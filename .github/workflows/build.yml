@@ -29,17 +29,13 @@ jobs:
           sdkmanager "build-tools;34.0.0" "platforms;android-34" "platform-tools"
 
       # ── Gradle install + wrapper generate ──
-      # gradlew কাজ করতে gradle-wrapper.jar দরকার।
-      # সহজ সমাধান: gradle binary install করে wrapper generate করি।
       - name: Install Gradle & generate wrapper
         run: |
-          # Gradle 8.4 download
           wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp/
           export GRADLE_BIN="/tmp/gradle-8.4/bin/gradle"
           chmod +x "$GRADLE_BIN"
 
-          # wrapper jar generate করি (wrapper task run করবে)
           mkdir -p gradle/wrapper
           "$GRADLE_BIN" wrapper --gradle-version=8.4 --distribution-type=bin
           chmod +x gradlew
@@ -52,6 +48,7 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: echo "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
+
       # ── Bengali fonts ──
       - name: Download Noto Sans Bengali fonts
         run: |
@@ -105,10 +102,11 @@ jobs:
         run: sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" app/build.gradle
 
       # ── Keystore ──
+      # এখানে ফাইলের নাম পরিবর্তন করে 'hanifkeystore.jks' করা হয়েছে
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > app/smartstudy.jks
+        run: echo "$KEYSTORE_BASE64" | base64 -d > app/hanifkeystore.jks
 
       # ── Build Debug ──
       - name: Build Debug APK
@@ -125,18 +123,18 @@ jobs:
           if-no-files-found: error
 
       # ── Build Signed Release ──
+      # এখানে আপনার নতুন কিস্টোর ফাইল এবং alias 'hanif' সঠিকভাবে ম্যাপ করা হয়েছে
       - name: Build Signed Release APK
-        run: |
-          ./gradlew assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file=${{ github.workspace }}/app/smartstudy.jks \
-            -Pandroid.injected.signing.store.password='${{ secrets.STORE_PASSWORD }}' \
-            -Pandroid.injected.signing.key.alias=smartstudy \
-            -Pandroid.injected.signing.key.password='${{ secrets.KEY_PASSWORD }}'
+        env:
+          KEYSTORE_FILE: "hanifkeystore.jks"
+          KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: "hanif"
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
         run: |
           find app/build/outputs/apk/release -name "*.apk" | head -5
-          # signed বা unsigned যেটাই থাক rename করি
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -n "$APK" ]; then
             mv "$APK" app/build/outputs/apk/release/SmartStudy.apk
