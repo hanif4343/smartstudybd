@@ -128,7 +128,7 @@ jobs:
         env:
           KEYSTORE_FILE: "hanifkeystore.jks"
           KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_ALIAS: "hanif"
+          KEY_ALIAS: "hanif-alias"
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
