@@ -18,14 +18,13 @@ android {
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
     }
 
-    // এখানে কিস্টোরের সাইনিং কনফিগারেশন যুক্ত করা হয়েছে
+    // GitHub Secret থেকে ডেটা নেওয়ার জন্য সাইনিং কনফিগারেশন
     signingConfigs {
         release {
-            // GitHub Workflow যদি ফাইল তৈরি করে, তবে সেটার নাম 'hanifkeystore.jks' হবে
             storeFile file(System.getenv("KEYSTORE_FILE") ?: "hanifkeystore.jks")
-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: "আপনার_কিস্টোর_পাসওয়ার্ড"
+            storePassword System.getenv("KEYSTORE_PASSWORD")
             keyAlias System.getenv("KEY_ALIAS") ?: "hanif"
-            keyPassword System.getenv("KEY_PASSWORD") ?: "আপনার_কি_পাসওয়ার্ড"
+            keyPassword System.getenv("KEY_PASSWORD")
         }
     }
 
@@ -44,7 +43,7 @@ android {
         }
         release {
             minifyEnabled false
-            // এখানে রিলিজ বিল্ডের জন্য সাইনিং কনফিগারেশনটি একটিভেট করা হলো
+            // রিলিজ বিল্ডের জন্য সাইনিং কনফিগারেশন যুক্ত করা হলো
             signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
