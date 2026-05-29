@@ -1,0 +1,18 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Secret files — কখনো commit করবে না!
+app/google-services.json
+app/smartstudy.jks
+app/src/main/res/font/
+
+# APK/AAB
+*.apk
+*.aab
