@@ -72,35 +72,41 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadContent() {
         viewModelScope.launch {
-            val result = repo.getContent()
-            val content = (result as? DataState.Success)?.data ?: AppContent()
+            val result    = repo.getContent()
+            val content   = (result as? DataState.Success)?.data ?: AppContent()
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val weakTopics = loadWeakTopics()
+            val mode = _state.value.mode
             _state.update {
                 it.copy(
                     isLoading     = false,
                     contentLoaded = !content.isEmpty(),
                     bookmarkedIds = bookmarks,
                     weakTopics    = weakTopics,
-                    error         = (result as? DataState.Error)?.message
+                    error         = if (content.isEmpty()) (result as? DataState.Error)?.message else null
                 )
             }
-            // Build subjects for current mode
-            rebuildSubjects(content, _state.value.mode)
+            // current mode-এর subjects build করো
+            rebuildSubjects(content, mode)
         }
     }
 
     // ── Mode switch ──
     fun setMode(mode: StudyMode) {
         timerJob?.cancel()
+        val alreadySet = _state.value.mode == mode && _state.value.contentLoaded
         _state.update {
             it.copy(mode = mode, navPath = NavPath(), isQuizActive = false,
                     result = null, showResult = false, isMockZone = false, timerSec = 0)
         }
-        viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            rebuildSubjects(content, mode)
+        // contentLoaded না থাকলে loadContent() থেকেই subjects build হবে
+        if (alreadySet) {
+            viewModelScope.launch {
+                val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                rebuildSubjects(content, mode)
+            }
         }
+        // else: loadContent() init-এ চলছে, সেটাই subjects build করবে
     }
 
     // ── Navigation ──
