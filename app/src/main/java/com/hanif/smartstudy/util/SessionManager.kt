@@ -5,8 +5,11 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.data.model.User
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "smart_study_prefs")
@@ -15,17 +18,28 @@ class SessionManager(private val context: Context) {
     private val gson = Gson()
 
     companion object {
-        val KEY_USER_JSON  = stringPreferencesKey("ss_user")
-        val KEY_DARK_MODE  = booleanPreferencesKey("dark_mode")
-        val KEY_FONT_SIZE  = floatPreferencesKey("font_size")
-        val KEY_THEME      = stringPreferencesKey("app_theme")
-        val KEY_OB_DONE    = booleanPreferencesKey("ob_done")
-        val KEY_SOUND_OFF  = booleanPreferencesKey("sound_off")
-        val KEY_EXAM_DATE  = stringPreferencesKey("exam_date")
-        val KEY_DAILY_GOAL = intPreferencesKey("daily_goal")
-        val KEY_USER_NAME  = stringPreferencesKey("home_user_name")
-        val KEY_USER_PIC   = stringPreferencesKey("home_user_pic")
+        val KEY_USER_JSON        = stringPreferencesKey("ss_user")
+        val KEY_DARK_MODE        = booleanPreferencesKey("dark_mode")
+        val KEY_FONT_SIZE        = floatPreferencesKey("font_size")
+        val KEY_THEME_COLOR      = stringPreferencesKey("theme_color")   // "indigo"|"teal"|"rose"|"amber"
+        val KEY_OB_DONE          = booleanPreferencesKey("ob_done")
+        val KEY_SOUND_OFF        = booleanPreferencesKey("sound_off")
+        val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
+        val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
+        val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
+        val KEY_USER_PIC         = stringPreferencesKey("home_user_pic")
+        // Reminder
+        val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
+        val KEY_REMINDER_HOUR    = intPreferencesKey("reminder_hour")
+        val KEY_REMINDER_MINUTE  = intPreferencesKey("reminder_minute")
+        // XP history (JSON list of daily XP)
+        val KEY_XP_HISTORY       = stringPreferencesKey("xp_history")
+        // App time tracking
+        val KEY_APP_SESSION_START = longPreferencesKey("app_session_start")
+        val KEY_TOTAL_APP_MIN    = intPreferencesKey("total_app_min")
     }
+
+    // ── User ──────────────────────────────────────────────────
 
     fun isLoggedIn(): Boolean = runBlocking {
         val prefs = context.dataStore.data.first()
@@ -37,6 +51,11 @@ class SessionManager(private val context: Context) {
             val json = context.dataStore.data.first()[KEY_USER_JSON] ?: return@runBlocking null
             gson.fromJson(json, User::class.java)
         } catch (e: Exception) { null }
+    }
+
+    fun currentUserFlow(): Flow<User?> = context.dataStore.data.map { prefs ->
+        try { prefs[KEY_USER_JSON]?.let { gson.fromJson(it, User::class.java) } }
+        catch (e: Exception) { null }
     }
 
     suspend fun saveUser(user: User) {
@@ -51,13 +70,39 @@ class SessionManager(private val context: Context) {
         context.dataStore.edit { it.remove(KEY_USER_JSON) }
     }
 
+    // ── Theme ─────────────────────────────────────────────────
+
     fun isDarkMode(): Boolean = runBlocking {
         context.dataStore.data.first()[KEY_DARK_MODE] ?: false
     }
 
+    fun darkModeFlow(): Flow<Boolean> = context.dataStore.data.map { it[KEY_DARK_MODE] ?: false }
+
     suspend fun setDarkMode(on: Boolean) {
         context.dataStore.edit { it[KEY_DARK_MODE] = on }
     }
+
+    fun getThemeColor(): String = runBlocking {
+        context.dataStore.data.first()[KEY_THEME_COLOR] ?: "indigo"
+    }
+
+    fun themeColorFlow(): Flow<String> = context.dataStore.data.map { it[KEY_THEME_COLOR] ?: "indigo" }
+
+    suspend fun setThemeColor(color: String) {
+        context.dataStore.edit { it[KEY_THEME_COLOR] = color }
+    }
+
+    // ── Sound ─────────────────────────────────────────────────
+
+    fun isSoundOff(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_SOUND_OFF] ?: false
+    }
+
+    suspend fun setSoundOff(off: Boolean) {
+        context.dataStore.edit { it[KEY_SOUND_OFF] = off }
+    }
+
+    // ── Onboarding ────────────────────────────────────────────
 
     fun isOnboardingDone(): Boolean = runBlocking {
         context.dataStore.data.first()[KEY_OB_DONE] ?: false
@@ -67,11 +112,80 @@ class SessionManager(private val context: Context) {
         context.dataStore.edit { it[KEY_OB_DONE] = true }
     }
 
+    // ── Daily Goal ────────────────────────────────────────────
+
     fun getDailyGoal(): Int = runBlocking {
         context.dataStore.data.first()[KEY_DAILY_GOAL] ?: 20
     }
 
     suspend fun setDailyGoal(goal: Int) {
         context.dataStore.edit { it[KEY_DAILY_GOAL] = goal }
+    }
+
+    // ── Reminder ─────────────────────────────────────────────
+
+    fun isReminderOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_REMINDER_ON] ?: false
+    }
+
+    fun getReminderHour(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_REMINDER_HOUR] ?: 20
+    }
+
+    fun getReminderMinute(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_REMINDER_MINUTE] ?: 0
+    }
+
+    suspend fun setReminder(on: Boolean, hour: Int, minute: Int) {
+        context.dataStore.edit {
+            it[KEY_REMINDER_ON]     = on
+            it[KEY_REMINDER_HOUR]   = hour
+            it[KEY_REMINDER_MINUTE] = minute
+        }
+    }
+
+    // ── XP History ────────────────────────────────────────────
+
+    suspend fun recordDailyXp(xp: Int) {
+        val today  = todayString()
+        val prefs  = context.dataStore.data.first()
+        val json   = prefs[KEY_XP_HISTORY] ?: "[]"
+        val type   = object : com.google.gson.reflect.TypeToken<MutableList<Map<String, Any>>>() {}.type
+        val list: MutableList<Map<String, Any>> = try { gson.fromJson(json, type) } catch (e: Exception) { mutableListOf() }
+        // Update or add today
+        val idx = list.indexOfFirst { it["date"] == today }
+        val entry = mapOf("date" to today, "xp" to xp)
+        if (idx >= 0) list[idx] = entry else list.add(entry)
+        // Keep last 30 days
+        val trimmed = if (list.size > 30) list.takeLast(30) else list
+        context.dataStore.edit { it[KEY_XP_HISTORY] = gson.toJson(trimmed) }
+    }
+
+    fun getXpHistory(): List<Pair<String, Int>> = runBlocking {
+        val json  = context.dataStore.data.first()[KEY_XP_HISTORY] ?: return@runBlocking emptyList()
+        return@runBlocking try {
+            val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+            val list: List<Map<String, Any>> = gson.fromJson(json, type) ?: emptyList()
+            list.map { (it["date"] as? String ?: "") to ((it["xp"] as? Double)?.toInt() ?: 0) }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    // ── App time ─────────────────────────────────────────────
+
+    suspend fun recordSessionMinutes(minutes: Int) {
+        context.dataStore.edit {
+            it[KEY_TOTAL_APP_MIN] = (it[KEY_TOTAL_APP_MIN] ?: 0) + minutes
+        }
+    }
+
+    fun getTotalAppMinutes(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TOTAL_APP_MIN] ?: 0
+    }
+
+    // ── Helpers ───────────────────────────────────────────────
+
+    private fun todayString(): String {
+        val c = java.util.Calendar.getInstance()
+        return "${c.get(java.util.Calendar.YEAR)}-${c.get(java.util.Calendar.MONTH)+1}-${c.get(java.util.Calendar.DAY_OF_MONTH)}"
     }
 }
