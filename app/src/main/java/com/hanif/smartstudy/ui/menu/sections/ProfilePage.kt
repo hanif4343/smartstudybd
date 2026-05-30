@@ -48,16 +48,7 @@ fun ProfilePage(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        try {
-            val stream = context.contentResolver.openInputStream(uri) ?: return@rememberLauncherForActivityResult
-            val bytes  = stream.readBytes()
-            stream.close()
-            // Compress to max 300KB
-            val bmp    = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            val out    = ByteArrayOutputStream()
-            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
-            vm.uploadPhoto(out.toByteArray())
-        } catch (e: Exception) { /* ignore */ }
+        vm.uploadPhoto(uri)
     }
 
     Scaffold(
