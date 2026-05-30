@@ -26,6 +26,14 @@ import kotlinx.coroutines.launch
 //  MenuViewModel — all Menu tab state
 // ─────────────────────────────────────────────────────────────
 
+data class ActiveUser(
+    val phone    : String = "",
+    val name     : String = "",
+    val lastSeen : Long   = 0L,
+    val isOnline : Boolean = false,
+    val fcmToken : String = ""
+)
+
 data class MenuUiState(
     val user            : User?              = null,
     val isAdmin         : Boolean            = false,
@@ -43,9 +51,20 @@ data class MenuUiState(
     val xpHistory       : List<Pair<String,Int>> = emptyList(),
     val fcmToken        : String             = "",
     val isUploadingPhoto: Boolean            = false,
+    val uploadProgress  : Boolean            = false,
     val photoUploadError: String?            = null,
     val isLoading       : Boolean            = false,
     val toast           : String?            = null,
+    val successMsg      : String?            = null,
+    val error           : String?            = null,
+    // Stats
+    val totalCorrect    : Int                = 0,
+    val totalWrong      : Int                = 0,
+    val subjectStats    : Map<String, Pair<Int,Int>> = emptyMap(),
+    // Bookmarks
+    val bookmarkedIds   : Set<String>        = emptySet(),
+    // Active users (Admin)
+    val activeUsers     : List<ActiveUser>   = emptyList(),
     // Admin: list of all users from Firebase
     val allUsers        : List<Map<String,String>> = emptyList(),
     val viewingAsUser   : User?              = null,  // admin impersonation
@@ -80,6 +99,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val totalApp   = session.getTotalAppMinutes()
             val fcm        = user?.fcmToken ?: ""
 
+            val prefs = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
+            val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
+
             _state.update {
                 it.copy(
                     user           = user,
@@ -92,11 +114,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     reminderMinute = remM,
                     correctCount   = correct,
                     wrongCount     = wrong,
+                    totalCorrect   = correct,
+                    totalWrong     = wrong,
                     accuracyPct    = acc,
                     totalStudyMin  = stats.third,
                     totalAppMin    = totalApp,
                     xpHistory      = xpHist,
-                    fcmToken       = fcm
+                    fcmToken       = fcm,
+                    bookmarkedIds  = bookmarks
                 )
             }
 
@@ -227,25 +252,62 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Admin: send FCM notification to all ──────────────────
+    // ── Profile photo upload (byte array version) ─────────────
+    fun uploadPhoto(bytes: ByteArray) {
+        viewModelScope.launch {
+            _state.update { it.copy(isUploadingPhoto = true, uploadProgress = true, photoUploadError = null) }
+            try {
+                val url = com.hanif.smartstudy.data.remote.ImgBBService.upload(bytes)
+                if (url != null) {
+                    val user = _state.value.user ?: return@launch
+                    val updated = user.copy(picture = url)
+                    session.saveUser(updated)
+                    saveUserToFirebase(updated)
+                    _state.update { it.copy(user = updated, isUploadingPhoto = false, uploadProgress = false, successMsg = "প্রোফাইল ছবি আপডেট হয়েছে") }
+                } else {
+                    _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = "ছবি আপলোড হয়নি") }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = e.message) }
+            }
+        }
+    }
 
-    fun adminSendNotification(title: String, body: String) {
+    // ── Clear success/error messages ─────────────────────────
+    fun clearMsg() {
+        _state.update { it.copy(successMsg = null, error = null, toast = null) }
+    }
+
+    // ── Load active users (Admin) ─────────────────────────────
+    fun loadActiveUsers() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            try {
+                val users = com.hanif.smartstudy.data.remote.UserSyncService.fetchActiveUsers()
+                _state.update { it.copy(activeUsers = users) }
+            } catch (e: Exception) {
+                Log.e("Admin", "loadActiveUsers: ${e.message}")
+            }
+        }
+    }
+
+    // ── Admin: send notification (title, body, targetPhone) ───
+    fun adminSendNotification(title: String, body: String, targetPhone: String?) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                // Store in Firebase RTDB as a broadcast message — each device reads on login
-                val ref = FirebaseDatabase.getInstance().getReference("broadcasts")
-                    .push()
+                val ref = FirebaseDatabase.getInstance().getReference("broadcasts").push()
                 ref.setValue(mapOf(
-                    "title"     to title,
-                    "body"      to body,
-                    "sentAt"    to System.currentTimeMillis(),
-                    "sentBy"    to (_state.value.user?.phone ?: "admin")
+                    "title"       to title,
+                    "body"        to body,
+                    "targetPhone" to (targetPhone ?: "ALL"),
+                    "sentAt"      to System.currentTimeMillis(),
+                    "sentBy"      to (_state.value.user?.phone ?: "admin")
                 ))
-                _state.update { it.copy(isLoading = false, toast = "✅ নোটিফিকেশন পাঠানো হয়েছে") }
+                _state.update { it.copy(isLoading = false, successMsg = "নোটিফিকেশন পাঠানো হয়েছে") }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, toast = "❌ পাঠানো যায়নি: ${e.message}") }
+                _state.update { it.copy(isLoading = false, error = "পাঠানো যায়নি: ${e.message}") }
             }
         }
     }
