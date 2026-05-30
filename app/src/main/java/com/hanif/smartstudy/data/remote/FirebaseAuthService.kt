@@ -1,13 +1,13 @@
 package com.hanif.smartstudy.data.remote
 
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -18,89 +18,143 @@ object FirebaseAuthService {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
     private val gson = Gson()
-    private val JSON = "application/json; charset=utf-8".toMediaType()
-    private const val FIREBASE_URL = "https://smartentrydb-default-rtdb.firebaseio.com/"
 
     fun hashPassword(pass: String): String {
-        val bytes = MessageDigest.getInstance("SHA-256").digest(pass.toByteArray(Charsets.UTF_8))
+        val bytes = MessageDigest.getInstance("SHA-256")
+            .digest(pass.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    // ── LOGIN — Firebase RTDB থেকে verify ──
-    suspend fun verifyLogin(phone: String, password: String): AuthResult =
+    // ── LOGIN ──
+    // GAS doGet?action=verifyLogin ব্যবহার করে
+    // GAS নিজেই Firebase থেকে user খুঁজে password verify করে
+    // plain text এবং hash দুটোই GAS এ handle হয়
+    suspend fun verifyLogin(phone: String, password: String, gasUrl: String): AuthResult =
         withContext(Dispatchers.IO) {
             try {
-                val req  = Request.Builder().url("${FIREBASE_URL}Users.json").get().build()
-                val body = client.newCall(req).execute().body?.string()
+                // Method 1: GAS verifyLogin (recommended)
+                // GAS doGet এ verifyLogin action আছে যেটা sheet থেকে verify করে
+                val url = "$gasUrl?action=verifyLogin" +
+                    "&phone=${encode(phone)}" +
+                    "&password=${encode(password)}"
 
-                if (body.isNullOrEmpty() || body == "null")
-                    return@withContext AuthResult.Error("ইন্টারনেট সংযোগ চেক করুন")
+                Log.d("Login", "GAS URL: $url")
 
-                val hashedInput = hashPassword(password)
-                val normPhone   = phone.trim()
-                val normNo0     = normPhone.trimStart('0')
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
 
-                val users = parseUsers(body)
-                val found = users.values.find { u ->
-                    val fb = (u["Phone"] ?: u["phone"] ?: "").toString()
-                        .trim().replace("'", "")
-                    fb == normPhone || fb.trimStart('0') == normNo0
-                } ?: return@withContext AuthResult.Error("ফোন নম্বর পাওয়া যায়নি")
+                Log.d("Login", "GAS response: $body")
 
-                val stored = (found["Password"] ?: found["password"] ?: "").toString().trim()
-                if (stored != hashedInput && stored != password)
-                    return@withContext AuthResult.Error("পাসওয়ার্ড ভুল হয়েছে")
-
-                val status = (found["Status"] ?: found["status"] ?: "Active").toString()
-                if (status.equals("Inactive", true) || status.equals("Banned", true))
-                    return@withContext AuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। অ্যাডমিনের সাথে যোগাযোগ করুন।")
-
-                AuthResult.Success(found)
+                return@withContext parseGasLoginResponse(body, phone, password)
 
             } catch (e: Exception) {
-                AuthResult.Error("সংযোগ সমস্যা: ${e.message}")
+                Log.e("Login", "Error: ${e.message}")
+                AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
             }
         }
 
-    // ── SIGNUP — GAS এ POST করো ──
+    private fun parseGasLoginResponse(body: String, phone: String, password: String): AuthResult {
+        if (body.isBlank()) return AuthResult.Error("GAS থেকে কোনো response পাওয়া যায়নি")
+
+        return try {
+            val type = object : TypeToken<Map<String, Any>>() {}.type
+            val map: Map<String, Any> = gson.fromJson(body, type)
+
+            Log.d("Login", "Parsed map: $map")
+
+            val result = map["result"]?.toString() ?: ""
+            val status = map["status"]?.toString() ?: ""
+
+            when {
+                // GAS doGet verifyLogin: result="success" + user object
+                result == "success" -> {
+                    val userMap = (map["user"] as? Map<*, *>)
+                        ?.mapKeys { it.key.toString() }
+                        ?.mapValues { it.value ?: "" }
+                        ?: map  // user আলাদা field এ না থাকলে root map ই user
+                    @Suppress("UNCHECKED_CAST")
+                    AuthResult.Success(userMap as Map<String, Any>)
+                }
+
+                // GAS doPost login: status="ok" + user fields directly in root
+                status == "ok" -> {
+                    AuthResult.Success(map)
+                }
+
+                // Error cases
+                result == "error" || status == "error" -> {
+                    val msg = (map["error"] ?: map["message"] ?: "লগইন ব্যর্থ").toString()
+                    AuthResult.Error(translateError(msg))
+                }
+
+                else -> AuthResult.Error("অপ্রত্যাশিত response: $body")
+            }
+        } catch (e: Exception) {
+            Log.e("Login", "Parse error: ${e.message}, body: $body")
+            AuthResult.Error("Response parse করা যায়নি")
+        }
+    }
+
+    private fun translateError(msg: String): String = when {
+        msg.contains("wrong password", true)  -> "পাসওয়ার্ড ভুল হয়েছে"
+        msg.contains("not found", true)       -> "এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই"
+        msg.contains("missing", true)         -> "ফোন নম্বর ও পাসওয়ার্ড দিন"
+        msg.contains("inactive", true)        -> "অ্যাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।"
+        else -> msg
+    }
+
+    // ── SIGNUP ──
+    // GAS doPost signup — FormBody দিয়ে
     suspend fun signup(
         name: String, phone: String, password: String,
         userType: String, classLevel: String, gasUrl: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
-            // Firebase এ phone আছে কিনা check
-            if (checkPhoneExists(phone))
-                return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
+            // FormBody — GAS e.parameter দিয়ে পড়বে
+            val formBody = FormBody.Builder()
+                .add("action",     "signup")
+                .add("name",       name)
+                .add("phone",      phone)
+                .add("password",   hashPassword(password))  // hash করে save
+                .add("userType",   userType)
+                .add("classLevel", classLevel)
+                .add("status",     "Active")
+                .add("role",       "User")
+                .build()
 
-            val payload = mapOf(
-                "action"     to "signup",
-                "name"       to name,
-                "phone"      to phone,
-                "password"   to hashPassword(password),
-                "userType"   to userType,
-                "classLevel" to classLevel
-            )
-            val body = gson.toJson(payload).toRequestBody(JSON)
-            val req  = Request.Builder().url(gasUrl).post(body).build()
+            val req  = Request.Builder().url(gasUrl).post(formBody).build()
             val resp = client.newCall(req).execute().body?.string() ?: ""
 
-            // Response parse — status/result দুটোই check
+            Log.d("Signup", "GAS response: $resp")
+
             return@withContext try {
                 val type = object : TypeToken<Map<String, Any>>() {}.type
                 val map: Map<String, Any> = gson.fromJson(resp, type)
                 val s = (map["status"] ?: map["result"] ?: "").toString()
+
                 if (s == "ok" || s == "success") {
-                    AuthResult.Success(mapOf("Name" to name, "Phone" to phone,
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone,
                         "UserType" to userType, "ClassLevel" to classLevel,
-                        "Status" to "Active", "Role" to "User"))
+                        "Status" to "Active", "Role" to "User"
+                    ))
                 } else {
-                    AuthResult.Error((map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString())
+                    val msg = (map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString()
+                    // Duplicate phone
+                    if (msg.contains("already", true) || msg.contains("duplicate", true) ||
+                        msg.contains("exists", true))
+                        AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
+                    else
+                        AuthResult.Error(msg)
                 }
             } catch (e: Exception) {
                 if (resp.contains("ok", true) || resp.contains("success", true))
-                    AuthResult.Success(mapOf("Name" to name, "Phone" to phone,
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone,
                         "UserType" to userType, "ClassLevel" to classLevel,
-                        "Status" to "Active", "Role" to "User"))
+                        "Status" to "Active", "Role" to "User"
+                    ))
                 else
                     AuthResult.Error("Signup ব্যর্থ হয়েছে")
             }
@@ -109,33 +163,8 @@ object FirebaseAuthService {
         }
     }
 
-    private suspend fun checkPhoneExists(phone: String): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val body = client.newCall(
-                    Request.Builder().url("${FIREBASE_URL}Users.json").get().build()
-                ).execute().body?.string() ?: return@withContext false
-                val norm = phone.trim().trimStart('0')
-                parseUsers(body).values.any { u ->
-                    val fb = (u["Phone"] ?: u["phone"] ?: "").toString()
-                        .trim().replace("'", "").trimStart('0')
-                    fb == norm
-                }
-            } catch (e: Exception) { false }
-        }
-
-    private fun parseUsers(body: String): Map<String, Map<String, Any>> {
-        return try {
-            val type = object : TypeToken<Map<String, Map<String, Any>>>() {}.type
-            gson.fromJson(body, type) ?: emptyMap()
-        } catch (e: Exception) {
-            try {
-                val type = object : TypeToken<List<Map<String, Any>>>() {}.type
-                val list: List<Map<String, Any>?> = gson.fromJson(body, type) ?: emptyList()
-                list.filterNotNull().mapIndexed { i, m -> i.toString() to m }.toMap()
-            } catch (e2: Exception) { emptyMap() }
-        }
-    }
+    private fun encode(s: String) =
+        java.net.URLEncoder.encode(s, "UTF-8")
 }
 
 sealed class AuthResult {
