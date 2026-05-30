@@ -252,12 +252,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Profile photo upload (byte array version) ─────────────
-    fun uploadPhoto(bytes: ByteArray) {
+    // ── Profile photo upload (Uri version) ────────────────────
+    fun uploadPhoto(uri: android.net.Uri) {
         viewModelScope.launch {
             _state.update { it.copy(isUploadingPhoto = true, uploadProgress = true, photoUploadError = null) }
             try {
-                val url = com.hanif.smartstudy.data.remote.ImgBBService.upload(bytes)
+                val result = com.hanif.smartstudy.data.remote.ImgBbService.uploadImage(getApplication(), uri)
+                val url = result.url
                 if (url != null) {
                     val user = _state.value.user ?: return@launch
                     val updated = user.copy(picture = url)
