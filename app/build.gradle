@@ -10,13 +10,13 @@ android {
         applicationId "com.hanif.smartstudy"
         minSdk 21
         targetSdk 34
-        versionCode 5
-        versionName "1.5"
+        versionCode 3
+        versionName "1.3"
 
-        buildConfigField "String", "GAS_URL",        "\"${System.getenv('GAS_URL')        ?: ''}\""
-        buildConfigField "String", "FIREBASE_URL",   "\"${System.getenv('FIREBASE_URL')   ?: ''}\""
-        buildConfigField "String", "GEMINI_API_KEY", "\"${System.getenv('GEMINI_API_KEY') ?: ''}\""
-        buildConfigField "String", "IMGBB_API_KEY",  "\"${System.getenv('IMGBB_API_KEY')  ?: ''}\""
+        buildConfigField "String", "GAS_URL",        "\"%%GAS_URL%%\""
+        buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
+        buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
+        buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
     }
 
     signingConfigs {
@@ -77,10 +77,10 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.core:core-splashscreen:1.0.1'
 
-    // ── DataStore ──
+    // ── DataStore (Phase 1+3 — offline cache) ──
     implementation 'androidx.datastore:datastore-preferences:1.0.0'
 
-    // ── WorkManager ──
+    // ── WorkManager — offline sync (Phase 3) ──
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
 
     // ── Network ──
@@ -93,5 +93,9 @@ dependencies {
     implementation platform('com.google.firebase:firebase-bom:32.7.4')
     implementation 'com.google.firebase:firebase-messaging-ktx'
     implementation 'com.google.firebase:firebase-analytics-ktx'
+    implementation 'com.google.firebase:firebase-database-ktx'
     implementation 'com.google.android.gms:play-services-auth:21.2.0'
+
+    // ── Phase 5: image picker activity ──
+    implementation 'androidx.activity:activity-ktx:1.8.2'
 }
