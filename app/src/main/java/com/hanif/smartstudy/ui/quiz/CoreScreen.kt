@@ -35,8 +35,8 @@ fun CoreScreen(
         if (streak > 0) { onStreakUpdated(streak); viewModel.consumeStreak() }
     }
 
-    // Mode switch যদি বাইরে থেকে আসে
-    LaunchedEffect(mode) {
+    // Mode init — শুধু প্রথমবার, পরে MainScreen থেকে আলাদা VM তাই দরকার নেই
+    LaunchedEffect(Unit) {
         if (state.mode != mode) viewModel.setMode(mode)
     }
 
