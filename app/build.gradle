@@ -17,6 +17,7 @@ android {
         buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
+        buildConfigField "String", "SECRET_KEY",     "\"%%SECRET_KEY%%\""
     }
 
     signingConfigs {
