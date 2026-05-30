@@ -3,49 +3,49 @@ package com.hanif.smartstudy.data.model
 import com.google.gson.annotations.SerializedName
 
 // ─────────────────────────────────────────────────────────
-// Firebase RTDB field names — old app getVal() case-insensitive এর মতো
-// দুটো করে @SerializedName দেওয়া যায় না, তাই Gson TypeAdapterFactory ছাড়া
-// সবচেয়ে নিরাপদ উপায়: যেটা Firebase-এ actually আছে সেটা রাখো।
-// পুরনো sheet-এ: Subject, Sub_Topic, Question, Option_A... Answer, AudienceTags
+// Firebase RTDB actual field names (from old HTML app getVal analysis):
+//   subject, sub_topic, question, option1/opt1, option2/opt2, ...
+//   correct (NOT Answer!), explanation, technique, Question Type, AudienceTags
+// CaseInsensitiveAdapterFactory handles casing variants
 // ─────────────────────────────────────────────────────────
 
 data class StudyItem(
     @SerializedName("id")           val id          : String? = null,
-    @SerializedName("Subject")      val subject     : String? = null,
-    @SerializedName("Sub_Topic")    val subTopic    : String? = null,
-    @SerializedName("Question")     val question    : String? = null,
-    @SerializedName("Answer")       val answer      : String? = null,
+    @SerializedName("subject")      val subject     : String? = null,
+    @SerializedName("sub_topic")    val subTopic    : String? = null,
+    @SerializedName("question")     val question    : String? = null,
+    @SerializedName("answer")       val answer      : String? = null,
     @SerializedName("AudienceTags") val audienceTags: String? = null
 )
 
 data class QuizItem(
     @SerializedName("id")            val id           : String? = null,
-    @SerializedName("Subject")       val subject      : String? = null,
-    @SerializedName("Sub_Topic")     val subTopic     : String? = null,
-    @SerializedName("Question")      val question     : String? = null,
-    @SerializedName("Option_A")      val optionA      : String? = null,
-    @SerializedName("Option_B")      val optionB      : String? = null,
-    @SerializedName("Option_C")      val optionC      : String? = null,
-    @SerializedName("Option_D")      val optionD      : String? = null,
-    @SerializedName("Answer")        val answer       : String? = null,
-    @SerializedName("Explanation")   val explanation  : String? = null,
+    @SerializedName("subject")       val subject      : String? = null,
+    @SerializedName("sub_topic")     val subTopic     : String? = null,
+    @SerializedName("question")      val question     : String? = null,
+    @SerializedName("option1")       val optionA      : String? = null,
+    @SerializedName("option2")       val optionB      : String? = null,
+    @SerializedName("option3")       val optionC      : String? = null,
+    @SerializedName("option4")       val optionD      : String? = null,
+    @SerializedName("correct")       val answer       : String? = null,
+    @SerializedName("explanation")   val explanation  : String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
-    @SerializedName("Technique")     val technique    : String? = null,
+    @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Image")         val imageUrl     : String? = null
 )
 
 data class QBankItem(
     @SerializedName("id")            val id           : String? = null,
-    @SerializedName("Subject")       val subject      : String? = null,
-    @SerializedName("Sub_Topic")     val subTopic     : String? = null,
-    @SerializedName("Question")      val question     : String? = null,
-    @SerializedName("Option_A")      val optionA      : String? = null,
-    @SerializedName("Option_B")      val optionB      : String? = null,
-    @SerializedName("Option_C")      val optionC      : String? = null,
-    @SerializedName("Option_D")      val optionD      : String? = null,
-    @SerializedName("Answer")        val answer       : String? = null,
-    @SerializedName("Explanation")   val explanation  : String? = null,
+    @SerializedName("subject")       val subject      : String? = null,
+    @SerializedName("sub_topic")     val subTopic     : String? = null,
+    @SerializedName("question")      val question     : String? = null,
+    @SerializedName("option1")       val optionA      : String? = null,
+    @SerializedName("option2")       val optionB      : String? = null,
+    @SerializedName("option3")       val optionC      : String? = null,
+    @SerializedName("option4")       val optionD      : String? = null,
+    @SerializedName("correct")       val answer       : String? = null,
+    @SerializedName("explanation")   val explanation  : String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Year")          val year         : String? = null,
@@ -53,9 +53,7 @@ data class QBankItem(
     @SerializedName("Image")         val imageUrl     : String? = null
 )
 
-// ── Gson case-insensitive deserializer ──
-// Gson normally is case-sensitive, but our Firebase may have inconsistent casing.
-// We register a custom TypeAdapterFactory that handles it.
+// ── Gson case-insensitive + multi-alias adapter ──
 object CaseInsensitiveGson {
     val instance: com.google.gson.Gson by lazy {
         com.google.gson.GsonBuilder()
@@ -74,7 +72,6 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                 val jsonElement = elementAdapter.read(`in`)
                 return if (jsonElement.isJsonObject) {
                     val normalized = com.google.gson.JsonObject()
-                    // Normalize keys to match @SerializedName exactly
                     jsonElement.asJsonObject.entrySet().forEach { (k, v) ->
                         normalized.add(normalizeKey(k), v)
                     }
@@ -86,27 +83,49 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
         }
     }
 
-    // Map common variants to canonical key names
-    private fun normalizeKey(key: String): String = when (key.lowercase().trim().replace(" ", "_")) {
-        "subject"       -> "Subject"
-        "sub_topic"     -> "Sub_Topic"
-        "subtopic"      -> "Sub_Topic"
-        "question"      -> "Question"
-        "option_a"      -> "Option_A"
-        "option_b"      -> "Option_B"
-        "option_c"      -> "Option_C"
-        "option_d"      -> "Option_D"
-        "answer"        -> "Answer"
-        "explanation"   -> "Explanation"
-        "question_type" -> "Question Type"
-        "questiontype"  -> "Question Type"
-        "audiencetags"  -> "AudienceTags"
-        "audience_tags" -> "AudienceTags"
-        "technique"     -> "Technique"
-        "year"          -> "Year"
-        "exam_name"     -> "Exam_Name"
-        "image"         -> "Image"
-        else            -> key  // keep original
+    // Firebase field names → @SerializedName canonical keys
+    private fun normalizeKey(key: String): String {
+        val k = key.lowercase().trim()
+        return when {
+            // subject
+            k == "subject"                          -> "subject"
+            // sub_topic — many variants
+            k == "sub_topic" || k == "subtopic"
+                || k == "sub topic"                 -> "sub_topic"
+            // question
+            k == "question"                         -> "question"
+            // options — option1/opt1 variants
+            k == "option1" || k == "opt1"
+                || k == "option_a" || k == "optiona" -> "option1"
+            k == "option2" || k == "opt2"
+                || k == "option_b" || k == "optionb" -> "option2"
+            k == "option3" || k == "opt3"
+                || k == "option_c" || k == "optionc" -> "option3"
+            k == "option4" || k == "opt4"
+                || k == "option_d" || k == "optiond" -> "option4"
+            // correct answer — old app uses "correct", also "answer"
+            k == "correct"                          -> "correct"
+            k == "answer"                           -> "answer"
+            // explanation
+            k == "explanation"                      -> "explanation"
+            // question type
+            k == "question type" || k == "question_type"
+                || k == "questiontype"              -> "Question Type"
+            // audience tags
+            k == "audiencetags" || k == "audience_tags" -> "AudienceTags"
+            // technique
+            k == "technique"                        -> "technique"
+            // qbank specific
+            k == "year"                             -> "Year"
+            k == "exam_name" || k == "examname"
+                || k == "exam name"                 -> "Exam_Name"
+            // image
+            k == "image" || k == "imageurl"
+                || k == "image_url"                 -> "Image"
+            // id
+            k == "id"                               -> "id"
+            else                                    -> key
+        }
     }
 }
 
