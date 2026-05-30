@@ -63,7 +63,8 @@ fun MenuScreen(
         label = "menuNav"
     ) { nav ->
         when (nav) {
-            MenuNav.MAIN        -> MainMenuScreen(state, vm, onLogout, onNavigate = { screen = it })
+            MenuNav.MAIN        -> MainMenuScreen(state, vm, onLogout, onNavigate = { screen = it },
+                                    onSearchClick = onSearchClick, onTypingClick = onTypingClick)
             MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.SETTINGS    -> SettingsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
@@ -102,10 +103,12 @@ enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADM
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainMenuScreen(
-    state     : com.hanif.smartstudy.viewmodel.MenuUiState,
-    vm        : MenuViewModel,
-    onLogout  : () -> Unit,
-    onNavigate: (MenuNav) -> Unit
+    state         : com.hanif.smartstudy.viewmodel.MenuUiState,
+    vm            : MenuViewModel,
+    onLogout      : () -> Unit,
+    onNavigate    : (MenuNav) -> Unit,
+    onSearchClick : () -> Unit = {},
+    onTypingClick : () -> Unit = {}
 ) {
     Scaffold(
         topBar = {
@@ -129,15 +132,15 @@ fun MainMenuScreen(
             Spacer(Modifier.height(4.dp))
 
             // ── Menu items ──
-            MenuGroup(\"📊 তথ্য\") {
+            MenuGroup("📊 তথ্য") {
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
             }
 
             MenuGroup("🛠 Tools") {
-                MenuRow("🔍 Global Search",  "সব প্রশ্ন একসাথে খুঁজুন", Icons.Default.Search)       { onSearchClick() }
-                MenuRow("⌨️ Typing Practice", "টাইপিং স্পিড বাড়ান",    Icons.Default.Keyboard)     { onTypingClick() }
+                MenuRow("🔍 Global Search",   "সব প্রশ্ন একসাথে খুঁজুন", Icons.Default.Search)    { onSearchClick() }
+                MenuRow("⌨️ Typing Practice", "টাইপিং স্পিড বাড়ান",     Icons.Default.Keyboard)  { onTypingClick() }
             }
 
             MenuGroup("⚙️ সেটিংস") {
