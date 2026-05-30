@@ -7,14 +7,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.hanif.smartstudy.ui.home.HomeScreen
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 
 enum class BottomTab(val icon: String, val label: String) {
-    HOME("🏠", "Home"),
-    QUIZ("🎯", "Quiz"),
-    QBANK("📚", "QBank"),
-    STUDY("📖", "Study"),
-    MENU("👤", "Menu")
+    HOME(  "🏠", "Home"),
+    QUIZ(  "🎯", "Quiz"),
+    QBANK( "📚", "QBank"),
+    STUDY( "📖", "Study"),
+    MENU(  "👤", "Menu")
 }
 
 @Composable
@@ -42,12 +43,9 @@ fun MainScreen() {
             }
         }
     ) { padding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (currentTab) {
-                BottomTab.HOME  -> PlaceholderTab("🏠 Home\n(Phase 3 এ আসবে)")
+                BottomTab.HOME  -> HomeScreen()                          // ✅ Phase 3
                 BottomTab.QUIZ  -> PlaceholderTab("🎯 Quiz\n(Phase 4 এ আসবে)")
                 BottomTab.QBANK -> PlaceholderTab("📚 QBank\n(Phase 4 এ আসবে)")
                 BottomTab.STUDY -> PlaceholderTab("📖 Study\n(Phase 4 এ আসবে)")
@@ -59,11 +57,13 @@ fun MainScreen() {
 
 @Composable
 fun PlaceholderTab(label: String) {
-    Text(
-        text       = label,
-        fontSize   = 22.sp,
-        fontWeight = FontWeight.ExtraBold,
-        fontFamily = NotoSansBengali,
-        textAlign  = androidx.compose.ui.text.style.TextAlign.Center
-    )
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            text       = label,
+            fontSize   = 22.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = NotoSansBengali,
+            textAlign  = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
 }
