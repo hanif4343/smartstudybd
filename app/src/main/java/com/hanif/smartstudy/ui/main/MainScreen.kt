@@ -9,11 +9,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hanif.smartstudy.data.model.Achievement
 import com.hanif.smartstudy.data.model.StudyMode
 import com.hanif.smartstudy.ui.home.HomeScreen
 import com.hanif.smartstudy.ui.menu.MenuScreen
 import com.hanif.smartstudy.ui.quiz.CoreScreen
+import com.hanif.smartstudy.ui.search.GlobalSearchScreen
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.typing.TypingPracticeScreen
+import com.hanif.smartstudy.util.DeepLinkAction
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
@@ -26,13 +30,50 @@ enum class BottomTab(val icon: String, val label: String) {
 }
 
 @Composable
-fun MainScreen(onLogout: () -> Unit = {}) {
-    var currentTab by remember { mutableStateOf(BottomTab.HOME) }
+fun MainScreen(
+    deepLink              : DeepLinkAction = DeepLinkAction(DeepLinkAction.Type.NONE),
+    onLogout              : () -> Unit     = {},
+    onAchievementUnlocked : (Achievement) -> Unit = {},
+    onStreakUpdated       : (Int) -> Unit  = {}
+) {
+    var currentTab      by remember { mutableStateOf(BottomTab.HOME) }
+    var showSearch      by remember { mutableStateOf(false) }
+    var showTyping      by remember { mutableStateOf(false) }
 
-    // Shared QuizViewModel across Quiz / QBank / Study tabs
     val quizViewModel : QuizViewModel = viewModel()
-    // MenuViewModel — separate lifecycle
     val menuViewModel : MenuViewModel = viewModel()
+    val quizState by quizViewModel.state.collectAsState()
+
+    // Handle deep link on first composition
+    LaunchedEffect(deepLink.type) {
+        when (deepLink.type) {
+            DeepLinkAction.Type.QUIZ   -> { currentTab = BottomTab.QUIZ  }
+            DeepLinkAction.Type.QBANK  -> { currentTab = BottomTab.QBANK }
+            DeepLinkAction.Type.STUDY  -> { currentTab = BottomTab.STUDY }
+            DeepLinkAction.Type.SEARCH -> { showSearch = true }
+            DeepLinkAction.Type.NONE   -> {}
+        }
+    }
+
+    // Overlay screens (full-screen, slide over bottom nav)
+    if (showSearch) {
+        GlobalSearchScreen(
+            allQuestions = quizState.questions,
+            onBack       = { showSearch = false }
+        )
+        return
+    }
+    if (showTyping) {
+        TypingPracticeScreen(
+            onBack   = { showTyping = false },
+            onResult = { result ->
+                if (result.wpm >= 40) {
+                    // Achievement for typing speed
+                }
+            }
+        )
+        return
+    }
 
     Scaffold(
         bottomBar = {
@@ -43,12 +84,8 @@ fun MainScreen(onLogout: () -> Unit = {}) {
                         onClick  = { currentTab = tab },
                         icon     = { Text(tab.icon, fontSize = 22.sp) },
                         label    = {
-                            Text(
-                                tab.label,
-                                fontSize   = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = NotoSansBengali
-                            )
+                            Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali)
                         }
                     )
                 }
@@ -57,28 +94,23 @@ fun MainScreen(onLogout: () -> Unit = {}) {
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (currentTab) {
-                BottomTab.HOME  -> HomeScreen()
-                BottomTab.QUIZ  -> CoreScreen(mode = StudyMode.QUIZ,  viewModel = quizViewModel)
-                BottomTab.QBANK -> CoreScreen(mode = StudyMode.QBANK, viewModel = quizViewModel)
-                BottomTab.STUDY -> CoreScreen(mode = StudyMode.STUDY, viewModel = quizViewModel)
+                BottomTab.HOME  -> HomeScreen(
+                    onSearchClick = { showSearch = true },
+                    onTypingClick = { showTyping = true }
+                )
+                BottomTab.QUIZ  -> CoreScreen(mode = StudyMode.QUIZ,  viewModel = quizViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
+                BottomTab.QBANK -> CoreScreen(mode = StudyMode.QBANK, viewModel = quizViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
+                BottomTab.STUDY -> CoreScreen(mode = StudyMode.STUDY, viewModel = quizViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
                 BottomTab.MENU  -> MenuScreen(
-                    vm       = menuViewModel,
-                    onLogout = onLogout
+                    vm                   = menuViewModel,
+                    onLogout             = onLogout,
+                    onSearchClick        = { showSearch = true },
+                    onTypingClick        = { showTyping = true }
                 )
             }
         }
-    }
-}
-
-@Composable
-fun PlaceholderTab(label: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            label,
-            fontSize   = 20.sp,
-            fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali,
-            textAlign  = TextAlign.Center
-        )
     }
 }
