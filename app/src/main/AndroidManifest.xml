@@ -30,6 +30,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Deep links: smartstudy://quiz/SUBJECT, smartstudy://qbank/SUBJECT, smartstudy://study/SUBJECT -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="smartstudy" android:host="quiz" />
+                <data android:scheme="smartstudy" android:host="qbank" />
+                <data android:scheme="smartstudy" android:host="study" />
+                <data android:scheme="smartstudy" android:host="search" />
+            </intent-filter>
         </activity>
 
         <receiver android:name=".receiver.ReminderReceiver" android:exported="true" />
