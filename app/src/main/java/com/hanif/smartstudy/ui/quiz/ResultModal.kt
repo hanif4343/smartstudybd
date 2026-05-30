@@ -41,7 +41,7 @@ fun ResultModal(
     ) {
         LazyColumn(
             modifier            = Modifier.fillMaxWidth(),
-            contentPadding      = PaddingValues(horizontal = 20.dp, bottom = 40.dp),
+            contentPadding      = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Score ring
