@@ -1,55 +1,99 @@
 package com.hanif.smartstudy.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import com.hanif.smartstudy.R
-import com.hanif.smartstudy.viewmodel.AppTheme
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-val NotoSansBengali = FontFamily(
-    Font(R.font.noto_sans_bengali_regular, FontWeight.Normal),
-    Font(R.font.noto_sans_bengali_bold,    FontWeight.Bold),
-    Font(R.font.noto_sans_bengali_black,   FontWeight.ExtraBold)
-)
+// ── Base palette ──────────────────────────────────────────────
+val Indigo600  = Color(0xFF4F46E5)
+val Indigo700  = Color(0xFF4338CA)
+val Indigo100  = Color(0xFFE0E7FF)
+val Green500   = Color(0xFF10B981)
+val Teal600    = Color(0xFF0D9488)
+val Teal100    = Color(0xFFCCFBF1)
+val Amber500   = Color(0xFFF59E0B)
+val Amber100   = Color(0xFFFEF3C7)
+val Red500     = Color(0xFFEF4444)
+val Rose600    = Color(0xFFE11D48)
+val Rose100    = Color(0xFFFFE4E6)
+val Slate100   = Color(0xFFF1F5F9)
+val Slate800   = Color(0xFF1E293B)
+val Slate900   = Color(0xFF0F172A)
+val White      = Color(0xFFFFFFFF)
 
-// ── Theme color palettes ──
-private fun indigoScheme(dark: Boolean) = if (dark) darkColorScheme(
-    primary   = Color(0xFF818CF8), onPrimary = Color(0xFF1E1B4B),
-    background = Color(0xFF0F0F1A), surface = Color(0xFF1A1A2E),
-    onBackground = Color(0xFFE2E8F0), onSurface = Color(0xFFE2E8F0)
-) else lightColorScheme(
-    primary   = Color(0xFF4F46E5), onPrimary = Color.White,
-    background = Color(0xFFF8FAFC), surface = Color.White,
-    onBackground = Color(0xFF1E293B), onSurface = Color(0xFF1E293B)
-)
+// ── Font ────────────────────────────────────────────────────────
+val NotoSansBengali = FontFamily.Default
 
-private fun tealScheme(dark: Boolean) = if (dark) darkColorScheme(
-    primary   = Color(0xFF2DD4BF), onPrimary = Color(0xFF003733),
-    background = Color(0xFF0F1A18), surface = Color(0xFF1A2E2B)
-) else lightColorScheme(
-    primary   = Color(0xFF0D9488), onPrimary = Color.White,
-    background = Color(0xFFF0FDFA), surface = Color.White
-)
+// ── 4 theme definitions ───────────────────────────────────────
+enum class AppTheme(val label: String, val emoji: String) {
+    INDIGO("ইন্ডিগো", "💜"),
+    TEAL("টিল", "🩵"),
+    ROSE("রোজ", "❤️"),
+    AMBER("অ্যাম্বার", "🧡")
+}
 
-private fun roseScheme(dark: Boolean) = if (dark) darkColorScheme(
-    primary   = Color(0xFFFB7185), onPrimary = Color(0xFF4C0519),
-    background = Color(0xFF1A0F12), surface = Color(0xFF2E1A1E)
-) else lightColorScheme(
-    primary   = Color(0xFFE11D48), onPrimary = Color.White,
-    background = Color(0xFFFFF1F2), surface = Color.White
-)
+fun themeFromString(s: String): AppTheme = when (s.lowercase()) {
+    "teal"  -> AppTheme.TEAL
+    "rose"  -> AppTheme.ROSE
+    "amber" -> AppTheme.AMBER
+    else    -> AppTheme.INDIGO
+}
 
-private fun amberScheme(dark: Boolean) = if (dark) darkColorScheme(
-    primary   = Color(0xFFFBBF24), onPrimary = Color(0xFF451A03),
-    background = Color(0xFF1A1408), surface = Color(0xFF2E2410)
-) else lightColorScheme(
-    primary   = Color(0xFFD97706), onPrimary = Color.White,
-    background = Color(0xFFFFFBEB), surface = Color.White
-)
+private fun lightColors(theme: AppTheme) = when (theme) {
+    AppTheme.INDIGO -> lightColorScheme(
+        primary = Indigo600, onPrimary = White, primaryContainer = Indigo100,
+        secondary = Green500, onSecondary = White, tertiary = Teal600,
+        background = Slate100, onBackground = Slate800, surface = White, onSurface = Slate800, error = Red500
+    )
+    AppTheme.TEAL -> lightColorScheme(
+        primary = Teal600, onPrimary = White, primaryContainer = Teal100,
+        secondary = Indigo600, onSecondary = White, tertiary = Green500,
+        background = Slate100, onBackground = Slate800, surface = White, onSurface = Slate800, error = Red500
+    )
+    AppTheme.ROSE -> lightColorScheme(
+        primary = Rose600, onPrimary = White, primaryContainer = Rose100,
+        secondary = Amber500, onSecondary = White, tertiary = Indigo600,
+        background = Slate100, onBackground = Slate800, surface = White, onSurface = Slate800, error = Red500
+    )
+    AppTheme.AMBER -> lightColorScheme(
+        primary = Amber500, onPrimary = White, primaryContainer = Amber100,
+        secondary = Rose600, onSecondary = White, tertiary = Teal600,
+        background = Slate100, onBackground = Slate800, surface = White, onSurface = Slate800, error = Red500
+    )
+}
+
+private fun darkColors(theme: AppTheme) = when (theme) {
+    AppTheme.INDIGO -> darkColorScheme(
+        primary = Color(0xFF818CF8), onPrimary = Slate900, primaryContainer = Color(0xFF3730A3),
+        secondary = Green500, onSecondary = Slate900, tertiary = Teal600,
+        background = Slate900, onBackground = Slate100, surface = Slate800, onSurface = Slate100, error = Red500
+    )
+    AppTheme.TEAL -> darkColorScheme(
+        primary = Color(0xFF2DD4BF), onPrimary = Slate900, primaryContainer = Color(0xFF0F766E),
+        secondary = Color(0xFF818CF8), onSecondary = Slate900, tertiary = Green500,
+        background = Slate900, onBackground = Slate100, surface = Slate800, onSurface = Slate100, error = Red500
+    )
+    AppTheme.ROSE -> darkColorScheme(
+        primary = Color(0xFFFB7185), onPrimary = Slate900, primaryContainer = Color(0xFF9F1239),
+        secondary = Amber500, onSecondary = Slate900, tertiary = Color(0xFF818CF8),
+        background = Slate900, onBackground = Slate100, surface = Slate800, onSurface = Slate100, error = Red500
+    )
+    AppTheme.AMBER -> darkColorScheme(
+        primary = Color(0xFFFBBF24), onPrimary = Slate900, primaryContainer = Color(0xFF92400E),
+        secondary = Color(0xFFFB7185), onSecondary = Slate900, tertiary = Teal600,
+        background = Slate900, onBackground = Slate100, surface = Slate800, onSurface = Slate100, error = Red500
+    )
+}
+
+// ── CompositionLocals ─────────────────────────────────────────
+val LocalDarkMode  = compositionLocalOf { mutableStateOf(false) }
+val LocalAppTheme  = compositionLocalOf { mutableStateOf(AppTheme.INDIGO) }
 
 @Composable
 fun SmartStudyTheme(
@@ -57,21 +101,27 @@ fun SmartStudyTheme(
     appTheme  : AppTheme = AppTheme.INDIGO,
     content   : @Composable () -> Unit
 ) {
-    val colorScheme = when (appTheme) {
-        AppTheme.INDIGO -> indigoScheme(darkTheme)
-        AppTheme.TEAL   -> tealScheme(darkTheme)
-        AppTheme.ROSE   -> roseScheme(darkTheme)
-        AppTheme.AMBER  -> amberScheme(darkTheme)
+    val darkMode     = remember { mutableStateOf(darkTheme) }
+    val themeState   = remember { mutableStateOf(appTheme) }
+    val colorScheme  = if (darkMode.value) darkColors(themeState.value) else lightColors(themeState.value)
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            window.statusBarColor = colorScheme.primary.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkMode.value
+        }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography  = Typography(
-            bodyLarge  = MaterialTheme.typography.bodyLarge.copy(fontFamily  = NotoSansBengali),
-            bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontFamily = NotoSansBengali),
-            titleLarge = MaterialTheme.typography.titleLarge.copy(fontFamily = NotoSansBengali),
-            labelSmall = MaterialTheme.typography.labelSmall.copy(fontFamily = NotoSansBengali)
-        ),
-        content = content
-    )
+    CompositionLocalProvider(
+        LocalDarkMode provides darkMode,
+        LocalAppTheme provides themeState
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography  = SmartStudyTypography,
+            content     = content
+        )
+    }
 }
