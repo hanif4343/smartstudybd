@@ -10,8 +10,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.StudyMode
 import com.hanif.smartstudy.ui.home.HomeScreen
+import com.hanif.smartstudy.ui.menu.MenuScreen
 import com.hanif.smartstudy.ui.quiz.CoreScreen
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
 enum class BottomTab(val icon: String, val label: String) {
@@ -24,10 +26,9 @@ enum class BottomTab(val icon: String, val label: String) {
 
 @Composable
 fun MainScreen() {
-    var currentTab by remember { mutableStateOf(BottomTab.HOME) }
-
-    // Shared QuizViewModel — Quiz/QBank/Study সবাই শেয়ার করে content
-    val quizViewModel: QuizViewModel = viewModel()
+    var currentTab    by remember { mutableStateOf(BottomTab.HOME) }
+    val quizViewModel : QuizViewModel = viewModel()
+    val menuViewModel : MenuViewModel = viewModel()
 
     Scaffold(
         bottomBar = {
@@ -53,17 +54,8 @@ fun MainScreen() {
                 BottomTab.QUIZ  -> CoreScreen(mode = StudyMode.QUIZ,  viewModel = quizViewModel)
                 BottomTab.QBANK -> CoreScreen(mode = StudyMode.QBANK, viewModel = quizViewModel)
                 BottomTab.STUDY -> CoreScreen(mode = StudyMode.STUDY, viewModel = quizViewModel)
-                BottomTab.MENU  -> PlaceholderTab("👤 Menu\n(Phase 5 এ আসবে)")
+                BottomTab.MENU  -> MenuScreen(viewModel = menuViewModel)
             }
         }
-    }
-}
-
-@Composable
-fun PlaceholderTab(label: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(label, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali,
-            textAlign  = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
