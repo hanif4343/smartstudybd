@@ -28,6 +28,7 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
+import androidx.compose.ui.graphics.Color
 
 // Brand colors
 private val PrimaryIndigo   = Color(0xFF4F46E5)
@@ -41,7 +42,9 @@ private val TextMuted       = Color(0xFF64748B)
 
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel = viewModel()
+    viewModel     : HomeViewModel = viewModel(),
+    onSearchClick : () -> Unit    = {},
+    onTypingClick : () -> Unit    = {}
 ) {
     val state by viewModel.uiState.collectAsState()
 
@@ -68,6 +71,29 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Spacer(Modifier.height(4.dp))
+
+            // Quick Action row — Search + Typing
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickActionCard(
+                    emoji    = "🔍",
+                    label    = "Global Search",
+                    subtitle = "সব প্রশ্ন খোঁজুন",
+                    color    = Color(0xFF4F46E5),
+                    modifier = Modifier.weight(1f),
+                    onClick  = onSearchClick
+                )
+                QuickActionCard(
+                    emoji    = "⌨️",
+                    label    = "Typing Practice",
+                    subtitle = "WPM বাড়ান",
+                    color    = Color(0xFF059669),
+                    modifier = Modifier.weight(1f),
+                    onClick  = onTypingClick
+                )
+            }
 
             // Daily Quote
             QuoteCard(quote = state.dailyQuote)
@@ -845,6 +871,38 @@ fun TodayTopicCard(content: AppContent) {
 
 // ─────────────────────────────────────────
 // Helpers
+// ─────────────────────────────────────────
+// Quick Action Card (Search / Typing)
+// ─────────────────────────────────────────
+@Composable
+private fun QuickActionCard(
+    emoji    : String,
+    label    : String,
+    subtitle : String,
+    color    : Color,
+    modifier : Modifier = Modifier,
+    onClick  : () -> Unit
+) {
+    Card(
+        onClick   = onClick,
+        modifier  = modifier,
+        shape     = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.08f)),
+        border    = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.25f))
+    ) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(emoji, fontSize = 24.sp)
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                color = color, fontFamily = NotoSansBengali)
+            Text(subtitle, fontSize = 10.sp, color = Color(0xFF64748B),
+                fontFamily = NotoSansBengali)
+        }
+    }
+}
+
 // ─────────────────────────────────────────
 @Composable
 private fun OfflineBanner() {
