@@ -52,6 +52,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(QuizUiState())
     val state: StateFlow<QuizUiState> = _state.asStateFlow()
 
+    // ── Achievement / Streak events ───────────────────────────
+    private val _pendingAchievement = MutableStateFlow<com.hanif.smartstudy.data.model.Achievement?>(null)
+    val pendingAchievement: StateFlow<com.hanif.smartstudy.data.model.Achievement?> = _pendingAchievement.asStateFlow()
+
+    private val _pendingStreak = MutableStateFlow(0)
+    val pendingStreak: StateFlow<Int> = _pendingStreak.asStateFlow()
+
+    fun consumeAchievement() { _pendingAchievement.value = null }
+    fun consumeStreak()      { _pendingStreak.value = 0 }
+
     private var timerJob: Job? = null
     // Bookmarks: DataStore-based (simplified — SharedPreferences)
     private val prefs = app.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
@@ -262,6 +272,44 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (user != null) {
                 val updated = user.copy(xp = (user.xp + xp).coerceAtMost(999999))
                 session.saveUser(updated)
+            }
+            // ── Achievements check ────────────────────────────
+            session.recordDailyXp(xp)
+            val streak = session.updateStreak()
+            _pendingStreak.value = streak
+
+            // First quiz
+            if (!session.hasAchievement("first_quiz")) {
+                session.unlockAchievement("first_quiz")
+                _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("first_quiz")
+            }
+            // Perfect score
+            if (result.wrong == 0 && result.skipped == 0 && result.total > 0) {
+                if (!session.hasAchievement("perfect_score")) {
+                    session.unlockAchievement("perfect_score")
+                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("perfect_score")
+                }
+            }
+            // Streak milestones
+            listOf(3 to "streak_3", 7 to "streak_7", 30 to "streak_30").forEach { (days, id) ->
+                if (streak >= days && !session.hasAchievement(id)) {
+                    session.unlockAchievement(id)
+                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById(id)
+                }
+            }
+            // Bookmark achievements
+            val bookmarkCount = _state.value.bookmarkedIds.size
+            if (bookmarkCount >= 10 && !session.hasAchievement("bookmarked_10")) {
+                session.unlockAchievement("bookmarked_10")
+                _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("bookmarked_10")
+            }
+            // XP milestones
+            val totalXp = (user?.xp ?: 0) + xp
+            listOf(100 to "xp_100", 500 to "xp_500", 1000 to "xp_1000").forEach { (threshold, id) ->
+                if (totalXp >= threshold && !session.hasAchievement(id)) {
+                    session.unlockAchievement(id)
+                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById(id)
+                }
             }
         }
     }
