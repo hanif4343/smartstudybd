@@ -37,6 +37,15 @@ class SessionManager(private val context: Context) {
         // App time tracking
         val KEY_APP_SESSION_START = longPreferencesKey("app_session_start")
         val KEY_TOTAL_APP_MIN    = intPreferencesKey("total_app_min")
+        // Streak
+        val KEY_STREAK_COUNT     = intPreferencesKey("streak_count")
+        val KEY_STREAK_LAST_DATE = stringPreferencesKey("streak_last_date")
+        // Achievements (JSON set of earned ids)
+        val KEY_ACHIEVEMENTS     = stringPreferencesKey("achievements")
+        // Typing practice best WPM
+        val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
+        // Pending sync count
+        val KEY_PENDING_SYNC     = intPreferencesKey("pending_sync_count")
     }
 
     // ── User ──────────────────────────────────────────────────
@@ -187,5 +196,72 @@ class SessionManager(private val context: Context) {
     private fun todayString(): String {
         val c = java.util.Calendar.getInstance()
         return "${c.get(java.util.Calendar.YEAR)}-${c.get(java.util.Calendar.MONTH)+1}-${c.get(java.util.Calendar.DAY_OF_MONTH)}"
+    }
+
+    // ── Streak ────────────────────────────────────────────────
+
+    /** Call after each study session. Returns new streak count. */
+    fun updateStreak(): Int = runBlocking {
+        val today = todayString()
+        val prefs = context.dataStore.data.first()
+        val lastDate = prefs[KEY_STREAK_LAST_DATE] ?: ""
+        val current  = prefs[KEY_STREAK_COUNT] ?: 0
+        if (lastDate == today) return@runBlocking current
+
+        val yesterday = run {
+            val c = java.util.Calendar.getInstance()
+            c.add(java.util.Calendar.DAY_OF_MONTH, -1)
+            "${c.get(java.util.Calendar.YEAR)}-${c.get(java.util.Calendar.MONTH)+1}-${c.get(java.util.Calendar.DAY_OF_MONTH)}"
+        }
+        val newStreak = if (lastDate == yesterday) current + 1 else 1
+        context.dataStore.edit {
+            it[KEY_STREAK_COUNT]     = newStreak
+            it[KEY_STREAK_LAST_DATE] = today
+        }
+        newStreak
+    }
+
+    fun getStreak(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_STREAK_COUNT] ?: 0
+    }
+
+    // ── Achievements ──────────────────────────────────────────
+
+    fun getAchievements(): Set<String> = runBlocking {
+        val json = context.dataStore.data.first()[KEY_ACHIEVEMENTS] ?: return@runBlocking emptySet()
+        try {
+            val type = object : com.google.gson.reflect.TypeToken<Set<String>>() {}.type
+            gson.fromJson(json, type) ?: emptySet()
+        } catch (e: Exception) { emptySet() }
+    }
+
+    suspend fun unlockAchievement(id: String) {
+        val current = getAchievements().toMutableSet()
+        if (current.contains(id)) return
+        current.add(id)
+        context.dataStore.edit { it[KEY_ACHIEVEMENTS] = gson.toJson(current) }
+    }
+
+    fun hasAchievement(id: String): Boolean = getAchievements().contains(id)
+
+    // ── Typing practice ───────────────────────────────────────
+
+    fun getTypingBestWpm(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_BEST_WPM] ?: 0
+    }
+
+    suspend fun saveTypingWpm(wpm: Int) {
+        val best = getTypingBestWpm()
+        if (wpm > best) context.dataStore.edit { it[KEY_TYPING_BEST_WPM] = wpm }
+    }
+
+    // ── Pending sync ──────────────────────────────────────────
+
+    fun getPendingSyncCount(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_PENDING_SYNC] ?: 0
+    }
+
+    suspend fun setPendingSyncCount(count: Int) {
+        context.dataStore.edit { it[KEY_PENDING_SYNC] = count }
     }
 }
