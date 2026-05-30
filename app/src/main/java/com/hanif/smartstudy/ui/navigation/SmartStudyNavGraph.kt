@@ -49,7 +49,13 @@ fun SmartStudyNavGraph(
         }
 
         composable(Routes.MAIN) {
-            MainScreen()
+            MainScreen(
+                onLogout = {
+                    navController.navigate(Routes.AUTH) {
+                        popUpTo(Routes.MAIN) { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }
