@@ -1,6 +1,5 @@
 package com.hanif.smartstudy.ui.auth
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -64,26 +63,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     .clip(CircleShape)
                     .background(White.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
-            ) {
-                Text("📚", fontSize = 40.sp)
-            }
+            ) { Text("📚", fontSize = 42.sp) }
 
             Spacer(Modifier.height(12.dp))
+            Text("Smart Study", color = White, fontSize = 26.sp,
+                fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+            Text("পড়ো, শেখো, এগিয়ে যাও", color = White.copy(alpha = 0.75f),
+                fontSize = 13.sp, fontFamily = NotoSansBengali)
 
-            Text(
-                "Smart Study",
-                color = White, fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold,
-                fontFamily = NotoSansBengali
-            )
-            Text(
-                "পড়ো, শেখো, এগিয়ে যাও",
-                color = White.copy(alpha = 0.75f),
-                fontSize = 13.sp,
-                fontFamily = NotoSansBengali
-            )
-
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
 
             // Tab toggle
             Row(
@@ -92,303 +80,201 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     .background(White.copy(alpha = 0.15f))
                     .padding(4.dp)
             ) {
-                TabButton("লগইন",   showLogin)        { showLogin = true }
-                TabButton("সাইনআপ", !showLogin)       { showLogin = false }
+                TabBtn("লগইন",   showLogin)        { showLogin = true  }
+                TabBtn("সাইনআপ", !showLogin)       { showLogin = false }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // Card
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(24.dp),
+                colors    = CardDefaults.cardColors(containerColor = White),
+                elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                if (showLogin) {
-                    LoginForm(onLoginSuccess)
-                } else {
-                    SignupForm(onLoginSuccess)
-                }
+                if (showLogin) LoginForm(onLoginSuccess)
+                else           SignupForm(onLoginSuccess)
             }
         }
     }
 }
 
 @Composable
-private fun TabButton(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun TabBtn(label: String, active: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) White else Color.Transparent)
+            .background(if (active) White else Color.Transparent)
             .clickable { onClick() }
-            .padding(horizontal = 32.dp, vertical = 10.dp),
+            .padding(horizontal = 36.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            label,
-            color = if (selected) Indigo600 else White,
+        Text(label,
+            color      = if (active) Indigo600 else White,
             fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            fontFamily = NotoSansBengali
-        )
+            fontSize   = 14.sp,
+            fontFamily = NotoSansBengali)
     }
 }
 
-// ── LOGIN FORM ──
+// ─────────── LOGIN ───────────
 @Composable
 fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
-    val authState by vm.authState.collectAsStateWithLifecycle()
-    val fm = LocalFocusManager.current
+    val state by vm.authState.collectAsStateWithLifecycle()
+    val fm    = LocalFocusManager.current
     var phone    by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var showPass by remember { mutableStateOf(false) }
+    var showPw   by remember { mutableStateOf(false) }
 
-    LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
-            vm.resetState()
-            onLoginSuccess()
-        }
+    LaunchedEffect(state) {
+        if (state is AuthState.Success) { vm.resetState(); onLoginSuccess() }
     }
 
-    Column(
-        modifier = Modifier.padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            "স্বাগতম! 👋",
-            fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali, color = Slate800
-        )
-        Text(
-            "আপনার অ্যাকাউন্টে লগইন করুন",
-            fontSize = 13.sp, color = Color.Gray,
-            fontFamily = NotoSansBengali
-        )
+    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("স্বাগতম! 👋", fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
+        Text("অ্যাকাউন্টে লগইন করুন", fontSize = 13.sp,
+            color = Color.Gray, fontFamily = NotoSansBengali)
 
-        SSTextField(
-            value = phone, onValueChange = { phone = it },
-            label = "ফোন নম্বর", icon = Icons.Default.Phone,
+        SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone,
             keyboardType = KeyboardType.Phone,
-            imeAction = ImeAction.Next,
-            onImeAction = { fm.moveFocus(FocusDirection.Down) }
-        )
+            imeAction    = ImeAction.Next,
+            onIme        = { fm.moveFocus(FocusDirection.Down) })
 
-        SSTextField(
-            value = password, onValueChange = { password = it },
-            label = "পাসওয়ার্ড", icon = Icons.Default.Lock,
-            isPassword = true, showPassword = showPass,
-            onTogglePassword = { showPass = !showPass },
-            imeAction = ImeAction.Done,
-            onImeAction = { fm.clearFocus(); vm.login(phone, password) }
-        )
+        SSField(password, { password = it }, "পাসওয়ার্ড", Icons.Default.Lock,
+            isPass       = true,
+            showPass     = showPw,
+            onToggle     = { showPw = !showPw },
+            imeAction    = ImeAction.Done,
+            onIme        = { fm.clearFocus(); vm.login(phone, password) })
 
-        if (authState is AuthState.Error) {
-            ErrorBanner((authState as AuthState.Error).message)
-        }
+        if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
 
         Button(
-            onClick = { fm.clearFocus(); vm.login(phone, password) },
+            onClick  = { fm.clearFocus(); vm.login(phone, password) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Indigo600),
-            enabled = authState !is AuthState.Loading
+            shape    = RoundedCornerShape(16.dp),
+            colors   = ButtonDefaults.buttonColors(containerColor = Indigo600),
+            enabled  = state !is AuthState.Loading
         ) {
-            if (authState is AuthState.Loading) {
-                CircularProgressIndicator(
-                    color = White,
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Text(
-                    "লগইন করুন",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp,
-                    color = White,
-                    fontFamily = NotoSansBengali
-                )
-            }
+            if (state is AuthState.Loading)
+                CircularProgressIndicator(color = White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+            else
+                Text("লগইন করুন", fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
-
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
     }
 }
 
-// ── SIGNUP FORM ──
+// ─────────── SIGNUP ───────────
 @Composable
 fun SignupForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
-    val authState by vm.authState.collectAsStateWithLifecycle()
-    val fm = LocalFocusManager.current
+    val state by vm.authState.collectAsStateWithLifecycle()
+    val fm    = LocalFocusManager.current
     var name        by remember { mutableStateOf("") }
     var phone       by remember { mutableStateOf("") }
     var password    by remember { mutableStateOf("") }
     var confirmPass by remember { mutableStateOf("") }
-    var showPass    by remember { mutableStateOf(false) }
+    var showPw      by remember { mutableStateOf(false) }
     var userType    by remember { mutableStateOf("Student") }
     var classLevel  by remember { mutableStateOf("HSC") }
 
     val userTypes   = listOf("Student", "Job Seeker", "General")
     val classLevels = listOf("SSC", "HSC", "Degree", "Masters", "BCS", "Bank", "Other")
 
-    LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
-            vm.resetState()
-            onLoginSuccess()
-        }
+    LaunchedEffect(state) {
+        if (state is AuthState.Success) { vm.resetState(); onLoginSuccess() }
     }
 
-    Column(
-        modifier = Modifier.padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Text(
-            "নতুন অ্যাকাউন্ট ✨",
-            fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali, color = Slate800
-        )
+    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("নতুন অ্যাকাউন্ট ✨", fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
 
-        SSTextField(
-            value = name, onValueChange = { name = it },
-            label = "পুরো নাম", icon = Icons.Default.Person,
-            imeAction = ImeAction.Next,
-            onImeAction = { fm.moveFocus(FocusDirection.Down) }
-        )
-        SSTextField(
-            value = phone, onValueChange = { phone = it },
-            label = "ফোন নম্বর", icon = Icons.Default.Phone,
+        SSField(name,   { name = it },   "পুরো নাম", Icons.Default.Person,
+            imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        SSField(phone,  { phone = it },  "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone,
             keyboardType = KeyboardType.Phone,
-            imeAction = ImeAction.Next,
-            onImeAction = { fm.moveFocus(FocusDirection.Down) }
-        )
-        SSTextField(
-            value = password, onValueChange = { password = it },
-            label = "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", icon = Icons.Default.Lock,
-            isPassword = true, showPassword = showPass,
-            onTogglePassword = { showPass = !showPass },
-            imeAction = ImeAction.Next,
-            onImeAction = { fm.moveFocus(FocusDirection.Down) }
-        )
-        SSTextField(
-            value = confirmPass, onValueChange = { confirmPass = it },
-            label = "পাসওয়ার্ড নিশ্চিত করুন", icon = Icons.Default.Lock,
-            isPassword = true, showPassword = showPass,
-            onTogglePassword = { showPass = !showPass },
-            imeAction = ImeAction.Done,
-            onImeAction = { fm.clearFocus() }
-        )
+            imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        SSField(password, { password = it }, "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", Icons.Default.Lock,
+            isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
+            imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        SSField(confirmPass, { confirmPass = it }, "পাসওয়ার্ড নিশ্চিত করুন", Icons.Default.Lock,
+            isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
+            imeAction = ImeAction.Done, onIme = { fm.clearFocus() })
 
-        Text(
-            "আপনি কে?",
-            fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-            color = Slate800, fontFamily = NotoSansBengali
-        )
+        // User type
+        Text("আপনি কে?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+            color = Slate800, fontFamily = NotoSansBengali)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            userTypes.forEach { type ->
-                FilterChip(
-                    selected = userType == type,
-                    onClick  = { userType = type },
-                    label    = { Text(type, fontSize = 12.sp, fontFamily = NotoSansBengali) }
-                )
+            userTypes.forEach { t ->
+                FilterChip(t == userType, { userType = t },
+                    label = { Text(t, fontSize = 12.sp, fontFamily = NotoSansBengali) })
             }
         }
 
-        Text(
-            "শ্রেণী / স্তর",
-            fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-            color = Slate800, fontFamily = NotoSansBengali
-        )
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        // Class level
+        Text("শ্রেণী / স্তর", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+            color = Slate800, fontFamily = NotoSansBengali)
+        Row(Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             classLevels.forEach { cl ->
-                FilterChip(
-                    selected = classLevel == cl,
-                    onClick  = { classLevel = cl },
-                    label    = { Text(cl, fontSize = 12.sp, fontFamily = NotoSansBengali) }
-                )
+                FilterChip(cl == classLevel, { classLevel = cl },
+                    label = { Text(cl, fontSize = 12.sp, fontFamily = NotoSansBengali) })
             }
         }
 
-        if (authState is AuthState.Error) {
-            ErrorBanner((authState as AuthState.Error).message)
-        }
+        if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
 
         Button(
-            onClick = {
-                fm.clearFocus()
-                vm.signup(name, phone, password, confirmPass, userType, classLevel)
-            },
+            onClick  = { fm.clearFocus(); vm.signup(name, phone, password, confirmPass, userType, classLevel) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Green500),
-            enabled = authState !is AuthState.Loading
+            shape    = RoundedCornerShape(16.dp),
+            colors   = ButtonDefaults.buttonColors(containerColor = Green500),
+            enabled  = state !is AuthState.Loading
         ) {
-            if (authState is AuthState.Loading) {
-                CircularProgressIndicator(
-                    color = White,
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Text(
-                    "অ্যাকাউন্ট তৈরি করুন",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp,
-                    color = White,
-                    fontFamily = NotoSansBengali
-                )
-            }
+            if (state is AuthState.Loading)
+                CircularProgressIndicator(color = White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+            else
+                Text("অ্যাকাউন্ট তৈরি করুন", fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
-
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
     }
 }
 
-// ── Reusable TextField ──
+// ─────────── Reusable components ───────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SSTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    icon: ImageVector,
+fun SSField(
+    value: String, onValueChange: (String) -> Unit,
+    label: String, icon: ImageVector,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
-    onImeAction: () -> Unit = {},
-    isPassword: Boolean = false,
-    showPassword: Boolean = false,
-    onTogglePassword: () -> Unit = {}
+    onIme: () -> Unit = {},
+    isPass: Boolean = false,
+    showPass: Boolean = false,
+    onToggle: () -> Unit = {}
 ) {
     OutlinedTextField(
-        value = value,
+        value         = value,
         onValueChange = onValueChange,
-        label = { Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp) },
-        leadingIcon = { Icon(icon, contentDescription = null, tint = Indigo600) },
-        trailingIcon = if (isPassword) {
-            {
-                IconButton(onClick = onTogglePassword) {
-                    Icon(
-                        if (showPassword) Icons.Default.VisibilityOff
-                        else Icons.Default.Visibility,
-                        contentDescription = null,
-                        tint = Color.Gray
-                    )
-                }
+        label         = { Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp) },
+        leadingIcon   = { Icon(icon, null, tint = Indigo600) },
+        trailingIcon  = if (isPass) {{
+            IconButton(onClick = onToggle) {
+                Icon(if (showPass) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    null, tint = Color.Gray)
             }
-        } else null,
-        visualTransformation = if (isPassword && !showPassword)
-            PasswordVisualTransformation() else VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = keyboardType,
-            imeAction = imeAction
-        ),
-        keyboardActions = KeyboardActions(onAny = { onImeAction() }),
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        }} else null,
+        visualTransformation = if (isPass && !showPass) PasswordVisualTransformation()
+                               else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(onAny = { onIme() }),
+        modifier   = Modifier.fillMaxWidth(),
+        shape      = RoundedCornerShape(14.dp),
         singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
+        colors     = OutlinedTextFieldDefaults.colors(
             focusedBorderColor   = Indigo600,
             unfocusedBorderColor = Color(0xFFE2E8F0),
             focusedLabelColor    = Indigo600
@@ -396,24 +282,18 @@ fun SSTextField(
     )
 }
 
-// ── Error banner ──
 @Composable
-fun ErrorBanner(message: String) {
+fun ErrBanner(msg: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Red500.copy(alpha = 0.1f))
             .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalAlignment         = Alignment.CenterVertically,
+        horizontalArrangement     = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(
-            Icons.Default.Warning,
-            contentDescription = null,
-            tint = Red500,
-            modifier = Modifier.size(18.dp)
-        )
-        Text(message, color = Red500, fontSize = 13.sp, fontFamily = NotoSansBengali)
+        Icon(Icons.Default.Warning, null, tint = Red500, modifier = Modifier.size(18.dp))
+        Text(msg, color = Red500, fontSize = 13.sp, fontFamily = NotoSansBengali)
     }
 }
