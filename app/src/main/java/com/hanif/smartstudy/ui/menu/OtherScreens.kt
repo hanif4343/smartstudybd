@@ -212,7 +212,7 @@ fun AdminScreen(
             },
             confirmButton = {
                 Button(
-                    onClick  = { vm.adminSendNotification(notifTitle, notifBody); showNotifDialog = false },
+                    onClick  = { vm.adminSendNotification(notifTitle, notifBody, null); showNotifDialog = false },
                     enabled  = notifTitle.isNotBlank() && notifBody.isNotBlank()
                 ) {
                     Text("পাঠান", fontFamily = NotoSansBengali)
