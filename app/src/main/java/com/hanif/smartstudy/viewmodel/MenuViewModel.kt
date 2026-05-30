@@ -258,15 +258,17 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(isUploadingPhoto = true, uploadProgress = true, photoUploadError = null) }
             try {
                 val result = com.hanif.smartstudy.data.remote.ImgBbService.uploadImage(getApplication(), uri)
-                val url = result.url
-                if (url != null) {
-                    val user = _state.value.user ?: return@launch
-                    val updated = user.copy(picture = url)
-                    session.saveUser(updated)
-                    saveUserToFirebase(updated)
-                    _state.update { it.copy(user = updated, isUploadingPhoto = false, uploadProgress = false, successMsg = "প্রোফাইল ছবি আপডেট হয়েছে") }
-                } else {
-                    _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = "ছবি আপলোড হয়নি") }
+                when (result) {
+                    is com.hanif.smartstudy.data.remote.ImgBbResult.Success -> {
+                        val user = _state.value.user ?: return@launch
+                        val updated = user.copy(picture = result.url)
+                        session.saveUser(updated)
+                        saveUserToFirebase(updated)
+                        _state.update { it.copy(user = updated, isUploadingPhoto = false, uploadProgress = false, successMsg = "প্রোফাইল ছবি আপডেট হয়েছে") }
+                    }
+                    is com.hanif.smartstudy.data.remote.ImgBbResult.Error -> {
+                        _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = result.message) }
+                    }
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = e.message) }
