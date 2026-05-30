@@ -3,11 +3,11 @@ package com.hanif.smartstudy.ui.main
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.Achievement
 import com.hanif.smartstudy.data.model.StudyMode
@@ -36,15 +36,23 @@ fun MainScreen(
     onAchievementUnlocked : (Achievement) -> Unit = {},
     onStreakUpdated       : (Int) -> Unit  = {}
 ) {
-    var currentTab      by remember { mutableStateOf(BottomTab.HOME) }
-    var showSearch      by remember { mutableStateOf(false) }
-    var showTyping      by remember { mutableStateOf(false) }
+    var currentTab by remember { mutableStateOf(BottomTab.HOME) }
+    var showSearch by remember { mutableStateOf(false) }
+    var showTyping by remember { mutableStateOf(false) }
 
-    val quizViewModel : QuizViewModel = viewModel()
-    val menuViewModel : MenuViewModel = viewModel()
-    val quizState by quizViewModel.state.collectAsState()
+    // FIX: তিনটা আলাদা ViewModel — একটাতে mode switch করলে অন্যটার data নষ্ট হবে না
+    val quizViewModel  : QuizViewModel = viewModel(key = "quiz_vm")
+    val qbankViewModel : QuizViewModel = viewModel(key = "qbank_vm")
+    val studyViewModel : QuizViewModel = viewModel(key = "study_vm")
+    val menuViewModel  : MenuViewModel = viewModel()
 
-    // Handle deep link on first composition
+    // ViewModel init-এ mode set করো
+    LaunchedEffect(Unit) {
+        quizViewModel.setMode(StudyMode.QUIZ)
+        qbankViewModel.setMode(StudyMode.QBANK)
+        studyViewModel.setMode(StudyMode.STUDY)
+    }
+
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
             DeepLinkAction.Type.QUIZ   -> { currentTab = BottomTab.QUIZ  }
@@ -55,10 +63,16 @@ fun MainScreen(
         }
     }
 
-    // Overlay screens (full-screen, slide over bottom nav)
     if (showSearch) {
+        val activeVm = when (currentTab) {
+            BottomTab.QUIZ  -> quizViewModel
+            BottomTab.QBANK -> qbankViewModel
+            BottomTab.STUDY -> studyViewModel
+            else            -> quizViewModel
+        }
+        val activeState by activeVm.state.collectAsState()
         GlobalSearchScreen(
-            allQuestions = quizState.questions,
+            allQuestions = activeState.questions,
             onBack       = { showSearch = false }
         )
         return
@@ -66,11 +80,7 @@ fun MainScreen(
     if (showTyping) {
         TypingPracticeScreen(
             onBack   = { showTyping = false },
-            onResult = { result ->
-                if (result.wpm >= 40) {
-                    // Achievement for typing speed
-                }
-            }
+            onResult = {}
         )
         return
     }
@@ -98,12 +108,24 @@ fun MainScreen(
                     onSearchClick = { showSearch = true },
                     onTypingClick = { showTyping = true }
                 )
-                BottomTab.QUIZ  -> CoreScreen(mode = StudyMode.QUIZ,  viewModel = quizViewModel,
-                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
-                BottomTab.QBANK -> CoreScreen(mode = StudyMode.QBANK, viewModel = quizViewModel,
-                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
-                BottomTab.STUDY -> CoreScreen(mode = StudyMode.STUDY, viewModel = quizViewModel,
-                    onAchievementUnlocked = onAchievementUnlocked, onStreakUpdated = onStreakUpdated)
+                BottomTab.QUIZ  -> CoreScreen(
+                    mode      = StudyMode.QUIZ,
+                    viewModel = quizViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked,
+                    onStreakUpdated       = onStreakUpdated
+                )
+                BottomTab.QBANK -> CoreScreen(
+                    mode      = StudyMode.QBANK,
+                    viewModel = qbankViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked,
+                    onStreakUpdated       = onStreakUpdated
+                )
+                BottomTab.STUDY -> CoreScreen(
+                    mode      = StudyMode.STUDY,
+                    viewModel = studyViewModel,
+                    onAchievementUnlocked = onAchievementUnlocked,
+                    onStreakUpdated       = onStreakUpdated
+                )
                 BottomTab.MENU  -> MenuScreen(
                     vm                   = menuViewModel,
                     onLogout             = onLogout,
