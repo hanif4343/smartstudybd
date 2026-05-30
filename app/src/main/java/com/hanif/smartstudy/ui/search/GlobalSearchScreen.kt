@@ -92,9 +92,10 @@ fun GlobalSearchScreen(
                         modifier = Modifier.fillMaxWidth().focusRequester(focusReq),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Indigo600,
+                            focusedBorderColor   = Indigo600,
                             unfocusedBorderColor = Color(0xFFE2E8F0),
-                            containerColor = Color(0xFFF8FAFC)
+                            focusedContainerColor   = Color(0xFFF8FAFC),
+                            unfocusedContainerColor = Color(0xFFF8FAFC)
                         ),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
