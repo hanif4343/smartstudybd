@@ -28,8 +28,10 @@ import com.hanif.smartstudy.viewmodel.MenuViewModel
 
 @Composable
 fun MenuScreen(
-    vm         : MenuViewModel = viewModel(),
-    onLogout   : () -> Unit = {}
+    vm            : MenuViewModel = viewModel(),
+    onLogout      : () -> Unit    = {},
+    onSearchClick : () -> Unit    = {},
+    onTypingClick : () -> Unit    = {}
 ) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val darkMode = LocalDarkMode.current
@@ -127,10 +129,15 @@ fun MainMenuScreen(
             Spacer(Modifier.height(4.dp))
 
             // ── Menu items ──
-            MenuGroup("📊 তথ্য") {
+            MenuGroup(\"📊 তথ্য\") {
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
+            }
+
+            MenuGroup("🛠 Tools") {
+                MenuRow("🔍 Global Search",  "সব প্রশ্ন একসাথে খুঁজুন", Icons.Default.Search)       { onSearchClick() }
+                MenuRow("⌨️ Typing Practice", "টাইপিং স্পিড বাড়ান",    Icons.Default.Keyboard)     { onTypingClick() }
             }
 
             MenuGroup("⚙️ সেটিংস") {
