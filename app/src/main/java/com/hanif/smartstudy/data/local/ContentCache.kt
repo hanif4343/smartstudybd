@@ -9,24 +9,17 @@ import com.google.gson.Gson
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.util.dataStore
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 
-/**
- * AppContent (Study/Quiz/QBank) কে DataStore-এ JSON হিসেবে cache করে।
- * Room DB ছাড়াই offline কাজ করে — lightweight approach।
- */
 class ContentCache(private val context: Context) {
 
     private val gson = Gson()
 
     companion object {
-        // Content cache keys
         val KEY_STUDY_JSON    = stringPreferencesKey("cache_study_json")
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
         val KEY_QBANK_JSON    = stringPreferencesKey("cache_qbank_json")
         val KEY_CACHE_TIME    = longPreferencesKey("cache_fetched_at")
 
-        // Home stats keys
         val KEY_TODAY_STUDY   = intPreferencesKey("today_study_min")
         val KEY_WEEK_STUDY    = intPreferencesKey("week_study_min")
         val KEY_TOTAL_STUDY   = intPreferencesKey("total_study_min")
@@ -37,7 +30,6 @@ class ContentCache(private val context: Context) {
         val KEY_STUDY_DATE    = stringPreferencesKey("today_study_date")
     }
 
-    // ── Content save ──
     suspend fun saveContent(content: AppContent) {
         context.dataStore.edit { prefs ->
             prefs[KEY_STUDY_JSON] = gson.toJson(content.study)
@@ -47,14 +39,18 @@ class ContentCache(private val context: Context) {
         }
     }
 
-    // ── Content load ──
+    // FIX: যেকোনো একটা key null হলেও বাকিগুলো দিয়ে AppContent বানাও
     suspend fun loadContent(): AppContent? {
         return try {
             val prefs = context.dataStore.data.first()
-            val studyJson = prefs[KEY_STUDY_JSON] ?: return null
-            val quizJson  = prefs[KEY_QUIZ_JSON]  ?: return null
-            val qbankJson = prefs[KEY_QBANK_JSON] ?: return null
             val fetchedAt = prefs[KEY_CACHE_TIME] ?: 0L
+
+            // কোনো cache নেই
+            if (fetchedAt == 0L) return null
+
+            val studyJson = prefs[KEY_STUDY_JSON] ?: "[]"
+            val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
+            val qbankJson = prefs[KEY_QBANK_JSON] ?: "[]"
 
             val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem>>() {}.type
             val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem>>() {}.type
@@ -71,11 +67,9 @@ class ContentCache(private val context: Context) {
 
     suspend fun hasCachedContent(): Boolean {
         val prefs = context.dataStore.data.first()
-        return !prefs[KEY_STUDY_JSON].isNullOrEmpty()
+        return (prefs[KEY_CACHE_TIME] ?: 0L) > 0L
     }
 
-    // ── Study time tracker ──
-    // প্রতিদিন reset হয়
     suspend fun addStudyMinutes(minutes: Int) {
         val today = todayString()
         context.dataStore.edit { prefs ->
@@ -107,7 +101,6 @@ class ContentCache(private val context: Context) {
         )
     }
 
-    // ── Streak ──
     suspend fun updateStreak(): Int {
         val today   = todayString()
         val prefs   = context.dataStore.data.first()
@@ -115,10 +108,10 @@ class ContentCache(private val context: Context) {
         val current = prefs[KEY_STREAK] ?: 0
 
         val newStreak = when {
-            lastDate == today   -> current          // আজ ইতিমধ্যে হয়েছে
-            isYesterday(lastDate) -> current + 1    // ধারাবাহিক
-            lastDate.isEmpty()  -> 1                // প্রথম দিন
-            else                -> 1                // streak ভেঙে গেছে
+            lastDate == today     -> current
+            isYesterday(lastDate) -> current + 1
+            lastDate.isEmpty()    -> 1
+            else                  -> 1
         }
 
         context.dataStore.edit { p ->
@@ -129,14 +122,12 @@ class ContentCache(private val context: Context) {
     }
 
     suspend fun getStreak(): Int {
-        val prefs   = context.dataStore.data.first()
-        val lastDate= prefs[KEY_STREAK_DATE] ?: ""
-        val current = prefs[KEY_STREAK] ?: 0
-        // আগের দিনের পরে কোনো activity না থাকলে streak শেষ
+        val prefs    = context.dataStore.data.first()
+        val lastDate = prefs[KEY_STREAK_DATE] ?: ""
+        val current  = prefs[KEY_STREAK] ?: 0
         return if (isStreakAlive(lastDate)) current else 0
     }
 
-    // ── Quiz/correct/wrong count ──
     suspend fun incrementCorrect() {
         context.dataStore.edit { it[KEY_CORRECT_COUNT] = (it[KEY_CORRECT_COUNT] ?: 0) + 1 }
     }
@@ -148,7 +139,6 @@ class ContentCache(private val context: Context) {
     suspend fun getCorrectCount() = context.dataStore.data.first()[KEY_CORRECT_COUNT] ?: 0
     suspend fun getWrongCount()   = context.dataStore.data.first()[KEY_WRONG_COUNT]   ?: 0
 
-    // ── Helper ──
     private fun todayString(): String {
         val cal = java.util.Calendar.getInstance()
         return "${cal.get(java.util.Calendar.YEAR)}-${cal.get(java.util.Calendar.MONTH)+1}-${cal.get(java.util.Calendar.DAY_OF_MONTH)}"
