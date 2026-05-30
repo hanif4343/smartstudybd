@@ -28,7 +28,6 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
-import androidx.compose.ui.graphics.Color
 
 // Brand colors
 private val PrimaryIndigo   = Color(0xFF4F46E5)
