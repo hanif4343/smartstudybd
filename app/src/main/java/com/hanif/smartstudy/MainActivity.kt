@@ -3,63 +3,71 @@ package com.hanif.smartstudy
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.Flow
+import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.hanif.smartstudy.service.SmartStudyFirebaseService
 import com.hanif.smartstudy.ui.navigation.SmartStudyNavGraph
-import com.hanif.smartstudy.ui.theme.SmartStudyTheme
-import com.hanif.smartstudy.util.ActivityReporter
-import com.hanif.smartstudy.util.FcmHelper
-import com.hanif.smartstudy.util.ReminderHelper
+import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.util.SessionManager
-import com.hanif.smartstudy.util.SoundManager
-import com.hanif.smartstudy.viewmodel.AppTheme
+
+// ─────────────────────────────────────────────────────────────
+//  MainActivity — theme-aware entry point
+//  Presence tracking + session time recording
+// ─────────────────────────────────────────────────────────────
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var session: SessionManager
+    private var sessionStartMs = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         installSplashScreen()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
-        // Phase 5: reminder channel
-        ReminderHelper.createChannel(this)
-
-        // Phase 5: sound init
-        SoundManager.init(this)
+        session = SessionManager(this)
 
         setContent {
-            val context = LocalContext.current
-            val session = remember { SessionManager(context) }
+            // Read persisted theme preferences
+            val darkFlow  = remember { session.darkModeFlow() }
+            val themeFlow = remember { session.themeColorFlow() }
+            val isDark    by darkFlow.collectAsState(initial = session.isDarkMode())
+            val themeStr  by themeFlow.collectAsState(initial = session.getThemeColor())
+            val appTheme  = themeFromString(themeStr)
 
-            // Dark mode reactive
-            val isDark   = remember { mutableStateOf(session.isDarkMode()) }
-            val themeKey = remember { mutableStateOf(
-                context.getSharedPreferences("quiz_prefs", MODE_PRIVATE)
-                    .getString("app_theme", "indigo") ?: "indigo"
-            )}
-            val appTheme = AppTheme.entries.firstOrNull { it.key == themeKey.value } ?: AppTheme.INDIGO
-
-            SmartStudyTheme(darkTheme = isDark.value, appTheme = appTheme) {
-                SmartStudyNavGraph()
+            SmartStudyTheme(darkTheme = isDark, appTheme = appTheme) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    SmartStudyNavGraph()
+                }
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Phase 5: report active + collect FCM token
-        ActivityReporter.reportActive(application)
-        FcmHelper.collectAndSave(application)
+        sessionStartMs = System.currentTimeMillis()
+        SmartStudyFirebaseService.updatePresence(this, true)
     }
 
     override fun onPause() {
         super.onPause()
-        ActivityReporter.reportInactive(application)
+        val sessionMin = ((System.currentTimeMillis() - sessionStartMs) / 60000).toInt()
+        if (sessionMin > 0) {
+            SmartStudyFirebaseService.recordAppSession(this, sessionMin)
+            kotlinx.coroutines.runBlocking {
+                session.recordSessionMinutes(sessionMin)
+            }
+        }
+        SmartStudyFirebaseService.updatePresence(this, false)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        SoundManager.release()
+    override fun onStop() {
+        super.onStop()
+        SmartStudyFirebaseService.updatePresence(this, false)
     }
 }
