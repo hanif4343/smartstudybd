@@ -17,10 +17,23 @@ import com.hanif.smartstudy.viewmodel.QuizViewModel
  */
 @Composable
 fun CoreScreen(
-    mode      : StudyMode,
-    viewModel : QuizViewModel = viewModel()
+    mode                  : StudyMode,
+    viewModel             : QuizViewModel = viewModel(),
+    onAchievementUnlocked : (com.hanif.smartstudy.data.model.Achievement) -> Unit = {},
+    onStreakUpdated       : (Int) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Collect and forward achievement/streak events
+    val achievement by viewModel.pendingAchievement.collectAsState()
+    val streak      by viewModel.pendingStreak.collectAsState()
+
+    LaunchedEffect(achievement) {
+        achievement?.let { onAchievementUnlocked(it); viewModel.consumeAchievement() }
+    }
+    LaunchedEffect(streak) {
+        if (streak > 0) { onStreakUpdated(streak); viewModel.consumeStreak() }
+    }
 
     // Mode switch যদি বাইরে থেকে আসে
     LaunchedEffect(mode) {
