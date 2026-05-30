@@ -489,37 +489,22 @@ fun ZoomableImage(url: String) {
     var zoomed by remember { mutableStateOf(false) }
 
     AsyncImage(
-        model            = url,
+        model              = url,
         contentDescription = null,
-        modifier         = Modifier
+        modifier           = Modifier
             .fillMaxWidth()
             .heightIn(max = 200.dp)
             .clip(RoundedCornerShape(10.dp))
             .clickable { zoomed = true }
             .padding(vertical = 6.dp),
-        contentScale     = ContentScale.Fit
+        contentScale       = ContentScale.Fit
     )
 
     if (zoomed) {
-        Dialog(onDismissRequest = { zoomed = false }) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(0.9f), RoundedCornerShape(16.dp))
-                    .clickable { zoomed = false }
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model              = url,
-                    contentDescription = null,
-                    modifier           = Modifier.fillMaxWidth(),
-                    contentScale       = ContentScale.Fit
-                )
-                Text("ট্যাপ করে বন্ধ করুন", fontSize = 10.sp, color = Color.White.copy(0.5f),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
-            }
-        }
+        com.hanif.smartstudy.ui.shared.ImageZoomOverlay(
+            imageUrl  = url,
+            onDismiss = { zoomed = false }
+        )
     }
 }
 
