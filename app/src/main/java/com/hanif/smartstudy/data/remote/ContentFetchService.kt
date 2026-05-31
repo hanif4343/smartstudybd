@@ -36,9 +36,24 @@ object ContentFetchService {
     private val SECRET_KEY   get() = BuildConfig.SECRET_KEY
     private val GAS_URL      get() = BuildConfig.GAS_URL
 
+    // Validate config
+    private fun isConfigured(): Boolean {
+        val url = BuildConfig.FIREBASE_URL
+        val key = BuildConfig.SECRET_KEY
+        if (url.contains("%%") || url.isBlank()) {
+            Log.e(TAG, "FIREBASE_URL not set! Value: '$url'")
+            return false
+        }
+        Log.d(TAG, "Config OK: url=${url.take(30)}... key=${if(key.contains("%%")) "NOT SET" else "set"}")
+        return true
+    }
+
     // ── একবারে সব fetch — root .json থেকে (old app-এর মতো) ──
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
         try {
+            if (!isConfigured()) {
+                return@withContext ContentResult.Error("Firebase URL not configured")
+            }
             // Firebase root endpoint — ?auth=SECRET_KEY
             val authParam = if (SECRET_KEY.isNotBlank() && SECRET_KEY != "%%SECRET_KEY%%")
                 "?auth=$SECRET_KEY" else ""
