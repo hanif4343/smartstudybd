@@ -10,6 +10,7 @@ import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,16 +91,19 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val weakTopics = loadWeakTopics()
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics) }
 
-            val result  = repo.getContent()
+            // 30 সেকেন্ড timeout
+            val result = withTimeoutOrNull(30_000L) { repo.getContent() }
+                ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
+
             val content = (result as? DataState.Success)?.data ?: AppContent()
             val errMsg  = (result as? DataState.Error)?.message
 
-            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
+            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
 
             _state.update {
                 it.copy(
                     contentLoaded = !content.isEmpty(),
-                    error         = if (content.isEmpty()) errMsg else null
+                    error         = errMsg
                 )
             }
             rebuildSubjects(content, newMode)
