@@ -113,6 +113,7 @@ fun QuestionCard(
     index       : Int,
     item        : QuestionItem,
     mode        : StudyMode,
+    totalCount  : Int       = 0,
     onMcqAnswer : (Int) -> Unit,
     onWritten   : (String) -> Int,
     onBookmark  : () -> Unit,
@@ -512,39 +513,105 @@ fun ZoomableImage(url: String) {
 // Report Dialog
 // ─────────────────────────────────────────────────────────
 @Composable
-fun ReportDialog(onReport: (String) -> Unit, onDismiss: () -> Unit) {
+fun ReportDialog(
+    questionId   : String = "",
+    questionText : String = "",
+    onReport     : (String) -> Unit,
+    onDismiss    : () -> Unit
+) {
     val issues = listOf("ভুল উত্তর", "ভুল বানান", "ব্যাখ্যা নেই", "ছবি দেখা যাচ্ছে না", "অন্য সমস্যা")
     var selected by remember { mutableStateOf("") }
+    var extraNote by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("সমস্যা রিপোর্ট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
-        text  = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFF1F2)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🚩", fontSize = 18.sp)
+                }
+                Text("সমস্যা রিপোর্ট করুন", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (questionText.isNotBlank()) {
+                    Text(
+                        questionText.take(80) + if (questionText.length > 80) "..." else "",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = MutedText, lineHeight = 15.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SlateLight)
+                            .padding(8.dp)
+                    )
+                }
+                Text("সমস্যার ধরন:", fontFamily = NotoSansBengali,
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateText)
                 issues.forEach { issue ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (selected == issue) Color(0xFFEEF2FF) else SlateLight)
+                            .border(
+                                1.dp,
+                                if (selected == issue) Indigo600 else Color.Transparent,
+                                RoundedCornerShape(10.dp)
+                            )
                             .clickable { selected = issue }
-                            .padding(10.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        RadioButton(selected = selected == issue, onClick = { selected = issue })
+                        RadioButton(
+                            selected = selected == issue,
+                            onClick  = { selected = issue },
+                            colors   = RadioButtonDefaults.colors(selectedColor = Indigo600)
+                        )
                         Spacer(Modifier.width(8.dp))
-                        Text(issue, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(issue, fontFamily = NotoSansBengali, fontSize = 13.sp,
+                            color = if (selected == issue) Indigo600 else SlateText,
+                            fontWeight = if (selected == issue) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
+                OutlinedTextField(
+                    value         = extraNote,
+                    onValueChange = { extraNote = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    placeholder   = { Text("বাড়তি তথ্য (ঐচ্ছিক)...", fontFamily = NotoSansBengali,
+                        fontSize = 12.sp, color = Color(0xFFCBD5E1)) },
+                    maxLines      = 3,
+                    shape         = RoundedCornerShape(10.dp),
+                    colors        = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Indigo600,
+                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                    )
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (selected.isNotBlank()) onReport(selected) }, enabled = selected.isNotBlank()) {
-                Text("রিপোর্ট করুন", fontFamily = NotoSansBengali, color = Indigo600, fontWeight = FontWeight.ExtraBold)
+            Button(
+                onClick  = {
+                    val msg = selected + if (extraNote.isNotBlank()) ": $extraNote" else ""
+                    if (msg.isNotBlank()) onReport(msg)
+                },
+                enabled  = selected.isNotBlank(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+            ) {
+                Text("🚩 রিপোর্ট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) }
-        }
+            TextButton(onClick = onDismiss) {
+                Text("বাতিল", fontFamily = NotoSansBengali, color = MutedText)
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
     )
 }
