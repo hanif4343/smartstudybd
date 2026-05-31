@@ -1,19 +1,30 @@
 package com.hanif.smartstudy.ui.quiz
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
+/**
+ * CoreScreen — Quiz / Study / QBank এর master orchestrator.
+ * NavPath depth অনুযায়ী সঠিক screen দেখায়:
+ *   depth 0 → Subject list
+ *   depth 1 → SubTopic list
+ *   depth 2 → Question list
+ *   isMockZone → Mock selection
+ *   showResult → Result modal
+ */
 @Composable
 fun CoreScreen(
     mode                  : StudyMode,
     viewModel             : QuizViewModel = viewModel(),
-    onAchievementUnlocked : (Achievement) -> Unit = {},
+    onAchievementUnlocked : (com.hanif.smartstudy.data.model.Achievement) -> Unit = {},
     onStreakUpdated       : (Int) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
 
+    // Collect and forward achievement/streak events
     val achievement by viewModel.pendingAchievement.collectAsState()
     val streak      by viewModel.pendingStreak.collectAsState()
 
@@ -24,9 +35,13 @@ fun CoreScreen(
         if (streak > 0) { onStreakUpdated(streak); viewModel.consumeStreak() }
     }
 
-    // CoreScreen নিজে setMode call করে না — MainScreen থেকে সঠিক VM আসে
+    // Mode init — শুধু প্রথমবার, পরে MainScreen থেকে আলাদা VM তাই দরকার নেই
+    LaunchedEffect(Unit) {
+        if (state.mode != mode) viewModel.setMode(mode)
+    }
 
     when {
+        // ── Mock Zone ──
         state.isMockZone -> {
             MockSelectionScreen(
                 subjects       = state.subjects,
@@ -38,7 +53,9 @@ fun CoreScreen(
             )
         }
 
+        // ── Result Modal ──
         state.showResult && state.result != null -> {
+            // Show question list behind + result on top
             QuestionListScreen(
                 viewModel = viewModel,
                 mode      = state.mode,
@@ -54,6 +71,7 @@ fun CoreScreen(
             ResultModal(
                 result  = state.result!!,
                 onRetry = {
+                    // Same topic reload
                     val subj = state.navPath.subject ?: return@ResultModal
                     val st   = state.navPath.subTopic ?: return@ResultModal
                     viewModel.navigateBack()
@@ -63,6 +81,7 @@ fun CoreScreen(
             )
         }
 
+        // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
             QuestionListScreen(
                 viewModel = viewModel,
@@ -78,6 +97,7 @@ fun CoreScreen(
             )
         }
 
+        // ── SubTopic List (depth 1) ──
         state.navPath.depth() == 1 -> {
             SubTopicListScreen(
                 subject    = state.navPath.subject ?: "",
@@ -88,6 +108,7 @@ fun CoreScreen(
             )
         }
 
+        // ── Subject List (depth 0, root) ──
         else -> {
             SubjectListScreen(
                 mode       = state.mode,
