@@ -36,42 +36,69 @@ object ContentFetchService {
     private val SECRET_KEY   get() = BuildConfig.SECRET_KEY
     private val GAS_URL      get() = BuildConfig.GAS_URL
 
-    // Validate config
-    private fun isConfigured(): Boolean {
+    // Validate config — কোনো placeholder থাকলে log করো
+    private fun logConfig() {
         val url = BuildConfig.FIREBASE_URL
         val key = BuildConfig.SECRET_KEY
-        if (url.contains("%%") || url.isBlank()) {
-            Log.e(TAG, "FIREBASE_URL not set! Value: '$url'")
-            return false
-        }
-        Log.d(TAG, "Config OK: url=${url.take(30)}... key=${if(key.contains("%%")) "NOT SET" else "set"}")
-        return true
+        val gas = BuildConfig.GAS_URL
+        Log.d(TAG, "=== CONFIG CHECK ===")
+        Log.d(TAG, "FIREBASE_URL: ${if(url.contains("%%")) "❌ NOT INJECTED" else "✅ ${url.take(40)}"}")
+        Log.d(TAG, "SECRET_KEY:   ${if(key.contains("%%")) "❌ NOT INJECTED" else "✅ set (${key.length} chars)"}")
+        Log.d(TAG, "GAS_URL:      ${if(gas.contains("%%")) "❌ NOT INJECTED" else "✅ ${gas.take(40)}"}")
+        Log.d(TAG, "===================")
     }
 
-    // ── একবারে সব fetch — root .json থেকে (old app-এর মতো) ──
+    private fun firebaseConfigured(): Boolean {
+        val url = BuildConfig.FIREBASE_URL
+        val key = BuildConfig.SECRET_KEY
+        return !url.contains("%%") && url.isNotBlank() &&
+               !key.contains("%%") && key.isNotBlank()
+    }
+
+    private fun gasConfigured(): Boolean {
+        val gas = BuildConfig.GAS_URL
+        return !gas.contains("%%") && gas.isNotBlank()
+    }
+
+    // ── একবারে সব fetch ──
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+        logConfig()
         try {
-            if (!isConfigured()) {
-                return@withContext ContentResult.Error("Firebase URL not configured")
+            // Firebase try
+            if (firebaseConfigured()) {
+                val authParam = "?auth=$SECRET_KEY"
+                val url = "$FIREBASE_URL.json$authParam"
+                Log.d(TAG, "Fetching Firebase: ${url.take(60)}...")
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+                Log.d(TAG, "Firebase response: HTTP ${resp.code}, body length=${body.length}, preview=${body.take(100)}")
+
+                if (body.isNotBlank() && body != "null" && !body.contains("error")) {
+                    val result = parseRootJson(body)
+                    if (result is ContentResult.Success && !result.data.isEmpty()) {
+                        return@withContext result
+                    }
+                    Log.w(TAG, "Firebase parse empty — trying GAS")
+                } else {
+                    Log.w(TAG, "Firebase bad response: ${body.take(100)}")
+                }
+            } else {
+                Log.w(TAG, "Firebase not configured — trying GAS directly")
             }
-            // Firebase root endpoint — ?auth=SECRET_KEY
-            val authParam = if (SECRET_KEY.isNotBlank() && SECRET_KEY != "%%SECRET_KEY%%")
-                "?auth=$SECRET_KEY" else ""
-            val url = "$FIREBASE_URL.json$authParam"
-            Log.d(TAG, "Fetching root: $url")
 
-            val req  = Request.Builder().url(url).get().build()
-            val body = client.newCall(req).execute().body?.string() ?: ""
-
-            if (body.isBlank() || body == "null") {
-                Log.w(TAG, "Root fetch empty — trying GAS fallback")
+            // GAS fallback
+            if (gasConfigured()) {
                 return@withContext fetchViaGas()
             }
 
-            parseRootJson(body)
+            ContentResult.Error("Firebase ও GAS দুটোই configured নেই। GitHub Secrets চেক করো।")
         } catch (e: Exception) {
             Log.e(TAG, "fetchAllContent error: ${e.message}")
-            try { fetchViaGas() } catch (e2: Exception) {
+            if (gasConfigured()) {
+                try { fetchViaGas() }
+                catch (e2: Exception) { ContentResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}") }
+            } else {
                 ContentResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
             }
         }
