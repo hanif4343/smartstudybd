@@ -98,4 +98,23 @@ object GasApiService {
 sealed class GasResult<out T> {
     data class Success<T>(val data: T) : GasResult<T>()
     data class Error(val message: String) : GasResult<Nothing>()
-}
+
+    suspend fun reportQuestion(questionId: String, question: String, issue: String) =
+        withContext(Dispatchers.IO) {
+            try {
+                val json = com.google.gson.JsonObject().apply {
+                    addProperty("type",       "report_question")
+                    addProperty("id",         questionId)
+                    addProperty("question",   question.take(200))
+                    addProperty("issue",      issue)
+                    addProperty("timestamp",  System.currentTimeMillis())
+                }
+                val body = okhttp3.RequestBody.create(
+                    okhttp3.MediaType.parse("application/json"), json.toString()
+                )
+                val req = Request.Builder().url(GAS_URL).post(body).build()
+                client.newCall(req).execute().close()
+            } catch (e: Exception) {
+                android.util.Log.e("GAS", "reportQuestion: ${e.message}")
+            }
+        }
