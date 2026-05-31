@@ -277,6 +277,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun reportQuestion(questionIndex: Int, issue: String) {
+        val q = _state.value.questions.getOrNull(questionIndex) ?: return
+        viewModelScope.launch {
+            try {
+                com.hanif.smartstudy.data.remote.GasApiService.reportQuestion(
+                    questionId = q.id,
+                    question   = q.question,
+                    issue      = issue
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("QuizVM", "Report failed: ${e.message}")
+            }
+        }
+    }
+
     fun toggleBookmark(questionId: String) {
         val current = _state.value.bookmarkedIds.toMutableSet()
         if (current.contains(questionId)) current.remove(questionId) else current.add(questionId)
