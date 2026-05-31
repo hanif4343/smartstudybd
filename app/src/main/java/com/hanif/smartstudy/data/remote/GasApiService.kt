@@ -1,13 +1,17 @@
 package com.hanif.smartstudy.data.remote
 
+import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -16,7 +20,7 @@ object GasApiService {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-    private val gson = Gson()
+    private val gson   = Gson()
     private val GAS_URL get() = BuildConfig.GAS_URL
 
     fun hashPassword(password: String): String {
@@ -24,73 +28,79 @@ object GasApiService {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    // ── Login ──
     suspend fun login(phone: String, password: String): GasResult<Map<String, Any>> =
         withContext(Dispatchers.IO) {
             try {
-                val hashed = hashPassword(password)
                 val body = FormBody.Builder()
                     .add("action", "login")
                     .add("phone", phone)
-                    .add("password", hashed)
+                    .add("password", hashPassword(password))
                     .build()
-                val req = Request.Builder().url(GAS_URL).post(body).build()
-                val resp = client.newCall(req).execute()
-                val json = resp.body?.string() ?: return@withContext GasResult.Error("No response")
-                val type = object : TypeToken<Map<String, Any>>() {}.type
-                val map: Map<String, Any> = gson.fromJson(json, type)
+                val req  = Request.Builder().url(GAS_URL).post(body).build()
+                val json = client.newCall(req).execute().body?.string()
+                    ?: return@withContext GasResult.Error("No response")
+                val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
                 if (map["status"] == "ok") GasResult.Success(map)
                 else GasResult.Error(map["message"]?.toString() ?: "Login failed")
-            } catch (e: Exception) {
-                GasResult.Error(e.message ?: "Network error")
-            }
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
 
-    // ── Signup ──
     suspend fun signup(
         name: String, phone: String, password: String,
         userType: String, classLevel: String
     ): GasResult<Map<String, Any>> = withContext(Dispatchers.IO) {
         try {
-            val hashed = hashPassword(password)
             val body = FormBody.Builder()
                 .add("action", "signup")
                 .add("name", name)
                 .add("phone", phone)
-                .add("password", hashed)
+                .add("password", hashPassword(password))
                 .add("userType", userType)
                 .add("classLevel", classLevel)
                 .build()
-            val req = Request.Builder().url(GAS_URL).post(body).build()
-            val resp = client.newCall(req).execute()
-            val json = resp.body?.string() ?: return@withContext GasResult.Error("No response")
-            val type = object : TypeToken<Map<String, Any>>() {}.type
-            val map: Map<String, Any> = gson.fromJson(json, type)
+            val req  = Request.Builder().url(GAS_URL).post(body).build()
+            val json = client.newCall(req).execute().body?.string()
+                ?: return@withContext GasResult.Error("No response")
+            val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
             if (map["status"] == "ok") GasResult.Success(map)
             else GasResult.Error(map["message"]?.toString() ?: "Signup failed")
-        } catch (e: Exception) {
-            GasResult.Error(e.message ?: "Network error")
-        }
+        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
     }
 
-    // ── Firebase থেকে user data আনো ──
     suspend fun getUserFromFirebase(phone: String): GasResult<Map<String, Any>> =
         withContext(Dispatchers.IO) {
             try {
-                val firebaseUrl = "${BuildConfig.FIREBASE_URL}Users.json"
-                val req = Request.Builder().url(firebaseUrl).get().build()
-                val resp = client.newCall(req).execute()
-                val json = resp.body?.string() ?: return@withContext GasResult.Error("No data")
-                val type = object : TypeToken<Map<String, Map<String, Any>>>() {}.type
-                val all: Map<String, Map<String, Any>> = gson.fromJson(json, type)
+                val req  = Request.Builder()
+                    .url("${BuildConfig.FIREBASE_URL}Users.json").get().build()
+                val json = client.newCall(req).execute().body?.string()
+                    ?: return@withContext GasResult.Error("No data")
+                val all: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : TypeToken<Map<String, Map<String, Any>>>() {}.type)
                 val user = all.values.find { entry ->
                     val p = entry["Phone"]?.toString() ?: entry["phone"]?.toString() ?: ""
                     p.trim() == phone.trim()
                 }
                 if (user != null) GasResult.Success(user)
                 else GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
+
+    suspend fun reportQuestion(questionId: String, question: String, issue: String) =
+        withContext(Dispatchers.IO) {
+            try {
+                val jsonObj = JsonObject().apply {
+                    addProperty("type",      "report_question")
+                    addProperty("id",        questionId)
+                    addProperty("question",  question.take(200))
+                    addProperty("issue",     issue)
+                    addProperty("timestamp", System.currentTimeMillis())
+                }
+                val body = jsonObj.toString()
+                    .toRequestBody("application/json".toMediaType())
+                val req = Request.Builder().url(GAS_URL).post(body).build()
+                client.newCall(req).execute().close()
             } catch (e: Exception) {
-                GasResult.Error(e.message ?: "Network error")
+                Log.e("GAS", "reportQuestion: ${e.message}")
             }
         }
 }
@@ -98,23 +108,4 @@ object GasApiService {
 sealed class GasResult<out T> {
     data class Success<T>(val data: T) : GasResult<T>()
     data class Error(val message: String) : GasResult<Nothing>()
-
-    suspend fun reportQuestion(questionId: String, question: String, issue: String) =
-        withContext(Dispatchers.IO) {
-            try {
-                val json = com.google.gson.JsonObject().apply {
-                    addProperty("type",       "report_question")
-                    addProperty("id",         questionId)
-                    addProperty("question",   question.take(200))
-                    addProperty("issue",      issue)
-                    addProperty("timestamp",  System.currentTimeMillis())
-                }
-                val body = okhttp3.RequestBody.create(
-                    okhttp3.MediaType.parse("application/json"), json.toString()
-                )
-                val req = Request.Builder().url(GAS_URL).post(body).build()
-                client.newCall(req).execute().close()
-            } catch (e: Exception) {
-                android.util.Log.e("GAS", "reportQuestion: ${e.message}")
-            }
-        }
+}
