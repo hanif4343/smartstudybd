@@ -100,10 +100,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
             Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
 
+            val debugMsg = when {
+                content.isEmpty() -> "❌ Data empty! err=$errMsg quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
+                else -> "✅ quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
+            }
+            Log.d("QuizVM_DEBUG", debugMsg)
+
             _state.update {
                 it.copy(
                     contentLoaded = !content.isEmpty(),
-                    error         = errMsg
+                    error         = if (content.isEmpty()) (errMsg ?: "Data empty") else null
                 )
             }
             rebuildSubjects(content, newMode)
