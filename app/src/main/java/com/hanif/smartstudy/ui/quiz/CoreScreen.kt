@@ -115,6 +115,7 @@ fun CoreScreen(
                 subjects   = state.subjects,
                 weakTopics = state.weakTopics,
                 isLoading  = state.isLoading,
+                error      = state.error,
                 onSubject  = { viewModel.navigateToSubject(it) },
                 onMockZone = { viewModel.openMockZone() }
             )
