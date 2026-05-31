@@ -19,6 +19,7 @@ class ContentCache(private val context: Context) {
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
         val KEY_QBANK_JSON    = stringPreferencesKey("cache_qbank_json")
         val KEY_CACHE_TIME    = longPreferencesKey("cache_fetched_at")
+
         val KEY_TODAY_STUDY   = intPreferencesKey("today_study_min")
         val KEY_WEEK_STUDY    = intPreferencesKey("week_study_min")
         val KEY_TOTAL_STUDY   = intPreferencesKey("total_study_min")
@@ -38,12 +39,14 @@ class ContentCache(private val context: Context) {
         }
     }
 
-    // FIX: null হলে empty list ধরো, পুরো null return করো না
+    // FIX: যেকোনো একটা key null হলেও বাকিগুলো দিয়ে AppContent বানাও
     suspend fun loadContent(): AppContent? {
         return try {
-            val prefs     = context.dataStore.data.first()
+            val prefs = context.dataStore.data.first()
             val fetchedAt = prefs[KEY_CACHE_TIME] ?: 0L
-            if (fetchedAt == 0L) return null   // কোনো cache নেই
+
+            // কোনো cache নেই
+            if (fetchedAt == 0L) return null
 
             val studyJson = prefs[KEY_STUDY_JSON] ?: "[]"
             val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
@@ -87,24 +90,30 @@ class ContentCache(private val context: Context) {
     }
 
     suspend fun getStudyStats(): Triple<Int, Int, Int> {
-        val prefs   = context.dataStore.data.first()
-        val today   = todayString()
+        val prefs = context.dataStore.data.first()
+        val today = todayString()
         val lastDay = prefs[KEY_STUDY_DATE] ?: ""
         val todayMin = if (lastDay == today) prefs[KEY_TODAY_STUDY] ?: 0 else 0
-        return Triple(todayMin, prefs[KEY_WEEK_STUDY] ?: 0, prefs[KEY_TOTAL_STUDY] ?: 0)
+        return Triple(
+            todayMin,
+            prefs[KEY_WEEK_STUDY]  ?: 0,
+            prefs[KEY_TOTAL_STUDY] ?: 0
+        )
     }
 
     suspend fun updateStreak(): Int {
-        val today    = todayString()
-        val prefs    = context.dataStore.data.first()
-        val lastDate = prefs[KEY_STREAK_DATE] ?: ""
-        val current  = prefs[KEY_STREAK] ?: 0
+        val today   = todayString()
+        val prefs   = context.dataStore.data.first()
+        val lastDate= prefs[KEY_STREAK_DATE] ?: ""
+        val current = prefs[KEY_STREAK] ?: 0
+
         val newStreak = when {
             lastDate == today     -> current
             isYesterday(lastDate) -> current + 1
             lastDate.isEmpty()    -> 1
             else                  -> 1
         }
+
         context.dataStore.edit { p ->
             p[KEY_STREAK]      = newStreak
             p[KEY_STREAK_DATE] = today
@@ -122,9 +131,11 @@ class ContentCache(private val context: Context) {
     suspend fun incrementCorrect() {
         context.dataStore.edit { it[KEY_CORRECT_COUNT] = (it[KEY_CORRECT_COUNT] ?: 0) + 1 }
     }
+
     suspend fun incrementWrong() {
         context.dataStore.edit { it[KEY_WRONG_COUNT] = (it[KEY_WRONG_COUNT] ?: 0) + 1 }
     }
+
     suspend fun getCorrectCount() = context.dataStore.data.first()[KEY_CORRECT_COUNT] ?: 0
     suspend fun getWrongCount()   = context.dataStore.data.first()[KEY_WRONG_COUNT]   ?: 0
 
@@ -132,19 +143,23 @@ class ContentCache(private val context: Context) {
         val cal = java.util.Calendar.getInstance()
         return "${cal.get(java.util.Calendar.YEAR)}-${cal.get(java.util.Calendar.MONTH)+1}-${cal.get(java.util.Calendar.DAY_OF_MONTH)}"
     }
+
     private fun isYesterday(dateStr: String): Boolean {
         if (dateStr.isEmpty()) return false
         return try {
             val parts = dateStr.split("-").map { it.toInt() }
             val cal   = java.util.Calendar.getInstance()
             cal.add(java.util.Calendar.DAY_OF_MONTH, -1)
-            parts.size == 3 && parts[0] == cal.get(java.util.Calendar.YEAR) &&
-            parts[1] == cal.get(java.util.Calendar.MONTH)+1 &&
-            parts[2] == cal.get(java.util.Calendar.DAY_OF_MONTH)
+            val y = cal.get(java.util.Calendar.YEAR)
+            val m = cal.get(java.util.Calendar.MONTH) + 1
+            val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+            parts.size == 3 && parts[0] == y && parts[1] == m && parts[2] == d
         } catch (e: Exception) { false }
     }
+
     private fun isStreakAlive(lastDate: String): Boolean {
         if (lastDate.isEmpty()) return false
-        return lastDate == todayString() || isYesterday(lastDate)
+        val today = todayString()
+        return lastDate == today || isYesterday(lastDate)
     }
 }
