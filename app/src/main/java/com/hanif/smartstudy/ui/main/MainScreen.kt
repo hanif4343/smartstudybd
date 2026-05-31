@@ -6,8 +6,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.Achievement
 import com.hanif.smartstudy.data.model.StudyMode
@@ -40,13 +38,14 @@ fun MainScreen(
     var showSearch by remember { mutableStateOf(false) }
     var showTyping by remember { mutableStateOf(false) }
 
-    // FIX: তিনটা আলাদা ViewModel — একটাতে mode switch করলে অন্যটার data নষ্ট হবে না
-    val quizViewModel  : QuizViewModel = viewModel(key = "quiz_vm")
-    val qbankViewModel : QuizViewModel = viewModel(key = "qbank_vm")
-    val studyViewModel : QuizViewModel = viewModel(key = "study_vm")
+    // ── তিনটা আলাদা VM — প্রতিটা নিজের mode নিয়ে কাজ করে ──
+    // key দিয়ে আলাদা করা হয়েছে যাতে একটার state অন্যটাকে প্রভাবিত না করে
+    val quizViewModel  : QuizViewModel = viewModel(key = "vm_quiz")
+    val qbankViewModel : QuizViewModel = viewModel(key = "vm_qbank")
+    val studyViewModel : QuizViewModel = viewModel(key = "vm_study")
     val menuViewModel  : MenuViewModel = viewModel()
 
-    // ViewModel init-এ mode set করো
+    // ── প্রতিটা VM কে তার সঠিক mode দাও — একবারই ──
     LaunchedEffect(Unit) {
         quizViewModel.setMode(StudyMode.QUIZ)
         qbankViewModel.setMode(StudyMode.QBANK)
@@ -55,10 +54,10 @@ fun MainScreen(
 
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
-            DeepLinkAction.Type.QUIZ   -> { currentTab = BottomTab.QUIZ  }
-            DeepLinkAction.Type.QBANK  -> { currentTab = BottomTab.QBANK }
-            DeepLinkAction.Type.STUDY  -> { currentTab = BottomTab.STUDY }
-            DeepLinkAction.Type.SEARCH -> { showSearch = true }
+            DeepLinkAction.Type.QUIZ   -> currentTab = BottomTab.QUIZ
+            DeepLinkAction.Type.QBANK  -> currentTab = BottomTab.QBANK
+            DeepLinkAction.Type.STUDY  -> currentTab = BottomTab.STUDY
+            DeepLinkAction.Type.SEARCH -> showSearch = true
             DeepLinkAction.Type.NONE   -> {}
         }
     }
@@ -77,6 +76,7 @@ fun MainScreen(
         )
         return
     }
+
     if (showTyping) {
         TypingPracticeScreen(
             onBack   = { showTyping = false },
