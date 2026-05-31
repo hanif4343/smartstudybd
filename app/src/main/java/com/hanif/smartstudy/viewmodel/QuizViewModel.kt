@@ -286,8 +286,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     question   = q.question,
                     issue      = issue
                 )
+                Log.d("QuizVM", "Reported question ${q.id}: $issue")
             } catch (e: Exception) {
-                android.util.Log.e("QuizVM", "Report failed: ${e.message}")
+                Log.e("QuizVM", "Report failed: ${e.message}")
             }
         }
     }
