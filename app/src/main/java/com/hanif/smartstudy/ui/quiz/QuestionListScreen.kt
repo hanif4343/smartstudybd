@@ -75,7 +75,7 @@ fun QuestionListScreen(
                 LazyColumn(
                     state               = listState,
                     modifier            = Modifier.weight(1f),
-                    contentPadding      = PaddingValues(horizontal = 12.dp, top = 8.dp, bottom = 100.dp),
+                    contentPadding      = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 100.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(questions, key = { _, q -> q.id }) { idx, q ->
