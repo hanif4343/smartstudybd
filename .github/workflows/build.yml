@@ -88,6 +88,14 @@ jobs:
           done
           echo "Icons done"
 
+      # ── Remove duplicate files ──
+      - name: Remove duplicate files
+        run: |
+          rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/StatsScreen.kt
+          rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/ProfileScreen.kt
+          rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/MenuScreen.kt
+          echo "Cleaned duplicate files"
+
       # ── Inject secrets ──
       - name: Inject API keys
         run: |
