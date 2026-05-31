@@ -99,6 +99,23 @@ fun SubjectListScreen(
             }
         }
 
+        // Empty state — data আসেনি বা loading failed
+        if (!isLoading && subjects.isEmpty()) {
+            item {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.fillMaxWidth().padding(40.dp),
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    androidx.compose.material3.Text(
+                        text = "⏳ ডেটা লোড হচ্ছে...",
+                        fontSize = 14.sp,
+                        fontFamily = NotoSansBengali,
+                        color = androidx.compose.ui.graphics.Color.Gray
+                    )
+                }
+            }
+        }
+
         // Subject cards
         itemsIndexed(subjects) { _, subject ->
             SubjectCard(subject = subject, onClick = { onSubject(subject.name) })
