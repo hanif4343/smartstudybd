@@ -1,7 +1,7 @@
 package com.hanif.smartstudy.ui.quiz
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.viewmodel.QuizViewModel
