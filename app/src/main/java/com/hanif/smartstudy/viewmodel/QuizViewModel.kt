@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-// ── Full UI State ──
 data class QuizUiState(
     val mode          : StudyMode        = StudyMode.QUIZ,
     val navPath       : NavPath          = NavPath(),
@@ -23,23 +22,17 @@ data class QuizUiState(
     val questions     : List<QuestionItem>   = emptyList(),
     val isLoading     : Boolean          = true,
     val error         : String?          = null,
-    // Quiz active state
     val isQuizActive  : Boolean          = false,
     val timerSec      : Int              = 0,
     val totalTimeSec  : Int              = 0,
     val answeredCount : Int              = 0,
     val result        : QuizResult?      = null,
     val showResult    : Boolean          = false,
-    // Mock test
     val isMockZone    : Boolean          = false,
     val mockConfig    : MockTestConfig   = MockTestConfig(),
-    // Reading progress
     val readingIndex  : Int              = 0,
-    // Bookmarks
     val bookmarkedIds : Set<String>      = emptySet(),
-    // Weak topics
     val weakTopics    : List<WeakTopic>  = emptyList(),
-    // Content loaded
     val contentLoaded : Boolean          = false
 )
 
@@ -52,9 +45,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(QuizUiState())
     val state: StateFlow<QuizUiState> = _state.asStateFlow()
 
-    // ── Achievement / Streak events ───────────────────────────
-    private val _pendingAchievement = MutableStateFlow<com.hanif.smartstudy.data.model.Achievement?>(null)
-    val pendingAchievement: StateFlow<com.hanif.smartstudy.data.model.Achievement?> = _pendingAchievement.asStateFlow()
+    private val _pendingAchievement = MutableStateFlow<Achievement?>(null)
+    val pendingAchievement: StateFlow<Achievement?> = _pendingAchievement.asStateFlow()
 
     private val _pendingStreak = MutableStateFlow(0)
     val pendingStreak: StateFlow<Int> = _pendingStreak.asStateFlow()
@@ -63,50 +55,50 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun consumeStreak()      { _pendingStreak.value = 0 }
 
     private var timerJob: Job? = null
-    // Bookmarks: DataStore-based (simplified — SharedPreferences)
     private val prefs = app.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
 
+    // ── Init: content load, BUT subjects build হবে setMode() call এর পরে ──
+    // তাই এখানে rebuildSubjects call করি না — setMode() সেটা করবে
     init {
-        loadContent()
-    }
-
-    private fun loadContent() {
         viewModelScope.launch {
             val result    = repo.getContent()
             val content   = (result as? DataState.Success)?.data ?: AppContent()
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val weakTopics = loadWeakTopics()
-            val mode = _state.value.mode
             _state.update {
                 it.copy(
-                    isLoading     = false,
                     contentLoaded = !content.isEmpty(),
                     bookmarkedIds = bookmarks,
                     weakTopics    = weakTopics,
                     error         = if (content.isEmpty()) (result as? DataState.Error)?.message else null
                 )
             }
-            // current mode-এর subjects build করো
-            rebuildSubjects(content, mode)
+            // content load হলে current mode এর subjects build করো
+            rebuildSubjects(content, _state.value.mode)
         }
     }
 
-    // ── Mode switch ──
-    fun setMode(mode: StudyMode) {
+    // ── Mode set — সবসময় subjects rebuild করো ──
+    fun setMode(newMode: StudyMode) {
+        if (_state.value.mode == newMode && _state.value.subjects.isNotEmpty()) return
         timerJob?.cancel()
-        val alreadySet = _state.value.mode == mode && _state.value.contentLoaded
         _state.update {
-            it.copy(mode = mode, navPath = NavPath(), isQuizActive = false,
-                    result = null, showResult = false, isMockZone = false, timerSec = 0)
+            it.copy(
+                mode         = newMode,
+                navPath      = NavPath(),
+                isQuizActive = false,
+                result       = null,
+                showResult   = false,
+                isMockZone   = false,
+                timerSec     = 0,
+                subjects     = emptyList(),
+                isLoading    = true
+            )
         }
-        // contentLoaded না থাকলে loadContent() থেকেই subjects build হবে
-        if (alreadySet) {
-            viewModelScope.launch {
-                val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                rebuildSubjects(content, mode)
-            }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubjects(content, newMode)
         }
-        // else: loadContent() init-এ চলছে, সেটাই subjects build করবে
     }
 
     // ── Navigation ──
@@ -141,7 +133,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
             path.subTopic != null -> _state.update { it.copy(navPath = NavPath(path.subject)) }
             path.subject  != null -> _state.update { it.copy(navPath = NavPath()) }
-            else -> { /* already at root */ }
+            else -> {}
         }
     }
 
@@ -153,7 +145,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Mock config ──
     fun toggleMockTopic(key: String) {
         val current = _state.value.mockConfig.selectedTopics.toMutableList()
         if (current.contains(key)) current.remove(key) else current.add(key)
@@ -185,24 +176,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .map { it.copy(isWeakTopic = isWeak(it.subTopic)) }
             _state.update {
                 it.copy(
-                    isMockZone   = false,
-                    questions    = questions,
-                    isQuizActive = true,
-                    showResult   = false,
-                    result       = null,
+                    isMockZone    = false,
+                    questions     = questions,
+                    isQuizActive  = true,
+                    showResult    = false,
+                    result        = null,
                     answeredCount = 0,
-                    navPath      = NavPath("Mock Test")
+                    navPath       = NavPath("Mock Test")
                 )
             }
             startTimer(questions.size)
         }
     }
 
-    // ── Answer MCQ ──
     fun answerMcq(questionIndex: Int, selectedOption: Int) {
         val questions = _state.value.questions.toMutableList()
         val q = questions.getOrNull(questionIndex) ?: return
-        if (q.answerState !is AnswerState.Unanswered) return  // already answered
+        if (q.answerState !is AnswerState.Unanswered) return
 
         val selectedText = when (selectedOption) {
             1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
@@ -212,8 +202,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             answerState = AnswerState.McqSelected(selectedOption, isCorrect)
         )
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
-
-        // Track
         viewModelScope.launch {
             if (isCorrect) cache.incrementCorrect() else {
                 cache.incrementWrong()
@@ -223,7 +211,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Answer Written (simple fuzzy match) ──
     fun answerWritten(questionIndex: Int, userText: String): Int {
         val questions = _state.value.questions.toMutableList()
         val q = questions.getOrNull(questionIndex) ?: return 0
@@ -242,14 +229,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         return matchPct
     }
 
-    // ── Submit / Show Result ──
     fun submitQuiz() {
         timerJob?.cancel()
-        val questions   = _state.value.questions
-        val totalTime   = _state.value.totalTimeSec
-        val elapsed     = totalTime - _state.value.timerSec
+        val questions  = _state.value.questions
+        val totalTime  = _state.value.totalTimeSec
+        val elapsed    = totalTime - _state.value.timerSec
         var correct = 0; var wrong = 0; var skipped = 0
-        val subjectMap  = mutableMapOf<String, SubjectScore>()
+        val subjectMap = mutableMapOf<String, SubjectScore>()
 
         questions.forEach { q ->
             when (val a = q.answerState) {
@@ -268,59 +254,50 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         val xp = correct * 5 + (correct - wrong).coerceAtLeast(0) * 2
         val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap)
-
         _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
 
         viewModelScope.launch {
             cache.markTodayActivity()
-            // Save XP to user
             val user = session.getCurrentUser()
             if (user != null) {
                 val updated = user.copy(xp = (user.xp + xp).coerceAtMost(999999))
                 session.saveUser(updated)
             }
-            // ── Achievements check ────────────────────────────
             session.recordDailyXp(xp)
             val streak = session.updateStreak()
             _pendingStreak.value = streak
 
-            // First quiz
             if (!session.hasAchievement("first_quiz")) {
                 session.unlockAchievement("first_quiz")
-                _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("first_quiz")
+                _pendingAchievement.value = Achievements.findById("first_quiz")
             }
-            // Perfect score
             if (result.wrong == 0 && result.skipped == 0 && result.total > 0) {
                 if (!session.hasAchievement("perfect_score")) {
                     session.unlockAchievement("perfect_score")
-                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("perfect_score")
+                    _pendingAchievement.value = Achievements.findById("perfect_score")
                 }
             }
-            // Streak milestones
             listOf(3 to "streak_3", 7 to "streak_7", 30 to "streak_30").forEach { (days, id) ->
                 if (streak >= days && !session.hasAchievement(id)) {
                     session.unlockAchievement(id)
-                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById(id)
+                    _pendingAchievement.value = Achievements.findById(id)
                 }
             }
-            // Bookmark achievements
             val bookmarkCount = _state.value.bookmarkedIds.size
             if (bookmarkCount >= 10 && !session.hasAchievement("bookmarked_10")) {
                 session.unlockAchievement("bookmarked_10")
-                _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById("bookmarked_10")
+                _pendingAchievement.value = Achievements.findById("bookmarked_10")
             }
-            // XP milestones
             val totalXp = (user?.xp ?: 0) + xp
             listOf(100 to "xp_100", 500 to "xp_500", 1000 to "xp_1000").forEach { (threshold, id) ->
                 if (totalXp >= threshold && !session.hasAchievement(id)) {
                     session.unlockAchievement(id)
-                    _pendingAchievement.value = com.hanif.smartstudy.data.model.Achievements.findById(id)
+                    _pendingAchievement.value = Achievements.findById(id)
                 }
             }
         }
     }
 
-    // ── Bookmark ──
     fun toggleBookmark(questionId: String) {
         val current = _state.value.bookmarkedIds.toMutableSet()
         if (current.contains(questionId)) current.remove(questionId) else current.add(questionId)
@@ -328,12 +305,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(bookmarkedIds = current) }
     }
 
-    // ── Reading progress ──
     fun updateReadingIndex(index: Int) {
         _state.update { it.copy(readingIndex = index) }
     }
 
-    // ── Timer ──
     private fun startTimer(questionCount: Int) {
         val totalSec = questionCount * 60
         timerJob?.cancel()
@@ -343,36 +318,38 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 delay(1000)
                 _state.update { it.copy(timerSec = (it.timerSec - 1).coerceAtLeast(0)) }
             }
-            if (_state.value.timerSec <= 0 && _state.value.isQuizActive) {
-                submitQuiz()  // Time up → auto submit
-            }
+            if (_state.value.timerSec <= 0 && _state.value.isQuizActive) submitQuiz()
         }
     }
 
-    // ── Internal helpers ──
     private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
         val items = when (mode) {
-            StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it)   }
-            StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it)  }
-            StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it)  }
+            StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
-        val subjects = items.groupBy { it.subject }.map { (subj, qs) ->
-            SubjectEntry(
-                name      = subj,
-                totalQ    = qs.size,
-                doneQ     = qs.count { progressMap.contains("${mode.name}:${it.id}") },
-                subTopics = qs.groupBy { it.subTopic }.map { (st, stQs) ->
-                    SubTopicEntry(
-                        name    = st,
-                        subject = subj,
-                        totalQ  = stQs.size,
-                        doneQ   = stQs.count { progressMap.contains("${mode.name}:${it.id}") },
-                        isWeak  = isWeak(st)
-                    )
-                }
-            )
-        }
+        val subjects = items
+            .filter { it.subject.isNotBlank() }   // blank subject গুলো বাদ দাও
+            .groupBy { it.subject }
+            .map { (subj, qs) ->
+                SubjectEntry(
+                    name      = subj,
+                    totalQ    = qs.size,
+                    doneQ     = qs.count { progressMap.contains("${mode.name}:${it.id}") },
+                    subTopics = qs.filter { it.subTopic.isNotBlank() }
+                                  .groupBy { it.subTopic }
+                                  .map { (st, stQs) ->
+                                      SubTopicEntry(
+                                          name    = st,
+                                          subject = subj,
+                                          totalQ  = stQs.size,
+                                          doneQ   = stQs.count { progressMap.contains("${mode.name}:${it.id}") },
+                                          isWeak  = isWeak(st)
+                                      )
+                                  }
+                )
+            }
         _state.update { it.copy(subjects = subjects, isLoading = false) }
     }
 
@@ -383,15 +360,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> content.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
-        val subTopics = items.groupBy { it.subTopic }.map { (st, qs) ->
-            SubTopicEntry(
-                name    = st,
-                subject = subject,
-                totalQ  = qs.size,
-                doneQ   = qs.count { progressMap.contains("${mode.name}:${it.id}") },
-                isWeak  = isWeak(st)
-            )
-        }
+        val subTopics = items
+            .filter { it.subTopic.isNotBlank() }
+            .groupBy { it.subTopic }
+            .map { (st, qs) ->
+                SubTopicEntry(
+                    name    = st,
+                    subject = subject,
+                    totalQ  = qs.size,
+                    doneQ   = qs.count { progressMap.contains("${mode.name}:${it.id}") },
+                    isWeak  = isWeak(st)
+                )
+            }
         _state.update { it.copy(subTopics = subTopics) }
     }
 
@@ -405,12 +385,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         _state.update {
             it.copy(
-                questions    = items,
-                isQuizActive = mode != StudyMode.STUDY,
-                showResult   = false,
-                result       = null,
+                questions     = items,
+                isQuizActive  = mode != StudyMode.STUDY,
+                showResult    = false,
+                result        = null,
                 answeredCount = 0,
-                timerSec     = 0
+                timerSec      = 0
             )
         }
         if (mode != StudyMode.STUDY) startTimer(items.size)
@@ -426,19 +406,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt(key, count).apply()
     }
 
-    private fun isWeak(subTopic: String): Boolean {
-        return prefs.getInt("weak_$subTopic", 0) >= 2
-    }
+    private fun isWeak(subTopic: String): Boolean =
+        prefs.getInt("weak_$subTopic", 0) >= 2
 
-    private fun loadWeakTopics(): List<WeakTopic> {
-        val all = prefs.all
-        return all.entries
+    private fun loadWeakTopics(): List<WeakTopic> =
+        prefs.all.entries
             .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
             .map { WeakTopic(it.key.removePrefix("weak_"), "", it.value as Int) }
             .sortedByDescending { it.wrongCount }
-    }
 
-    // ── Fuzzy match (simple — keyword overlap) ──
     private fun fuzzyMatch(userText: String, correctText: String): Int {
         if (userText.isBlank()) return 0
         val uWords = userText.lowercase().split(Regex("[\\s,।.]+")).filter { it.length > 1 }.toSet()
@@ -454,6 +430,4 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-private suspend fun ContentCache.markTodayActivity() {
-    updateStreak()
-}
+private suspend fun ContentCache.markTodayActivity() { updateStreak() }
