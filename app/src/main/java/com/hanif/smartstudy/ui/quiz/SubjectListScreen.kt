@@ -49,6 +49,7 @@ fun SubjectListScreen(
     subjects   : List<SubjectEntry>,
     weakTopics : List<WeakTopic>,
     isLoading  : Boolean,
+    error      : String?   = null,
     onSubject  : (String) -> Unit,
     onMockZone : () -> Unit
 ) {
@@ -103,7 +104,7 @@ fun SubjectListScreen(
         if (!isLoading && subjects.isEmpty()) {
             item {
                 androidx.compose.foundation.layout.Column(
-                    modifier = Modifier.fillMaxWidth().padding(40.dp),
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
                     horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
                 ) {
                     androidx.compose.material3.Text(
@@ -113,14 +114,16 @@ fun SubjectListScreen(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         color = androidx.compose.ui.graphics.Color(0xFFE53935)
                     )
-                    androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
-                    androidx.compose.material3.Text(
-                        text = "GitHub Secrets এ FIREBASE_URL,\nSECRET_KEY, GAS_URL চেক করো",
-                        fontSize = 12.sp,
-                        fontFamily = NotoSansBengali,
-                        color = androidx.compose.ui.graphics.Color.Gray,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
+                    if (error != null) {
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                        androidx.compose.material3.Text(
+                            text = error,
+                            fontSize = 11.sp,
+                            fontFamily = NotoSansBengali,
+                            color = androidx.compose.ui.graphics.Color.Gray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
                 }
             }
         }
