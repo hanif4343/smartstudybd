@@ -260,7 +260,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun checkAndUnlock(id: String) {
+    private suspend fun checkAndUnlock(id: String) {
         if (!session.hasAchievement(id)) {
             session.unlockAchievement(id)
             _pendingAchievement.value = Achievements.findById(id)
