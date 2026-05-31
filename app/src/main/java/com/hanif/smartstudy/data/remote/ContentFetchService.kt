@@ -1,7 +1,7 @@
 package com.hanif.smartstudy.data.remote
 
 import android.util.Log
-import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
@@ -26,177 +26,94 @@ object ContentFetchService {
     private const val TAG = "ContentFetch"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(40, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val gson = CaseInsensitiveGson.instance
 
-    private val FIREBASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-    private val SECRET_KEY   get() = BuildConfig.SECRET_KEY
-    private val GAS_URL      get() = BuildConfig.GAS_URL
+    private val BASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
+    private val SECRET_KEY get() = BuildConfig.SECRET_KEY
 
-    // Validate config — কোনো placeholder থাকলে log করো
-    private fun logConfig() {
-        val url = BuildConfig.FIREBASE_URL
-        val key = BuildConfig.SECRET_KEY
-        val gas = BuildConfig.GAS_URL
-        Log.d(TAG, "=== CONFIG CHECK ===")
-        Log.d(TAG, "FIREBASE_URL: ${if(url.contains("%%")) "❌ NOT INJECTED" else "✅ ${url.take(40)}"}")
-        Log.d(TAG, "SECRET_KEY:   ${if(key.contains("%%")) "❌ NOT INJECTED" else "✅ set (${key.length} chars)"}")
-        Log.d(TAG, "GAS_URL:      ${if(gas.contains("%%")) "❌ NOT INJECTED" else "✅ ${gas.take(40)}"}")
-        Log.d(TAG, "===================")
+    private fun authParam(): String {
+        val key = SECRET_KEY
+        return if (key.isNotBlank() && !key.contains("%%")) "?auth=$key" else ""
     }
 
-    private fun firebaseConfigured(): Boolean {
-        val url = BuildConfig.FIREBASE_URL
-        val key = BuildConfig.SECRET_KEY
-        return !url.contains("%%") && url.isNotBlank() &&
-               !key.contains("%%") && key.isNotBlank()
-    }
-
-    private fun gasConfigured(): Boolean {
-        val gas = BuildConfig.GAS_URL
-        return !gas.contains("%%") && gas.isNotBlank()
-    }
-
-    // ── একবারে সব fetch ──
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
-        logConfig()
+        Log.d(TAG, "=== FETCH START ===")
+        Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
+        Log.d(TAG, "SECRET_KEY: ${if (SECRET_KEY.contains("%%")) "NOT SET" else "set(${SECRET_KEY.length})"}")
+
         try {
-            // Firebase try
-            if (firebaseConfigured()) {
-                val authParam = "?auth=$SECRET_KEY"
-                val url = "$FIREBASE_URL.json$authParam"
-                Log.d(TAG, "Fetching Firebase: ${url.take(60)}...")
-                val req  = Request.Builder().url(url).get().build()
-                val resp = client.newCall(req).execute()
-                val body = resp.body?.string() ?: ""
-                Log.d(TAG, "Firebase response: HTTP ${resp.code}, body length=${body.length}, preview=${body.take(100)}")
+            // আলাদা আলাদে fetch — root fetch too large হয়
+            val quiz  = fetchSheet<QuizItem>("Quiz")
+            val qbank = fetchSheet<QBankItem>("QBank")
+            val study = fetchSheet<StudyItem>("Study")
 
-                if (body.isNotBlank() && body != "null" && !body.contains("error")) {
-                    val result = parseRootJson(body)
-                    if (result is ContentResult.Success && !result.data.isEmpty()) {
-                        return@withContext result
-                    }
-                    Log.w(TAG, "Firebase parse empty — trying GAS")
-                } else {
-                    Log.w(TAG, "Firebase bad response: ${body.take(100)}")
-                }
-            } else {
-                Log.w(TAG, "Firebase not configured — trying GAS directly")
-            }
+            Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} ===")
 
-            // GAS fallback
-            if (gasConfigured()) {
-                return@withContext fetchViaGas()
-            }
-
-            ContentResult.Error("Firebase ও GAS দুটোই configured নেই। GitHub Secrets চেক করো।")
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchAllContent error: ${e.message}")
-            if (gasConfigured()) {
-                try { fetchViaGas() }
-                catch (e2: Exception) { ContentResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}") }
-            } else {
-                ContentResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
-            }
-        }
-    }
-
-    // ── Root JSON parse: { "Study": [...], "Quiz": [...], "QBank": [...] } ──
-    private fun parseRootJson(body: String): ContentResult<AppContent> {
-        return try {
-            val root = gson.fromJson(body, JsonObject::class.java)
-
-            val study = parseSheetFromJson<StudyItem>(root, "Study")
-            val quiz  = parseSheetFromJson<QuizItem>(root,  "Quiz")
-            val qbank = parseSheetFromJson<QBankItem>(root, "QBank")
-
-            Log.d(TAG, "Parsed — Study:${study.size} Quiz:${quiz.size} QBank:${qbank.size}")
-
-            if (study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()) {
-                ContentResult.Error("ডেটা পাওয়া যায়নি — Firebase empty")
+            if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
+                ContentResult.Error("Firebase থেকে data আসেনি (সব empty)")
             } else {
                 ContentResult.Success(AppContent(
-                    study     = study,
-                    quiz      = quiz,
-                    qbank     = qbank,
+                    quiz = quiz, qbank = qbank, study = study,
                     fetchedAt = System.currentTimeMillis()
                 ))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "parseRootJson error: ${e.message}")
-            ContentResult.Error("JSON parse error: ${e.message}")
+            Log.e(TAG, "fetchAllContent error: ${e.message}", e)
+            ContentResult.Error("Error: ${e.message}")
         }
     }
 
-    // ── একটা key থেকে List<T> বের করো (Array বা Object map দুটোই handle) ──
-    private inline fun <reified T> parseSheetFromJson(root: JsonObject, key: String): List<T> {
-        return try {
-            val el = root.get(key) ?: return emptyList()
-            when {
-                el.isJsonArray -> {
-                    val type = object : TypeToken<List<T>>() {}.type
-                    gson.fromJson<List<T>>(el, type) ?: emptyList()
-                }
-                el.isJsonObject -> {
-                    // Firebase push-key format: { "-abc": {...}, "-def": {...} }
-                    val obj = el.asJsonObject
-                    obj.entrySet().mapNotNull { (_, v) ->
-                        try { gson.fromJson(v, T::class.java) } catch (e: Exception) { null }
-                    }
-                }
-                else -> emptyList()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "parseSheetFromJson<$key>: ${e.message}")
-            emptyList()
-        }
-    }
-
-    // ── GAS fallback — আলাদাভাবে প্রতিটা sheet ──
-    private suspend fun fetchViaGas(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
-        try {
-            val study = fetchGasSheet<StudyItem>("Study")
-            val quiz  = fetchGasSheet<QuizItem>("Quiz")
-            val qbank = fetchGasSheet<QBankItem>("QBank")
-            Log.d(TAG, "GAS — Study:${study.size} Quiz:${quiz.size} QBank:${qbank.size}")
-            ContentResult.Success(AppContent(
-                study = study, quiz = quiz, qbank = qbank,
-                fetchedAt = System.currentTimeMillis()
-            ))
-        } catch (e: Exception) {
-            ContentResult.Error("GAS error: ${e.message}")
-        }
-    }
-
-    private suspend inline fun <reified T> fetchGasSheet(sheet: String): List<T> =
+    private suspend inline fun <reified T> fetchSheet(sheet: String): List<T> =
         withContext(Dispatchers.IO) {
             try {
-                val url  = "$GAS_URL?action=getData&sheet=$sheet"
+                val url = "$BASE_URL/$sheet.json${authParam()}"
+                Log.d(TAG, "Fetching $sheet: ${url.take(60)}...")
+
                 val req  = Request.Builder().url(url).get().build()
-                val body = client.newCall(req).execute().body?.string() ?: ""
-                if (body.isBlank() || body == "null") return@withContext emptyList()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+
+                Log.d(TAG, "$sheet response: HTTP ${resp.code}, len=${body.length}, preview=${body.take(80)}")
+
+                if (body.isBlank() || body == "null") {
+                    Log.w(TAG, "$sheet: empty response")
+                    return@withContext emptyList()
+                }
+
                 val trimmed = body.trim()
-                when {
+                val items: List<T> = when {
+                    // Array format: [0: {...}, 1: {...}]
                     trimmed.startsWith("[") -> {
                         val type = object : TypeToken<List<T>>() {}.type
                         gson.fromJson<List<T>>(trimmed, type) ?: emptyList()
                     }
+                    // Object format: {"0": {...}, "1": {...}} or {"-key": {...}}
                     trimmed.startsWith("{") -> {
-                        val root = gson.fromJson(trimmed, JsonObject::class.java)
-                        // GAS sometimes returns { "data": [...] }
-                        val arr = root.get("data") ?: root.get(sheet)
-                        if (arr?.isJsonArray == true) {
-                            val type = object : TypeToken<List<T>>() {}.type
-                            gson.fromJson<List<T>>(arr, type) ?: emptyList()
-                        } else emptyList()
+                        val obj = gson.fromJson(trimmed, JsonObject::class.java)
+                        // "error" response চেক করো
+                        if (obj.has("error")) {
+                            Log.e(TAG, "$sheet Firebase error: ${obj.get("error")}")
+                            return@withContext emptyList()
+                        }
+                        obj.entrySet()
+                            .sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }
+                            .mapNotNull { (_, v) ->
+                                try {
+                                    if (v.isJsonObject) gson.fromJson(v, T::class.java) else null
+                                } catch (e: Exception) { null }
+                            }
                     }
                     else -> emptyList()
                 }
+
+                Log.d(TAG, "$sheet parsed: ${items.size} items")
+                items
             } catch (e: Exception) {
-                Log.e(TAG, "fetchGasSheet<$sheet>: ${e.message}")
+                Log.e(TAG, "fetchSheet<$sheet> error: ${e.message}")
                 emptyList()
             }
         }
