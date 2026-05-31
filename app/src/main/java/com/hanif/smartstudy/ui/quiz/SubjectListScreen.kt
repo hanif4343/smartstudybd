@@ -99,18 +99,27 @@ fun SubjectListScreen(
             }
         }
 
-        // Empty state — data আসেনি বা loading failed
+        // Empty state
         if (!isLoading && subjects.isEmpty()) {
             item {
-                androidx.compose.foundation.layout.Box(
+                androidx.compose.foundation.layout.Column(
                     modifier = Modifier.fillMaxWidth().padding(40.dp),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
+                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
                 ) {
                     androidx.compose.material3.Text(
-                        text = "⏳ ডেটা লোড হচ্ছে...",
-                        fontSize = 14.sp,
+                        text = "⚠️ ডেটা আসেনি",
+                        fontSize = 15.sp,
                         fontFamily = NotoSansBengali,
-                        color = androidx.compose.ui.graphics.Color.Gray
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = androidx.compose.ui.graphics.Color(0xFFE53935)
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.Text(
+                        text = "GitHub Secrets এ FIREBASE_URL,\nSECRET_KEY, GAS_URL চেক করো",
+                        fontSize = 12.sp,
+                        fontFamily = NotoSansBengali,
+                        color = androidx.compose.ui.graphics.Color.Gray,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }
