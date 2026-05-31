@@ -3,6 +3,7 @@ package com.hanif.smartstudy.data.repository
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.util.Log
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
 import com.hanif.smartstudy.data.model.AppContent
@@ -16,7 +17,8 @@ import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.ContentResult
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ContentRepository(private val context: Context) {
 
@@ -24,76 +26,102 @@ class ContentRepository(private val context: Context) {
     private val queue   = PendingQueue(context)
     private val session = SessionManager(context)
 
-    // ── Content: cache-first, then network ──
+    // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
+    companion object {
+        @Volatile private var _memCache: AppContent? = null
+        private val mutex = Mutex()
+    }
+
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
-        // Cache check
+        // In-memory cache hit — সবচেয়ে fast
         if (!forceRefresh) {
-            val cached = cache.loadContent()
-            if (cached != null && !cached.isEmpty() && !cached.isStale()) {
-                return DataState.Success(cached, fromCache = true)
+            _memCache?.let { mem ->
+                if (!mem.isEmpty() && !mem.isStale()) {
+                    Log.d("Repo", "Memory cache hit: quiz=${mem.quiz.size}")
+                    return DataState.Success(mem, fromCache = true)
+                }
             }
         }
 
-        // Offline হলে cache থেকে দাও
-        if (!isOnline()) {
-            val cached = cache.loadContent()
-            return if (cached != null && !cached.isEmpty()) {
-                DataState.Success(cached, fromCache = true, isOffline = true)
-            } else {
-                DataState.Error("ইন্টারনেট সংযোগ নেই এবং কোনো cache নেই")
+        // mutex দিয়ে protect — concurrent calls এ একবারই fetch হবে
+        return mutex.withLock {
+            // Double-check after lock
+            if (!forceRefresh) {
+                _memCache?.let { mem ->
+                    if (!mem.isEmpty() && !mem.isStale()) {
+                        return@withLock DataState.Success(mem, fromCache = true)
+                    }
+                }
             }
-        }
 
-        // Network fetch
-        return when (val result = ContentFetchService.fetchAllContent()) {
-            is ContentResult.Success -> {
-                cache.saveContent(result.data)
-                DataState.Success(result.data)
+            // DataStore cache check
+            if (!forceRefresh) {
+                val cached = cache.loadContent()
+                if (cached != null && !cached.isEmpty() && !cached.isStale()) {
+                    _memCache = cached
+                    Log.d("Repo", "DataStore cache hit: quiz=${cached.quiz.size}")
+                    return@withLock DataState.Success(cached, fromCache = true)
+                }
             }
-            is ContentResult.Error -> {
-                // Fallback to stale cache
-                val stale = cache.loadContent()
-                if (stale != null && !stale.isEmpty()) {
-                    DataState.Success(stale, fromCache = true, isOffline = false)
+
+            // Offline হলে যা আছে দাও
+            if (!isOnline()) {
+                val cached = cache.loadContent() ?: _memCache
+                return@withLock if (cached != null && !cached.isEmpty()) {
+                    _memCache = cached
+                    DataState.Success(cached, fromCache = true, isOffline = true)
                 } else {
-                    DataState.Error(result.message)
+                    DataState.Error("ইন্টারনেট সংযোগ নেই")
+                }
+            }
+
+            // Network fetch
+            Log.d("Repo", "Fetching from Firebase...")
+            when (val result = ContentFetchService.fetchAllContent()) {
+                is ContentResult.Success -> {
+                    Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
+                    _memCache = result.data
+                    cache.saveContent(result.data)
+                    DataState.Success(result.data)
+                }
+                is ContentResult.Error -> {
+                    Log.e("Repo", "Firebase error: ${result.message}")
+                    val stale = cache.loadContent() ?: _memCache
+                    if (stale != null && !stale.isEmpty()) {
+                        _memCache = stale
+                        DataState.Success(stale, fromCache = true)
+                    } else {
+                        DataState.Error(result.message)
+                    }
                 }
             }
         }
     }
 
-    // ── XP Info ──
+    fun clearMemCache() { _memCache = null }
+
     fun getXpInfo(): XpInfo {
         val user = session.getCurrentUser()
         return XpInfo.fromXp(user?.xp ?: 0)
     }
 
-    // ── Streak ──
     suspend fun getStreakInfo(): StreakInfo {
         val streakDays = cache.getStreak()
         val daysBn     = listOf("শনি","রবি","সোম","মঙ্গল","বুধ","বৃহস্পতি","শুক্র")
-
-        // JS style: 0=Sun, 1=Mon... আমাদের শনি থেকে শুরু
-        val todayJS     = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0-6
+        val todayJS     = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) - 1
         val jsToOurIdx  = intArrayOf(1,2,3,4,5,6,0)
         val todayOurIdx = jsToOurIdx[todayJS]
-
         val weekDays = daysBn.mapIndexed { i, label ->
             val daysAgo = (todayOurIdx - i + 7) % 7
             val isToday = i == todayOurIdx
             val isDone  = !isToday && daysAgo in 1..streakDays
             StreakDay(label, isToday, isDone)
         }
-
         return StreakInfo(streakDays, weekDays)
     }
 
-    // ── Mark today's activity (streak update) ──
-    suspend fun markTodayActivity() {
-        cache.updateStreak()
-    }
+    suspend fun markTodayActivity() { cache.updateStreak() }
 
-    // ── Goal Progress ──
     suspend fun getGoalProgress(): GoalProgress {
         val goalMin = session.getDailyGoal()
         val doneMin = cache.getTodayStudyMinutes()
@@ -101,7 +129,6 @@ class ContentRepository(private val context: Context) {
         return GoalProgress(goalMin, doneMin, pct)
     }
 
-    // ── Study Stats ──
     suspend fun getStudyStats(): StudyStats {
         val (today, week, total) = cache.getStudyStats()
         val correct = cache.getCorrectCount()
@@ -111,10 +138,7 @@ class ContentRepository(private val context: Context) {
         return StudyStats(today, week, total, correct, wrong, acc)
     }
 
-    // ── Exam Countdown ──
     fun getExamCountdown(): ExamCountdown {
-        val prefs = android.content.Context::class.java
-        // SessionManager থেকে exam date পড়ো
         return try {
             val sharedPrefs = context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE)
             val examDateStr = sharedPrefs.getString("exam_date", null) ?: return ExamCountdown()
@@ -123,15 +147,14 @@ class ContentRepository(private val context: Context) {
             val examDate    = sdf.parse(examDateStr) ?: return ExamCountdown()
             val diff        = examDate.time - System.currentTimeMillis()
             if (diff <= 0) return ExamCountdown(examName, 0, 0, 0, 0, true)
-            val days    = diff / (1000 * 60 * 60 * 24)
-            val hours   = (diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
-            val minutes = (diff % (1000 * 60 * 60)) / (1000 * 60)
-            val seconds = (diff % (1000 * 60)) / 1000
-            ExamCountdown(examName, days, hours, minutes, seconds, true)
+            ExamCountdown(examName,
+                diff / (1000*60*60*24),
+                (diff % (1000*60*60*24)) / (1000*60*60),
+                (diff % (1000*60*60)) / (1000*60),
+                (diff % (1000*60)) / 1000, true)
         } catch (e: Exception) { ExamCountdown() }
     }
 
-    // ── Save Exam Date ──
     fun saveExamDate(date: String, name: String) {
         context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE).edit()
             .putString("exam_date", date)
@@ -139,32 +162,23 @@ class ContentRepository(private val context: Context) {
             .apply()
     }
 
-    // ── Offline action queue ──
     suspend fun submitQuizAnswer(questionId: String, isCorrect: Boolean) {
         val phone = session.getCurrentUser()?.phone ?: return
         if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
-        if (isOnline()) {
-            // Direct sync — WorkManager এর মাধ্যমে
-            SyncWorker.scheduleOneTime(context)
-        } else {
-            queue.enqueueQuizAnswer(questionId, isCorrect, phone)
-        }
+        if (isOnline()) SyncWorker.scheduleOneTime(context)
+        else queue.enqueueQuizAnswer(questionId, isCorrect, phone)
     }
 
     suspend fun submitStudyProgress(minutes: Int, topic: String) {
         val phone = session.getCurrentUser()?.phone ?: return
         cache.addStudyMinutes(minutes)
         markTodayActivity()
-        if (!isOnline()) {
-            queue.enqueueStudyProgress(phone, minutes, topic)
-        }
+        if (!isOnline()) queue.enqueueStudyProgress(phone, minutes, topic)
         SyncWorker.scheduleOneTime(context)
     }
 
-    fun getPendingQueueCount(): kotlinx.coroutines.flow.Flow<Int> =
-        kotlinx.coroutines.flow.flow { emit(queue.count()) }
+    fun getPendingQueueCount() = kotlinx.coroutines.flow.flow { emit(queue.count()) }
 
-    // ── Network check ──
     fun isOnline(): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
@@ -173,7 +187,6 @@ class ContentRepository(private val context: Context) {
     }
 }
 
-// ── DataState wrapper ──
 sealed class DataState<out T> {
     data class Success<T>(
         val data      : T,
