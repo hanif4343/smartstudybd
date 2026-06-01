@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.ui.main
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,6 +40,17 @@ fun MainScreen(
     var currentTab by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch by remember { mutableStateOf(false) }
     var showTyping by remember { mutableStateOf(false) }
+
+    // Back button: search/typing বন্ধ করো অথবা Home এ যাও
+    // Quiz/QBank/Study এর ভেতরের navigation CoreScreen এর BackHandler handle করে
+    BackHandler(enabled = showSearch || showTyping || currentTab != BottomTab.HOME) {
+        when {
+            showSearch -> showSearch = false
+            showTyping -> showTyping = false
+            // Quiz/QBank/Study tab এ back দিলে শুধু Home এ যাবে যদি CoreScreen এর back consume না হয়
+            currentTab != BottomTab.HOME -> currentTab = BottomTab.HOME
+        }
+    }
 
     // FIX: তিনটা আলাদা ViewModel — একটাতে mode switch করলে অন্যটার data নষ্ট হবে না
     val quizViewModel  : QuizViewModel = viewModel(key = "quiz_vm")
