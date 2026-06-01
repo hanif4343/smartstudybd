@@ -133,6 +133,26 @@ class SessionManager(private val context: Context) {
 
     // ── Reminder ─────────────────────────────────────────────
 
+    // ── Morning reminder ──
+    fun setReminderMorning(on: Boolean, hour: Int, minute: Int) {
+        prefs.edit().putBoolean("morning_on", on).putInt("morning_hour", hour).putInt("morning_min", minute).apply()
+    }
+    fun isMorningReminderOn(): Boolean = prefs.getBoolean("morning_on", false)
+    fun getMorningHour(): Int          = prefs.getInt("morning_hour", 7)
+    fun getMorningMinute(): Int        = prefs.getInt("morning_min", 0)
+
+    // ── Night reminder ──
+    fun setReminderNight(on: Boolean, hour: Int, minute: Int) {
+        prefs.edit().putBoolean("night_on", on).putInt("night_hour", hour).putInt("night_min", minute).apply()
+    }
+    fun isNightReminderOn(): Boolean = prefs.getBoolean("night_on", false)
+    fun getNightHour(): Int          = prefs.getInt("night_hour", 21)
+    fun getNightMinute(): Int        = prefs.getInt("night_min", 0)
+
+    // ── Notification polling ──
+    fun getLastNotifCheck(): Long  = prefs.getLong("last_notif_check", 0L)
+    fun setLastNotifCheck(t: Long) { prefs.edit().putLong("last_notif_check", t).apply() }
+
     fun isReminderOn(): Boolean = runBlocking {
         context.dataStore.data.first()[KEY_REMINDER_ON] ?: false
     }
