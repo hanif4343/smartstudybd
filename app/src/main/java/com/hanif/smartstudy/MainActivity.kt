@@ -19,6 +19,13 @@ import com.hanif.smartstudy.ui.shared.AchievementPopup
 import com.hanif.smartstudy.ui.shared.OfflineBanner
 import com.hanif.smartstudy.ui.shared.StreakPopup
 import com.hanif.smartstudy.ui.theme.*
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.hanif.smartstudy.receiver.ReminderReceiver
+import com.hanif.smartstudy.worker.NotificationPollWorker
 import com.hanif.smartstudy.util.ConnectivityObserver
 import com.hanif.smartstudy.util.DeepLinkAction
 import com.hanif.smartstudy.util.SessionManager
@@ -39,6 +46,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         session = SessionManager(this)
+
+        // Notification channel create করো
+        ReminderReceiver.createChannel(this)
+
+        // Notification permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
+        }
+
+        // Firebase Notifications polling শুরু করো
+        NotificationPollWorker.schedule(this)
 
         // Parse deep link if launched from URL
         val deepLink = intent?.parseDeepLink() ?: DeepLinkAction(DeepLinkAction.Type.NONE)
