@@ -43,6 +43,12 @@ data class MenuUiState(
     val isReminderOn    : Boolean            = false,
     val reminderHour    : Int                = 20,
     val reminderMinute  : Int                = 0,
+    val isMorningOn     : Boolean            = false,
+    val morningHour     : Int                = 7,
+    val morningMinute   : Int                = 0,
+    val isNightOn       : Boolean            = false,
+    val nightHour       : Int                = 21,
+    val nightMinute     : Int                = 0,
     val correctCount    : Int                = 0,
     val wrongCount      : Int                = 0,
     val accuracyPct     : Int                = 0,
@@ -90,6 +96,12 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val remOn      = session.isReminderOn()
             val remH       = session.getReminderHour()
             val remM       = session.getReminderMinute()
+            val morningOn  = session.isMorningReminderOn()
+            val morningH   = session.getMorningHour()
+            val morningM   = session.getMorningMinute()
+            val nightOn    = session.isNightReminderOn()
+            val nightH     = session.getNightHour()
+            val nightM     = session.getNightMinute()
             val correct    = cache.getCorrectCount()
             val wrong      = cache.getWrongCount()
             val total      = correct + wrong
@@ -112,6 +124,12 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isReminderOn   = remOn,
                     reminderHour   = remH,
                     reminderMinute = remM,
+                    isMorningOn    = morningOn,
+                    morningHour    = morningH,
+                    morningMinute  = morningM,
+                    isNightOn      = nightOn,
+                    nightHour      = nightH,
+                    nightMinute    = nightM,
                     correctCount   = correct,
                     wrongCount     = wrong,
                     totalCorrect   = correct,
@@ -199,11 +217,24 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setReminder(on, hour, minute)
             _state.update { it.copy(isReminderOn = on, reminderHour = hour, reminderMinute = minute) }
-            if (on) {
-                ReminderReceiver.schedule(ctx, hour, minute)
-            } else {
-                ReminderReceiver.cancel(ctx)
-            }
+            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute)
+            else    ReminderReceiver.cancelMorning(ctx)
+        }
+    }
+
+    fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute) {
+        viewModelScope.launch {
+            _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute) }
+            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute)
+            else    ReminderReceiver.cancelMorning(ctx)
+        }
+    }
+
+    fun setNightReminder(on: Boolean, hour: Int = _state.value.nightHour, minute: Int = _state.value.nightMinute) {
+        viewModelScope.launch {
+            _state.update { it.copy(isNightOn = on, nightHour = hour, nightMinute = minute) }
+            if (on) ReminderReceiver.scheduleNight(ctx, hour, minute)
+            else    ReminderReceiver.cancelNight(ctx)
         }
     }
 
