@@ -7,17 +7,18 @@ import com.hanif.smartstudy.util.SessionManager
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            // Re-schedule reminder alarm after reboot / app update
-            val session = SessionManager(context)
-            if (session.isReminderOn()) {
-                ReminderReceiver.schedule(
-                    context = context,
-                    hour    = session.getReminderHour(),
-                    minute  = session.getReminderMinute()
-                )
-            }
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
+            intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+
+        val session = SessionManager(context)
+
+        // Morning reminder reschedule
+        if (session.isMorningReminderOn()) {
+            ReminderReceiver.scheduleMorning(context, session.getMorningHour(), session.getMorningMinute())
+        }
+        // Night reminder reschedule
+        if (session.isNightReminderOn()) {
+            ReminderReceiver.scheduleNight(context, session.getNightHour(), session.getNightMinute())
         }
     }
 }
