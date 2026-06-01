@@ -297,7 +297,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val current = _state.value.bookmarkedIds.toMutableSet()
         if (current.contains(questionId)) current.remove(questionId) else current.add(questionId)
         prefs.edit().putStringSet("bookmarks", current).apply()
-        _state.update { it.copy(bookmarkedIds = current) }
+        // questions list এও isBookmarked update করো — UI immediately reflect করবে
+        val updatedQuestions = _state.value.questions.map { q ->
+            if (q.id == questionId) q.copy(isBookmarked = current.contains(questionId)) else q
+        }
+        _state.update { it.copy(bookmarkedIds = current, questions = updatedQuestions) }
     }
 
     fun updateReadingIndex(index: Int) {
