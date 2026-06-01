@@ -88,19 +88,29 @@ object GasApiService {
     suspend fun reportQuestion(questionId: String, question: String, issue: String) =
         withContext(Dispatchers.IO) {
             try {
+                // Firebase RTDB তে Reports node এ সরাসরি লেখা
+                val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey    = BuildConfig.SECRET_KEY
+                val authParam    = if (secretKey.isNotBlank() && !secretKey.contains("%%"))
+                    "?auth=$secretKey" else ""
+
                 val jsonObj = JsonObject().apply {
-                    addProperty("type",      "report_question")
-                    addProperty("id",        questionId)
-                    addProperty("question",  question.take(200))
-                    addProperty("issue",     issue)
-                    addProperty("timestamp", System.currentTimeMillis())
+                    addProperty("questionId", questionId)
+                    addProperty("question",   question.take(200))
+                    addProperty("issue",      issue)
+                    addProperty("timestamp",  System.currentTimeMillis())
+                    addProperty("status",     "pending")
                 }
-                val body = jsonObj.toString()
-                    .toRequestBody("application/json".toMediaType())
-                val req = Request.Builder().url(GAS_URL).post(body).build()
-                client.newCall(req).execute().close()
+
+                // POST to Firebase RTDB — auto push key তৈরি হবে
+                val url  = "${'$'}firebaseBase/Reports.json${'$'}authParam"
+                val body = jsonObj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).post(body).build()
+                val resp = client.newCall(req).execute()
+                Log.d("GAS", "Report saved: HTTP ${'$'}{resp.code} → ${'$'}url")
+                resp.close()
             } catch (e: Exception) {
-                Log.e("GAS", "reportQuestion: ${e.message}")
+                Log.e("GAS", "reportQuestion: ${'$'}{e.message}")
             }
         }
 }
