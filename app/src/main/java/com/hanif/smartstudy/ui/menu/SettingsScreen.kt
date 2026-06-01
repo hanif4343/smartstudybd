@@ -43,7 +43,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.setReminder(true, timeState.hour, timeState.minute)
+                    vm.setMorningReminder(true, timeState.hour, timeState.minute)
                     showTimePicker = false
                 }) {
                     Text("সংরক্ষণ", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.primary)
@@ -142,46 +142,84 @@ fun SettingsScreen(
 
             // ── Reminder ──
             SettingsCard("🔔 পড়ার রিমাইন্ডার") {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("দৈনিক রিমাইন্ডার", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Text(
-                                if (state.isReminderOn)
-                                    "প্রতিদিন ${state.reminderHour}:${state.reminderMinute.toString().padStart(2,'0')} এ"
-                                else "বন্ধ আছে",
-                                fontFamily = NotoSansBengali, fontSize = 11.sp,
-                                color      = MaterialTheme.colorScheme.onSurface.copy(0.5f)
-                            )
-                        }
-                        Switch(
-                            checked         = state.isReminderOn,
-                            onCheckedChange = { on ->
-                                if (on) showTimePicker = true
-                                else vm.setReminder(false)
-                            }
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+                    // Morning reminder
+                    ReminderRow(
+                        icon    = "🌅",
+                        label   = "সকালের রিমাইন্ডার",
+                        subLabel = if (state.isMorningOn)
+                            "প্রতিদিন ${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')} এ"
+                        else "বন্ধ আছে",
+                        isOn    = state.isMorningOn,
+                        onToggle = { on ->
+                            if (on) showTimePicker = true
+                            else vm.setMorningReminder(false)
+                        },
+                        onEdit  = { showTimePicker = true },
+                        timeStr = "${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')}"
+                    )
+
+                    HorizontalDivider(color = androidx.compose.ui.graphics.Color(0xFFF1F5F9))
+
+                    // Night reminder
+                    var showNightPicker by remember { mutableStateOf(false) }
+                    ReminderRow(
+                        icon    = "🌙",
+                        label   = "রাতের রিমাইন্ডার",
+                        subLabel = if (state.isNightOn)
+                            "প্রতিদিন ${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')} এ"
+                        else "বন্ধ আছে",
+                        isOn    = state.isNightOn,
+                        onToggle = { on ->
+                            if (on) showNightPicker = true
+                            else vm.setNightReminder(false)
+                        },
+                        onEdit  = { showNightPicker = true },
+                        timeStr = "${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')}"
+                    )
+
+                    if (showNightPicker) {
+                        TimePickerDialog(
+                            initialHour   = state.nightHour,
+                            initialMinute = state.nightMinute,
+                            onConfirm     = { h, m -> vm.setNightReminder(true, h, m); showNightPicker = false },
+                            onDismiss     = { showNightPicker = false }
                         )
-                    }
-                    if (state.isReminderOn) {
-                        OutlinedButton(
-                            onClick = { showTimePicker = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape    = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(
-                                "⏰ সময় পরিবর্তন: ${state.reminderHour}:${state.reminderMinute.toString().padStart(2,'0')}",
-                                fontFamily = NotoSansBengali, fontSize = 13.sp
-                            )
-                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+// ── Reminder row ─────────────────────────────────────────────
+
+@Composable
+private fun ReminderRow(
+    icon: String, label: String, subLabel: String,
+    isOn: Boolean, onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit, timeStr: String
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(icon, fontSize = 22.sp)
+                Column {
+                    Text(label, fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(subLabel, fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                }
+            }
+            Switch(checked = isOn, onCheckedChange = onToggle)
+        }
+        if (isOn) {
+            OutlinedButton(onClick = onEdit, modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp)) {
+                Text("⏰ সময় পরিবর্তন: $timeStr", fontFamily = NotoSansBengali, fontSize = 13.sp)
+            }
         }
     }
 }
