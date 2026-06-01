@@ -164,6 +164,11 @@ fun SettingsScreen(
 
                     // Night reminder
                     var showNightPicker by remember { mutableStateOf(false) }
+                    val nightTimeState = rememberTimePickerState(
+                        initialHour   = state.nightHour,
+                        initialMinute = state.nightMinute
+                    )
+
                     ReminderRow(
                         icon    = "🌙",
                         label   = "রাতের রিমাইন্ডার",
@@ -180,11 +185,27 @@ fun SettingsScreen(
                     )
 
                     if (showNightPicker) {
-                        TimePickerDialog(
-                            initialHour   = state.nightHour,
-                            initialMinute = state.nightMinute,
-                            onConfirm     = { h, m -> vm.setNightReminder(true, h, m); showNightPicker = false },
-                            onDismiss     = { showNightPicker = false }
+                        AlertDialog(
+                            onDismissRequest = { showNightPicker = false },
+                            title = { Text("রাতের পড়ার রিমাইন্ডার সময়", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                            text  = {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                    TimePicker(state = nightTimeState)
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    vm.setNightReminder(true, nightTimeState.hour, nightTimeState.minute)
+                                    showNightPicker = false
+                                }) {
+                                    Text("সংরক্ষণ", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.primary)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showNightPicker = false }) {
+                                    Text("বাতিল", fontFamily = NotoSansBengali)
+                                }
+                            }
                         )
                     }
                 }
