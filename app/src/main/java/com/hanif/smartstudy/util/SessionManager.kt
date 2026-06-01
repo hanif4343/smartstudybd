@@ -28,10 +28,22 @@ class SessionManager(private val context: Context) {
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
         val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
         val KEY_USER_PIC         = stringPreferencesKey("home_user_pic")
-        // Reminder
+        
+        // Reminder Keys (Updated for DataStore Consistency)
         val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
         val KEY_REMINDER_HOUR    = intPreferencesKey("reminder_hour")
         val KEY_REMINDER_MINUTE  = intPreferencesKey("reminder_minute")
+        
+        val KEY_MORNING_ON       = booleanPreferencesKey("morning_on")
+        val KEY_MORNING_HOUR     = intPreferencesKey("morning_hour")
+        val KEY_MORNING_MIN      = intPreferencesKey("morning_min")
+        
+        val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
+        val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
+        val KEY_NIGHT_MIN        = intPreferencesKey("night_min")
+        
+        val KEY_LAST_NOTIF_CHECK = longPreferencesKey("last_notif_check")
+
         // XP history (JSON list of daily XP)
         val KEY_XP_HISTORY       = stringPreferencesKey("xp_history")
         // App time tracking
@@ -134,24 +146,48 @@ class SessionManager(private val context: Context) {
     // ── Reminder ─────────────────────────────────────────────
 
     // ── Morning reminder ──
-    fun setReminderMorning(on: Boolean, hour: Int, minute: Int) {
-        prefs.edit().putBoolean("morning_on", on).putInt("morning_hour", hour).putInt("morning_min", minute).apply()
+    fun setReminderMorning(on: Boolean, hour: Int, minute: Int) = runBlocking {
+        context.dataStore.edit {
+            it[KEY_MORNING_ON] = on
+            it[KEY_MORNING_HOUR] = hour
+            it[KEY_MORNING_MIN] = minute
+        }
     }
-    fun isMorningReminderOn(): Boolean = prefs.getBoolean("morning_on", false)
-    fun getMorningHour(): Int          = prefs.getInt("morning_hour", 7)
-    fun getMorningMinute(): Int        = prefs.getInt("morning_min", 0)
+    fun isMorningReminderOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_MORNING_ON] ?: false
+    }
+    fun getMorningHour(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_MORNING_HOUR] ?: 7
+    }
+    fun getMorningMinute(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_MORNING_MIN] ?: 0
+    }
 
     // ── Night reminder ──
-    fun setReminderNight(on: Boolean, hour: Int, minute: Int) {
-        prefs.edit().putBoolean("night_on", on).putInt("night_hour", hour).putInt("night_min", minute).apply()
+    fun setReminderNight(on: Boolean, hour: Int, minute: Int) = runBlocking {
+        context.dataStore.edit {
+            it[KEY_NIGHT_ON] = on
+            it[KEY_NIGHT_HOUR] = hour
+            it[KEY_NIGHT_MIN] = minute
+        }
     }
-    fun isNightReminderOn(): Boolean = prefs.getBoolean("night_on", false)
-    fun getNightHour(): Int          = prefs.getInt("night_hour", 21)
-    fun getNightMinute(): Int        = prefs.getInt("night_min", 0)
+    fun isNightReminderOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_NIGHT_ON] ?: false
+    }
+    fun getNightHour(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_NIGHT_HOUR] ?: 21
+    }
+    fun getNightMinute(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_NIGHT_MIN] ?: 0
+    }
 
     // ── Notification polling ──
-    fun getLastNotifCheck(): Long  = prefs.getLong("last_notif_check", 0L)
-    fun setLastNotifCheck(t: Long) { prefs.edit().putLong("last_notif_check", t).apply() }
+    fun getLastNotifCheck(): Long = runBlocking {
+        context.dataStore.data.first()[KEY_LAST_NOTIF_CHECK] ?: 0L
+    }
+    fun setLastNotifCheck(t: Long) = runBlocking {
+        context.dataStore.edit { it[KEY_LAST_NOTIF_CHECK] = t }
+    }
 
     fun isReminderOn(): Boolean = runBlocking {
         context.dataStore.data.first()[KEY_REMINDER_ON] ?: false
