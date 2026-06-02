@@ -71,6 +71,7 @@ fun MenuScreen(
             MenuNav.BOOKMARKS   -> BookmarksMenuScreen(onBack = { screen = MenuNav.MAIN })
             MenuNav.LEADERBOARD -> LeaderboardScreen(state, onBack = { screen = MenuNav.MAIN })
             MenuNav.ADMIN       -> AdminScreen(state, vm, onBack = { screen = MenuNav.MAIN })
+            MenuNav.PRIVACY     -> PrivacyPolicyScreen(onBack = { screen = MenuNav.MAIN })
         }
     }
 
@@ -94,7 +95,7 @@ fun MenuScreen(
     }
 }
 
-enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN }
+enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY }
 
 // ─────────────────────────────────────────────────────────────
 //  Main Menu Screen
@@ -156,6 +157,7 @@ fun MainMenuScreen(
             }
 
             MenuGroup("❓ অন্যান্য") {
+                MenuRow("🔒 গোপনীয়তা নীতি", "Privacy Policy", Icons.Default.Security) { screen = MenuNav.PRIVACY }
                 MenuRow("🗑 ডেটা রিসেট",   "সব progress মুছে দাও",  Icons.Default.DeleteForever, tint = Red500) {
                     vm.resetData()
                 }
