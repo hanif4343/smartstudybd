@@ -1,9 +1,13 @@
 package com.hanif.smartstudy.ui.main
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
+import com.hanif.smartstudy.ui.shared.OfflineBanner
+import com.hanif.smartstudy.util.ConnectivityObserver
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -37,6 +41,9 @@ fun MainScreen(
     onAchievementUnlocked : (Achievement) -> Unit = {},
     onStreakUpdated       : (Int) -> Unit  = {}
 ) {
+    val context    = LocalContext.current
+    val isOnline   by ConnectivityObserver.observe(context)
+                        .collectAsStateWithLifecycle(initialValue = true)
     var currentTab by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch by remember { mutableStateOf(false) }
     var showTyping by remember { mutableStateOf(false) }
@@ -115,6 +122,8 @@ fun MainScreen(
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.fillMaxSize()) {
+                OfflineBanner(visible = !isOnline)
             when (currentTab) {
                 BottomTab.HOME  -> HomeScreen(
                     onSearchClick = { showSearch = true },
@@ -145,6 +154,7 @@ fun MainScreen(
                     onTypingClick        = { showTyping = true }
                 )
             }
-        }
+            } // Box
+        } // Column
     }
 }
