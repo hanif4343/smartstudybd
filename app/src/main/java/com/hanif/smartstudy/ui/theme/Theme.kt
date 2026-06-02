@@ -2,6 +2,9 @@ package com.hanif.smartstudy.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
@@ -109,7 +112,9 @@ fun SmartStudyTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
+            // Edge-to-edge: status bar transparent, content draws behind
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkMode.value
         }
     }
