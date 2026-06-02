@@ -126,6 +126,7 @@ fun MainScreen(
                 OfflineBanner(visible = !isOnline)
             when (currentTab) {
                 BottomTab.HOME  -> HomeScreen(
+                    quizViewModel = quizViewModel,
                     onSearchClick = { showSearch = true },
                     onTypingClick = { showTyping = true }
                 )
