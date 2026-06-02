@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import com.hanif.smartstudy.ui.shared.HapticUtil
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
@@ -297,6 +298,7 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
 // ─────────────────────────────────────────────────────────
 @Composable
 fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
+    val ctx = LocalContext.current
     val answered = item.answerState as? AnswerState.McqSelected
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
