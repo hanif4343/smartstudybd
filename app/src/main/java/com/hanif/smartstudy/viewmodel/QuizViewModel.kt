@@ -208,8 +208,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         viewModelScope.launch {
-            if (isCorrect) cache.incrementCorrect() else {
-                cache.incrementWrong(); saveWeakTopic(q.subject, q.subTopic)
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQId(q.id, _state.value.mode)   // সঠিক হলে remove
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+                saveWrongQId(q.id, _state.value.mode)     // ভুল হলে save
             }
             repo.submitQuizAnswer(q.id, isCorrect)
         }
@@ -223,7 +228,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         viewModelScope.launch {
-            if (isCorrect) cache.incrementCorrect() else { cache.incrementWrong(); saveWeakTopic(q.subject, q.subTopic) }
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQId(q.id, _state.value.mode)
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+                saveWrongQId(q.id, _state.value.mode)
+            }
         }
         return matchPct
     }
@@ -308,7 +320,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(readingIndex = index) }
     }
 
-    private fun startTimer(questionCount: Int) {
+    internal fun startTimer(questionCount: Int) {
         val totalSec = questionCount * 60
         timerJob?.cancel()
         _state.update { it.copy(timerSec = totalSec, totalTimeSec = totalSec, isQuizActive = true) }
@@ -390,6 +402,65 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (subTopic.isBlank()) return
         val key = "weak_$subTopic"
         prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply()
+    }
+
+    private fun saveWrongQId(qId: String, mode: StudyMode) {
+        val sheet  = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
+        val entry  = "$sheet:$qId"
+        val ids    = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        ids.add(entry)
+        val counts = prefs.getStringSet("wrong_q_count", mutableSetOf())!!.toMutableSet()
+        // count format: "sheet:id=N"
+        val existing = counts.find { it.startsWith("$entry=") }
+        val newCount = (existing?.split("=")?.getOrNull(1)?.toIntOrNull() ?: 0) + 1
+        if (existing != null) counts.remove(existing)
+        counts.add("$entry=$newCount")
+        prefs.edit().putStringSet("wrong_q_ids", ids).putStringSet("wrong_q_count", counts).apply()
+    }
+
+    private fun removeWrongQId(qId: String, mode: StudyMode) {
+        val sheet = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
+        val entry = "$sheet:$qId"
+        val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        ids.remove(entry)
+        prefs.edit().putStringSet("wrong_q_ids", ids).apply()
+    }
+
+    fun getWrongQuestions(): List<Pair<QuestionItem, Int>> {
+        val content   = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache() ?: return emptyList()
+        val ids       = prefs.getStringSet("wrong_q_ids", emptySet()) ?: return emptyList()
+        val counts    = prefs.getStringSet("wrong_q_count", emptySet()) ?: emptySet()
+        val countMap  = counts.associate {
+            val p = it.split("="); p.getOrElse(0){""} to (p.getOrElse(1){"1"}.toIntOrNull() ?: 1)
+        }
+        return ids.mapNotNull { entry ->
+            val parts  = entry.split(":", limit = 2)
+            val sheet  = parts.getOrElse(0) { "quiz" }
+            val qId    = parts.getOrElse(1) { "" }
+            val pool   = when (sheet) {
+                "qbank" -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+                "study" -> content.study.map { QuestionItem.fromStudyItem(it) }
+                else    -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+            }
+            val q = pool.find { it.id == qId } ?: return@mapNotNull null
+            q to (countMap[entry] ?: 1)
+        }.sortedByDescending { it.second }
+    }
+
+    fun startWrongReview() {
+        val wrongItems = getWrongQuestions().map { (q, _) -> q }
+        if (wrongItems.isEmpty()) return
+        _state.update {
+            it.copy(
+                questions     = wrongItems,
+                isQuizActive  = true,
+                showResult    = false,
+                result        = null,
+                answeredCount = 0,
+                navPath       = NavPath("ভুল প্রশ্ন Review")
+            )
+        }
+        startTimer(wrongItems.size)
     }
 
     private fun isWeak(subTopic: String) = prefs.getInt("weak_$subTopic", 0) >= 2
