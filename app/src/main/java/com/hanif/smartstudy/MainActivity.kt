@@ -25,6 +25,8 @@ import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.hanif.smartstudy.receiver.ReminderReceiver
+import com.hanif.smartstudy.ui.shared.ToastHost
+import com.hanif.smartstudy.ui.shared.rememberToastState
 import com.hanif.smartstudy.worker.NotificationPollWorker
 import com.hanif.smartstudy.util.ConnectivityObserver
 import com.hanif.smartstudy.util.DeepLinkAction
@@ -86,13 +88,16 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize()) {
 
-                        SmartStudyNavGraph(
+                        val toastState = rememberToastState()
+
+                    SmartStudyNavGraph(
                             deepLink            = deepLink,
                             onAchievementUnlocked = { ach -> pendingAchievement = ach },
                             onStreakUpdated       = { streak ->
                                 if (streak > 0) { streakCount = streak; showStreak = true }
                             }
                         )
+                        ToastHost(state = toastState)
 
                         // Offline banner (bottom)
                         OfflineBanner(
