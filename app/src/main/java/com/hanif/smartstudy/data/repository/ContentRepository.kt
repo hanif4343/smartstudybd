@@ -30,6 +30,7 @@ class ContentRepository(private val context: Context) {
     companion object {
         @Volatile private var _memCache: AppContent? = null
         private val mutex = Mutex()
+        fun getMemCache(): AppContent? = _memCache
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
