@@ -157,7 +157,7 @@ fun MainMenuScreen(
             }
 
             MenuGroup("❓ অন্যান্য") {
-                MenuRow("🔒 গোপনীয়তা নীতি", "Privacy Policy", Icons.Default.Security) { screen = MenuNav.PRIVACY }
+                MenuRow("🔒 গোপনীয়তা নীতি", "Privacy Policy", Icons.Default.Security) { onNavigate(MenuNav.PRIVACY) }
                 MenuRow("🗑 ডেটা রিসেট",   "সব progress মুছে দাও",  Icons.Default.DeleteForever, tint = Red500) {
                     vm.resetData()
                 }
