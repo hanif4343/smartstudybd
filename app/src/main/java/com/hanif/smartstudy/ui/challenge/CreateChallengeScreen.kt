@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.lazy.items // সঠিক items লুপের জন্য এই ইমপোর্টটি প্রয়োজন
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
@@ -191,7 +192,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
             // Subject chips
             Text("বিষয়:", fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.subjects) { subject ->
+                items(items = state.subjects) { subject ->
                     FilterChip(
                         selected = state.selectedSubject == subject,
                         onClick  = { vm.onSubjectSelect(subject) },
@@ -209,7 +210,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                             onClick = { vm.onSubTopicSelect("") },
                             label   = { Text("সব টপিক", fontFamily = NotoSansBengali, fontSize = 11.sp) })
                     }
-                    items(state.subTopics) { sub ->
+                    items(items = state.subTopics) { sub ->
                         FilterChip(selected = state.selectedSubTopic == sub,
                             onClick = { vm.onSubTopicSelect(sub) },
                             label   = { Text(sub, fontFamily = NotoSansBengali, fontSize = 11.sp) })
