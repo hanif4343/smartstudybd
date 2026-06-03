@@ -1,0 +1,21 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": "auth != null",
+    "Challenges": {
+      "$challengeId": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "Invites": {
+      "$phone": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "Reports": {
+      ".write": true
+    }
+  }
+}
