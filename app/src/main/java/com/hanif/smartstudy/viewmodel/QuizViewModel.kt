@@ -320,7 +320,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(readingIndex = index) }
     }
 
-    internal fun startTimer(questionCount: Int) {
+    fun startTimer(questionCount: Int) {
         val totalSec = questionCount * 60
         timerJob?.cancel()
         _state.update { it.copy(timerSec = totalSec, totalTimeSec = totalSec, isQuizActive = true) }
