@@ -18,20 +18,23 @@ import com.hanif.smartstudy.data.model.Achievement
 import com.hanif.smartstudy.data.model.StudyMode
 import com.hanif.smartstudy.ui.home.HomeScreen
 import com.hanif.smartstudy.ui.menu.MenuScreen
+import com.hanif.smartstudy.ui.challenge.ChallengeZone
 import com.hanif.smartstudy.ui.quiz.CoreScreen
 import com.hanif.smartstudy.ui.search.GlobalSearchScreen
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.ui.typing.TypingPracticeScreen
 import com.hanif.smartstudy.util.DeepLinkAction
+import com.hanif.smartstudy.viewmodel.ChallengeViewModel
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
 enum class BottomTab(val icon: String, val label: String) {
-    HOME(  "🏠", "Home"),
-    QUIZ(  "🎯", "Quiz"),
-    QBANK( "📚", "QBank"),
-    STUDY( "📖", "Study"),
-    MENU(  "👤", "Menu")
+    HOME(      "🏠", "Home"),
+    QUIZ(      "🎯", "Quiz"),
+    QBANK(     "📚", "QBank"),
+    STUDY(     "📖", "Study"),
+    CHALLENGE( "⚔️", "চ্যালেঞ্জ"),
+    MENU(      "👤", "Menu")
 }
 
 @Composable
@@ -63,7 +66,10 @@ fun MainScreen(
     val quizViewModel  : QuizViewModel = viewModel(key = "quiz_vm")
     val qbankViewModel : QuizViewModel = viewModel(key = "qbank_vm")
     val studyViewModel : QuizViewModel = viewModel(key = "study_vm")
-    val menuViewModel  : MenuViewModel = viewModel()
+    val menuViewModel       : MenuViewModel       = viewModel()
+    val challengeViewModel : ChallengeViewModel   = viewModel()
+    val challengeState by challengeViewModel.state.collectAsState()
+    val pendingInvites = challengeState.pendingInvites.size
 
     // ViewModel init-এ mode set করো
     LaunchedEffect(Unit) {
@@ -111,7 +117,13 @@ fun MainScreen(
                     NavigationBarItem(
                         selected = currentTab == tab,
                         onClick  = { currentTab = tab },
-                        icon     = { Text(tab.icon, fontSize = 22.sp) },
+                        icon     = {
+                            BadgedBox(badge = {
+                                if (tab == BottomTab.CHALLENGE && pendingInvites > 0) {
+                                    Badge { Text(pendingInvites.toString()) }
+                                }
+                            }) { Text(tab.icon, fontSize = 22.sp) }
+                        },
                         label    = {
                             Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                                 fontFamily = NotoSansBengali)
@@ -148,6 +160,7 @@ fun MainScreen(
                     onAchievementUnlocked = onAchievementUnlocked,
                     onStreakUpdated       = onStreakUpdated
                 )
+                BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel)
                 BottomTab.MENU  -> MenuScreen(
                     vm                   = menuViewModel,
                     onLogout             = onLogout,
