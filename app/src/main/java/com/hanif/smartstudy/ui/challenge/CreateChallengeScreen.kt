@@ -262,10 +262,13 @@ private fun ConfigRow(label: String, value: String, options: List<String>, selec
             }
         }
         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(options) { opt ->
-                FilterChip(selected = opt == selected || value.startsWith(opt.replace(" মি", "")),
-                    onClick = { onSelect(opt) },
-                    label   = { Text(opt, fontFamily = NotoSansBengali, fontSize = 11.sp) })
+            items(count = options.size) { idx ->
+                val opt = options[idx]
+                FilterChip(
+                    selected = opt == selected || value.startsWith(opt.replace(" মি", "")),
+                    onClick  = { onSelect(opt) },
+                    label    = { Text(opt, fontFamily = NotoSansBengali, fontSize = 11.sp) }
+                )
             }
         }
     }
