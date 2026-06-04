@@ -152,10 +152,14 @@ fun SubjectListScreen(
 
 @Composable
 private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
     Card(
         modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp).clickable { onClick() },
         shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = CardBg),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(
@@ -172,8 +176,8 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
 
             Column(Modifier.weight(1f)) {
                 Text(subject.name, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-                    color = SlateText, fontFamily = NotoSansBengali)
-                Text("${subject.totalQ} প্রশ্ন", fontSize = 11.sp, color = MutedText,
+                    color = textColor, fontFamily = NotoSansBengali)
+                Text("${subject.totalQ} প্রশ্ন", fontSize = 11.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
                 Spacer(Modifier.height(6.dp))
                 // Progress bar
@@ -187,7 +191,7 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
                     )
                 }
                 Spacer(Modifier.height(2.dp))
-                Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = MutedText,
+                Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
             }
 
@@ -285,11 +289,15 @@ fun SubTopicListScreen(
 
 @Composable
 private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
     Card(
         modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
             .clickable { onClick() },
         shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = CardBg),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Row(
@@ -300,17 +308,17 @@ private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        color = SlateText, fontFamily = NotoSansBengali)
+                        color = textColor, fontFamily = NotoSansBengali)
                     if (st.isWeak) {
                         Text("🔁", fontSize = 12.sp)
                     }
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
-                    color = MutedText, fontFamily = NotoSansBengali)
+                    color = mutedColor, fontFamily = NotoSansBengali)
                 Spacer(Modifier.height(5.dp))
                 Box(
                     Modifier.fillMaxWidth().height(4.dp)
-                        .clip(RoundedCornerShape(20.dp)).background(Color(0xFFE2E8F0))
+                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(
                         Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
@@ -318,7 +326,7 @@ private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
                     )
                 }
             }
-            Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+            Icon(Icons.Default.ArrowForwardIos, null, tint = mutedColor,
                 modifier = Modifier.size(12.dp))
         }
     }
@@ -326,20 +334,24 @@ private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
 
 @Composable
 private fun QBankTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
     Card(
         modifier  = Modifier.fillMaxWidth().clickable { onClick() },
         shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = CardBg),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("📋", fontSize = 20.sp)
             Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                color = SlateText, fontFamily = NotoSansBengali, maxLines = 2)
-            Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali)
+                color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
+            Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
             Box(
                 Modifier.fillMaxWidth().height(4.dp)
-                    .clip(RoundedCornerShape(20.dp)).background(Color(0xFFE2E8F0))
+                    .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Box(
                     Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
