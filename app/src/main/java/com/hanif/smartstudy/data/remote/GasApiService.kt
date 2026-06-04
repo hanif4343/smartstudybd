@@ -85,8 +85,41 @@ object GasApiService {
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
 
-    suspend fun reportQuestion(questionId: String, question: String, issue: String) =
-        withContext(Dispatchers.IO) {
+    /** Admin কে FCM notification পাঠাও — technique বা report জমা হলে */
+    suspend fun notifyAdmin(
+        event      : String,
+        userName   : String,
+        userPhone  : String,
+        extra      : String = "",
+        questionId : String = "",
+        tab        : String = ""   // "quiz" | "qbank" | "study"
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val url = "${BuildConfig.GAS_URL}" +
+                "?action=adminNotify" +
+                "&event=${java.net.URLEncoder.encode(event, "UTF-8")}" +
+                "&name=${java.net.URLEncoder.encode(userName, "UTF-8")}" +
+                "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
+                "&extra=${java.net.URLEncoder.encode(extra.take(80), "UTF-8")}" +
+                "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
+                "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}"
+            val req = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            Log.d("GAS", "notifyAdmin($event): HTTP ${resp.code}")
+            resp.close()
+        } catch (e: Exception) {
+            Log.e("GAS", "notifyAdmin: ${e.message}")
+        }
+    }
+
+    suspend fun reportQuestion(
+        questionId : String,
+        question   : String,
+        issue      : String,
+        userName   : String = "",
+        userPhone  : String = "",
+        tab        : String = ""   // "quiz" | "qbank" | "study"
+    ) = withContext(Dispatchers.IO) {
             try {
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
                 val secretKey    = BuildConfig.SECRET_KEY
@@ -97,6 +130,8 @@ object GasApiService {
                     addProperty("questionId", questionId)
                     addProperty("question",   question.take(200))
                     addProperty("issue",      issue)
+                    addProperty("userName",   userName)
+                    addProperty("userPhone",  userPhone)
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("status",     "pending")
                 }
@@ -107,6 +142,18 @@ object GasApiService {
                 val resp = client.newCall(req).execute()
                 Log.d("GAS", "Report saved: HTTP ${resp.code} → $url")
                 resp.close()
+
+                // Admin কে notify করো
+                if (userName.isNotBlank() && userPhone.isNotBlank()) {
+                    notifyAdmin(
+                        event      = "report",
+                        userName   = userName,
+                        userPhone  = userPhone,
+                        extra      = issue.take(60),
+                        questionId = questionId,
+                        tab        = tab
+                    )
+                }
             } catch (e: Exception) {
                 Log.e("GAS", "reportQuestion: ${e.message}")
             }
@@ -170,6 +217,17 @@ object GasApiService {
             val pushKey = gson.fromJson(respJson, JsonObject::class.java)?.get("name")?.asString ?: ""
             resp.close()
             Log.d("GAS", "Technique saved: $pushKey")
+
+            // শুধু public হলে admin কে notify করো (approval লাগবে)
+            if (isPublic) {
+                notifyAdmin(
+                    event     = "technique",
+                    userName  = userName,
+                    userPhone = userId,
+                    extra     = text.take(60)
+                )
+            }
+
             GasResult.Success(pushKey)
         } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
     }
