@@ -87,12 +87,7 @@ fun SubjectListScreen(
             }
         }
 
-        // Weak topics bar
-        if (weakTopics.isNotEmpty()) {
-            item {
-                WeakTopicsBar(weakTopics)
-            }
-        }
+        // (দুর্বল টপিক শুধু Profile/Stats পেজে দেখাবে)
 
         // Loading
         if (isLoading) {
