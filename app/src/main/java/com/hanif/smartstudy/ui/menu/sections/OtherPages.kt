@@ -19,6 +19,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
+import com.hanif.smartstudy.data.model.QuestionItem
+import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.remote.LeaderboardEntry
 import com.hanif.smartstudy.data.remote.UserSyncService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
@@ -29,6 +31,7 @@ import kotlinx.coroutines.launch
 
 private val Indigo600 = Color(0xFF4F46E5)
 private val AmberWarn = Color(0xFFF59E0B)
+private val RedWrong  = Color(0xFFEF4444)
 private val SlateText = Color(0xFF1E293B)
 private val MutedText = Color(0xFF64748B)
 private val CardBg    = Color(0xFFFFFFFF)
@@ -40,13 +43,31 @@ private val GreenOk   = Color(0xFF10B981)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
-    val prefs    = androidx.compose.ui.platform.LocalContext.current
-        .getSharedPreferences("quiz_prefs", Context.MODE_PRIVATE)
     val bookmarkIds = state.bookmarkedIds
-    var filter   by remember { mutableStateOf("সব") }
 
-    // Load bookmarked questions from cache (simplified — show IDs + subjects)
-    val filterOptions = listOf("সব", "MCQ", "Written", "QBank")
+    // Cache থেকে প্রশ্ন টেনে আনো
+    val allQuestions = remember {
+        val content = ContentRepository.getMemCache() ?: return@remember emptyList()
+        val quizQ  = content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+        val qbankQ = content.qbank.map { QuestionItem.fromQBankItem(it) }
+        val studyQ = content.study.map { QuestionItem.fromStudyItem(it) }
+        (quizQ + qbankQ + studyQ)
+    }
+
+    val bookmarkedQuestions = remember(bookmarkIds, allQuestions) {
+        allQuestions.filter { it.id in bookmarkIds }
+    }
+
+    var filter by remember { mutableStateOf("সব") }
+    val filterOptions = listOf("সব", "MCQ", "Written")
+
+    val filtered = remember(filter, bookmarkedQuestions) {
+        when (filter) {
+            "MCQ"     -> bookmarkedQuestions.filter { it.isMcq() }
+            "Written" -> bookmarkedQuestions.filter { it.isWritten() }
+            else      -> bookmarkedQuestions
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -61,7 +82,7 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             // Filter chips
             LazyRow(
-                contentPadding      = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding       = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(filterOptions) { opt ->
@@ -92,11 +113,20 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
                 }
             } else {
                 LazyColumn(
-                    contentPadding      = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding       = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    verticalArrangement  = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(bookmarkIds.toList()) { id ->
-                        BookmarkCard(id = id)
+                    items(filtered, key = { it.id }) { q ->
+                        BookmarkCard(q)
+                    }
+                    if (filtered.isEmpty()) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(32.dp),
+                                contentAlignment = Alignment.Center) {
+                                Text("এই ফিল্টারে কিছু নেই", fontSize = 13.sp,
+                                    color = MutedText, fontFamily = NotoSansBengali)
+                            }
+                        }
                     }
                 }
             }
@@ -105,24 +135,79 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun BookmarkCard(id: String) {
+private fun BookmarkCard(q: QuestionItem) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
     ) {
-        Row(
-            Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("⭐", fontSize = 20.sp)
-            Column(Modifier.weight(1f)) {
-                Text("প্রশ্ন ID: $id", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    color = SlateText, fontFamily = NotoSansBengali)
-                Text("Quiz/QBank থেকে সংরক্ষিত", fontSize = 10.sp, color = MutedText,
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            // Header row
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Type badge
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (q.isMcq()) Color(0xFFEEF2FF) else Color(0xFFF5F3FF)
+                            )
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            if (q.isMcq()) "❓ MCQ" else "✍️ Written",
+                            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                            color = if (q.isMcq()) Indigo600 else Color(0xFF7C3AED),
+                            fontFamily = NotoSansBengali
+                        )
+                    }
+                    // Subject badge
+                    if (q.subject.isNotBlank()) {
+                        Box(
+                            Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF0FDF4))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(q.subject, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                color = GreenOk, fontFamily = NotoSansBengali)
+                        }
+                    }
+                }
+                Text("⭐", fontSize = 16.sp)
+            }
+
+            // প্রশ্ন
+            Text(
+                q.question.take(120) + if (q.question.length > 120) "…" else "",
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                color = SlateText, fontFamily = NotoSansBengali, lineHeight = 20.sp
+            )
+
+            // SubTopic
+            if (q.subTopic.isNotBlank()) {
+                Text("📌 ${q.subTopic}", fontSize = 10.sp, color = MutedText,
                     fontFamily = NotoSansBengali)
             }
-            Icon(Icons.Default.ChevronRight, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
+
+            // উত্তর
+            if (q.answer.isNotBlank()) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(Color(0xFFF0FDF4), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("✅", fontSize = 12.sp)
+                    Text(
+                        q.answer.take(80) + if (q.answer.length > 80) "…" else "",
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = GreenOk, fontFamily = NotoSansBengali
+                    )
+                }
+            }
         }
     }
 }
