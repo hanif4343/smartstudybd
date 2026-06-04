@@ -47,18 +47,41 @@ fun MainScreen(
     val context    = LocalContext.current
     val isOnline   by ConnectivityObserver.observe(context)
                         .collectAsStateWithLifecycle(initialValue = true)
-    var currentTab by remember { mutableStateOf(BottomTab.HOME) }
-    var showSearch by remember { mutableStateOf(false) }
-    var showTyping by remember { mutableStateOf(false) }
+    var currentTab     by remember { mutableStateOf(BottomTab.HOME) }
+    var showSearch     by remember { mutableStateOf(false) }
+    var showTyping     by remember { mutableStateOf(false) }
+    var showExitDialog by remember { mutableStateOf(false) }
 
-    // Back button: search/typing বন্ধ করো অথবা Home এ যাও
-    // Quiz/QBank/Study এর ভেতরের navigation CoreScreen এর BackHandler handle করে
-    BackHandler(enabled = showSearch || showTyping || currentTab != BottomTab.HOME) {
+    // Exit confirmation dialog
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title   = { Text("অ্যাপ বন্ধ করবেন?", fontFamily = NotoSansBengali) },
+            text    = { Text("আপনি কি SmartStudy বন্ধ করতে চান?", fontFamily = NotoSansBengali) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitDialog = false
+                    (context as? androidx.activity.ComponentActivity)?.finish()
+                }) { Text("হ্যাঁ, বন্ধ করুন", fontFamily = NotoSansBengali) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text("না", fontFamily = NotoSansBengali)
+                }
+            }
+        )
+    }
+
+    // Back button:
+    // 1) search/typing খোলা থাকলে বন্ধ করো
+    // 2) অন্য tab এ থাকলে Home এ যাও (Quiz ভেতরের depth CoreScreen BackHandler আগেই consume করে)
+    // 3) Home এ থাকলে exit dialog দেখাও
+    BackHandler(enabled = true) {
         when {
-            showSearch -> showSearch = false
-            showTyping -> showTyping = false
-            // Quiz/QBank/Study tab এ back দিলে শুধু Home এ যাবে যদি CoreScreen এর back consume না হয়
+            showSearch                   -> showSearch = false
+            showTyping                   -> showTyping = false
             currentTab != BottomTab.HOME -> currentTab = BottomTab.HOME
+            else                         -> showExitDialog = true
         }
     }
 
