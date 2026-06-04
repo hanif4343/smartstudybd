@@ -31,7 +31,8 @@ fun MenuScreen(
     vm            : MenuViewModel = viewModel(),
     onLogout      : () -> Unit    = {},
     onSearchClick : () -> Unit    = {},
-    onTypingClick : () -> Unit    = {}
+    onTypingClick : () -> Unit    = {},
+    initialPage   : String?       = null   // "reports" | "techniques" | "stats" | "bookmarks" | "admin"
 ) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val darkMode = LocalDarkMode.current
@@ -49,8 +50,23 @@ fun MenuScreen(
         }
     }
 
-    // Sub-screen nav
-    var screen by remember { mutableStateOf(MenuNav.MAIN) }
+    // Sub-screen nav — initialPage থেকে শুরু করো
+    val startScreen = remember(initialPage) {
+        when (initialPage?.lowercase()) {
+            "stats"       -> MenuNav.STATS
+            "bookmarks"   -> MenuNav.BOOKMARKS
+            "admin"       -> MenuNav.ADMIN
+            "leaderboard" -> MenuNav.LEADERBOARD
+            "profile"     -> MenuNav.PROFILE
+            else          -> MenuNav.MAIN
+        }
+    }
+    var screen by remember { mutableStateOf(startScreen) }
+
+    // initialPage বদলালে navigate করো (notification click এর পরে)
+    LaunchedEffect(initialPage) {
+        if (initialPage != null) screen = startScreen
+    }
 
     AnimatedContent(
         targetState = screen,
