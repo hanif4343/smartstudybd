@@ -80,11 +80,24 @@ fun MainScreen(
 
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
-            DeepLinkAction.Type.QUIZ   -> { currentTab = BottomTab.QUIZ  }
-            DeepLinkAction.Type.QBANK  -> { currentTab = BottomTab.QBANK }
-            DeepLinkAction.Type.STUDY  -> { currentTab = BottomTab.STUDY }
-            DeepLinkAction.Type.SEARCH -> { showSearch = true }
-            DeepLinkAction.Type.NONE   -> {}
+            DeepLinkAction.Type.QUIZ       -> { currentTab = BottomTab.QUIZ  }
+            DeepLinkAction.Type.QBANK      -> { currentTab = BottomTab.QBANK }
+            DeepLinkAction.Type.STUDY      -> { currentTab = BottomTab.STUDY }
+            DeepLinkAction.Type.SEARCH     -> { showSearch = true }
+            DeepLinkAction.Type.REPORTS    -> { currentTab = BottomTab.MENU  }
+            DeepLinkAction.Type.TECHNIQUES -> { currentTab = BottomTab.MENU  }
+            DeepLinkAction.Type.MENU       -> { currentTab = BottomTab.MENU  }
+            DeepLinkAction.Type.NONE       -> {}
+        }
+    }
+
+    // deepLink থেকে menuPage বের করো
+    val menuInitialPage = remember(deepLink) {
+        when (deepLink.type) {
+            DeepLinkAction.Type.REPORTS    -> "admin"
+            DeepLinkAction.Type.TECHNIQUES -> "admin"
+            DeepLinkAction.Type.MENU       -> deepLink.menuPage
+            else                           -> null
         }
     }
 
@@ -165,7 +178,8 @@ fun MainScreen(
                     vm                   = menuViewModel,
                     onLogout             = onLogout,
                     onSearchClick        = { showSearch = true },
-                    onTypingClick        = { showTyping = true }
+                    onTypingClick        = { showTyping = true },
+                    initialPage          = menuInitialPage
                 )
             }
             } // Box
