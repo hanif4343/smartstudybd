@@ -86,11 +86,10 @@ object GasApiService {
                     val p = entry["Phone"]?.toString() ?: entry["phone"]?.toString() ?: ""
                     p.trim() == phone.trim()
                 }
-                if (user != null) {
-                    GasResult.Success(user)
-                } else {
-                    GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
-                }
+                
+                // ব্র্যাকিং ছাড়াই সরাসরি এক্সপ্রেশন ভ্যালু রিটার্ন করা হলো
+                if (user != null) GasResult.Success(user) else GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
 
