@@ -115,11 +115,16 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
 
         val title = message.notification?.title ?: message.data["title"] ?: "Smart Study"
         val body  = message.notification?.body  ?: message.data["body"]  ?: ""
+        val data  = message.data  // url, questionId, tab, type
 
-        showNotification(title, body)
+        showNotification(title, body, data)
     }
 
-    private fun showNotification(title: String, body: String) {
+    private fun showNotification(
+        title : String,
+        body  : String,
+        data  : Map<String, String> = emptyMap()
+    ) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         // Create channel (API 26+)
@@ -130,11 +135,14 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             nm.createNotificationChannel(channel)
         }
 
+        // FCM data payload → Intent extras (deep link এর জন্য)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+            data.forEach { (key, value) -> putExtra(key, value) }
         }
+
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
+            this, System.currentTimeMillis().toInt(), intent,
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -145,6 +153,7 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .build()
 
         nm.notify(System.currentTimeMillis().toInt(), notification)
