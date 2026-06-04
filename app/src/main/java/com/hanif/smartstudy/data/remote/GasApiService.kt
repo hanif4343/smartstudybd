@@ -177,6 +177,7 @@ object GasApiService {
                         tab        = tab
                     )
                 }
+                Unit
             } catch (e: Exception) {
                 Log.e("GAS", "reportQuestion: ${e.message}")
             }
