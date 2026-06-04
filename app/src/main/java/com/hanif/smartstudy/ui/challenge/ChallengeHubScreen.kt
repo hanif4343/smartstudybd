@@ -38,6 +38,18 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
         }
     }
 
+    // Home ছাড়া অন্য screen এ back দিলে Home এ ফেরত
+    // Exam screen এ back দিলে submit dialog দেখানো হয় (ChallengeExamScreen এর নিজের BackHandler)
+    val isInsideChallenge = state.screen !is ChallengeScreen.Home
+    if (isInsideChallenge) {
+        androidx.activity.compose.BackHandler(
+            enabled = state.screen is ChallengeScreen.CreateSetup ||
+                      state.screen is ChallengeScreen.Result
+        ) {
+            vm.goHome()
+        }
+    }
+
     when (val screen = state.screen) {
         is ChallengeScreen.Home        -> ChallengeHubScreen(state, vm)
         is ChallengeScreen.CreateSetup -> CreateChallengeScreen(state, vm)
