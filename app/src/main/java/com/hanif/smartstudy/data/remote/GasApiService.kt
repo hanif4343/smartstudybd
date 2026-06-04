@@ -87,8 +87,12 @@ object GasApiService {
                     p.trim() == phone.trim()
                 }
                 
-                // ব্র্যাকিং ছাড়াই সরাসরি এক্সপ্রেশন ভ্যালু রিটার্ন করা হলো
-                if (user != null) GasResult.Success(user) else GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                // এখানে স্পষ্ট করে return@withContext যুক্ত করা হয়েছে, যা কনফিউশন দূর করবে
+                if (user != null) {
+                    return@withContext GasResult.Success(user)
+                } else {
+                    return@withContext GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                }
                 
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
