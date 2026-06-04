@@ -9,8 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,7 +29,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.data.remote.GasApiService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import kotlinx.coroutines.launch
 
 // ── Brand colors ──
 val Indigo600   = Color(0xFF4F46E5)
@@ -119,6 +120,7 @@ fun QuestionCard(
     onWritten   : (String) -> Int,
     onBookmark  : () -> Unit,
     onReport    : () -> Unit,
+    currentUser : User?     = null,   // ইউজার info (technique add এর জন্য)
     modifier    : Modifier = Modifier
 ) {
     Card(
@@ -228,10 +230,19 @@ fun QuestionCard(
                 ExplanationBox(text = item.explanation)
             }
 
-            // ── Technique box ──
+            // ── Technique box (admin-added) ──
             if (showAnswerBox && item.technique.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 TechniqueBox(text = item.technique)
+            }
+
+            // ── User Techniques Section ──
+            if (showAnswerBox) {
+                Spacer(Modifier.height(6.dp))
+                UserTechniqueSection(
+                    questionId  = item.id,
+                    currentUser = currentUser
+                )
             }
         }
     }
@@ -465,7 +476,7 @@ fun ExplanationBox(text: String) {
 }
 
 // ─────────────────────────────────────────────────────────
-// Technique Box (orange)
+// Technique Box (orange) — admin added
 // ─────────────────────────────────────────────────────────
 @Composable
 fun TechniqueBox(text: String) {
@@ -480,6 +491,350 @@ fun TechniqueBox(text: String) {
             Spacer(Modifier.height(4.dp))
             Text(text, fontSize = 12.sp, color = Color(0xFF78350F),
                 fontFamily = NotoSansBengali, lineHeight = 18.sp)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// User Technique Section — ইউজারদের নিজস্ব টেকনিক
+// ─────────────────────────────────────────────────────────
+@Composable
+fun UserTechniqueSection(
+    questionId  : String,
+    currentUser : User?
+) {
+    if (questionId.isBlank() || currentUser == null) return
+
+    val scope          = rememberCoroutineScope()
+    var techniques     by remember(questionId) { mutableStateOf<List<UserTechnique>>(emptyList()) }
+    var isLoading      by remember(questionId) { mutableStateOf(false) }
+    var showAddDialog  by remember { mutableStateOf(false) }
+    var editTarget     by remember { mutableStateOf<UserTechnique?>(null) }
+    var expanded       by remember { mutableStateOf(false) }
+    var feedbackMsg    by remember { mutableStateOf<String?>(null) }
+
+    // Fetch techniques একবার load হলে
+    LaunchedEffect(questionId) {
+        isLoading = true
+        val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+        if (res is com.hanif.smartstudy.data.remote.GasResult.Success) {
+            techniques = res.data
+        }
+        isLoading = false
+    }
+
+    fun refresh() {
+        scope.launch {
+            val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+            if (res is com.hanif.smartstudy.data.remote.GasResult.Success) techniques = res.data
+        }
+    }
+
+    Column {
+        // Header row
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Expand/collapse toggle (only if techniques exist)
+            if (techniques.isNotEmpty()) {
+                TextButton(
+                    onClick = { expanded = !expanded },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        null, tint = OrangeTech, modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Text(
+                        if (expanded) "টেকনিক লুকাও" else "🧠 ${techniques.size}টি ইউজার টেকনিক",
+                        fontSize = 11.sp, color = OrangeTech, fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(1.dp))
+            }
+
+            // Add button
+            TextButton(
+                onClick  = { showAddDialog = true },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+            ) {
+                Icon(Icons.Default.Add, null, tint = Indigo600, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(2.dp))
+                Text("টেকনিক যোগ করুন", fontSize = 10.sp, color = Indigo600,
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Feedback snackbar
+        feedbackMsg?.let { msg ->
+            LaunchedEffect(msg) {
+                kotlinx.coroutines.delay(2500)
+                feedbackMsg = null
+            }
+            Surface(
+                shape  = RoundedCornerShape(8.dp),
+                color  = GreenOk.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(msg, fontSize = 11.sp, color = GreenOk, fontFamily = NotoSansBengali,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
+        // Technique list (expanded)
+        if (expanded && techniques.isNotEmpty()) {
+            techniques.forEach { t ->
+                val isOwn = t.userId == currentUser.phone
+                Spacer(Modifier.height(4.dp))
+                UserTechniqueCard(
+                    technique   = t,
+                    isOwn       = isOwn,
+                    onEdit      = { editTarget = t; showAddDialog = true },
+                    onDelete    = {
+                        scope.launch {
+                            GasApiService.deleteTechnique(questionId, t.id)
+                            refresh()
+                            feedbackMsg = "টেকনিক মুছে ফেলা হয়েছে"
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    // Add / Edit Dialog
+    if (showAddDialog) {
+        AddTechniqueDialog(
+            existing    = editTarget,
+            onDismiss   = { showAddDialog = false; editTarget = null },
+            onSave      = { text, isPublic ->
+                scope.launch {
+                    val target = editTarget
+                    if (target == null) {
+                        // নতুন টেকনিক
+                        GasApiService.saveTechnique(
+                            questionId = questionId,
+                            userId     = currentUser.phone ?: "",
+                            userName   = currentUser.displayName(),
+                            text       = text,
+                            isPublic   = isPublic
+                        )
+                        feedbackMsg = if (isPublic)
+                            "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
+                        else "✅ প্রাইভেট টেকনিক সেভ হয়েছে।"
+                    } else {
+                        // এডিট
+                        GasApiService.updateTechnique(questionId, target.id, text, isPublic)
+                        feedbackMsg = "✅ আপডেট হয়েছে!"
+                    }
+                    refresh()
+                    showAddDialog = false
+                    editTarget = null
+                    expanded = true
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun UserTechniqueCard(
+    technique : UserTechnique,
+    isOwn     : Boolean,
+    onEdit    : () -> Unit,
+    onDelete  : () -> Unit
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Card(
+        shape  = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isOwn) Color(0xFFF0FDF4) else Color(0xFFFFFBEB)
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (isOwn) GreenOk.copy(alpha = 0.4f) else AmberWarn.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Badge row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (isOwn) "🙋 আমার" else "👤 ${technique.userName}",
+                        fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                        color = if (isOwn) GreenOk else MutedText,
+                        fontFamily = NotoSansBengali
+                    )
+                    // visibility badge
+                    if (isOwn) {
+                        Box(
+                            Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (technique.isPublic) Indigo600.copy(alpha = 0.12f)
+                                    else Color(0xFFF1F5F9)
+                                )
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                if (technique.isPublic) "🌐 পাবলিক" else "🔒 প্রাইভেট",
+                                fontSize = 8.sp, color = if (technique.isPublic) Indigo600 else MutedText,
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold
+                            )
+                        }
+                        // status badge (only for public pending)
+                        if (technique.isPublic && technique.isPending()) {
+                            Box(
+                                Modifier.clip(RoundedCornerShape(6.dp))
+                                    .background(AmberWarn.copy(alpha = 0.15f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text("⏳ অনুমোদন পেন্ডিং", fontSize = 8.sp, color = Color(0xFF92400E),
+                                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+                // Edit/Delete (only own)
+                if (isOwn) {
+                    Row {
+                        IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Edit, null, tint = Indigo600, modifier = Modifier.size(14.dp))
+                        }
+                        IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Delete, null, tint = RedWrong, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(technique.text, fontSize = 12.sp, color = Color(0xFF1E293B),
+                fontFamily = NotoSansBengali, lineHeight = 18.sp)
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("টেকনিক মুছবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text  = { Text("এই টেকনিকটি স্থায়ীভাবে মুছে যাবে।", fontFamily = NotoSansBengali) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) {
+                    Text("হ্যাঁ, মুছুন", color = RedWrong, fontFamily = NotoSansBengali)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun AddTechniqueDialog(
+    existing  : UserTechnique?,
+    onDismiss : () -> Unit,
+    onSave    : (text: String, isPublic: Boolean) -> Unit
+) {
+    var text     by remember(existing) { mutableStateOf(existing?.text ?: "") }
+    var isPublic by remember(existing) { mutableStateOf(existing?.isPublic ?: false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape  = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text(
+                    if (existing == null) "💡 নতুন টেকনিক যোগ করুন" else "✏️ টেকনিক সম্পাদনা",
+                    fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                    color = SlateText, fontFamily = NotoSansBengali
+                )
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value           = text,
+                    onValueChange   = { text = it },
+                    placeholder     = { Text("এখানে টেকনিক লিখুন...", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                    modifier        = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    minLines        = 3,
+                    maxLines        = 6,
+                    shape           = RoundedCornerShape(10.dp),
+                    textStyle       = LocalTextStyle.current.copy(fontFamily = NotoSansBengali, fontSize = 13.sp)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Public / Private toggle
+                Surface(
+                    shape  = RoundedCornerShape(10.dp),
+                    color  = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (isPublic) "🌐 সবার জন্য পাবলিক" else "🔒 শুধু আমার জন্য প্রাইভেট",
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                color = SlateText, fontFamily = NotoSansBengali
+                            )
+                            Text(
+                                if (isPublic) "এডমিন অনুমোদনের পর সবাই দেখতে পাবে"
+                                else "শুধু আপনি দেখতে পাবেন",
+                                fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali
+                            )
+                        }
+                        Switch(
+                            checked  = isPublic,
+                            onCheckedChange = { isPublic = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Indigo600)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick  = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("বাতিল", fontFamily = NotoSansBengali)
+                    }
+                    Button(
+                        onClick  = { if (text.trim().isNotBlank()) onSave(text.trim(), isPublic) },
+                        enabled  = text.trim().isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(10.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                    ) {
+                        Text("সেভ করুন", fontFamily = NotoSansBengali)
+                    }
+                }
+            }
         }
     }
 }
