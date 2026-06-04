@@ -26,16 +26,17 @@ import com.hanif.smartstudy.viewmodel.QuizViewModel
 
 @Composable
 fun QuestionListScreen(
-    viewModel : QuizViewModel,
-    mode      : StudyMode,
-    subject   : String,
-    subTopic  : String,
-    questions : List<QuestionItem>,
-    timerSec  : Int,
-    totalTime : Int,
-    answered  : Int,
-    onBack    : () -> Unit,
-    onSubmit  : () -> Unit
+    viewModel   : QuizViewModel,
+    mode        : StudyMode,
+    subject     : String,
+    subTopic    : String,
+    questions   : List<QuestionItem>,
+    timerSec    : Int,
+    totalTime   : Int,
+    answered    : Int,
+    onBack      : () -> Unit,
+    onSubmit    : () -> Unit,
+    currentUser : com.hanif.smartstudy.data.model.User? = null
 ) {
     val listState = rememberLazyListState()
     var reportIdx by remember { mutableStateOf(-1) }
@@ -87,7 +88,8 @@ fun QuestionListScreen(
                             onMcqAnswer = { opt -> viewModel.answerMcq(idx, opt) },
                             onWritten   = { text -> viewModel.answerWritten(idx, text) },
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
-                            onReport    = { reportIdx = idx }
+                            onReport    = { reportIdx = idx },
+                            currentUser = currentUser
                         )
                     }
                 }
