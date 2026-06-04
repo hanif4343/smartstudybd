@@ -290,15 +290,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reportQuestion(questionIndex: Int, issue: String) {
-        val q = _state.value.questions.getOrNull(questionIndex) ?: return
+        val q    = _state.value.questions.getOrNull(questionIndex) ?: return
+        val user = session.getCurrentUser()
+        val tab  = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "quiz"
+            StudyMode.QBANK -> "qbank"
+            StudyMode.STUDY -> "study"
+        }
         viewModelScope.launch {
             try {
                 com.hanif.smartstudy.data.remote.GasApiService.reportQuestion(
                     questionId = q.id,
                     question   = q.question,
-                    issue      = issue
+                    issue      = issue,
+                    userName   = user?.displayName() ?: "",
+                    userPhone  = user?.phone ?: "",
+                    tab        = tab
                 )
-                Log.d("QuizVM", "Reported question ${q.id}: $issue")
+                Log.d("QuizVM", "Reported question ${q.id} [$tab]: $issue")
             } catch (e: Exception) {
                 Log.e("QuizVM", "Report failed: ${e.message}")
             }
