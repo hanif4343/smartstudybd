@@ -68,14 +68,14 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
                     Text("⏱️ পড়ার সময়", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color.White, fontFamily = NotoSansBengali)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // ফিক্সড: MenuUiState এর প্রোপার্টির সাথে ম্যাচিং ফিক্স (প্রয়োজনে আপনার স্টেট অনুযায়ী variable মডিফাই করতে পারবেন)
+                        
                         val todayMin = state.todayStudyMin
                         val weekMin = state.weekStudyMin
                         val totalMin = state.totalStudyMin
 
-                        val todayStr = if (todayMin < 60) "$todayMinমি" else "${todayMin / 60}ঘ ${todayMin % 60}মি"
-                        val weekStr = if (weekMin < 60) "$weekMinমি" else "${weekMin / 60}ঘ ${weekMin % 60}মি"
-                        val totalStr = if (totalMin < 60) "$totalMinমি" else "${totalMin / 60}ঘ ${totalMin % 60}মি"
+                        val todayStr = if (todayMin < 60) "${todayMin}মি" else "${todayMin / 60}ঘ ${todayMin % 60}মি"
+                        val weekStr = if (weekMin < 60) "${weekMin}মি" else "${weekMin / 60}ঘ ${weekMin % 60}মি"
+                        val totalStr = if (totalMin < 60) "${totalMin}মি" else "${totalMin / 60}ঘ ${totalMin % 60}মি"
 
                         TimeStatBox("আজ",    todayStr, Color(0xFF4ADE80), Modifier.weight(1f))
                         TimeStatBox("সপ্তাহ", weekStr,  Color(0xFFA78BFA), Modifier.weight(1f))
