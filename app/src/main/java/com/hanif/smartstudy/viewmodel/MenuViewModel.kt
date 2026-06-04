@@ -69,6 +69,11 @@ data class MenuUiState(
     val subjectStats    : Map<String, Pair<Int,Int>> = emptyMap(),
     // Bookmarks
     val bookmarkedIds   : Set<String>        = emptySet(),
+    // Weak topics (Profile/Stats only)
+    val weakTopics      : List<com.hanif.smartstudy.data.model.WeakTopic> = emptyList(),
+    // Study time breakdown
+    val todayStudyMin   : Int                = 0,
+    val weekStudyMin    : Int                = 0,
     // Active users (Admin)
     val activeUsers     : List<ActiveUser>   = emptyList(),
     // Admin: list of all users from Firebase
@@ -114,6 +119,16 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val prefs = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
 
+            // দুর্বল টপিক — weak_* keys থেকে লোড
+            val weakTopics = prefs.all.entries
+                .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
+                .map { com.hanif.smartstudy.data.model.WeakTopic(
+                    subTopic   = it.key.removePrefix("weak_"),
+                    subject    = "",
+                    wrongCount = it.value as Int
+                )}
+                .sortedByDescending { it.wrongCount }
+
             _state.update {
                 it.copy(
                     user           = user,
@@ -135,11 +150,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     totalCorrect   = correct,
                     totalWrong     = wrong,
                     accuracyPct    = acc,
+                    todayStudyMin  = stats.first,
+                    weekStudyMin   = stats.second,
                     totalStudyMin  = stats.third,
                     totalAppMin    = totalApp,
                     xpHistory      = xpHist,
                     fcmToken       = fcm,
-                    bookmarkedIds  = bookmarks
+                    bookmarkedIds  = bookmarks,
+                    weakTopics     = weakTopics
                 )
             }
 
