@@ -21,19 +21,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import com.hanif.smartstudy.ui.shared.HapticUtil
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.GasApiService
+import com.hanif.smartstudy.data.remote.GasResult
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
 
-// ── Brand colors ──
 val Indigo600   = Color(0xFF4F46E5)
 val DeepIndigo  = Color(0xFF1E1B4B)
 val GreenOk     = Color(0xFF10B981)
@@ -45,9 +43,6 @@ val MutedText   = Color(0xFF64748B)
 val CardBg      = Color(0xFFFFFFFF)
 val SlateLight  = Color(0xFFF8FAFC)
 
-// ─────────────────────────────────────────────────────────
-// Timer Bar
-// ─────────────────────────────────────────────────────────
 @Composable
 fun TimerBar(
     timerSec  : Int,
@@ -92,9 +87,6 @@ fun TimerBar(
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Reading Progress Bar (scroll-based)
-// ─────────────────────────────────────────────────────────
 @Composable
 fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) {
     val pct     = if (total > 0) current.toFloat() / total else 0f
@@ -107,9 +99,6 @@ fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) 
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Question Card
-// ─────────────────────────────────────────────────────────
 @Composable
 fun QuestionCard(
     index       : Int,
@@ -120,7 +109,7 @@ fun QuestionCard(
     onWritten   : (String) -> Int,
     onBookmark  : () -> Unit,
     onReport    : () -> Unit,
-    currentUser : User?     = null,   // ইউজার info (technique add এর জন্য)
+    currentUser : User?     = null,
     modifier    : Modifier = Modifier
 ) {
     Card(
@@ -130,14 +119,12 @@ fun QuestionCard(
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
-            // ── Header row ──
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Number badge
                     Box(
                         Modifier.clip(RoundedCornerShape(20.dp))
                             .background(Color(0xFFEEF2FF))
@@ -191,17 +178,14 @@ fun QuestionCard(
 
             Spacer(Modifier.height(8.dp))
 
-            // ── Question text (LaTeX/Math or plain) ──
             QuestionText(text = item.question)
 
-            // ── Image (if any) ──
             if (item.imageUrl.isNotBlank()) {
                 ZoomableImage(url = item.imageUrl)
             }
 
             Spacer(Modifier.height(10.dp))
 
-            // ── MCQ Options / Written Input ──
             when {
                 item.isMcq() && mode != StudyMode.STUDY -> {
                     McqOptions(item = item, onAnswer = onMcqAnswer)
@@ -209,12 +193,9 @@ fun QuestionCard(
                 item.isWritten() && mode != StudyMode.STUDY -> {
                     WrittenInput(item = item, onSubmit = onWritten)
                 }
-                else -> {
-                    // Study mode — always show answer
-                }
+                else -> {}
             }
 
-            // ── Answer box (Study mode always; others after answer) ──
             val showAnswerBox = when (mode) {
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
@@ -224,19 +205,16 @@ fun QuestionCard(
                 AnswerBox(text = item.answer)
             }
 
-            // ── Explanation box ──
             if (showAnswerBox && item.explanation.isNotBlank() && item.explanation != item.answer) {
                 Spacer(Modifier.height(6.dp))
                 ExplanationBox(text = item.explanation)
             }
 
-            // ── Technique box (admin-added) ──
             if (showAnswerBox && item.technique.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 TechniqueBox(text = item.technique)
             }
 
-            // ── User Techniques Section ──
             if (showAnswerBox) {
                 Spacer(Modifier.height(6.dp))
                 UserTechniqueSection(
@@ -248,9 +226,6 @@ fun QuestionCard(
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Question Text — LaTeX detect করে WebView দিয়ে render
-// ─────────────────────────────────────────────────────────
 @Composable
 fun QuestionText(text: String, modifier: Modifier = Modifier) {
     val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
@@ -269,9 +244,6 @@ fun QuestionText(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// MathJax WebView
-// ─────────────────────────────────────────────────────────
 @Composable
 fun MathWebView(latex: String, modifier: Modifier = Modifier) {
     val escaped = remember(latex) {
@@ -304,12 +276,8 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
     )
 }
 
-// ─────────────────────────────────────────────────────────
-// MCQ Options
-// ─────────────────────────────────────────────────────────
 @Composable
 fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
-    val ctx = LocalContext.current
     val answered = item.answerState as? AnswerState.McqSelected
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
@@ -374,9 +342,6 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Written Input
-// ─────────────────────────────────────────────────────────
 @Composable
 fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
     val submitted = item.answerState as? AnswerState.WrittenSubmitted
@@ -384,7 +349,6 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
     var matchPct by remember { mutableStateOf(0) }
 
     if (submitted != null) {
-        // Show match result
         val isCorrect = submitted.isCorrect
         Card(
             shape  = RoundedCornerShape(12.dp),
@@ -395,7 +359,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
         ) {
             Column(Modifier.padding(12.dp)) {
                 Text(
-                    "${if (isCorrect) "✅" else "❌"} মিল: ${submitted.matchPct}%",
+                    "${if (isCorrect) "✅" else "❌"} : ${submitted.matchPct}%",
                     fontSize   = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color      = if (isCorrect) Color(0xFF166534) else Color(0xFF9F1239),
@@ -435,9 +399,6 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Answer Box (green)
-// ─────────────────────────────────────────────────────────
 @Composable
 fun AnswerBox(text: String) {
     Card(
@@ -455,9 +416,6 @@ fun AnswerBox(text: String) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Explanation Box (blue)
-// ─────────────────────────────────────────────────────────
 @Composable
 fun ExplanationBox(text: String) {
     Card(
@@ -475,9 +433,6 @@ fun ExplanationBox(text: String) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Technique Box (orange) — admin added
-// ─────────────────────────────────────────────────────────
 @Composable
 fun TechniqueBox(text: String) {
     Card(
@@ -495,9 +450,6 @@ fun TechniqueBox(text: String) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// User Technique Section — ইউজারদের নিজস্ব টেকনিক
-// ─────────────────────────────────────────────────────────
 @Composable
 fun UserTechniqueSection(
     questionId  : String,
@@ -513,12 +465,13 @@ fun UserTechniqueSection(
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
 
-    // Fetch techniques একবার load হলে
     LaunchedEffect(questionId) {
         isLoading = true
+        // ফিক্সড: GasResult.Success টাইপ সেফটি ফিক্সড
         val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-        if (res is com.hanif.smartstudy.data.remote.GasResult.Success) {
-            techniques = res.data
+        if (res is GasResult.Success<*>) {
+            @Suppress("UNCHECKED_CAST")
+            techniques = res.data as List<UserTechnique>
         }
         isLoading = false
     }
@@ -526,18 +479,19 @@ fun UserTechniqueSection(
     fun refresh() {
         scope.launch {
             val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-            if (res is com.hanif.smartstudy.data.remote.GasResult.Success) techniques = res.data
+            if (res is GasResult.Success<*>) {
+                @Suppress("UNCHECKED_CAST")
+                techniques = res.data as List<UserTechnique>
+            }
         }
     }
 
     Column {
-        // Header row
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Expand/collapse toggle (only if techniques exist)
             if (techniques.isNotEmpty()) {
                 TextButton(
                     onClick = { expanded = !expanded },
@@ -558,7 +512,6 @@ fun UserTechniqueSection(
                 Spacer(Modifier.width(1.dp))
             }
 
-            // Add button
             TextButton(
                 onClick  = { showAddDialog = true },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
@@ -570,7 +523,6 @@ fun UserTechniqueSection(
             }
         }
 
-        // Feedback snackbar
         feedbackMsg?.let { msg ->
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(2500)
@@ -587,7 +539,6 @@ fun UserTechniqueSection(
             Spacer(Modifier.height(4.dp))
         }
 
-        // Technique list (expanded)
         if (expanded && techniques.isNotEmpty()) {
             techniques.forEach { t ->
                 val isOwn = t.userId == currentUser.phone
@@ -608,7 +559,6 @@ fun UserTechniqueSection(
         }
     }
 
-    // Add / Edit Dialog
     if (showAddDialog) {
         AddTechniqueDialog(
             existing    = editTarget,
@@ -617,7 +567,6 @@ fun UserTechniqueSection(
                 scope.launch {
                     val target = editTarget
                     if (target == null) {
-                        // নতুন টেকনিক
                         GasApiService.saveTechnique(
                             questionId = questionId,
                             userId     = currentUser.phone ?: "",
@@ -629,7 +578,6 @@ fun UserTechniqueSection(
                             "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
                         else "✅ প্রাইভেট টেকনিক সেভ হয়েছে।"
                     } else {
-                        // এডিট
                         GasApiService.updateTechnique(questionId, target.id, text, isPublic)
                         feedbackMsg = "✅ আপডেট হয়েছে!"
                     }
@@ -669,7 +617,6 @@ private fun UserTechniqueCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Badge row
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -680,7 +627,6 @@ private fun UserTechniqueCard(
                         color = if (isOwn) GreenOk else MutedText,
                         fontFamily = NotoSansBengali
                     )
-                    // visibility badge
                     if (isOwn) {
                         Box(
                             Modifier.clip(RoundedCornerShape(6.dp))
@@ -696,7 +642,6 @@ private fun UserTechniqueCard(
                                 fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold
                             )
                         }
-                        // status badge (only for public pending)
                         if (technique.isPublic && technique.isPending()) {
                             Box(
                                 Modifier.clip(RoundedCornerShape(6.dp))
@@ -709,7 +654,6 @@ private fun UserTechniqueCard(
                         }
                     }
                 }
-                // Edit/Delete (only own)
                 if (isOwn) {
                     Row {
                         IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
@@ -782,7 +726,6 @@ private fun AddTechniqueDialog(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Public / Private toggle
                 Surface(
                     shape  = RoundedCornerShape(10.dp),
                     color  = Color(0xFFF8FAFC),
@@ -839,9 +782,6 @@ private fun AddTechniqueDialog(
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Zoomable Image
-// ─────────────────────────────────────────────────────────
 @Composable
 fun ZoomableImage(url: String) {
     var zoomed by remember { mutableStateOf(false) }
@@ -866,9 +806,6 @@ fun ZoomableImage(url: String) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// Report Dialog
-// ─────────────────────────────────────────────────────────
 @Composable
 fun ReportDialog(
     questionId   : String = "",
