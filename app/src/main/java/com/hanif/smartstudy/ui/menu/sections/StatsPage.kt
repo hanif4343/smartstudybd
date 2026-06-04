@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import com.hanif.smartstudy.data.model.WeakTopic
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.MenuUiState
 
@@ -65,9 +66,21 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
                     Text("⏱️ পড়ার সময়", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color.White, fontFamily = NotoSansBengali)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TimeStatBox("আজ",   "${state.totalStudyMin}মি",     Color(0xFF4ADE80), Modifier.weight(1f))
-                        TimeStatBox("সপ্তাহ","—",                           Color(0xFFA78BFA), Modifier.weight(1f))
-                        TimeStatBox("মোট",  "${state.totalStudyMin}মি",     Color(0xFFFBBF24), Modifier.weight(1f))
+                        val todayStr = if (state.todayStudyMin < 60)
+                            "${state.todayStudyMin}মি"
+                        else "${state.todayStudyMin / 60}ঘ ${state.todayStudyMin % 60}মি"
+
+                        val weekStr = if (state.weekStudyMin < 60)
+                            "${state.weekStudyMin}মি"
+                        else "${state.weekStudyMin / 60}ঘ ${state.weekStudyMin % 60}মি"
+
+                        val totalStr = if (state.totalStudyMin < 60)
+                            "${state.totalStudyMin}মি"
+                        else "${state.totalStudyMin / 60}ঘ ${state.totalStudyMin % 60}মি"
+
+                        TimeStatBox("আজ",    todayStr, Color(0xFF4ADE80), Modifier.weight(1f))
+                        TimeStatBox("সপ্তাহ", weekStr,  Color(0xFFA78BFA), Modifier.weight(1f))
+                        TimeStatBox("মোট",   totalStr, Color(0xFFFBBF24), Modifier.weight(1f))
                     }
                 }
             }
@@ -82,6 +95,11 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
             // ── Subject breakdown ──
             if (state.subjectStats.isNotEmpty()) {
                 SubjectBreakdownCard(stats = state.subjectStats)
+            }
+
+            // ── দুর্বল টপিক ──
+            if (state.weakTopics.isNotEmpty()) {
+                WeakTopicsCard(weakTopics = state.weakTopics)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -249,6 +267,69 @@ private fun SubjectBreakdownCard(stats: Map<String, Pair<Int, Int>>) {
                                         Indigo600
                                     ))
                                 )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── দুর্বল টপিক Card — শুধু Stats/Profile পেজে ──
+@Composable
+private fun WeakTopicsCard(weakTopics: List<WeakTopic>) {
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(Color(0xFFFFF1F2)),
+        border = BorderStroke(1.5.dp, Color(0xFFFCA5A5))
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("🔁", fontSize = 16.sp)
+                Text("দুর্বল টপিক", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF9F1239), fontFamily = NotoSansBengali)
+                Text("(${weakTopics.size}টি)", fontSize = 11.sp, color = RedWrong,
+                    fontFamily = NotoSansBengali)
+            }
+            Text(
+                "এই টপিকগুলোতে বারবার ভুল হয়েছে — আরো Practice করো",
+                fontSize = 11.sp, color = Color(0xFFBE123C), fontFamily = NotoSansBengali
+            )
+            weakTopics.forEach { w ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFFE4E6), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
+                                .background(RedWrong.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) { Text("❌", fontSize = 13.sp) }
+                        Text(
+                            w.subTopic, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9F1239), fontFamily = NotoSansBengali
+                        )
+                    }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(20.dp))
+                            .background(RedWrong.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            "${w.wrongCount}× ভুল", fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold, color = RedWrong,
+                            fontFamily = NotoSansBengali
                         )
                     }
                 }
