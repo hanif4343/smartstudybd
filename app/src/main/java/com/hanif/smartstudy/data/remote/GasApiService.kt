@@ -88,7 +88,6 @@ object GasApiService {
     suspend fun reportQuestion(questionId: String, question: String, issue: String) =
         withContext(Dispatchers.IO) {
             try {
-                // Firebase RTDB তে Reports node এ সরাসরি লেখা
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
                 val secretKey    = BuildConfig.SECRET_KEY
                 val authParam    = if (secretKey.isNotBlank() && !secretKey.contains("%%"))
@@ -102,18 +101,16 @@ object GasApiService {
                     addProperty("status",     "pending")
                 }
 
-                // POST to Firebase RTDB — auto push key তৈরি হবে
-                val url  = "${'$'}firebaseBase/Reports.json${'$'}authParam"
+                val url  = "$firebaseBase/Reports.json$authParam"
                 val body = jsonObj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).post(body).build()
                 val resp = client.newCall(req).execute()
-                Log.d("GAS", "Report saved: HTTP ${'$'}{resp.code} → ${'$'}url")
+                Log.d("GAS", "Report saved: HTTP ${resp.code} → $url")
                 resp.close()
             } catch (e: Exception) {
-                Log.e("GAS", "reportQuestion: ${'$'}{e.message}")
+                Log.e("GAS", "reportQuestion: ${e.message}")
             }
         }
-}
 
     // ─────────────────────────────────────────────────────────
     // User Technique — Firebase RTDB
@@ -138,7 +135,6 @@ object GasApiService {
             val list = raw.map { (k, v) ->
                 com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to questionId))
             }.filter { t ->
-                // নিজের সব দেখাও, অন্যদের শুধু approved public
                 t.userId == myUserId || (t.isPublic && t.isApproved())
             }.sortedByDescending { it.timestamp }
             GasResult.Success(list)
@@ -164,14 +160,13 @@ object GasApiService {
                 addProperty("userName",   userName)
                 addProperty("text",       text)
                 addProperty("isPublic",   isPublic)
-                addProperty("status",     "pending") // public হলেও প্রথমে pending, admin approve করবে
+                addProperty("status",     "pending")
                 addProperty("timestamp",  System.currentTimeMillis())
             }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val req  = Request.Builder().url(url).post(body).build()
             val resp = client.newCall(req).execute()
             val respJson = resp.body?.string() ?: "{}"
-            // Firebase push এর response: {"name":"-pushKey"}
             val pushKey = gson.fromJson(respJson, JsonObject::class.java)?.get("name")?.asString ?: ""
             resp.close()
             Log.d("GAS", "Technique saved: $pushKey")
@@ -194,11 +189,10 @@ object GasApiService {
             val obj = JsonObject().apply {
                 addProperty("text",      text)
                 addProperty("isPublic",  isPublic)
-                addProperty("status",    if (isPublic) "pending" else "approved") // private হলে auto-approved
+                addProperty("status",    if (isPublic) "pending" else "approved")
                 addProperty("timestamp", System.currentTimeMillis())
             }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
-            // PATCH দিয়ে আংশিক আপডেট
             val req  = Request.Builder().url(url)
                 .patch(body)
                 .build()
@@ -233,7 +227,6 @@ object GasApiService {
                 val req       = Request.Builder().url(url).get().build()
                 val json      = client.newCall(req).execute().body?.string() ?: "null"
                 if (json == "null") return@withContext GasResult.Success(emptyList())
-                // { questionId: { pushKey: {...} } }
                 val raw: Map<String, Map<String, Map<String, Any>>> = gson.fromJson(
                     json, object : com.google.gson.reflect.TypeToken<
                             Map<String, Map<String, Map<String, Any>>>>() {}.type)
@@ -251,7 +244,7 @@ object GasApiService {
     suspend fun updateTechniqueStatus(
         questionId : String,
         pushKey    : String,
-        status     : String  // "approved" | "rejected"
+        status     : String
     ): GasResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
