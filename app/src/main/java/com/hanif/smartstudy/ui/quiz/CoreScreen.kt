@@ -44,6 +44,15 @@ fun CoreScreen(
         if (state.mode != mode) viewModel.setMode(mode)
     }
 
+    // Back handler: depth > 0 বা isMockZone বা showResult হলে ভেতরে handle করো
+    // depth 0 (subject list) হলে consume করি না — MainScreen এর BackHandler HOME এ নেবে
+    val isInsideNav = state.isMockZone ||
+                      state.showResult ||
+                      state.navPath.depth() > 0
+    BackHandler(enabled = isInsideNav) {
+        viewModel.navigateBack()
+    }
+
     when {
         // ── Mock Zone ──
         state.isMockZone -> {
