@@ -699,60 +699,86 @@ private fun AddTechniqueDialog(
     var text     by remember(existing) { mutableStateOf(existing?.text ?: "") }
     var isPublic by remember(existing) { mutableStateOf(existing?.isPublic ?: false) }
 
+    // Dark mode aware colors
+    val cardBg    = MaterialTheme.colorScheme.surface
+    val onCardBg  = MaterialTheme.colorScheme.onSurface
+    val subBg     = MaterialTheme.colorScheme.surfaceVariant
+    val subBorder = MaterialTheme.colorScheme.outline
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            shape  = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape     = RoundedCornerShape(16.dp),
+            colors    = CardDefaults.cardColors(containerColor = cardBg),
             elevation = CardDefaults.cardElevation(8.dp)
         ) {
             Column(Modifier.padding(20.dp)) {
                 Text(
                     if (existing == null) "💡 নতুন টেকনিক যোগ করুন" else "✏️ টেকনিক সম্পাদনা",
                     fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-                    color = SlateText, fontFamily = NotoSansBengali
+                    color = onCardBg, fontFamily = NotoSansBengali
                 )
                 Spacer(Modifier.height(12.dp))
 
                 OutlinedTextField(
-                    value           = text,
-                    onValueChange   = { text = it },
-                    placeholder     = { Text("এখানে টেকনিক লিখুন...", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                    modifier        = Modifier.fillMaxWidth().heightIn(min = 80.dp),
-                    minLines        = 3,
-                    maxLines        = 6,
-                    shape           = RoundedCornerShape(10.dp),
-                    textStyle       = LocalTextStyle.current.copy(fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    value         = text,
+                    onValueChange = { text = it },
+                    placeholder   = {
+                        Text(
+                            "এখানে টেকনিক লিখুন...",
+                            fontFamily = NotoSansBengali,
+                            fontSize   = 13.sp,
+                            color      = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    modifier   = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    minLines   = 3,
+                    maxLines   = 6,
+                    shape      = RoundedCornerShape(10.dp),
+                    textStyle  = LocalTextStyle.current.copy(
+                        fontFamily = NotoSansBengali,
+                        fontSize   = 13.sp,
+                        color      = onCardBg   // ← এটাই আগে ছিল না, তাই dark mode এ দেখা যেত না
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Indigo600,
+                        unfocusedBorderColor = subBorder,
+                        focusedTextColor     = onCardBg,
+                        unfocusedTextColor   = onCardBg,
+                        cursorColor          = Indigo600
+                    )
                 )
 
                 Spacer(Modifier.height(12.dp))
 
                 Surface(
-                    shape  = RoundedCornerShape(10.dp),
-                    color  = Color(0xFFF8FAFC),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shape    = RoundedCornerShape(10.dp),
+                    color    = subBg,
+                    border   = BorderStroke(1.dp, subBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
                                 if (isPublic) "🌐 সবার জন্য পাবলিক" else "🔒 শুধু আমার জন্য প্রাইভেট",
-                                fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                color = SlateText, fontFamily = NotoSansBengali
+                                fontSize   = 12.sp, fontWeight = FontWeight.Bold,
+                                color      = onCardBg, fontFamily = NotoSansBengali
                             )
                             Text(
                                 if (isPublic) "এডমিন অনুমোদনের পর সবাই দেখতে পাবে"
                                 else "শুধু আপনি দেখতে পাবেন",
-                                fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali
+                                fontSize = 10.sp,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = NotoSansBengali
                             )
                         }
                         Switch(
-                            checked  = isPublic,
+                            checked         = isPublic,
                             onCheckedChange = { isPublic = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Indigo600)
+                            colors          = SwitchDefaults.colors(checkedThumbColor = Indigo600)
                         )
                     }
                 }
