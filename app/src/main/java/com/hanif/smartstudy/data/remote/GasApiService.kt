@@ -113,22 +113,24 @@ object GasApiService {
         extra      : String = "",
         questionId : String = "",
         tab        : String = ""   // "quiz" | "qbank" | "study"
-    ) = withContext(Dispatchers.IO) {
-        try {
-            val url = "${BuildConfig.GAS_URL}" +
-                "?action=adminNotify" +
-                "&event=${java.net.URLEncoder.encode(event, "UTF-8")}" +
-                "&name=${java.net.URLEncoder.encode(userName, "UTF-8")}" +
-                "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
-                "&extra=${java.net.URLEncoder.encode(extra.take(80), "UTF-8")}" +
-                "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
-                "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}"
-            val req = Request.Builder().url(url).get().build()
-            val resp = client.newCall(req).execute()
-            Log.d("GAS", "notifyAdmin($event): HTTP ${resp.code}")
-            resp.close()
-        } catch (e: Exception) {
-            Log.e("GAS", "notifyAdmin: ${e.message}")
+    ) {
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "${BuildConfig.GAS_URL}" +
+                    "?action=adminNotify" +
+                    "&event=${java.net.URLEncoder.encode(event, "UTF-8")}" +
+                    "&name=${java.net.URLEncoder.encode(userName, "UTF-8")}" +
+                    "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
+                    "&extra=${java.net.URLEncoder.encode(extra.take(80), "UTF-8")}" +
+                    "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
+                    "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}"
+                val req = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                Log.d("GAS", "notifyAdmin($event): HTTP ${resp.code}")
+                resp.close()
+            } catch (e: Exception) {
+                Log.e("GAS", "notifyAdmin: ${e.message}")
+            }
         }
     }
 
@@ -139,7 +141,8 @@ object GasApiService {
         userName   : String = "",
         userPhone  : String = "",
         tab        : String = ""   // "quiz" | "qbank" | "study"
-    ) = withContext(Dispatchers.IO) {
+    ) {
+        withContext(Dispatchers.IO) {
             try {
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
                 val secretKey    = BuildConfig.SECRET_KEY
@@ -178,6 +181,7 @@ object GasApiService {
                 Log.e("GAS", "reportQuestion: ${e.message}")
             }
         }
+    }
 
     // ─────────────────────────────────────────────────────────
     // User Technique — Firebase RTDB
@@ -188,24 +192,26 @@ object GasApiService {
     suspend fun fetchTechniquesForQuestion(
         questionId : String,
         myUserId   : String
-    ): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> = withContext(Dispatchers.IO) {
-        try {
-            val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val secretKey = BuildConfig.SECRET_KEY
-            val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-            val url       = "$base/UserTechniques/${questionId}.json$auth"
-            val req       = Request.Builder().url(url).get().build()
-            val json      = client.newCall(req).execute().body?.string() ?: "null"
-            if (json == "null") return@withContext GasResult.Success(emptyList())
-            val raw: Map<String, Map<String, Any>> = gson.fromJson(
-                json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type)
-            val list = raw.map { (k, v) ->
-                com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to questionId))
-            }.filter { t ->
-                t.userId == myUserId || (t.isPublic && t.isApproved())
-            }.sortedByDescending { it.timestamp }
-            GasResult.Success(list)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+    ): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/UserTechniques/${questionId}.json$auth"
+                val req       = Request.Builder().url(url).get().build()
+                val json      = client.newCall(req).execute().body?.string() ?: "null"
+                if (json == "null") return@withContext GasResult.Success(emptyList())
+                val raw: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type)
+                val list = raw.map { (k, v) ->
+                    com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to questionId))
+                }.filter { t ->
+                    t.userId == myUserId || (t.isPublic && t.isApproved())
+                }.sortedByDescending { it.timestamp }
+                GasResult.Success(list)
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
     }
 
     /** নতুন টেকনিক সেভ করো */
@@ -215,41 +221,43 @@ object GasApiService {
         userName   : String,
         text       : String,
         isPublic   : Boolean
-    ): GasResult<String> = withContext(Dispatchers.IO) {
-        try {
-            val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val secretKey = BuildConfig.SECRET_KEY
-            val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-            val url       = "$base/UserTechniques/$questionId.json$auth"
-            val obj = JsonObject().apply {
-                addProperty("questionId", questionId)
-                addProperty("userId",     userId)
-                addProperty("userName",   userName)
-                addProperty("text",       text)
-                addProperty("isPublic",   isPublic)
-                addProperty("status",     "pending")
-                addProperty("timestamp",  System.currentTimeMillis())
-            }
-            val body = obj.toString().toRequestBody("application/json".toMediaType())
-            val req  = Request.Builder().url(url).post(body).build()
-            val resp = client.newCall(req).execute()
-            val respJson = resp.body?.string() ?: "{}"
-            val pushKey = gson.fromJson(respJson, JsonObject::class.java)?.get("name")?.asString ?: ""
-            resp.close()
-            Log.d("GAS", "Technique saved: $pushKey")
+    ): GasResult<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/UserTechniques/$questionId.json$auth"
+                val obj = JsonObject().apply {
+                    addProperty("questionId", questionId)
+                    addProperty("userId",     userId)
+                    addProperty("userName",   userName)
+                    addProperty("text",       text)
+                    addProperty("isPublic",   isPublic)
+                    addProperty("status",     "pending")
+                    addProperty("timestamp",  System.currentTimeMillis())
+                }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).post(body).build()
+                val resp = client.newCall(req).execute()
+                val respJson = resp.body?.string() ?: "{}"
+                val pushKey = gson.fromJson(respJson, JsonObject::class.java)?.get("name")?.asString ?: ""
+                resp.close()
+                Log.d("GAS", "Technique saved: $pushKey")
 
-            // শুধু public হলে admin কে notify করো (approval লাগবে)
-            if (isPublic) {
-                notifyAdmin(
-                    event     = "technique",
-                    userName  = userName,
-                    userPhone = userId,
-                    extra     = text.take(60)
-                )
-            }
+                // শুধু public হলে admin কে notify করো (approval লাগবে)
+                if (isPublic) {
+                    notifyAdmin(
+                        event     = "technique",
+                        userName  = userName,
+                        userPhone = userId,
+                        extra     = text.take(60)
+                    )
+                }
 
-            GasResult.Success(pushKey)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                GasResult.Success(pushKey)
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
     }
 
     /** নিজের টেকনিক আপডেট (text বা visibility পরিবর্তন) */
@@ -258,31 +266,33 @@ object GasApiService {
         pushKey     : String,
         text        : String,
         isPublic    : Boolean
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val secretKey = BuildConfig.SECRET_KEY
-            val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-            val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
-            val obj = JsonObject().apply {
-                addProperty("text",      text)
-                addProperty("isPublic",  isPublic)
-                addProperty("status",    if (isPublic) "pending" else "approved")
-                addProperty("timestamp", System.currentTimeMillis())
-            }
-            val body = obj.toString().toRequestBody("application/json".toMediaType())
-            val req  = Request.Builder().url(url)
-                .patch(body)
-                .build()
-            val resp = client.newCall(req).execute()
-            resp.close()
-            GasResult.Success(Unit)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+    ): GasResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
+                val obj = JsonObject().apply {
+                    addProperty("text",      text)
+                    addProperty("isPublic",  isPublic)
+                    addProperty("status",    if (isPublic) "pending" else "approved")
+                    addProperty("timestamp", System.currentTimeMillis())
+                }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url)
+                    .patch(body)
+                    .build()
+                val resp = client.newCall(req).execute()
+                resp.close()
+                GasResult.Success(Unit)
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
     }
 
     /** টেকনিক ডিলিট */
-    suspend fun deleteTechnique(questionId: String, pushKey: String): GasResult<Unit> =
-        withContext(Dispatchers.IO) {
+    suspend fun deleteTechnique(questionId: String, pushKey: String): GasResult<Unit> {
+        return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
                 val secretKey = BuildConfig.SECRET_KEY
@@ -293,10 +303,11 @@ object GasApiService {
                 GasResult.Success(Unit)
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
+    }
 
     /** Admin: সব pending public টেকনিক fetch */
-    suspend fun fetchPendingTechniques(): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> =
-        withContext(Dispatchers.IO) {
+    suspend fun fetchPendingTechniques(): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
+        return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
                 val secretKey = BuildConfig.SECRET_KEY
@@ -317,24 +328,27 @@ object GasApiService {
                 GasResult.Success(list)
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
+    }
 
     /** Admin: একটি technique approve বা reject করো */
     suspend fun updateTechniqueStatus(
         questionId : String,
         pushKey    : String,
         status     : String
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val secretKey = BuildConfig.SECRET_KEY
-            val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-            val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
-            val obj = JsonObject().apply { addProperty("status", status) }
-            val body = obj.toString().toRequestBody("application/json".toMediaType())
-            val req  = Request.Builder().url(url).patch(body).build()
-            client.newCall(req).execute().close()
-            GasResult.Success(Unit)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+    ): GasResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
+                val obj = JsonObject().apply { addProperty("status", status) }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).patch(body).build()
+                client.newCall(req).execute().close()
+                GasResult.Success(Unit)
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
     }
 }
 
