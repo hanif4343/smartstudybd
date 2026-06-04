@@ -28,8 +28,8 @@ object GasApiService {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    suspend fun login(phone: String, password: String): GasResult<Map<String, Any>> =
-        withContext(Dispatchers.IO) {
+    suspend fun login(phone: String, password: String): GasResult<Map<String, Any>> {
+        return withContext(Dispatchers.IO) {
             try {
                 val body = FormBody.Builder()
                     .add("action", "login")
@@ -45,36 +45,43 @@ object GasApiService {
                 } else {
                     GasResult.Error(map["message"]?.toString() ?: "Login failed")
                 }
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+            } catch (e: Exception) { 
+                GasResult.Error(e.message ?: "Network error") 
+            }
         }
+    }
 
     suspend fun signup(
         name: String, phone: String, password: String,
         userType: String, classLevel: String
-    ): GasResult<Map<String, Any>> = withContext(Dispatchers.IO) {
-        try {
-            val body = FormBody.Builder()
-                .add("action", "signup")
-                .add("name", name)
-                .add("phone", phone)
-                .add("password", hashPassword(password))
-                .add("userType", userType)
-                .add("classLevel", classLevel)
-                .build()
-            val req  = Request.Builder().url(GAS_URL).post(body).build()
-            val json = client.newCall(req).execute().body?.string()
-                ?: return@withContext GasResult.Error("No response")
-            val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
-            if (map["status"] == "ok") {
-                GasResult.Success(map)
-            } else {
-                GasResult.Error(map["message"]?.toString() ?: "Signup failed")
+    ): GasResult<Map<String, Any>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val body = FormBody.Builder()
+                    .add("action", "signup")
+                    .add("name", name)
+                    .add("phone", phone)
+                    .add("password", hashPassword(password))
+                    .add("userType", userType)
+                    .add("classLevel", classLevel)
+                    .build()
+                val req  = Request.Builder().url(GAS_URL).post(body).build()
+                val json = client.newCall(req).execute().body?.string()
+                    ?: return@withContext GasResult.Error("No response")
+                val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
+                if (map["status"] == "ok") {
+                    GasResult.Success(map)
+                } else {
+                    GasResult.Error(map["message"]?.toString() ?: "Signup failed")
+                }
+            } catch (e: Exception) { 
+                GasResult.Error(e.message ?: "Network error") 
             }
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
     }
 
-    suspend fun getUserFromFirebase(phone: String): GasResult<Map<String, Any>> =
-        withContext(Dispatchers.IO) {
+    suspend fun getUserFromFirebase(phone: String): GasResult<Map<String, Any>> {
+        return withContext(Dispatchers.IO) {
             try {
                 val req  = Request.Builder()
                     .url("${BuildConfig.FIREBASE_URL}Users.json").get().build()
@@ -87,15 +94,16 @@ object GasApiService {
                     p.trim() == phone.trim()
                 }
                 
-                // এখানে স্পষ্ট করে return@withContext যুক্ত করা হয়েছে, যা কনফিউশন দূর করবে
                 if (user != null) {
-                    return@withContext GasResult.Success(user)
+                    GasResult.Success(user)
                 } else {
-                    return@withContext GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                    GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
                 }
-                
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+            } catch (e: Exception) { 
+                GasResult.Error(e.message ?: "Network error") 
+            }
         }
+    }
 
     /** Admin কে FCM notification পাঠাও — technique বা report জমা হলে */
     suspend fun notifyAdmin(
