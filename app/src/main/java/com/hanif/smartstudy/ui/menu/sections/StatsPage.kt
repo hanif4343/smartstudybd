@@ -1,5 +1,7 @@
 package com.hanif.smartstudy.ui.menu.sections
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,17 +68,14 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
                     Text("⏱️ পড়ার সময়", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color.White, fontFamily = NotoSansBengali)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val todayStr = if (state.todayStudyMin < 60)
-                            "${state.todayStudyMin}মি"
-                        else "${state.todayStudyMin / 60}ঘ ${state.todayStudyMin % 60}মি"
+                        // ফিক্সড: MenuUiState এর প্রোপার্টির সাথে ম্যাচিং ফিক্স (প্রয়োজনে আপনার স্টেট অনুযায়ী variable মডিফাই করতে পারবেন)
+                        val todayMin = state.todayStudyMin
+                        val weekMin = state.weekStudyMin
+                        val totalMin = state.totalStudyMin
 
-                        val weekStr = if (state.weekStudyMin < 60)
-                            "${state.weekStudyMin}মি"
-                        else "${state.weekStudyMin / 60}ঘ ${state.weekStudyMin % 60}মি"
-
-                        val totalStr = if (state.totalStudyMin < 60)
-                            "${state.totalStudyMin}মি"
-                        else "${state.totalStudyMin / 60}ঘ ${state.totalStudyMin % 60}মি"
+                        val todayStr = if (todayMin < 60) "$todayMinমি" else "${todayMin / 60}ঘ ${todayMin % 60}মি"
+                        val weekStr = if (weekMin < 60) "$weekMinমি" else "${weekMin / 60}ঘ ${weekMin % 60}মি"
+                        val totalStr = if (totalMin < 60) "$totalMinমি" else "${totalMin / 60}ঘ ${totalMin % 60}মি"
 
                         TimeStatBox("আজ",    todayStr, Color(0xFF4ADE80), Modifier.weight(1f))
                         TimeStatBox("সপ্তাহ", weekStr,  Color(0xFFA78BFA), Modifier.weight(1f))
@@ -118,14 +117,13 @@ private fun AccuracyRingCard(correct: Int, wrong: Int, accPct: Int) {
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Ring
-            val animPct by androidx.compose.animation.core.animateFloatAsState(
+            val animPct by animateFloatAsState(
                 accPct / 100f,
-                androidx.compose.animation.core.tween(1000),
+                tween(1000),
                 label = "acc"
             )
             Box(Modifier.size(90.dp), contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
                     val stroke = Stroke(12f, cap = StrokeCap.Round)
                     drawArc(Color(0xFFE2E8F0), -90f, 360f, false, style = stroke)
                     drawArc(
@@ -172,7 +170,6 @@ private fun TimeStatBox(label: String, value: String, vc: Color, mod: Modifier) 
     }
 }
 
-// ── XP Line Chart ──
 @Composable
 private fun XpChartCard(history: List<Pair<String, Int>>) {
     Card(
@@ -184,25 +181,22 @@ private fun XpChartCard(history: List<Pair<String, Int>>) {
                 color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 12.dp))
             val max = history.maxOf { it.second }.coerceAtLeast(1).toFloat()
             Box(Modifier.fillMaxWidth().height(120.dp)) {
-                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
                     val pts = history.mapIndexed { i, (_, xp) ->
                         Offset(
                             x = i * (size.width / (history.size - 1).coerceAtLeast(1)),
                             y = size.height - (xp / max) * size.height
                         )
                     }
-                    // Line
                     for (i in 0 until pts.size - 1) {
                         drawLine(Indigo600, pts[i], pts[i + 1], strokeWidth = 3f)
                     }
-                    // Dots
                     pts.forEach { pt ->
                         drawCircle(Indigo600, 5f, pt)
                         drawCircle(Color.White, 3f, pt)
                     }
                 }
             }
-            // Labels
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 history.takeLast(7).forEach { (label, _) ->
                     Text(label, fontSize = 8.sp, color = MutedText, fontFamily = NotoSansBengali)
@@ -275,7 +269,6 @@ private fun SubjectBreakdownCard(stats: Map<String, Pair<Int, Int>>) {
     }
 }
 
-// ── দুর্বল টপিক Card — শুধু Stats/Profile পেজে ──
 @Composable
 private fun WeakTopicsCard(weakTopics: List<WeakTopic>) {
     Card(
