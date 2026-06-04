@@ -68,6 +68,11 @@ fun MenuScreen(
         if (initialPage != null) screen = startScreen
     }
 
+    // Sub-screen এ থাকলে back দিলে MAIN এ ফেরত
+    androidx.activity.compose.BackHandler(enabled = screen != MenuNav.MAIN) {
+        screen = MenuNav.MAIN
+    }
+
     AnimatedContent(
         targetState = screen,
         transitionSpec = {
