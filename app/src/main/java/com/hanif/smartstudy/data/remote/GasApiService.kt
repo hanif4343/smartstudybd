@@ -40,8 +40,11 @@ object GasApiService {
                 val json = client.newCall(req).execute().body?.string()
                     ?: return@withContext GasResult.Error("No response")
                 val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
-                if (map["status"] == "ok") GasResult.Success(map)
-                else GasResult.Error(map["message"]?.toString() ?: "Login failed")
+                if (map["status"] == "ok") {
+                    GasResult.Success(map)
+                } else {
+                    GasResult.Error(map["message"]?.toString() ?: "Login failed")
+                }
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
 
@@ -62,8 +65,11 @@ object GasApiService {
             val json = client.newCall(req).execute().body?.string()
                 ?: return@withContext GasResult.Error("No response")
             val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
-            if (map["status"] == "ok") GasResult.Success(map)
-            else GasResult.Error(map["message"]?.toString() ?: "Signup failed")
+            if (map["status"] == "ok") {
+                GasResult.Success(map)
+            } else {
+                GasResult.Error(map["message"]?.toString() ?: "Signup failed")
+            }
         } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
     }
 
@@ -80,8 +86,11 @@ object GasApiService {
                     val p = entry["Phone"]?.toString() ?: entry["phone"]?.toString() ?: ""
                     p.trim() == phone.trim()
                 }
-                if (user != null) GasResult.Success(user)
-                else GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                if (user != null) {
+                    GasResult.Success(user)
+                } else {
+                    GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                }
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
 
