@@ -3,7 +3,9 @@ package com.hanif.smartstudy.ui.quiz
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
 /**
@@ -23,6 +25,8 @@ fun CoreScreen(
     onStreakUpdated       : (Int) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
+    val ctx   = LocalContext.current
+    val currentUser = remember { SessionManager(ctx).getCurrentUser() }
 
     // Collect and forward achievement/streak events
     val achievement by viewModel.pendingAchievement.collectAsState()
@@ -57,16 +61,17 @@ fun CoreScreen(
         state.showResult && state.result != null -> {
             // Show question list behind + result on top
             QuestionListScreen(
-                viewModel = viewModel,
-                mode      = state.mode,
-                subject   = state.navPath.subject ?: "",
-                subTopic  = state.navPath.subTopic ?: "",
-                questions = state.questions,
-                timerSec  = 0,
-                totalTime = state.totalTimeSec,
-                answered  = state.answeredCount,
-                onBack    = { viewModel.navigateBack() },
-                onSubmit  = {}
+                viewModel   = viewModel,
+                mode        = state.mode,
+                subject     = state.navPath.subject ?: "",
+                subTopic    = state.navPath.subTopic ?: "",
+                questions   = state.questions,
+                timerSec    = 0,
+                totalTime   = state.totalTimeSec,
+                answered    = state.answeredCount,
+                onBack      = { viewModel.navigateBack() },
+                onSubmit    = {},
+                currentUser = currentUser
             )
             ResultModal(
                 result  = state.result!!,
@@ -84,16 +89,17 @@ fun CoreScreen(
         // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
             QuestionListScreen(
-                viewModel = viewModel,
-                mode      = state.mode,
-                subject   = state.navPath.subject ?: "",
-                subTopic  = state.navPath.subTopic ?: "",
-                questions = state.questions,
-                timerSec  = state.timerSec,
-                totalTime = state.totalTimeSec,
-                answered  = state.answeredCount,
-                onBack    = { viewModel.navigateBack() },
-                onSubmit  = { viewModel.submitQuiz() }
+                viewModel   = viewModel,
+                mode        = state.mode,
+                subject     = state.navPath.subject ?: "",
+                subTopic    = state.navPath.subTopic ?: "",
+                questions   = state.questions,
+                timerSec    = state.timerSec,
+                totalTime   = state.totalTimeSec,
+                answered    = state.answeredCount,
+                onBack      = { viewModel.navigateBack() },
+                onSubmit    = { viewModel.submitQuiz() },
+                currentUser = currentUser
             )
         }
 
