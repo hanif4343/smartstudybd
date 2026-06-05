@@ -48,12 +48,8 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                     session.saveUser(user)
                     Log.d("Auth", "Login success: ${user.name}")
 
-                    // reducedUi flag থাকলে app ছোট size এ চলবে (0.65f = ~65% সাইজ)
-                    // এই flag টা Firebase এ admin সেট করে দেয়
-                    // user নিজে menu থেকে reset করতে পারবে
-                    if (user.reducedUi && session.getFontScale() == 1.0f) {
-                        session.setFontScale(0.65f)
-                    }
+                    // reducedUi flag আছে মানে এই user নিজে menu থেকে + / - দিয়ে
+                    // app এর size adjust করতে পারবে। প্রথমবার login এ 1.0f (normal) থেকে শুরু।
 
                     _authState.value = AuthState.Success(user)
                 }
