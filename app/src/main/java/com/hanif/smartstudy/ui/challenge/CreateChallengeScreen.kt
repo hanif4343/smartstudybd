@@ -66,19 +66,65 @@ fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                 }
             }
 
+            // ── Ghost Mode toggle ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(14.dp),
+                colors   = CardDefaults.cardColors(
+                    containerColor = if (state.isGhostMode) Color(0xFF4C1D95).copy(0.3f)
+                                     else Color(0xFF1E1B4B).copy(0.3f)
+                ),
+                border   = BorderStroke(1.dp,
+                    if (state.isGhostMode) Color(0xFF7C3AED) else Color.White.copy(0.15f))
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { vm.toggleGhostMode() }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("👻", fontSize = 24.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text("Ghost Mode", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali)
+                        Text(
+                            if (state.isGhostMode)
+                                "তুমি আগে পরীক্ষা দেবে, score lock হবে — পরে বন্ধু দেবে"
+                            else
+                                "বন্ধু অনলাইনে না থাকলে Ghost Mode চালু করো",
+                            fontSize = 10.sp, color = Color.White.copy(0.6f),
+                            fontFamily = NotoSansBengali, lineHeight = 13.sp
+                        )
+                    }
+                    Switch(
+                        checked = state.isGhostMode,
+                        onCheckedChange = { vm.toggleGhostMode() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor       = Color.White,
+                            checkedTrackColor       = Color(0xFF7C3AED),
+                            uncheckedThumbColor     = Color.White.copy(0.5f),
+                            uncheckedTrackColor     = Color.White.copy(0.15f)
+                        )
+                    )
+                }
+            }
+
             // Create button
             Button(
-                onClick  = vm::createChallenge,
+                onClick  = if (state.isGhostMode) vm::createGhostChallenge else vm::createChallenge,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape    = RoundedCornerShape(16.dp),
-                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isGhostMode) Color(0xFF7C3AED) else Color(0xFF4F46E5)
+                ),
                 enabled  = !state.isLoading && state.invitedUsers.isNotEmpty() && state.selectedSubject.isNotBlank()
             ) {
                 if (state.isLoading) {
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("🚀 চ্যালেঞ্জ পাঠাও!", fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+                    Text(
+                        if (state.isGhostMode) "👻 Ghost Challenge শুরু করো!" else "🚀 চ্যালেঞ্জ পাঠাও!",
+                        fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali
+                    )
                 }
             }
             Spacer(Modifier.height(16.dp))
