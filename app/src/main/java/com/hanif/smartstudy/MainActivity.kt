@@ -70,8 +70,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val darkFlow  = remember { session.darkModeFlow() }
             val themeFlow = remember { session.themeColorFlow() }
+            val scaleFlow = remember { session.fontScaleFlow() }
             val isDark    by darkFlow.collectAsState(initial = session.isDarkMode())
             val themeStr  by themeFlow.collectAsState(initial = session.getThemeColor())
+            val uiScale  by scaleFlow.collectAsState(initial = session.getFontScale())
             val appTheme  = themeFromString(themeStr)
 
             // Offline state
@@ -84,7 +86,7 @@ class MainActivity : ComponentActivity() {
             var showStreak         by remember { mutableStateOf(false) }
             var streakCount        by remember { mutableStateOf(0) }
 
-            SmartStudyTheme(darkTheme = isDark, appTheme = appTheme) {
+            SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize()) {
 
