@@ -2,15 +2,13 @@ package com.hanif.smartstudy.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.font.FontFamily
 import androidx.core.view.WindowCompat
 
 // ── Base palette ──────────────────────────────────────────────
@@ -30,7 +28,7 @@ val Slate800   = Color(0xFF1E293B)
 val Slate900   = Color(0xFF0F172A)
 val White      = Color(0xFFFFFFFF)
 
-// ── Font ────────────────────────────────────────────────────────
+// ── Font ──────────────────────────────────────────────────────
 val NotoSansBengali = FontFamily.Default
 
 // ── 4 theme definitions ───────────────────────────────────────
@@ -98,30 +96,53 @@ private fun darkColors(theme: AppTheme) = when (theme) {
 val LocalDarkMode  = compositionLocalOf { mutableStateOf(false) }
 val LocalAppTheme  = compositionLocalOf { mutableStateOf(AppTheme.INDIGO) }
 
+// uiScale: 1.0f = normal সাইজ।
+// বাবার phone এ যদি system font/display বড় করা থাকে,
+// তাহলে এই value 1.0f এর নিচে দিলে পুরো app ছোট হয়ে যাবে।
+// (যেমন 0.75f মানে তিন-ভাগের দুই ভাগ, 0.6f মানে আরো ছোট)
+val LocalUiScale = compositionLocalOf { mutableStateOf(1.0f) }
+
 @Composable
 fun SmartStudyTheme(
     darkTheme : Boolean  = isSystemInDarkTheme(),
     appTheme  : AppTheme = AppTheme.INDIGO,
+    uiScale   : Float    = 1.0f,   // <-- এটাই পুরো app ছোট/বড় করে
     content   : @Composable () -> Unit
 ) {
     val darkMode     = remember { mutableStateOf(darkTheme) }
     val themeState   = remember { mutableStateOf(appTheme) }
+    val uiScaleState = remember { mutableStateOf(uiScale) }
     val colorScheme  = if (darkMode.value) darkColors(themeState.value) else lightColors(themeState.value)
+
+    LaunchedEffect(darkTheme) { darkMode.value = darkTheme }
+    LaunchedEffect(uiScale)   { uiScaleState.value = uiScale }
 
     val view = LocalView.current
     if (!view.isInEditMode) {
-        SideEffect {
+        androidx.compose.runtime.SideEffect {
             val window = (view.context as Activity).window
-            // Edge-to-edge: status bar transparent, content draws behind
             WindowCompat.setDecorFitsSystemWindows(window, false)
             window.statusBarColor = android.graphics.Color.TRANSPARENT
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkMode.value
         }
     }
 
+    // ── KEY: LocalDensity override ───────────────────────────
+    // এটাই পুরো UI কে scale করে — dp, sp, padding, icon, button সব।
+    // System এর original density নিয়ে সেটাকে uiScale দিয়ে multiply করো।
+    val baseDensity = LocalDensity.current
+    val scaledDensity = remember(uiScaleState.value, baseDensity) {
+        Density(
+            density    = baseDensity.density    * uiScaleState.value,
+            fontScale  = baseDensity.fontScale  * uiScaleState.value
+        )
+    }
+
     CompositionLocalProvider(
-        LocalDarkMode provides darkMode,
-        LocalAppTheme provides themeState
+        LocalDarkMode  provides darkMode,
+        LocalAppTheme  provides themeState,
+        LocalUiScale   provides uiScaleState,
+        LocalDensity   provides scaledDensity        // <-- পুরো app scale হয়
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
