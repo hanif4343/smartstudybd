@@ -2,6 +2,9 @@
   "rules": {
     ".read": true,
     ".write": "auth != null",
+    "users": {
+      ".indexOn": ["Phone", "phone"]
+    },
     "Challenges": {
       "$challengeId": {
         ".read": true,
