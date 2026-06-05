@@ -396,7 +396,9 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             val me = session.getCurrentUser() ?: return@launch
-            val c  = ContentRepository.getMemCache() ?: content.getContent()
+            val c  = ContentRepository.getMemCache()
+                ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
             val pool = (c.quiz.filter { it.subject == s.selectedSubject &&
                 (s.selectedSubTopic.isBlank() || it.subTopic == s.selectedSubTopic) })
                 .shuffled().take(s.questionCount)
@@ -416,7 +418,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             }
             // সরাসরি Exam এ যাও — creator একাই পরীক্ষা দেবে
             val ghostChallenge = repo.getChallenge(id)
-            val questions = c.quiz.filter { it.id in questionIds }
+            val questions = c.quiz.filter { it.id in questionIds }.map { QuestionItem.fromQuizItem(it) }
             _state.update { it.copy(
                 isLoading     = false,
                 challenge     = ghostChallenge,
@@ -437,7 +439,9 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             val me = session.getCurrentUser() ?: return@launch
-            val c  = ContentRepository.getMemCache() ?: content.getContent()
+            val c  = ContentRepository.getMemCache()
+                ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
 
             // opponents list
             val opponents = challenge.participants.values
