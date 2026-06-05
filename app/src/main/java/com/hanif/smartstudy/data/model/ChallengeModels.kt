@@ -1,7 +1,7 @@
 package com.hanif.smartstudy.data.model
 
 // ─────────────────────────────────────────────────────────
-// Challenge Models — Phase 1
+// Challenge Models
 // Firebase path: /Challenges/{challengeId}/
 // ─────────────────────────────────────────────────────────
 
@@ -10,16 +10,17 @@ enum class ChallengeStatus {
     WAITING,    // সবাই accept করেছে, শুরু হয়নি
     ACTIVE,     // পরীক্ষা চলছে
     FINISHED,   // সবাই submit করেছে
-    CANCELLED   // কেউ decline করেছে
+    CANCELLED,  // কেউ decline করেছে
+    GHOST_ACTIVE // Ghost Mode: creator submit করেছে, বন্ধু এখনো দেয়নি
 }
 
 data class ChallengeParticipant(
     val phone       : String = "",
     val name        : String = "",
     val status      : String = "INVITED",  // INVITED | ACCEPTED | DECLINED | SUBMITTED
-    val currentQ    : Int    = 0,          // কত নম্বর প্রশ্নে আছে (live tracking)
+    val currentQ    : Int    = 0,
     val submittedAt : Long   = 0L,
-    val score       : Int    = -1,         // -1 = not submitted yet (blind during exam)
+    val score       : Int    = -1,
     val correctIds  : List<String> = emptyList()
 )
 
@@ -27,15 +28,18 @@ data class Challenge(
     val id           : String = "",
     val creatorPhone : String = "",
     val creatorName  : String = "",
-    val subject      : String = "",        // "বাংলা ব্যাকরণ"
-    val subTopic     : String = "",        // optional
+    val subject      : String = "",
+    val subTopic     : String = "",
     val questionCount: Int    = 10,
-    val timeLimitSec : Int    = 600,       // 10 minutes default
+    val timeLimitSec : Int    = 600,
     val status       : String = ChallengeStatus.PENDING.name,
     val createdAt    : Long   = 0L,
     val startedAt    : Long   = 0L,
-    val questionIds  : List<String> = emptyList(),  // locked question ids
-    val participants : Map<String, ChallengeParticipant> = emptyMap()
+    val questionIds  : List<String> = emptyList(),
+    val participants : Map<String, ChallengeParticipant> = emptyMap(),
+    // Ghost Mode
+    val isGhostMode  : Boolean = false,
+    val ghostLockedAt: Long    = 0L
 ) {
     fun getStatus() = try { ChallengeStatus.valueOf(status) } catch (_: Exception) { ChallengeStatus.PENDING }
 
@@ -58,9 +62,9 @@ data class Challenge(
         participants.values.count { it.status == "SUBMITTED" }
 }
 
-// Firebase key-safe phone — dots/# not allowed
+// Firebase key-safe phone
 fun String.firebaseKey() = replace(".", "_").replace("#", "_").replace("[", "_").replace("]", "_").replace("/", "_")
-fun String.fromFirebaseKey() = replace("_", ".")  // simple reverse (may not be perfect for all phones)
+fun String.fromFirebaseKey() = replace("_", ".")
 
 data class ChallengeInvite(
     val challengeId  : String = "",
@@ -69,5 +73,23 @@ data class ChallengeInvite(
     val subject      : String = "",
     val questionCount: Int    = 10,
     val timeLimitSec : Int    = 600,
-    val createdAt    : Long   = 0L
+    val createdAt    : Long   = 0L,
+    val isGhostMode  : Boolean = false   // Ghost invite হলে দেখাবে "Ghost Challenge"
+)
+
+// ─────────────────────────────────────────────────────────
+// Match History — Firebase path: /MatchHistory/{myPhone}/{opponentPhone}/{matchId}
+// ─────────────────────────────────────────────────────────
+
+data class MatchRecord(
+    val challengeId   : String = "",
+    val subject       : String = "",
+    val myScore       : Int    = 0,
+    val opponentScore : Int    = 0,
+    val opponentName  : String = "",
+    val opponentPhone : String = "",
+    val iWon          : Boolean = false,
+    val total         : Int    = 0,
+    val playedAt      : Long   = 0L,
+    val isGhostMode   : Boolean = false
 )
