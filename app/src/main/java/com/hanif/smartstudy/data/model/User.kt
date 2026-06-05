@@ -10,7 +10,10 @@ data class User(
     val userType   : String? = null,
     val classLevel : String? = null,
     val xp         : Int     = 0,
-    val fcmToken   : String? = null
+    val fcmToken   : String? = null,
+    // Admin এই flag সেট করলে এই user এর জন্য app ছোট হবে
+    // এবং menu তে "Normal Size" button দেখাবে
+    val reducedUi  : Boolean = false
 ) {
     fun isAdmin()    = role?.lowercase() == "admin"
     fun isLoggedIn() = !phone.isNullOrEmpty()
@@ -23,6 +26,17 @@ data class User(
                 .mapNotNull { map[it]?.toString()?.trim()?.ifEmpty { null } }
                 .firstOrNull()
 
+            fun getBool(vararg keys: String): Boolean = keys
+                .mapNotNull { map[it] }
+                .firstOrNull()
+                ?.let {
+                    when (it) {
+                        is Boolean -> it
+                        is String  -> it.lowercase() == "true"
+                        else       -> false
+                    }
+                } ?: false
+
             return User(
                 phone      = get("Phone", "phone"),
                 name       = get("Name", "name"),
@@ -32,7 +46,8 @@ data class User(
                 userType   = get("UserType", "userType", "Type", "type"),
                 classLevel = get("ClassLevel", "classLevel", "Class", "class"),
                 xp         = map["XP"]?.toString()?.toIntOrNull()
-                          ?: map["xp"]?.toString()?.toIntOrNull() ?: 0
+                          ?: map["xp"]?.toString()?.toIntOrNull() ?: 0,
+                reducedUi  = getBool("ReducedUi", "reducedUi", "reduced_ui")
             )
         }
     }
