@@ -309,7 +309,9 @@ class ChallengeRepository {
             createdAt     = map["createdAt"]?.toString()?.toLongOrNull()    ?: 0L,
             startedAt     = map["startedAt"]?.toString()?.toLongOrNull()    ?: 0L,
             questionIds   = (map["questionIds"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
-            participants  = participants
+            participants  = participants,
+            isGhostMode   = map["isGhostMode"] as? Boolean ?: false,
+            ghostLockedAt = map["ghostLockedAt"]?.toString()?.toLongOrNull() ?: 0L
         )
     }
 
@@ -332,6 +334,203 @@ class ChallengeRepository {
             "submittedAt" to p.submittedAt,
             "score"       to p.score,
             "correctIds"  to p.correctIds
-        )}
+        )},
+        "isGhostMode"   to c.isGhostMode,
+        "ghostLockedAt" to c.ghostLockedAt
     )
+}
+
+    // ────────────────────────────────────────────────────────
+    // GHOST MODE
+    // ────────────────────────────────────────────────────────
+
+    // Ghost: creator একা পরীক্ষা দিয়ে score lock করে, তারপর invite পাঠায়
+    suspend fun lockGhostChallenge(
+        challengeId : String,
+        myPhone     : String,
+        score       : Int,
+        correctIds  : List<String>
+    ): Boolean {
+        return try {
+            val key = myPhone.firebaseKey()
+            val updates = mapOf<String, Any>(
+                "participants/$key/status"      to "SUBMITTED",
+                "participants/$key/score"       to score,
+                "participants/$key/correctIds"  to correctIds,
+                "participants/$key/submittedAt" to System.currentTimeMillis(),
+                "status"                        to ChallengeStatus.GHOST_ACTIVE.name,
+                "ghostLockedAt"                 to System.currentTimeMillis()
+            )
+            challengesRef.child(challengeId).updateChildren(updates).await()
+            Log.d(TAG, "Ghost locked: $challengeId score=$score")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "lockGhostChallenge: ${e.message}")
+            false
+        }
+    }
+
+    // Ghost invite পাঠাও (creator score lock করার পরে)
+    fun sendGhostInvite(toPhone: String, invite: ChallengeInvite) {
+        db.getReference("Invites/${toPhone.firebaseKey()}/${invite.challengeId}")
+            .setValue(mapOf(
+                "challengeId"   to invite.challengeId,
+                "creatorName"   to invite.creatorName,
+                "creatorPhone"  to invite.creatorPhone,
+                "subject"       to invite.subject,
+                "questionCount" to invite.questionCount,
+                "timeLimitSec"  to invite.timeLimitSec,
+                "createdAt"     to invite.createdAt,
+                "isGhostMode"   to true
+            ))
+    }
+
+    // ────────────────────────────────────────────────────────
+    // MATCH HISTORY
+    // ────────────────────────────────────────────────────────
+
+    // Challenge শেষে দুজনের ইতিহাসে record save করো
+    suspend fun saveMatchHistory(
+        myPhone      : String,
+        myName       : String,
+        opponent     : ChallengeParticipant,
+        challengeId  : String,
+        subject      : String,
+        myScore      : Int,
+        total        : Int,
+        isGhostMode  : Boolean = false
+    ) {
+        try {
+            val iWon = myScore > opponent.score
+            val now  = System.currentTimeMillis()
+            val record = mapOf(
+                "challengeId"   to challengeId,
+                "subject"       to subject,
+                "myScore"       to myScore,
+                "opponentScore" to opponent.score,
+                "opponentName"  to opponent.name,
+                "opponentPhone" to opponent.phone,
+                "iWon"          to iWon,
+                "total"         to total,
+                "playedAt"      to now,
+                "isGhostMode"   to isGhostMode
+            )
+            // আমার history তে save
+            db.getReference("MatchHistory/${myPhone.firebaseKey()}/${opponent.phone.firebaseKey()}/$challengeId")
+                .setValue(record).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "saveMatchHistory: ${e.message}")
+        }
+    }
+
+    // নির্দিষ্ট opponent এর সাথে match history আনো
+    suspend fun getMatchHistory(myPhone: String, opponentPhone: String): List<MatchRecord> {
+        return try {
+            val snap = withTimeout(10_000L) {
+                db.getReference("MatchHistory/${myPhone.firebaseKey()}/${opponentPhone.firebaseKey()}")
+                    .orderByChild("playedAt").limitToLast(20).get().await()
+            }
+            snap.children.mapNotNull { child ->
+                try {
+                    @Suppress("UNCHECKED_CAST")
+                    val m = child.value as? Map<String, Any> ?: return@mapNotNull null
+                    MatchRecord(
+                        challengeId   = m["challengeId"]?.toString()   ?: "",
+                        subject       = m["subject"]?.toString()        ?: "",
+                        myScore       = m["myScore"]?.toString()?.toIntOrNull() ?: 0,
+                        opponentScore = m["opponentScore"]?.toString()?.toIntOrNull() ?: 0,
+                        opponentName  = m["opponentName"]?.toString()   ?: "",
+                        opponentPhone = m["opponentPhone"]?.toString()  ?: "",
+                        iWon          = m["iWon"] as? Boolean ?: false,
+                        total         = m["total"]?.toString()?.toIntOrNull() ?: 0,
+                        playedAt      = m["playedAt"]?.toString()?.toLongOrNull() ?: 0L,
+                        isGhostMode   = m["isGhostMode"] as? Boolean ?: false
+                    )
+                } catch (_: Exception) { null }
+            }.sortedByDescending { it.playedAt }
+        } catch (e: Exception) {
+            Log.e(TAG, "getMatchHistory: ${e.message}")
+            emptyList()
+        }
+    }
+
+    // সব opponent এর সাথে overall win/loss summary
+    suspend fun getWinLossSummary(myPhone: String): Map<String, Pair<Int, Int>> {
+        // return: opponentPhone -> Pair(wins, losses)
+        return try {
+            val snap = withTimeout(10_000L) {
+                db.getReference("MatchHistory/${myPhone.firebaseKey()}").get().await()
+            }
+            val result = mutableMapOf<String, Pair<Int, Int>>()
+            snap.children.forEach { opponentSnap ->
+                var wins = 0; var losses = 0
+                opponentSnap.children.forEach { matchSnap ->
+                    @Suppress("UNCHECKED_CAST")
+                    val m = matchSnap.value as? Map<String, Any> ?: return@forEach
+                    if (m["iWon"] as? Boolean == true) wins++ else losses++
+                }
+                if (wins + losses > 0) {
+                    val oppPhone = opponentSnap.key?.fromFirebaseKey() ?: return@forEach
+                    result[oppPhone] = Pair(wins, losses)
+                }
+            }
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "getWinLossSummary: ${e.message}")
+            emptyMap()
+        }
+    }
+
+    // Ghost Challenge তৈরি (isGhostMode=true দিয়ে)
+    suspend fun createGhostChallenge(
+        creator       : User,
+        invitees      : List<User>,
+        subject       : String,
+        subTopic      : String,
+        questionCount : Int,
+        timeLimitSec  : Int,
+        questionIds   : List<String>
+    ): String? {
+        return try {
+            val id  = challengesRef.push().key ?: return null
+            val now = System.currentTimeMillis()
+
+            val participants = mutableMapOf<String, ChallengeParticipant>()
+            participants[creator.phone!!.firebaseKey()] = ChallengeParticipant(
+                phone  = creator.phone,
+                name   = creator.displayName(),
+                status = "ACCEPTED"
+            )
+            invitees.forEach { u ->
+                participants[u.phone!!.firebaseKey()] = ChallengeParticipant(
+                    phone  = u.phone,
+                    name   = u.displayName(),
+                    status = "INVITED"
+                )
+            }
+
+            val challenge = Challenge(
+                id            = id,
+                creatorPhone  = creator.phone,
+                creatorName   = creator.displayName(),
+                subject       = subject,
+                subTopic      = subTopic,
+                questionCount = questionCount,
+                timeLimitSec  = timeLimitSec,
+                status        = ChallengeStatus.ACTIVE.name, // সরাসরি ACTIVE — creator একাই পরীক্ষা দেবে
+                createdAt     = now,
+                startedAt     = now,
+                questionIds   = questionIds,
+                participants  = participants,
+                isGhostMode   = true
+            )
+
+            challengesRef.child(id).setValue(challengeToMap(challenge)).await()
+            Log.d(TAG, "Ghost challenge created: $id")
+            id
+        } catch (e: Exception) {
+            Log.e(TAG, "createGhostChallenge: ${e.message}")
+            null
+        }
+    }
 }
