@@ -122,18 +122,26 @@ object UserSyncService {
         }
     }
 
-    // ── Fetch single user (Admin view-as) ──
+    // ── Fetch single user from Firebase ──
+    // Firebase এ key হলো phone number হুবহু (যেমন "01729814214")
+    // path: users/{phone}  (lowercase "users")
     suspend fun fetchUser(phone: String): com.hanif.smartstudy.data.model.User? =
         withContext(Dispatchers.IO) {
+            // phone number টা হুবহু Firebase key হিসেবে ব্যবহার করো
+            val cleanPhone = phone.trim()
+            Log.d(TAG, "fetchUser: trying path users/$cleanPhone")
             try {
-                val cleanPhone = phone.trimStart('0').let { if (it.length == 10) "88$it" else it }
-                val url  = "$FB_URL/Users/$cleanPhone.json"
+                val url  = "$FB_URL/users/$cleanPhone.json"
                 val req  = Request.Builder().url(url).get().build()
                 val body = client.newCall(req).execute().body?.string() ?: return@withContext null
-                if (body == "null") return@withContext null
+                Log.d(TAG, "fetchUser response: $body")
+                if (body == "null" || body.isBlank()) return@withContext null
                 val map  = gson.fromJson(body, Map::class.java) as? Map<String, Any> ?: return@withContext null
                 com.hanif.smartstudy.data.model.User.fromFirebaseMap(map)
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchUser error: ${e.message}")
+                null
+            }
         }
 
     // ── Admin FCM broadcast / targeted notification ──
@@ -148,7 +156,7 @@ object UserSyncService {
     // ── Leaderboard fetch ──
     suspend fun fetchLeaderboard(): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
         try {
-            val url  = "$FB_URL/Users.json?orderBy=\"XP\"&limitToLast=20"
+            val url  = "$FB_URL/users.json?orderBy=\"XP\"&limitToLast=20"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext emptyList()
             if (body == "null" || body.isBlank()) return@withContext emptyList()
