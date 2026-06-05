@@ -320,4 +320,17 @@ class SessionManager(private val context: Context) {
     suspend fun setPendingSyncCount(count: Int) {
         context.dataStore.edit { it[KEY_PENDING_SYNC] = count }
     }
+
+    // ── Font Scale (for accessibility user override) ──────────
+    // Default 1.0f = normal size, larger = bigger text
+
+    fun getFontScale(): Float = runBlocking {
+        context.dataStore.data.first()[KEY_FONT_SIZE] ?: 1.0f
+    }
+
+    fun fontScaleFlow(): Flow<Float> = context.dataStore.data.map { it[KEY_FONT_SIZE] ?: 1.0f }
+
+    suspend fun setFontScale(scale: Float) {
+        context.dataStore.edit { it[KEY_FONT_SIZE] = scale }
+    }
 }
