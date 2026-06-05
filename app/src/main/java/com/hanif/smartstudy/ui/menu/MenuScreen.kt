@@ -164,11 +164,24 @@ fun MainMenuScreen(
 
             Spacer(Modifier.height(4.dp))
 
-            // ── Normal Size button — reducedUi user এর জন্য ──
-            // uiScale != 1.0f মানে app scale করা আছে → reset button দেখাও
-            if (isReducedUiUser && uiScale.value != 1.0f) {
-                NormalSizeButton(
-                    isSmall = uiScale.value < 1.0f,
+            // ── App Size Control — শুধু reducedUi user এর জন্য ──
+            if (isReducedUiUser) {
+                AppSizeControlCard(
+                    uiScale = uiScale.value,
+                    onIncrease = {
+                        scope.launch {
+                            val next = (uiScale.value + 0.05f).coerceAtMost(1.5f)
+                            session.setFontScale(next)
+                            uiScale.value = next
+                        }
+                    },
+                    onDecrease = {
+                        scope.launch {
+                            val next = (uiScale.value - 0.05f).coerceAtLeast(0.4f)
+                            session.setFontScale(next)
+                            uiScale.value = next
+                        }
+                    },
                     onReset = {
                         scope.launch {
                             session.setFontScale(1.0f)
@@ -291,59 +304,103 @@ fun UserProfileCard(
     }
 }
 
-// ── Normal Size Button — only for special accessibility user ─────
+// ── App Size Control Card — only for reducedUi users ─────────
 
 @Composable
-fun NormalSizeButton(isSmall: Boolean, onReset: () -> Unit) {
+fun AppSizeControlCard(
+    uiScale    : Float,
+    onIncrease : () -> Unit,
+    onDecrease : () -> Unit,
+    onReset    : () -> Unit
+) {
+    val percent = (uiScale * 100).toInt()
+
     Card(
-        onClick  = onReset,
-        shape    = RoundedCornerShape(14.dp),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
+        shape  = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .background(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        RoundedCornerShape(10.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+
+            // Title row
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector        = Icons.Default.TextFields,
+                    Icons.Default.TextFields,
                     contentDescription = null,
-                    tint               = MaterialTheme.colorScheme.primary,
-                    modifier           = Modifier.size(22.dp)
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    if (isSmall) "🔤 Normal Size এ ফিরে যাও" else "🔤 App Size ঠিক করো",
+                    "🔤 App সাইজ",
                     fontSize   = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = NotoSansBengali,
                     color      = MaterialTheme.colorScheme.onSurface
                 )
+                Spacer(Modifier.weight(1f))
+                // Current % দেখাও
                 Text(
-                    if (isSmall) "App এর সাইজ ছোট আছে, tap করে ঠিক করো"
-                    else         "App এর সাইজ বড় আছে, tap করে ঠিক করো",
-                    fontSize   = 11.sp,
-                    fontFamily = NotoSansBengali,
-                    color      = MaterialTheme.colorScheme.onSurface.copy(0.55f)
+                    "$percent%",
+                    fontSize   = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = MaterialTheme.colorScheme.primary,
+                    fontFamily = NotoSansBengali
                 )
             }
-            Icon(
-                Icons.Default.ChevronRight, null,
-                tint     = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
+
+            Spacer(Modifier.height(12.dp))
+
+            // − / Reset / + buttons
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                // − ছোট করো
+                FilledIconButton(
+                    onClick = onDecrease,
+                    enabled = uiScale > 0.4f,
+                    colors  = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.Remove, contentDescription = "ছোট", tint = MaterialTheme.colorScheme.onPrimary)
+                }
+
+                // Reset — normal size
+                OutlinedButton(
+                    onClick  = onReset,
+                    modifier = Modifier.weight(1f),
+                    shape    = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        "Normal",
+                        fontFamily = NotoSansBengali,
+                        fontSize   = 12.sp
+                    )
+                }
+
+                // + বড় করো
+                FilledIconButton(
+                    onClick = onIncrease,
+                    enabled = uiScale < 1.5f,
+                    colors  = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "বড়", tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "− চাপলে ছোট, + চাপলে বড়, Normal চাপলে default",
+                fontSize   = 10.sp,
+                color      = MaterialTheme.colorScheme.onSurface.copy(0.45f),
+                fontFamily = NotoSansBengali
             )
         }
     }
