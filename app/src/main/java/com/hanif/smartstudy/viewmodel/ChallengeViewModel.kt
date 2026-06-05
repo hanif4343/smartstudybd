@@ -52,7 +52,12 @@ data class ChallengeUiState(
     // Loading / error
     val isLoading       : Boolean               = false,
     val error           : String?               = null,
-    val toast           : String?               = null
+    val toast           : String?               = null,
+    // Ghost Mode
+    val isGhostMode     : Boolean               = false,
+    // Match History (current opponent)
+    val matchHistory    : List<MatchRecord>     = emptyList(),
+    val winLossSummary  : Map<String, Pair<Int,Int>> = emptyMap()
 )
 
 class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
@@ -306,7 +311,44 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                     correctIds.add(q.id)
                 }
             }
-            repo.submitChallenge(challenge.id, s.myPhone, score, correctIds)
+            // Ghost Mode: lockGhostChallenge, তারপর invite পাঠাও
+            if (challenge.isGhostMode && challenge.creatorPhone == s.myPhone) {
+                repo.lockGhostChallenge(challenge.id, s.myPhone, score, correctIds)
+                // Ghost invite পাঠাও সব invitees দের
+                challenge.participants.values
+                    .filter { it.phone != s.myPhone && it.status == "INVITED" }
+                    .forEach { p ->
+                        repo.sendGhostInvite(p.phone, ChallengeInvite(
+                            challengeId   = challenge.id,
+                            creatorName   = challenge.creatorName,
+                            creatorPhone  = challenge.creatorPhone,
+                            subject       = challenge.subject,
+                            questionCount = challenge.questionCount,
+                            timeLimitSec  = challenge.timeLimitSec,
+                            createdAt     = challenge.createdAt,
+                            isGhostMode   = true
+                        ))
+                    }
+            } else {
+                repo.submitChallenge(challenge.id, s.myPhone, score, correctIds)
+            }
+
+            // Match History save করো (সব opponent এর জন্য)
+            challenge.participants.values
+                .filter { it.phone != s.myPhone && it.score >= 0 }
+                .forEach { opponent ->
+                    repo.saveMatchHistory(
+                        myPhone     = s.myPhone,
+                        myName      = challenge.myParticipant(s.myPhone)?.name ?: "",
+                        opponent    = opponent,
+                        challengeId = challenge.id,
+                        subject     = challenge.subject,
+                        myScore     = score,
+                        total       = s.questions.size,
+                        isGhostMode = challenge.isGhostMode
+                    )
+                }
+
             _state.update { it.copy(isSubmitting = false) }
         }
     }
@@ -342,6 +384,117 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun openCreateSetup() = _state.update { it.copy(screen = ChallengeScreen.CreateSetup, error = null) }
     fun goHome()          { challengeObserveJob?.cancel(); timerJob?.cancel()
         _state.update { it.copy(screen = ChallengeScreen.Home, challenge = null, questions = emptyList(), answers = mutableMapOf()) } }
+
+    // ── Ghost Mode toggle ─────────────────────────────────
+    fun toggleGhostMode() = _state.update { it.copy(isGhostMode = !it.isGhostMode) }
+
+    // ── Ghost Challenge create — creator একাই ACTIVE পরীক্ষা শুরু করে ──
+    fun createGhostChallenge() {
+        val s = _state.value
+        if (s.selectedSubject.isBlank()) { _state.update { it.copy(error = "বিষয় বেছে নিন") }; return }
+        if (s.invitedUsers.isEmpty())    { _state.update { it.copy(error = "অন্তত একজনকে invite করুন") }; return }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            val me = session.getCurrentUser() ?: return@launch
+            val c  = ContentRepository.getMemCache() ?: content.getContent()
+            val pool = (c.quiz.filter { it.subject == s.selectedSubject &&
+                (s.selectedSubTopic.isBlank() || it.subTopic == s.selectedSubTopic) })
+                .shuffled().take(s.questionCount)
+            val questionIds = pool.map { it.id ?: "" }.filter { it.isNotBlank() }
+            if (questionIds.size < 3) {
+                _state.update { it.copy(isLoading = false, error = "পর্যাপ্ত প্রশ্ন নেই") }; return@launch
+            }
+            val id = repo.createGhostChallenge(
+                creator = me, invitees = s.invitedUsers,
+                subject = s.selectedSubject, subTopic = s.selectedSubTopic,
+                questionCount = questionIds.size, timeLimitSec = s.timeLimitSec,
+                questionIds = questionIds
+            )
+            if (id == null) {
+                _state.update { it.copy(isLoading = false, error = "চ্যালেঞ্জ তৈরি ব্যর্থ হয়েছে") }
+                return@launch
+            }
+            // সরাসরি Exam এ যাও — creator একাই পরীক্ষা দেবে
+            val ghostChallenge = repo.getChallenge(id)
+            val questions = c.quiz.filter { it.id in questionIds }
+            _state.update { it.copy(
+                isLoading     = false,
+                challenge     = ghostChallenge,
+                questions     = questions,
+                answers       = mutableMapOf(),
+                currentQIndex = 0,
+                timerSec      = s.timeLimitSec,
+                screen        = ChallengeScreen.Exam(id)
+            )}
+            startExamTimer(id, s.timeLimitSec)
+        }
+    }
+
+    // ── Rematch — same subject, same invitees, নতুন চ্যালেঞ্জ ──
+    fun rematch() {
+        val s = _state.value
+        val challenge = s.challenge ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            val me = session.getCurrentUser() ?: return@launch
+            val c  = ContentRepository.getMemCache() ?: content.getContent()
+
+            // opponents list
+            val opponents = challenge.participants.values
+                .filter { it.phone != s.myPhone }
+                .mapNotNull { p ->
+                    // User object বানাও opponent থেকে
+                    com.hanif.smartstudy.data.model.User(
+                        phone    = p.phone,
+                        name     = p.name,
+                        role     = "User",
+                        status   = "Active"
+                    )
+                }
+
+            val pool = c.quiz.filter { it.subject == challenge.subject &&
+                (challenge.subTopic.isBlank() || it.subTopic == challenge.subTopic) }
+                .shuffled().take(challenge.questionCount)
+            val questionIds = pool.map { it.id ?: "" }.filter { it.isNotBlank() }
+
+            if (questionIds.size < 3) {
+                _state.update { it.copy(isLoading = false, error = "পর্যাপ্ত প্রশ্ন নেই") }
+                return@launch
+            }
+
+            val id = repo.createChallenge(
+                creator = me, invitees = opponents,
+                subject = challenge.subject, subTopic = challenge.subTopic,
+                questionCount = questionIds.size, timeLimitSec = challenge.timeLimitSec,
+                questionIds = questionIds
+            )
+            _state.update { it.copy(isLoading = false) }
+            if (id != null) {
+                observeChallenge(id)
+                _state.update { it.copy(screen = ChallengeScreen.Lobby(id)) }
+                _state.update { it.copy(toast = "♻️ Rematch পাঠানো হয়েছে!") }
+            } else {
+                _state.update { it.copy(error = "Rematch তৈরি ব্যর্থ") }
+            }
+        }
+    }
+
+    // ── Match History load ────────────────────────────────
+    fun loadMatchHistory(opponentPhone: String) {
+        val myPhone = _state.value.myPhone.ifEmpty { return }
+        viewModelScope.launch {
+            val history = repo.getMatchHistory(myPhone, opponentPhone)
+            _state.update { it.copy(matchHistory = history) }
+        }
+    }
+
+    fun loadWinLossSummary() {
+        val myPhone = _state.value.myPhone.ifEmpty { return }
+        viewModelScope.launch {
+            val summary = repo.getWinLossSummary(myPhone)
+            _state.update { it.copy(winLossSummary = summary) }
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
