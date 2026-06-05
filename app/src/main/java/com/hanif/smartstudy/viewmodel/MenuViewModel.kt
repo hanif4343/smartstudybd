@@ -94,7 +94,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadAll() {
         viewModelScope.launch {
-            val user       = session.getCurrentUser()
+            val localUser  = session.getCurrentUser()
             val isDark     = session.isDarkMode()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
@@ -114,12 +114,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val stats      = cache.getStudyStats()
             val xpHist     = session.getXpHistory()
             val totalApp   = session.getTotalAppMinutes()
-            val fcm        = user?.fcmToken ?: ""
+            val fcm        = localUser?.fcmToken ?: ""
 
             val prefs = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
 
-            // দুর্বল টপিক — weak_* keys থেকে লোড
             val weakTopics = prefs.all.entries
                 .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
                 .map { com.hanif.smartstudy.data.model.WeakTopic(
@@ -129,10 +128,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 )}
                 .sortedByDescending { it.wrongCount }
 
+            // প্রথমে local user দিয়ে UI দেখাও (fast)
             _state.update {
                 it.copy(
-                    user           = user,
-                    isAdmin        = user?.isAdmin() ?: false,
+                    user           = localUser,
+                    isAdmin        = localUser?.isAdmin() ?: false,
                     isDarkMode     = isDark,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
@@ -161,7 +161,26 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
 
-            // Fetch FCM token fresh
+            // Firebase থেকে fresh user fetch করো (reducedUi সহ সব latest data)
+            if (!localUser?.phone.isNullOrEmpty()) {
+                try {
+                    val freshUser = com.hanif.smartstudy.data.remote.UserSyncService
+                        .fetchUser(localUser!!.phone!!)
+                        ?.copy(phone = localUser.phone, fcmToken = localUser.fcmToken)
+                    if (freshUser != null) {
+                        session.saveUser(freshUser)
+                        _state.update { it.copy(
+                            user    = freshUser,
+                            isAdmin = freshUser.isAdmin()
+                        )}
+                        Log.d("Menu", "Fresh user loaded: reducedUi=${freshUser.reducedUi}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("Menu", "Firebase refresh failed: ${e.message}")
+                }
+            }
+
+            // FCM token fresh fetch
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
                 _state.update { it.copy(fcmToken = token) }
                 SmartStudyFirebaseService.saveFcmTokenToFirebase(ctx, token)
