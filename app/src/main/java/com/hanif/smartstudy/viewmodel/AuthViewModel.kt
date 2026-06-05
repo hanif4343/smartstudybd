@@ -8,6 +8,7 @@ import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.data.remote.AuthResult
 import com.hanif.smartstudy.data.remote.FirebaseAuthService
+import com.hanif.smartstudy.data.remote.RemoteServices
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,13 +46,15 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData)
                         .copy(phone = ph)
-                    session.saveUser(user)
-                    Log.d("Auth", "Login success: ${user.name}")
 
-                    // reducedUi flag আছে মানে এই user নিজে menu থেকে + / - দিয়ে
-                    // app এর size adjust করতে পারবে। প্রথমবার login এ 1.0f (normal) থেকে শুরু।
+                    // GAS response এ ReducedUi আসে না, তাই Firebase থেকে আবার fetch করো
+                    val fullUser = try {
+                        RemoteServices.fetchUser(ph)?.copy(phone = ph) ?: user
+                    } catch (e: Exception) { user }
 
-                    _authState.value = AuthState.Success(user)
+                    session.saveUser(fullUser)
+                    Log.d("Auth", "Login success: ${fullUser.name}, reducedUi=${fullUser.reducedUi}")
+                    _authState.value = AuthState.Success(fullUser)
                 }
                 is AuthResult.Error -> {
                     Log.d("Auth", "Login failed: ${r.message}")
