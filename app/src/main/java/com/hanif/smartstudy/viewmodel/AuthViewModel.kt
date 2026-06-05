@@ -47,6 +47,12 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                         .copy(phone = ph)
                     session.saveUser(user)
                     Log.d("Auth", "Login success: ${user.name}")
+
+                    // বিশেষ user এর জন্য: প্রথমবার login এ যদি কোনো scale সেট না থাকে,
+                    // তাহলে default 1.0f রাখো (normal)।
+                    // বাবার phone এ manually বা অন্য জায়গা থেকে scale set করা হবে।
+                    // এই user এর মেয়ে login করলে সে menu থেকে Normal Size এ ফিরতে পারবে।
+
                     _authState.value = AuthState.Success(user)
                 }
                 is AuthResult.Error -> {
