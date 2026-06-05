@@ -140,8 +140,8 @@ fun MainMenuScreen(
     val uiScale    = LocalUiScale.current
     val session    = remember { SessionManager(context) }
 
-    // শুধু এই বিশেষ user এর জন্য Normal Size button দেখাবো
-    val isSpecialUser = state.user?.phone?.replace("-", "")?.replace(" ", "") == "01729814214"
+    // reducedUi flag আছে এমন user এর জন্যই শুধু button দেখাবো
+    val isReducedUiUser = state.user?.reducedUi == true
 
     Scaffold(
         topBar = {
@@ -164,10 +164,9 @@ fun MainMenuScreen(
 
             Spacer(Modifier.height(4.dp))
 
-            // ── Normal Size button — শুধু special user এর জন্য ──
-            // uiScale < 1.0f মানে app এখন ছোট করা আছে → reset button দেখাও
-            // uiScale > 1.0f কখনো হবে না এই user এর জন্য; just in case check করি
-            if (isSpecialUser && uiScale.value != 1.0f) {
+            // ── Normal Size button — reducedUi user এর জন্য ──
+            // uiScale != 1.0f মানে app scale করা আছে → reset button দেখাও
+            if (isReducedUiUser && uiScale.value != 1.0f) {
                 NormalSizeButton(
                     isSmall = uiScale.value < 1.0f,
                     onReset = {
