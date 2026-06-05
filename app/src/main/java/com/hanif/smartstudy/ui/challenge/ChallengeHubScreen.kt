@@ -132,10 +132,19 @@ private fun InviteCard(invite: ChallengeInvite, onAccept: () -> Unit, onDecline:
                     Text("⚔️", fontSize = 20.sp)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("${invite.creatorName} চ্যালেঞ্জ পাঠিয়েছে!", fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            if (invite.isGhostMode) "${invite.creatorName} Ghost চ্যালেঞ্জ পাঠিয়েছে!"
+                            else "${invite.creatorName} চ্যালেঞ্জ পাঠিয়েছে!",
+                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF1E293B), fontFamily = NotoSansBengali
+                        )
+                        if (invite.isGhostMode) Text("👻", fontSize = 12.sp)
+                    }
                     Text("${invite.subject} • ${invite.questionCount}টি প্রশ্ন • ${invite.timeLimitSec/60} মিনিট",
                         fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                    if (invite.isGhostMode) Text("সে আগেই পরীক্ষা দিয়েছে — তুমি দিলে রেজাল্ট দেখবে!",
+                        fontSize = 10.sp, color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
