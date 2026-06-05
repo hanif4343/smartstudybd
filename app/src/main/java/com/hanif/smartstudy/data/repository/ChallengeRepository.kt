@@ -338,7 +338,6 @@ class ChallengeRepository {
         "isGhostMode"   to c.isGhostMode,
         "ghostLockedAt" to c.ghostLockedAt
     )
-}
 
     // ────────────────────────────────────────────────────────
     // GHOST MODE
