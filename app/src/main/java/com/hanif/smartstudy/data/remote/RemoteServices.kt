@@ -123,23 +123,61 @@ object UserSyncService {
     }
 
     // ── Fetch single user from Firebase ──
-    // Firebase এ key হলো phone number হুবহু (যেমন "01729814214")
-    // path: users/{phone}  (lowercase "users")
+    // Firebase এ user গুলো numeric key (1, 2, 3...) তে আছে
+    // তাই phone number দিয়ে query করতে হবে
+    // path: users.json?orderBy="Phone"&equalTo="01729814214"
     suspend fun fetchUser(phone: String): com.hanif.smartstudy.data.model.User? =
         withContext(Dispatchers.IO) {
-            // phone number টা হুবহু Firebase key হিসেবে ব্যবহার করো
             val cleanPhone = phone.trim()
-            Log.d(TAG, "fetchUser: trying path users/$cleanPhone")
             try {
-                val url  = "$FB_URL/users/$cleanPhone.json"
+                // Method 1: Phone field দিয়ে query (Firebase index লাগবে)
+                val encodedPhone = java.net.URLEncoder.encode("\"$cleanPhone\"", "UTF-8")
+                val url = "$FB_URL/users.json?orderBy=%22Phone%22&equalTo=%22$cleanPhone%22"
+                Log.d(TAG, "fetchUser query: $url")
                 val req  = Request.Builder().url(url).get().build()
                 val body = client.newCall(req).execute().body?.string() ?: return@withContext null
                 Log.d(TAG, "fetchUser response: $body")
-                if (body == "null" || body.isBlank()) return@withContext null
-                val map  = gson.fromJson(body, Map::class.java) as? Map<String, Any> ?: return@withContext null
-                com.hanif.smartstudy.data.model.User.fromFirebaseMap(map)
+                if (body == "null" || body.isBlank() || body == "{}") {
+                    // Method 2: সব user নিয়ে phone দিয়ে filter
+                    return@withContext fetchUserByScan(cleanPhone)
+                }
+                // response হলো { "2": { ...userData... } } — value টা নাও
+                val rootMap = gson.fromJson(body, Map::class.java) as? Map<String, Any>
+                    ?: return@withContext null
+                val userMap = rootMap.values.firstOrNull() as? Map<String, Any>
+                    ?: return@withContext null
+                com.hanif.smartstudy.data.model.User.fromFirebaseMap(userMap)
             } catch (e: Exception) {
                 Log.e(TAG, "fetchUser error: ${e.message}")
+                // fallback: scan করো
+                try { fetchUserByScan(cleanPhone) } catch (e2: Exception) { null }
+            }
+        }
+
+    // Fallback: সব user scan করে phone match করো
+    private suspend fun fetchUserByScan(phone: String): com.hanif.smartstudy.data.model.User? =
+        withContext(Dispatchers.IO) {
+            try {
+                val url  = "$FB_URL/users.json?shallow=false"
+                val req  = Request.Builder().url(url).get().build()
+                val body = client.newCall(req).execute().body?.string() ?: return@withContext null
+                if (body == "null" || body.isBlank()) return@withContext null
+                val rootMap = gson.fromJson(body, Map::class.java) as? Map<String, Any>
+                    ?: return@withContext null
+                // প্রতিটা entry তে Phone field check করো
+                for ((_, value) in rootMap) {
+                    val userMap = value as? Map<String, Any> ?: continue
+                    val p = userMap["Phone"]?.toString()?.trim()
+                        ?: userMap["phone"]?.toString()?.trim() ?: continue
+                    if (p == phone) {
+                        Log.d(TAG, "fetchUserByScan: found user for $phone")
+                        return@withContext com.hanif.smartstudy.data.model.User.fromFirebaseMap(userMap)
+                    }
+                }
+                Log.d(TAG, "fetchUserByScan: no user found for $phone")
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchUserByScan error: ${e.message}")
                 null
             }
         }
