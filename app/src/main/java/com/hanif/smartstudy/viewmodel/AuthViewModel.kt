@@ -8,7 +8,7 @@ import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.data.remote.AuthResult
 import com.hanif.smartstudy.data.remote.FirebaseAuthService
-import com.hanif.smartstudy.data.remote.RemoteServices
+import com.hanif.smartstudy.data.remote.UserSyncService
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,7 +49,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
                     // GAS response এ ReducedUi আসে না, তাই Firebase থেকে আবার fetch করো
                     val fullUser = try {
-                        RemoteServices.fetchUser(ph)?.copy(phone = ph) ?: user
+                        UserSyncService.fetchUser(ph)?.copy(phone = ph) ?: user
                     } catch (e: Exception) { user }
 
                     session.saveUser(fullUser)
