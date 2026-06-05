@@ -22,6 +22,9 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.ChallengeUiState
 import com.hanif.smartstudy.viewmodel.ChallengeViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
@@ -136,6 +139,36 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
             }
 
             // ── Action buttons ──
+            if (sorted.size > 1 && waitingCount == 0) {
+                // Rematch button
+                Button(
+                    onClick  = { vm.rematch() },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                ) {
+                    if (state.isLoading) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("♻️ Rematch", fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+                    }
+                }
+            }
+
+            // Match History — 1v1 হলে দেখাও
+            val opponent = sorted.find { it.phone != myPhone }
+            if (opponent != null) {
+                LaunchedEffect(opponent.phone) { vm.loadMatchHistory(opponent.phone) }
+                if (state.matchHistory.isNotEmpty()) {
+                    MatchHistoryCard(
+                        history      = state.matchHistory,
+                        myPhone      = myPhone,
+                        opponentName = opponent.name
+                    )
+                }
+            }
+
             Button(
                 onClick  = vm::goHome,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
@@ -243,5 +276,122 @@ private fun QuestionComparisonCard(
                 }
             }
         }
+    }
+}
+
+
+// ── Match History Card ────────────────────────────────────
+
+@Composable
+fun MatchHistoryCard(
+    history      : List<MatchRecord>,
+    myPhone      : String,
+    opponentName : String
+) {
+    val wins   = history.count { it.iWon }
+    val losses = history.size - wins
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(16.dp),
+        colors   = CardDefaults.cardColors(Color.White.copy(0.1f)),
+        border   = BorderStroke(1.dp, Color.White.copy(0.15f))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            // Header: win/loss summary
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(
+                    "⚔️ ${opponentName.split(" ").first()} এর সাথে ইতিহাস",
+                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color.White, fontFamily = NotoSansBengali
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WinLossBadge("${wins}W", Color(0xFF10B981))
+                    WinLossBadge("${losses}L", Color(0xFFEF4444))
+                }
+            }
+
+            // Win rate bar
+            val winRate = if (history.isNotEmpty()) wins.toFloat() / history.size else 0f
+            Box(
+                Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFFEF4444).copy(0.4f))
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(winRate).fillMaxHeight()
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color(0xFF10B981))
+                )
+            }
+
+            // Last 5 matches
+            history.take(5).forEach { record ->
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (record.iWon) Color(0xFF10B981).copy(0.12f)
+                            else Color(0xFFEF4444).copy(0.12f)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(if (record.iWon) "🏆" else "💔", fontSize = 14.sp)
+                        Column {
+                            Text(
+                                record.subject.take(18),
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                color = Color.White, fontFamily = NotoSansBengali
+                            )
+                            Text(
+                                SimpleDateFormat("dd MMM", Locale.getDefault())
+                                    .format(Date(record.playedAt)),
+                                fontSize = 9.sp, color = Color.White.copy(0.5f)
+                            )
+                        }
+                        if (record.isGhostMode) {
+                            Text("👻", fontSize = 10.sp)
+                        }
+                    }
+                    Text(
+                        "${record.myScore} - ${record.opponentScore}",
+                        fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                        color = if (record.iWon) Color(0xFF10B981) else Color(0xFFEF4444),
+                        fontFamily = NotoSansBengali
+                    )
+                }
+            }
+
+            if (history.size > 5) {
+                Text(
+                    "... আরো ${history.size - 5}টি ম্যাচ",
+                    fontSize = 10.sp, color = Color.White.copy(0.4f),
+                    fontFamily = NotoSansBengali,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WinLossBadge(text: String, color: Color) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(color.copy(0.2f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(text, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+            color = color, fontFamily = NotoSansBengali)
     }
 }
