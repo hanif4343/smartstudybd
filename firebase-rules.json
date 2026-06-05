@@ -19,6 +19,13 @@
     },
     "Reports": {
       ".write": true
+    },
+    "MatchHistory": {
+      "$myPhone": {
+        "$opponentPhone": {
+          ".indexOn": ["playedAt"]
+        }
+      }
     }
   }
 }
