@@ -14,13 +14,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.ui.theme.*
+import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.MenuViewModel
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────
 //  MenuScreen — Profile / Settings / Stats / Admin
@@ -132,6 +135,14 @@ fun MainMenuScreen(
     onSearchClick : () -> Unit = {},
     onTypingClick : () -> Unit = {}
 ) {
+    val context    = LocalContext.current
+    val scope      = rememberCoroutineScope()
+    val uiScale    = LocalUiScale.current
+    val session    = remember { SessionManager(context) }
+
+    // শুধু এই বিশেষ user এর জন্য Normal Size button দেখাবো
+    val isSpecialUser = state.user?.phone?.replace("-", "")?.replace(" ", "") == "01729814214"
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -152,6 +163,21 @@ fun MainMenuScreen(
             UserProfileCard(state, onClick = { onNavigate(MenuNav.PROFILE) })
 
             Spacer(Modifier.height(4.dp))
+
+            // ── Normal Size button — শুধু special user এর জন্য ──
+            // uiScale < 1.0f মানে app এখন ছোট করা আছে → reset button দেখাও
+            // uiScale > 1.0f কখনো হবে না এই user এর জন্য; just in case check করি
+            if (isSpecialUser && uiScale.value != 1.0f) {
+                NormalSizeButton(
+                    isSmall = uiScale.value < 1.0f,
+                    onReset = {
+                        scope.launch {
+                            session.setFontScale(1.0f)
+                            uiScale.value = 1.0f
+                        }
+                    }
+                )
+            }
 
             // ── Menu items ──
             MenuGroup("📊 তথ্য") {
@@ -261,6 +287,64 @@ fun UserProfileCard(
                 Icons.Default.Edit, null,
                 tint = MaterialTheme.colorScheme.onPrimary.copy(0.7f),
                 modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+// ── Normal Size Button — only for special accessibility user ─────
+
+@Composable
+fun NormalSizeButton(isSmall: Boolean, onReset: () -> Unit) {
+    Card(
+        onClick  = onReset,
+        shape    = RoundedCornerShape(14.dp),
+        colors   = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        RoundedCornerShape(10.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.TextFields,
+                    contentDescription = null,
+                    tint               = MaterialTheme.colorScheme.primary,
+                    modifier           = Modifier.size(22.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (isSmall) "🔤 Normal Size এ ফিরে যাও" else "🔤 App Size ঠিক করো",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = NotoSansBengali,
+                    color      = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    if (isSmall) "App এর সাইজ ছোট আছে, tap করে ঠিক করো"
+                    else         "App এর সাইজ বড় আছে, tap করে ঠিক করো",
+                    fontSize   = 11.sp,
+                    fontFamily = NotoSansBengali,
+                    color      = MaterialTheme.colorScheme.onSurface.copy(0.55f)
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight, null,
+                tint     = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
             )
         }
     }
