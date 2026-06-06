@@ -34,6 +34,7 @@ data class ChallengeUiState(
     val phoneInput      : String                = "",
     val searchResult    : User?                 = null,
     val searchError     : String?               = null,
+    val canAddOpponent  : Boolean               = false,   // group match হলে true
     val isSearching     : Boolean               = false,
     val invitedUsers    : List<User>            = emptyList(),
     val selectedSubject : String                = "",
@@ -128,7 +129,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun onSubTopicSelect(sub: String) = _state.update { it.copy(selectedSubTopic = sub) }
     fun onQuestionCountChange(n: Int) = _state.update { it.copy(questionCount = n.coerceIn(5, 30)) }
     fun onTimeLimitChange(sec: Int)   = _state.update { it.copy(timeLimitSec = sec) }
-    fun onPhoneInput(phone: String)   = _state.update { it.copy(phoneInput = phone, searchResult = null, searchError = null) }
+    fun onPhoneInput(phone: String)   = _state.update { it.copy(phoneInput = phone, searchResult = null, searchError = null, canAddOpponent = false) }
     fun onWagerChange(xp: Int)        = _state.update { it.copy(wagerXp = xp) }
 
     // ── Search user ──────────────────────────────────────
@@ -149,28 +150,30 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(isSearching = true, searchError = null) }
             val user = repo.findUserByPhone(phone)
 
-            // ── Audience group compatibility check ──
-            if (user != null) {
-                val me = session.getCurrentUser()
-                if (!canChallenge(me, user)) {
-                    val myGroup  = audienceGroupLabel(me)
-                    val oppGroup = audienceGroupLabel(user)
-                    _state.update {
-                        it.copy(
-                            isSearching  = false,
-                            searchResult = null,
-                            searchError  = "❌ তুমি ($myGroup) এই ব্যবহারকারীকে ($oppGroup) challenge করতে পারবে না। শুধুমাত্র একই শ্রেণির শিক্ষার্থীরা পরস্পরকে challenge করতে পারবে।"
-                        )
-                    }
-                    return@launch
+            if (user == null) {
+                _state.update {
+                    it.copy(isSearching = false, searchResult = null,
+                            canAddOpponent = false,
+                            searchError = "এই নম্বরে কোনো account নেই")
                 }
+                return@launch
             }
+
+            // ── Audience group compatibility check ──
+            val me           = session.getCurrentUser()
+            val compatible   = canChallenge(me, user)
+            val myGroup      = audienceGroupLabel(me)
+            val oppGroup     = audienceGroupLabel(user)
+            val groupErrMsg  = if (!compatible)
+                "❌ তুমি ($myGroup) এই ব্যবহারকারীকে ($oppGroup) challenge করতে পারবে না। শুধুমাত্র একই শ্রেণির শিক্ষার্থীরা পরস্পরকে challenge করতে পারবে।"
+            else null
 
             _state.update {
                 it.copy(
-                    isSearching  = false,
-                    searchResult = user,
-                    searchError  = if (user == null) "এই নম্বরে কোনো account নেই" else null
+                    isSearching    = false,
+                    searchResult   = user,          // সব ক্ষেত্রেই card দেখাও
+                    canAddOpponent = compatible,    // group মিললে true → বাটন সবুজ
+                    searchError    = groupErrMsg    // মিলে গেলে null, না মিললে error
                 )
             }
         }
