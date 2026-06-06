@@ -18,7 +18,6 @@ android {
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
         buildConfigField "String", "SECRET_KEY",     "\"%%SECRET_KEY%%\""
-        buildConfigField "String", "WEB_CLIENT_ID",  "\"%%WEB_CLIENT_ID%%\""
     }
 
     signingConfigs {
