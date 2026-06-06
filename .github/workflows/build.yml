@@ -94,7 +94,6 @@ jobs:
           echo "Cleaned"
 
       # ── Inject secrets ──
-      # WEB_CLIENT_ID শুধু strings.xml এ inject হবে (build.gradle এ resValue নেই — duplicate এড়াতে)
       - name: Inject API keys
         run: |
           sed -i 's|%%GAS_URL%%|${{ secrets.GAS_URL }}|g'               app/build.gradle
@@ -102,8 +101,6 @@ jobs:
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
           sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
-          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/build.gradle
-          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/src/main/res/values/strings.xml
 
       # ── Auto versionCode ──
       - name: Set versionCode
