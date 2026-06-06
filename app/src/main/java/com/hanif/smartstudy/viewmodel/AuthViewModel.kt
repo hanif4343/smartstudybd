@@ -75,7 +75,6 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             _authState.value = AuthState.Loading
             when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, gasUrl, firebaseUrl, secretKey)) {
                 is GoogleAuthResult.ExistingUser -> {
-                    // সমাধান (Line 77): User copy থেকে email বাদ দেওয়া হয়েছে কারণ User মডেলে email ফিল্ড নেই
                     val user = User.fromFirebaseMap(r.userData).let { u ->
                         u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
                     }
@@ -84,7 +83,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                     _authState.value = AuthState.Success(user)
                 }
                 is GoogleAuthResult.NewUser -> {
-                    _authState.value = GoogleAuthResult.NewUser(r.email, r.name, r.photoUrl)
+                    _authState.value = AuthState.GoogleNewUser(r.email, r.name, r.photoUrl)
                 }
                 is GoogleAuthResult.Error -> _authState.value = AuthState.Error(r.message)
             }
@@ -99,7 +98,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         photoUrl: String,
         userType: String,
         classLevel: String,
-        localPhotoUri: Uri? = null // user নিজে photo pick করলে
+        localPhotoUri: Uri? = null
     ) {
         val n = name.trim()
         val ph = phone.trim()
@@ -109,7 +108,6 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             
-            // Photo upload: local photo থাকলে ImgBB তে upload, না থাকলে Google photo url সরাসরি
             val finalPhotoUrl = try {
                 when {
                     localPhotoUri != null -> {
@@ -131,8 +129,6 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             Log.d("GoogleSignup", "Final photo URL: $finalPhotoUrl")
             val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
 
-            // সমাধান (Line 138): ক্লডের নোট অনুযায়ী Named Parameters সরিয়ে Positional Arguments ব্যবহার করা হলো
-            // এবং FirebaseAuthService.signup ট্র্যাডিশনাল মেথড কল করা হলো যা email ছাড়াই কাজ করে
             when (val r = FirebaseAuthService.signup(
                 n, 
                 ph, 
@@ -142,7 +138,6 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 gasUrl
             )) {
                 is AuthResult.Success -> {
-                    // সমাধান: User copy থেকে email বাদ দেওয়া হয়েছে
                     val user = User.fromFirebaseMap(r.userData).copy(
                         phone = ph,
                         name = n,
