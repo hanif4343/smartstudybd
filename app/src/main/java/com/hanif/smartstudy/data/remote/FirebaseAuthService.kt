@@ -25,34 +25,153 @@ object FirebaseAuthService {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    // ── LOGIN ──
-    // GAS doGet?action=verifyLogin ব্যবহার করে
-    // GAS নিজেই Firebase থেকে user খুঁজে password verify করে
-    // plain text এবং hash দুটোই GAS এ handle হয়
+    // ── LOGIN (Phone + Password) ──
     suspend fun verifyLogin(phone: String, password: String, gasUrl: String): AuthResult =
         withContext(Dispatchers.IO) {
             try {
-                // Method 1: GAS verifyLogin (recommended)
-                // GAS doGet এ verifyLogin action আছে যেটা sheet থেকে verify করে
                 val url = "$gasUrl?action=verifyLogin" +
                     "&phone=${encode(phone)}" +
                     "&password=${encode(password)}"
 
                 Log.d("Login", "GAS URL: $url")
-
                 val req  = Request.Builder().url(url).get().build()
                 val resp = client.newCall(req).execute()
                 val body = resp.body?.string() ?: ""
-
                 Log.d("Login", "GAS response: $body")
 
-                return@withContext parseGasLoginResponse(body, phone, password)
-
+                parseGasLoginResponse(body, phone, password)
             } catch (e: Exception) {
                 Log.e("Login", "Error: ${e.message}")
                 AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
             }
         }
+
+    // ── GOOGLE SIGN-IN ──
+    // Google থেকে email + name + photoUrl পেলে GAS এ check করে:
+    // যদি email match করে → login করে
+    // যদি না করে → নতুন user এর তথ্য return করে (signup এ যাবে)
+    suspend fun googleSignIn(
+        email: String, name: String, photoUrl: String, gasUrl: String, firebaseUrl: String, secretKey: String
+    ): GoogleAuthResult = withContext(Dispatchers.IO) {
+        try {
+            // Firebase RTDB থেকে Users.json fetch করে email দিয়ে match করো
+            val url = "${firebaseUrl}Users.json?auth=$secretKey"
+            Log.d("GoogleAuth", "Fetching users from: $url")
+
+            val req  = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+
+            if (body.isBlank() || body == "null") {
+                return@withContext GoogleAuthResult.Error("ডেটা লোড হয়নি")
+            }
+
+            // Parse — array বা object দুটোই handle করি
+            val normEmail = email.trim().lowercase()
+            var matchedUser: Map<String, Any>? = null
+
+            try {
+                // Object format: { "key": { user data } }
+                val type = object : TypeToken<Map<String, Map<String, Any>>>() {}.type
+                val usersMap: Map<String, Map<String, Any>> = gson.fromJson(body, type)
+                matchedUser = usersMap.values.find { u ->
+                    val uEmail = (u["Email"] ?: u["email"])?.toString()?.trim()?.lowercase() ?: ""
+                    uEmail == normEmail
+                }
+            } catch (e: Exception) {
+                // Array format
+                try {
+                    val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+                    val usersList: List<Map<String, Any>> = gson.fromJson(body, type)
+                    matchedUser = usersList.filterNotNull().find { u ->
+                        val uEmail = (u["Email"] ?: u["email"])?.toString()?.trim()?.lowercase() ?: ""
+                        uEmail == normEmail
+                    }
+                } catch (e2: Exception) {
+                    Log.e("GoogleAuth", "Parse error: ${e2.message}")
+                }
+            }
+
+            if (matchedUser != null) {
+                // Existing user found
+                val status = (matchedUser["Status"] ?: matchedUser["status"] ?: "Active")
+                    .toString().lowercase()
+                if (status == "inactive") {
+                    return@withContext GoogleAuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin-এর সাথে যোগাযোগ করুন।")
+                }
+                GoogleAuthResult.ExistingUser(matchedUser)
+            } else {
+                // New user — signup এ যাবে, তথ্য পাঠাই
+                GoogleAuthResult.NewUser(
+                    email    = email,
+                    name     = name,
+                    photoUrl = photoUrl
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("GoogleAuth", "Error: ${e.message}")
+            GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
+        }
+    }
+
+    // ── GOOGLE SIGNUP ──
+    // নতুন Google user কে signup করাও GAS এ
+    suspend fun googleSignup(
+        name: String, email: String, phone: String,
+        photoUrl: String, userType: String, classLevel: String,
+        gasUrl: String
+    ): AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val formBody = FormBody.Builder()
+                .add("action",     "signup")
+                .add("name",       name)
+                .add("phone",      phone)
+                .add("email",      email)
+                .add("password",   hashPassword(email + "_google"))  // Google user এর dummy password
+                .add("userType",   userType)
+                .add("classLevel", classLevel)
+                .add("picture",    photoUrl)
+                .add("status",     "Active")
+                .add("role",       "User")
+                .build()
+
+            val req  = Request.Builder().url(gasUrl).post(formBody).build()
+            val resp = client.newCall(req).execute().body?.string() ?: ""
+            Log.d("GoogleSignup", "GAS response: $resp")
+
+            try {
+                val type = object : TypeToken<Map<String, Any>>() {}.type
+                val map: Map<String, Any> = gson.fromJson(resp, type)
+                val s = (map["status"] ?: map["result"] ?: "").toString()
+
+                if (s == "ok" || s == "success") {
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone, "Email" to email,
+                        "Picture" to photoUrl, "UserType" to userType,
+                        "ClassLevel" to classLevel, "Status" to "Active", "Role" to "User"
+                    ))
+                } else {
+                    val msg = (map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString()
+                    if (msg.contains("already", true) || msg.contains("duplicate", true) ||
+                        msg.contains("exists", true))
+                        AuthResult.Error("এই ইমেইল আগে থেকেই নিবন্ধিত")
+                    else
+                        AuthResult.Error(msg)
+                }
+            } catch (e: Exception) {
+                if (resp.contains("ok", true) || resp.contains("success", true))
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone, "Email" to email,
+                        "Picture" to photoUrl, "UserType" to userType,
+                        "ClassLevel" to classLevel, "Status" to "Active", "Role" to "User"
+                    ))
+                else
+                    AuthResult.Error("Signup ব্যর্থ হয়েছে")
+            }
+        } catch (e: Exception) {
+            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+        }
+    }
 
     private fun parseGasLoginResponse(body: String, phone: String, password: String): AuthResult {
         if (body.isBlank()) return AuthResult.Error("GAS থেকে কোনো response পাওয়া যায়নি")
@@ -67,27 +186,19 @@ object FirebaseAuthService {
             val status = map["status"]?.toString() ?: ""
 
             when {
-                // GAS doGet verifyLogin: result="success" + user object
                 result == "success" -> {
                     val userMap = (map["user"] as? Map<*, *>)
                         ?.mapKeys { it.key.toString() }
                         ?.mapValues { it.value ?: "" }
-                        ?: map  // user আলাদা field এ না থাকলে root map ই user
+                        ?: map
                     @Suppress("UNCHECKED_CAST")
                     AuthResult.Success(userMap as Map<String, Any>)
                 }
-
-                // GAS doPost login: status="ok" + user fields directly in root
-                status == "ok" -> {
-                    AuthResult.Success(map)
-                }
-
-                // Error cases
+                status == "ok" -> AuthResult.Success(map)
                 result == "error" || status == "error" -> {
                     val msg = (map["error"] ?: map["message"] ?: "লগইন ব্যর্থ").toString()
                     AuthResult.Error(translateError(msg))
                 }
-
                 else -> AuthResult.Error("অপ্রত্যাশিত response: $body")
             }
         } catch (e: Exception) {
@@ -104,19 +215,17 @@ object FirebaseAuthService {
         else -> msg
     }
 
-    // ── SIGNUP ──
-    // GAS doPost signup — FormBody দিয়ে
+    // ── SIGNUP (Phone + Password) ──
     suspend fun signup(
         name: String, phone: String, password: String,
         userType: String, classLevel: String, gasUrl: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
-            // FormBody — GAS e.parameter দিয়ে পড়বে
             val formBody = FormBody.Builder()
                 .add("action",     "signup")
                 .add("name",       name)
                 .add("phone",      phone)
-                .add("password",   hashPassword(password))  // hash করে save
+                .add("password",   hashPassword(password))
                 .add("userType",   userType)
                 .add("classLevel", classLevel)
                 .add("status",     "Active")
@@ -125,10 +234,9 @@ object FirebaseAuthService {
 
             val req  = Request.Builder().url(gasUrl).post(formBody).build()
             val resp = client.newCall(req).execute().body?.string() ?: ""
-
             Log.d("Signup", "GAS response: $resp")
 
-            return@withContext try {
+            try {
                 val type = object : TypeToken<Map<String, Any>>() {}.type
                 val map: Map<String, Any> = gson.fromJson(resp, type)
                 val s = (map["status"] ?: map["result"] ?: "").toString()
@@ -141,7 +249,6 @@ object FirebaseAuthService {
                     ))
                 } else {
                     val msg = (map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString()
-                    // Duplicate phone
                     if (msg.contains("already", true) || msg.contains("duplicate", true) ||
                         msg.contains("exists", true))
                         AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
@@ -164,8 +271,7 @@ object FirebaseAuthService {
     }
 
 
-    // ── SIGNUP WITH EMAIL (Google user) ──
-    // email + picture সহ signup — GAS script এ email field handle করতে হবে
+    // ── SIGNUP WITH EMAIL (Google user — email + picture সহ) ──
     suspend fun signupWithEmail(
         name: String, phone: String, email: String, password: String,
         picture: String, userType: String, classLevel: String, gasUrl: String
@@ -200,8 +306,7 @@ object FirebaseAuthService {
                     ))
                 } else {
                     val msg = (map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString()
-                    if (msg.contains("already", true) || msg.contains("duplicate", true) ||
-                        msg.contains("exists", true))
+                    if (msg.contains("already", true) || msg.contains("duplicate", true) || msg.contains("exists", true))
                         AuthResult.Error("এই ফোন নম্বর বা Email আগে থেকেই নিবন্ধিত")
                     else
                         AuthResult.Error(msg)
@@ -228,4 +333,11 @@ object FirebaseAuthService {
 sealed class AuthResult {
     data class Success(val userData: Map<String, Any>) : AuthResult()
     data class Error(val message: String) : AuthResult()
+}
+
+// Google Auth result — existing user বা new user
+sealed class GoogleAuthResult {
+    data class ExistingUser(val userData: Map<String, Any>) : GoogleAuthResult()
+    data class NewUser(val email: String, val name: String, val photoUrl: String) : GoogleAuthResult()
+    data class Error(val message: String) : GoogleAuthResult()
 }
