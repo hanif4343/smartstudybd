@@ -101,9 +101,12 @@ object FirebaseAuthService {
                 val savedPassword = (userMap["Password"] ?: userMap["password"] ?: "").toString()
                 val currentHashed = hashPassword(password)
 
-                Log.d("Login", "Saved hash: ${savedPassword.take(10)}..., Input hash: ${currentHashed.take(10)}...")
+                Log.d("Login", "Saved pw length: ${savedPassword.length}, Input hash: ${currentHashed.take(10)}...")
 
-                if (savedPassword == currentHashed) {
+                // পুরনো user: plain text password | নতুন user: SHA-256 hashed
+                val passwordMatches = savedPassword == currentHashed || savedPassword == password.trim()
+
+                if (passwordMatches) {
                     val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
                     if (status == "inactive") {
                         AuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
