@@ -104,13 +104,14 @@ jobs:
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
           sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
+          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/build.gradle
+          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/src/main/res/values/strings.xml
 
       # ── Auto versionCode ──
       - name: Set versionCode
         run: sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" app/build.gradle
 
       # ── Keystore ──
-      # এখানে ফাইলের নাম পরিবর্তন করে 'smartstudy.jks' করা হয়েছে
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -131,7 +132,6 @@ jobs:
           if-no-files-found: error
 
       # ── Build Signed Release ──
-      # এখানে আপনার নতুন কিস্টোর ফাইল এবং alias 'hanif' সঠিকভাবে ম্যাপ করা হয়েছে
       - name: Build Signed Release APK
         env:
           KEYSTORE_FILE: "smartstudy.jks"
