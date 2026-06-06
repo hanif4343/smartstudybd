@@ -8,6 +8,9 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ChallengeRepository
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.AudienceFilter.forUser
+import com.hanif.smartstudy.util.AudienceFilter.canChallenge
+import com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -101,8 +104,10 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             val c = ContentRepository.getMemCache() ?: content.getContent()
                 .let { (it as? com.hanif.smartstudy.data.repository.DataState.Success)?.data }
             if (c == null) return@launch
-            val subjects = (c.quiz.map { it.subject ?: "" } +
-                            c.qbank.map { it.subject ?: "" })
+            val me       = session.getCurrentUser()
+            val filtered = c.forUser(me)
+            val subjects = (filtered.quiz.map { it.subject ?: "" } +
+                            filtered.qbank.map { it.subject ?: "" })
                 .filter { it.isNotBlank() }.distinct().sorted()
             _state.update { it.copy(subjects = subjects) }
         }
@@ -111,8 +116,10 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun onSubjectSelect(subject: String) {
         viewModelScope.launch {
             val c = ContentRepository.getMemCache() ?: return@launch
-            val subTopics = (c.quiz.filter { it.subject == subject }.map { it.subTopic ?: "" } +
-                             c.qbank.filter { it.subject == subject }.map { it.subTopic ?: "" })
+            val me       = session.getCurrentUser()
+            val filtered = c.forUser(me)
+            val subTopics = (filtered.quiz.filter { it.subject == subject }.map { it.subTopic ?: "" } +
+                             filtered.qbank.filter { it.subject == subject }.map { it.subTopic ?: "" })
                 .filter { it.isNotBlank() }.distinct().sorted()
             _state.update { it.copy(selectedSubject = subject, selectedSubTopic = "", subTopics = subTopics) }
         }
@@ -141,6 +148,24 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isSearching = true, searchError = null) }
             val user = repo.findUserByPhone(phone)
+
+            // ── Audience group compatibility check ──
+            if (user != null) {
+                val me = session.getCurrentUser()
+                if (!canChallenge(me, user)) {
+                    val myGroup  = audienceGroupLabel(me)
+                    val oppGroup = audienceGroupLabel(user)
+                    _state.update {
+                        it.copy(
+                            isSearching  = false,
+                            searchResult = null,
+                            searchError  = "❌ তুমি ($myGroup) এই ব্যবহারকারীকে ($oppGroup) challenge করতে পারবে না। শুধুমাত্র একই শ্রেণির শিক্ষার্থীরা পরস্পরকে challenge করতে পারবে।"
+                        )
+                    }
+                    return@launch
+                }
+            }
+
             _state.update {
                 it.copy(
                     isSearching  = false,
@@ -183,12 +208,13 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(isLoading = true, error = null) }
             val me      = session.getCurrentUser() ?: return@launch
             val c       = ContentRepository.getMemCache() ?: return@launch
+            val filtered = c.forUser(me)
 
-            // Question pool থেকে random questions নাও
-            val pool    = (c.quiz.filter { it.subject == s.selectedSubject &&
+            // Question pool থেকে random questions নাও (audience filtered)
+            val pool    = (filtered.quiz.filter { it.subject == s.selectedSubject &&
                             (s.selectedSubTopic.isBlank() || it.subTopic == s.selectedSubTopic) }
                             .map { QuestionItem.fromQuizItem(it) } +
-                           c.qbank.filter { it.subject == s.selectedSubject &&
+                           filtered.qbank.filter { it.subject == s.selectedSubject &&
                             (s.selectedSubTopic.isBlank() || it.subTopic == s.selectedSubTopic) }
                             .map { QuestionItem.fromQBankItem(it) })
                 .filter { it.optionA.isNotBlank() } // শুধু MCQ
@@ -497,7 +523,8 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             val c  = ContentRepository.getMemCache()
                 ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
                 ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
-            val pool = (c.quiz.filter { it.subject == s.selectedSubject &&
+            val filtered = c.forUser(me)
+            val pool = (filtered.quiz.filter { it.subject == s.selectedSubject &&
                 (s.selectedSubTopic.isBlank() || it.subTopic == s.selectedSubTopic) })
                 .shuffled().take(s.questionCount)
             val questionIds = pool.map { it.id ?: "" }.filter { it.isNotBlank() }
@@ -540,6 +567,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             val c  = ContentRepository.getMemCache()
                 ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
                 ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
+            val filtered = c.forUser(me)
 
             // opponents list
             val opponents = challenge.participants.values
@@ -554,7 +582,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
 
-            val pool = c.quiz.filter { it.subject == challenge.subject &&
+            val pool = filtered.quiz.filter { it.subject == challenge.subject &&
                 (challenge.subTopic.isBlank() || it.subTopic == challenge.subTopic) }
                 .shuffled().take(challenge.questionCount)
             val questionIds = pool.map { it.id ?: "" }.filter { it.isNotBlank() }
