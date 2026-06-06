@@ -219,8 +219,7 @@ fun LoginForm(
                         vm.googleSignIn(email, name, photoUrl)
                     },
                     onError = { msg ->
-                        // error AuthState তে পাঠাও — LaunchedEffect দিয়ে দেখাবে
-                        // ViewModel এ direct set করা যায় না বাইরে থেকে, তাই google error handle এভাবেই চলে
+                        vm.setError(msg)
                     }
                 )
             }
@@ -359,7 +358,7 @@ fun SignupForm(
                         onSuccess = { email, name2, photoUrl ->
                             vm.googleSignIn(email, name2, photoUrl)
                         },
-                        onError = { }
+                        onError = { msg -> vm.setError(msg) }
                     )
                 }
             )
