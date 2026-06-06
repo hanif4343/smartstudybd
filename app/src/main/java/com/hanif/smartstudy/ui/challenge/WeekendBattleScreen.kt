@@ -23,7 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.WeekendBattleViewModel
-import com.hanif.smartstudy.viewmodel.WeekendBattleUiState
+import com.hanif.smartstudy.data.model.WeekendBattleUiState
 import java.text.SimpleDateFormat
 import java.util.*
 
