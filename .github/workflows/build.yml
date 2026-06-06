@@ -1,8 +1,8 @@
-Name: Build Smart Study APK
+name: Build Smart Study APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "**" ]        # সব branch এ build হবে
   workflow_dispatch:
 
 jobs:
@@ -28,25 +28,21 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "build-tools;34.0.0" "platforms;android-34" "platform-tools"
 
-      # ── Gradle install + wrapper generate ──
+      # ── Gradle wrapper ──
       - name: Install Gradle & generate wrapper
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp/
           export GRADLE_BIN="/tmp/gradle-8.4/bin/gradle"
           chmod +x "$GRADLE_BIN"
-
           mkdir -p gradle/wrapper
           "$GRADLE_BIN" wrapper --gradle-version=8.4 --distribution-type=bin
           chmod +x gradlew
+          echo "✅ Wrapper generated"
 
-          echo "✅ Wrapper generated:"
-          ls -lh gradle/wrapper/
-
-      # ── google-services.json (অটোমেটিক ইনভ্যালিড ক্যারেক্টার রিমুভারসহ) ──
+      # ── google-services.json ──
       - name: Create google-services.json
-        run: |
-          echo -n "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode | tr -d '\021' > app/google-services.json
+        run: echo -n "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode | tr -d '\021' > app/google-services.json
 
       # ── Bengali fonts ──
       - name: Download Noto Sans Bengali fonts
@@ -95,9 +91,10 @@ jobs:
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/StatsScreen.kt
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/ProfileScreen.kt
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/MenuScreen.kt
-          echo "Cleaned duplicate files"
+          echo "Cleaned"
 
-      # ── Inject secrets (Duplicate Resource Fix) ──
+      # ── Inject secrets ──
+      # WEB_CLIENT_ID শুধু strings.xml এ inject হবে (build.gradle এ resValue নেই — duplicate এড়াতে)
       - name: Inject API keys
         run: |
           sed -i 's|%%GAS_URL%%|${{ secrets.GAS_URL }}|g'               app/build.gradle
@@ -105,7 +102,7 @@ jobs:
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
           sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
-          sed -i '/%%WEB_CLIENT_ID%%/d'                                 app/build.gradle
+          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/build.gradle
           sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/src/main/res/values/strings.xml
 
       # ── Auto versionCode ──
@@ -116,12 +113,9 @@ jobs:
       - name: Decode Keystore
         run: echo -n "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/smartstudy.jks
 
-      # ── Build Debug ──
+      # ── Debug APK (সব branch এ) ──
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
-
-      - name: Find APK
-        run: find app/build/outputs -name "*.apk" 2>/dev/null || echo "No APK found"
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -130,8 +124,9 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # ── Build Signed Release ──
+      # ── Release APK (শুধু main/master branch এ) ──
       - name: Build Signed Release APK
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
           KEYSTORE_FILE: "smartstudy.jks"
           KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
@@ -139,27 +134,29 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Rename APK
+      - name: Rename Release APK
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
-          find app/build/outputs/apk/release -name "*.apk" | head -5
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -n "$APK" ]; then
             mv "$APK" app/build/outputs/apk/release/SmartStudy.apk
-            echo "Renamed: $APK -> SmartStudy.apk"
+            echo "✅ Renamed: SmartStudy.apk"
           else
             echo "No release APK found!"
             exit 1
           fi
 
       - name: Upload Release APK
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
           name: SmartStudy-Release-${{ github.run_number }}
           path: app/build/outputs/apk/release/SmartStudy.apk
           if-no-files-found: error
 
-      # ── GitHub Release ──
+      # ── GitHub Release (শুধু main/master) ──
       - name: Get version
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         id: ver
         run: |
           VN=$(grep 'versionName' app/build.gradle | sed 's/.*"\(.*\)".*/\1/' | tr -d ' ')
@@ -167,6 +164,7 @@ jobs:
           echo "title=Smart Study v${VN} (Build ${{ github.run_number }})" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
@@ -177,7 +175,7 @@ jobs:
             নিচের **SmartStudy.apk** ডাউনলোড করো।
             > Settings → Unknown sources চালু করে install করো।
 
-            🔨 Build \#${{ github.run_number }} | 💬 ${{ github.event.head_commit.message }}
+            🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
           files: app/build/outputs/apk/release/SmartStudy.apk
           make_latest: true
         env:
