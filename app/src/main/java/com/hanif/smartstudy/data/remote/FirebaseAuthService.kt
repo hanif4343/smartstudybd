@@ -27,34 +27,43 @@ object FirebaseAuthService {
     }
 
     /**
+     * Gson Map<String,Any> তে সব number Double হয়ে যায়।
+     * যেমন: "43658766" → 4.3658766E7
+     * এই function যেকোনো value কে সঠিক String-এ convert করে।
+     */
+    private fun anyToString(value: Any?): String {
+        if (value == null) return ""
+        return when (value) {
+            is Double -> {
+                // Integer double হলে (যেমন 4.3658766E7) → "43658766"
+                if (value == Math.floor(value) && !value.isInfinite()) {
+                    value.toLong().toString()
+                } else {
+                    value.toString()
+                }
+            }
+            is Long -> value.toString()
+            is Int -> value.toString()
+            is Boolean -> value.toString()
+            else -> value.toString()
+        }
+    }
+
+    /**
      * Firebase-এ Users node থেকে সকল user লোড করে phone দিয়ে খোঁজে।
      * Database-এ user হয় phone-key (01XXXXXXXXX) অথবা numeric index (0,1,2...) হিসেবে থাকতে পারে।
      * দুটো ক্ষেত্রেই কাজ করে।
+     * 
+     * গুরুত্বপূর্ণ: সবসময় সব user scan করে phone field দিয়ে মেলায়।
+     * কারণ Firebase-এ phone number leading zero (01...) থাকায়
+     * direct key lookup কাজ করে না।
      */
     private suspend fun findUserByPhone(phone: String, firebaseUrl: String, secretKey: String): Map<String, Any>? =
         withContext(Dispatchers.IO) {
             try {
-                // প্রথমে সরাসরি phone-key দিয়ে খোঁজ (নতুন format)
-                val directUrl = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
-                Log.d("Login", "Trying direct phone key: $directUrl")
-                val directReq = Request.Builder().url(directUrl).get().build()
-                val directResp = client.newCall(directReq).execute()
-                val directBody = directResp.body?.string() ?: ""
-                Log.d("Login", "Direct key response: $directBody")
-
-                if (directBody.isNotBlank() && directBody != "null") {
-                    val type = object : TypeToken<Map<String, Any>>() {}.type
-                    val userMap: Map<String, Any> = gson.fromJson(directBody, type)
-                    // নিশ্চিত করি এটা সত্যিই user data (Name বা Phone field থাকতে হবে)
-                    if (userMap.containsKey("Name") || userMap.containsKey("Phone") || userMap.containsKey("name") || userMap.containsKey("phone")) {
-                        Log.d("Login", "Found user via direct phone key")
-                        return@withContext userMap
-                    }
-                }
-
-                // সরাসরি পাওয়া না গেলে সকল user scan করো (পুরনো numeric-index format)
+                val normPhone = phone.trim()
                 val allUrl = "${firebaseUrl}Users.json?auth=$secretKey"
-                Log.d("Login", "Scanning all users: $allUrl")
+                Log.d("Login", "Scanning all users for phone: $normPhone")
                 val allReq = Request.Builder().url(allUrl).get().build()
                 val allResp = client.newCall(allReq).execute()
                 val allBody = allResp.body?.string() ?: ""
@@ -62,28 +71,34 @@ object FirebaseAuthService {
 
                 if (allBody.isBlank() || allBody == "null") return@withContext null
 
-                val normPhone = phone.trim()
+                val type = object : TypeToken<Map<String, Any>>() {}.type
+                val rawMap: Map<String, Any> = gson.fromJson(allBody, type)
 
-                // Map<key, Map<field, value>> হিসেবে parse করো
-                try {
-                    val type = object : TypeToken<Map<String, Any>>() {}.type
-                    val rawMap: Map<String, Any> = gson.fromJson(allBody, type)
-
-                    for ((_, value) in rawMap) {
-                        if (value is Map<*, *>) {
+                for ((key, value) in rawMap) {
+                    when {
+                        // phone number নিজেই key হিসেবে ব্যবহার হয়েছে (নতুন format)
+                        key == normPhone -> {
+                            if (value is Map<*, *>) {
+                                @Suppress("UNCHECKED_CAST")
+                                Log.d("Login", "Found via key match: $key")
+                                return@withContext value as Map<String, Any>
+                            }
+                        }
+                        // numeric index বা অন্য key — ভেতরে Phone field দেখো
+                        value is Map<*, *> -> {
                             @Suppress("UNCHECKED_CAST")
                             val userMap = value as Map<String, Any>
-                            val storedPhone = (userMap["Phone"] ?: userMap["phone"])?.toString()?.trim() ?: ""
+                            val storedPhone = anyToString(userMap["Phone"] ?: userMap["phone"]).trim()
+                            Log.d("Login", "Checking key=$key storedPhone=$storedPhone vs $normPhone")
                             if (storedPhone == normPhone) {
-                                Log.d("Login", "Found user via scan: ${userMap["Name"]}")
+                                Log.d("Login", "Found via phone field scan: ${userMap["Name"]}")
                                 return@withContext userMap
                             }
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e("Login", "Parse error during scan: ${e.message}")
                 }
 
+                Log.d("Login", "User not found for phone: $normPhone")
                 null
             } catch (e: Exception) {
                 Log.e("Login", "findUserByPhone error: ${e.message}")
@@ -98,13 +113,15 @@ object FirebaseAuthService {
                 val userMap = findUserByPhone(phone, firebaseUrl, secretKey)
                     ?: return@withContext AuthResult.Error("এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই")
 
-                val savedPassword = (userMap["Password"] ?: userMap["password"] ?: "").toString()
-                val currentHashed = hashPassword(password)
+                // Gson সব number কে Double করে, তাই anyToString দিয়ে সঠিক value নাও
+                val savedPassword = anyToString(userMap["Password"] ?: userMap["password"] ?: "")
+                val inputPassword = password.trim()
+                val currentHashed = hashPassword(inputPassword)
 
-                Log.d("Login", "Saved pw length: ${savedPassword.length}, Input hash: ${currentHashed.take(10)}...")
+                Log.d("Login", "Saved pw: '$savedPassword', Input plain: '$inputPassword', Input hash start: ${currentHashed.take(10)}")
 
                 // পুরনো user: plain text password | নতুন user: SHA-256 hashed
-                val passwordMatches = savedPassword == currentHashed || savedPassword == password.trim()
+                val passwordMatches = savedPassword == currentHashed || savedPassword == inputPassword
 
                 if (passwordMatches) {
                     val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
