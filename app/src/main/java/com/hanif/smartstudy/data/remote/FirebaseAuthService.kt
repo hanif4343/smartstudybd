@@ -163,6 +163,64 @@ object FirebaseAuthService {
         }
     }
 
+
+    // ── SIGNUP WITH EMAIL (Google user) ──
+    // email + picture সহ signup — GAS script এ email field handle করতে হবে
+    suspend fun signupWithEmail(
+        name: String, phone: String, email: String, password: String,
+        picture: String, userType: String, classLevel: String, gasUrl: String
+    ): AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val formBody = FormBody.Builder()
+                .add("action",     "signup")
+                .add("name",       name)
+                .add("phone",      phone)
+                .add("email",      email)
+                .add("password",   hashPassword(password))
+                .add("picture",    picture)
+                .add("userType",   userType)
+                .add("classLevel", classLevel)
+                .add("status",     "Active")
+                .add("role",       "User")
+                .build()
+
+            val req  = Request.Builder().url(gasUrl).post(formBody).build()
+            val resp = client.newCall(req).execute().body?.string() ?: ""
+            Log.d("GoogleSignup", "GAS response: $resp")
+
+            try {
+                val type = object : TypeToken<Map<String, Any>>() {}.type
+                val map: Map<String, Any> = gson.fromJson(resp, type)
+                val s = (map["status"] ?: map["result"] ?: "").toString()
+                if (s == "ok" || s == "success") {
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone, "Email" to email,
+                        "Picture" to picture, "UserType" to userType,
+                        "ClassLevel" to classLevel, "Status" to "Active", "Role" to "User"
+                    ))
+                } else {
+                    val msg = (map["message"] ?: map["error"] ?: "Signup ব্যর্থ").toString()
+                    if (msg.contains("already", true) || msg.contains("duplicate", true) ||
+                        msg.contains("exists", true))
+                        AuthResult.Error("এই ফোন নম্বর বা Email আগে থেকেই নিবন্ধিত")
+                    else
+                        AuthResult.Error(msg)
+                }
+            } catch (e: Exception) {
+                if (resp.contains("ok", true) || resp.contains("success", true))
+                    AuthResult.Success(mapOf(
+                        "Name" to name, "Phone" to phone, "Email" to email,
+                        "Picture" to picture, "UserType" to userType,
+                        "ClassLevel" to classLevel, "Status" to "Active", "Role" to "User"
+                    ))
+                else
+                    AuthResult.Error("Signup ব্যর্থ হয়েছে: $resp")
+            }
+        } catch (e: Exception) {
+            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+        }
+    }
+
     private fun encode(s: String) =
         java.net.URLEncoder.encode(s, "UTF-8")
 }
