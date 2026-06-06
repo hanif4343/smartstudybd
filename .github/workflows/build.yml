@@ -43,9 +43,10 @@ jobs:
           echo "✅ Wrapper generated:"
           ls -lh gradle/wrapper/
 
-      # ── google-services.json ──
+      # ── google-services.json (অটোমেটিক ইনভ্যালিড ক্যারেক্টার রিমুভারসহ) ──
       - name: Create google-services.json
-        run: echo -n "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode > app/google-services.json
+        run: |
+          echo -n "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode | tr -d '\021' > app/google-services.json
 
       # ── Bengali fonts ──
       - name: Download Noto Sans Bengali fonts
