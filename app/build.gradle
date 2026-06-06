@@ -19,9 +19,6 @@ android {
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
         buildConfigField "String", "SECRET_KEY",     "\"%%SECRET_KEY%%\""
         buildConfigField "String", "WEB_CLIENT_ID",  "\"%%WEB_CLIENT_ID%%\""
-
-        // Google Services JSON auto-generate করে, কিন্তু আমরা strings.xml এও রাখছি fallback হিসেবে
-        resValue "string", "default_web_client_id", "\"%%WEB_CLIENT_ID%%\""
     }
 
     signingConfigs {
