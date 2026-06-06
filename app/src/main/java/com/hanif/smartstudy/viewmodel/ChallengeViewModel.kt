@@ -54,10 +54,21 @@ data class ChallengeUiState(
     val error           : String?               = null,
     val toast           : String?               = null,
     // Ghost Mode
-    val isGhostMode     : Boolean               = false,
+    val isGhostMode       : Boolean               = false,
+    // XP Wager (বাজি)
+    val wagerXp           : Int                   = 0,       // 0, 10, 25, 50, 100
+    val myCurrentXp       : Int                   = 0,       // বাজি ধরার আগে check
+    // Lifelines — প্রতিটা একবার মাত্র
+    val usedFiftyFifty    : Boolean               = false,
+    val usedTimeFreeze    : Boolean               = false,
+    val hiddenOptions     : Set<Int>              = emptySet(), // 50-50 এ লুকানো wrong options
+    val timeFrozenSec     : Int                   = 0,          // freeze চলাকালীন বাকি সেকেন্ড
+    val isFreezing        : Boolean               = false,
+    // Accuracy tip — দ্রুত কিন্তু কম accurate হলে পরামর্শ
+    val accuracyTip       : String?               = null,
     // Match History (current opponent)
-    val matchHistory    : List<MatchRecord>     = emptyList(),
-    val winLossSummary  : Map<String, Pair<Int,Int>> = emptyMap()
+    val matchHistory      : List<MatchRecord>     = emptyList(),
+    val winLossSummary    : Map<String, Pair<Int,Int>> = emptyMap()
 )
 
 class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
@@ -75,7 +86,10 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val me = session.getCurrentUser()
-        _state.update { it.copy(myPhone = me?.phone ?: "") }
+        _state.update { it.copy(
+            myPhone     = me?.phone ?: "",
+            myCurrentXp = me?.xp ?: 0
+        )}
         loadSubjects()
         observeInvites()
     }
@@ -108,6 +122,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun onQuestionCountChange(n: Int) = _state.update { it.copy(questionCount = n.coerceIn(5, 30)) }
     fun onTimeLimitChange(sec: Int)   = _state.update { it.copy(timeLimitSec = sec) }
     fun onPhoneInput(phone: String)   = _state.update { it.copy(phoneInput = phone, searchResult = null, searchError = null) }
+    fun onWagerChange(xp: Int)        = _state.update { it.copy(wagerXp = xp) }
 
     // ── Search user ──────────────────────────────────────
 
@@ -192,7 +207,8 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 subTopic      = s.selectedSubTopic,
                 questionCount = s.questionCount,
                 timeLimitSec  = s.timeLimitSec,
-                questionIds   = pool.map { it.id }
+                questionIds   = pool.map { it.id },
+                wagerXp       = s.wagerXp
             )
 
             if (challengeId != null) {
@@ -290,7 +306,10 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun goToQuestion(index: Int) {
-        _state.update { it.copy(currentQIndex = index.coerceIn(0, _state.value.questions.size - 1)) }
+        _state.update { it.copy(
+            currentQIndex = index.coerceIn(0, _state.value.questions.size - 1),
+            hiddenOptions = emptySet()   // নতুন প্রশ্নে 50-50 এফেক্ট reset
+        )}
     }
 
     fun submitExam() {
@@ -333,7 +352,23 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 repo.submitChallenge(challenge.id, s.myPhone, score, correctIds)
             }
 
-            // Match History save করো (সব opponent এর জন্য)
+            // Match History save + XP wager apply
+            val wager       = challenge.wagerXp
+            val accuracy    = if (s.questions.isNotEmpty()) score * 100f / s.questions.size else 0f
+            val timeUsedSec = challenge.timeLimitSec - s.timerSec   // কত সেকেন্ড লেগেছে
+            val totalSec    = challenge.timeLimitSec.coerceAtLeast(1)
+            val timeUsedPct = timeUsedSec * 100f / totalSec           // % সময় ব্যবহার
+
+            // Accuracy tip: দ্রুত শেষ করেছে কিন্তু accuracy কম
+            val tip = when {
+                accuracy < 50f && timeUsedPct < 50f ->
+                    "⚠️ তুমি অনেক দ্রুত শেষ করেছ কিন্তু মাত্র ${accuracy.toInt()}% সঠিক! পরের বার প্রতিটা প্রশ্ন ভালো করে পড়ো।"
+                accuracy < 60f && timeUsedPct < 60f ->
+                    "💡 Speed এর চেয়ে Accuracy বেশি গুরুত্বপূর্ণ! একটু ধীরে হলেও সঠিক উত্তর দাও।"
+                accuracy >= 90f ->
+                    "🌟 অসাধারণ! ${accuracy.toInt()}% accuracy — এভাবেই চালিয়ে যাও!"
+                else -> null
+            }
             challenge.participants.values
                 .filter { it.phone != s.myPhone && it.score >= 0 }
                 .forEach { opponent ->
@@ -345,11 +380,20 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                         subject     = challenge.subject,
                         myScore     = score,
                         total       = s.questions.size,
-                        isGhostMode = challenge.isGhostMode
+                        isGhostMode = challenge.isGhostMode,
+                        wagerXp     = wager
                     )
+                    // XP Wager apply করো
+                    if (wager > 0) {
+                        val iWon  = score > opponent.score
+                        val delta = if (iWon) wager else -wager
+                        repo.applyWagerXp(s.myPhone, delta)
+                        val msg = if (iWon) "🏆 জিতেছ! +$wager XP পেয়েছ" else "😞 হেরেছ। -$wager XP কাটা গেছে"
+                        _state.update { it.copy(toast = msg) }
+                    }
                 }
 
-            _state.update { it.copy(isSubmitting = false) }
+            _state.update { it.copy(isSubmitting = false, accuracyTip = tip) }
         }
     }
 
@@ -359,10 +403,11 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             var remaining = totalSec
             while (remaining > 0) {
                 delay(1000)
+                // Time Freeze চললে tick skip করো
+                if (_state.value.isFreezing) continue
                 remaining--
                 _state.update { it.copy(timerSec = remaining) }
             }
-            // Time up — auto submit
             if (_state.value.screen is ChallengeScreen.Exam) submitExam()
         }
     }
@@ -387,6 +432,59 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Ghost Mode toggle ─────────────────────────────────
     fun toggleGhostMode() = _state.update { it.copy(isGhostMode = !it.isGhostMode) }
+
+    // ── Lifelines ─────────────────────────────────────────
+
+    /** 50-50: সঠিক উত্তর ছাড়া দুটো ভুল option লুকিয়ে দাও */
+    fun useFiftyFifty() {
+        val s = _state.value
+        if (s.usedFiftyFifty) return
+        val currentQ = s.questions.getOrNull(s.currentQIndex) ?: return
+
+        // সঠিক option index বের করো (1-indexed)
+        val correctIdx = when {
+            currentQ.optionA.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 1
+            currentQ.optionB.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 2
+            currentQ.optionC.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 3
+            currentQ.optionD.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 4
+            else -> 1
+        }
+        // বাকি তিনটা থেকে দুটো random বেছে লুকাও
+        val wrongOptions = (1..4).filter { it != correctIdx }.shuffled().take(2).toSet()
+        _state.update { it.copy(usedFiftyFifty = true, hiddenOptions = wrongOptions) }
+
+        // Firebase এ mark করো
+        viewModelScope.launch {
+            repo.markLifelineUsed(
+                s.challenge?.id ?: return@launch,
+                s.myPhone,
+                Lifeline.FIFTY_FIFTY
+            )
+        }
+    }
+
+    /** Time Freeze: ৩০ সেকেন্ড timer থামিয়ে রাখো */
+    fun useTimeFreeze() {
+        val s = _state.value
+        if (s.usedTimeFreeze || s.isFreezing) return
+        val frozenAt = s.timerSec
+        _state.update { it.copy(usedTimeFreeze = true, isFreezing = true, timeFrozenSec = frozenAt) }
+
+        // Timer job pause করো — ৩০ সেকেন্ড পরে resume
+        viewModelScope.launch {
+            delay(30_000L)
+            _state.update { it.copy(isFreezing = false) }
+        }
+
+        // Firebase এ mark করো
+        viewModelScope.launch {
+            repo.markLifelineUsed(
+                s.challenge?.id ?: return@launch,
+                s.myPhone,
+                Lifeline.TIME_FREEZE
+            )
+        }
+    }
 
     // ── Ghost Challenge create — creator একাই ACTIVE পরীক্ষা শুরু করে ──
     fun createGhostChallenge() {

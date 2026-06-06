@@ -81,15 +81,19 @@ fun ChallengeExamScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                 ) {
                     item {
                         ChallengeQuestionCard(
-                            index      = state.currentQIndex,
-                            total      = questions.size,
-                            question   = currentQ,
-                            selected   = state.answers[currentQ.id],
-                            onSelect   = { opt -> vm.answerQuestion(currentQ.id, opt) }
+                            index         = state.currentQIndex,
+                            total         = questions.size,
+                            question      = currentQ,
+                            selected      = state.answers[currentQ.id],
+                            hiddenOptions = state.hiddenOptions,
+                            onSelect      = { opt -> vm.answerQuestion(currentQ.id, opt) }
                         )
                     }
                 }
             }
+
+            // ── Lifeline bar ──
+            LifelineBar(state = state, vm = vm)
 
             // ── Bottom nav ──
             Row(
@@ -196,6 +200,77 @@ fun ChallengeExamScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
 }
 
 @Composable
+private fun LifelineBar(state: ChallengeUiState, vm: ChallengeViewModel) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF1F5F9))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Text("🎯 লাইফলাইন:", fontSize = 11.sp,
+            color = Color(0xFF64748B), fontFamily = NotoSansBengali,
+            fontWeight = FontWeight.Bold)
+
+        // 50-50
+        LifelineChip(
+            label    = "50/50",
+            emoji    = "✂️",
+            used     = state.usedFiftyFifty,
+            onClick  = { vm.useFiftyFifty() }
+        )
+
+        // Time Freeze
+        LifelineChip(
+            label    = if (state.isFreezing) "ফ্রিজ!" else "⏸ ফ্রিজ",
+            emoji    = "🧊",
+            used     = state.usedTimeFreeze,
+            active   = state.isFreezing,
+            onClick  = { vm.useTimeFreeze() }
+        )
+
+        if (state.isFreezing) {
+            Spacer(Modifier.weight(1f))
+            Text("⏸ ৩০ সেকেন্ড freeze", fontSize = 9.sp,
+                color = Color(0xFF3B82F6), fontFamily = NotoSansBengali,
+                fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun LifelineChip(
+    label  : String,
+    emoji  : String,
+    used   : Boolean,
+    active : Boolean = false,
+    onClick: () -> Unit
+) {
+    val bg    = when {
+        active -> Color(0xFF3B82F6)
+        used   -> Color(0xFFE2E8F0)
+        else   -> Color(0xFF4F46E5)
+    }
+    val text  = if (used && !active) Color(0xFF94A3B8) else Color.White
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(bg)
+            .clickable(enabled = !used) { onClick() }
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text       = if (used && !active) "✓ $label" else "$emoji $label",
+            fontSize   = 11.sp,
+            color      = text,
+            fontWeight = FontWeight.Bold,
+            fontFamily = NotoSansBengali
+        )
+    }
+}
+
+@Composable
 private fun ExamTimer(timerSec: Int, totalSec: Int) {
     val pct = timerSec.toFloat() / totalSec.coerceAtLeast(1)
     val color = when {
@@ -214,11 +289,12 @@ private fun ExamTimer(timerSec: Int, totalSec: Int) {
 
 @Composable
 private fun ChallengeQuestionCard(
-    index   : Int,
-    total   : Int,
-    question: QuestionItem,
-    selected: Int?,
-    onSelect: (Int) -> Unit
+    index         : Int,
+    total         : Int,
+    question      : QuestionItem,
+    selected      : Int?,
+    hiddenOptions : Set<Int> = emptySet(),
+    onSelect      : (Int) -> Unit
 ) {
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), CardDefaults.cardColors(Color.White),
         CardDefaults.cardElevation(2.dp)) {
@@ -238,29 +314,50 @@ private fun ChallengeQuestionCard(
             listOf(question.optionA, question.optionB, question.optionC, question.optionD)
                 .filterIndexed { i, opt -> opt.isNotBlank() }
                 .forEachIndexed { i, opt ->
-                    val optNum    = i + 1
+                    val optNum     = i + 1
+                    val isHidden   = optNum in hiddenOptions
                     val isSelected = selected == optNum
-                    Row(
-                        modifier = Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC))
-                            .border(1.5.dp, if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
-                            .clickable { onSelect(optNum) }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(Modifier.size(26.dp).clip(CircleShape)
-                            .background(if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)),
-                            contentAlignment = Alignment.Center) {
-                            Text(listOf("ক", "খ", "গ", "ঘ")[i], fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isSelected) Color.White else Color(0xFF64748B))
+                    if (isHidden) {
+                        // 50-50 এ ঘোলা করে দেখাও
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF1F5F9).copy(0.4f))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.size(26.dp).clip(CircleShape).background(Color(0xFFE2E8F0)),
+                                contentAlignment = Alignment.Center) {
+                                Text(listOf("ক","খ","গ","ঘ")[i], fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold, color = Color(0xFFCBD5E1))
+                            }
+                            Text("— — —", fontSize = 13.sp, color = Color(0xFFCBD5E1),
+                                modifier = Modifier.weight(1f))
                         }
-                        Text(opt, fontSize = 13.sp, fontFamily = NotoSansBengali,
-                            color = if (isSelected) Color(0xFF1E1B4B) else Color(0xFF1E293B),
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f))
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC))
+                                .border(1.5.dp, if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                .clickable { onSelect(optNum) }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.size(26.dp).clip(CircleShape)
+                                .background(if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)),
+                                contentAlignment = Alignment.Center) {
+                                Text(listOf("ক","খ","গ","ঘ")[i], fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isSelected) Color.White else Color(0xFF64748B))
+                            }
+                            Text(opt, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                color = if (isSelected) Color(0xFF1E1B4B) else Color(0xFF1E293B),
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f))
+                        }
                     }
                 }
         }

@@ -23,7 +23,6 @@ import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.ChallengeUiState
 import com.hanif.smartstudy.viewmodel.ChallengeViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
@@ -55,6 +54,10 @@ fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
             // ── Step 3: Config ──
             SectionHeader("⚙️ Step 3: পরীক্ষার নিয়ম")
             ConfigSection(state = state, vm = vm)
+
+            // ── Step 4: XP Wager (ঐচ্ছিক) ──
+            SectionHeader("💰 Step 4: XP বাজি (ঐচ্ছিক)")
+            WagerSection(state = state, vm = vm)
 
             // Error
             state.error?.let { err ->
@@ -116,7 +119,9 @@ fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                 colors   = ButtonDefaults.buttonColors(
                     containerColor = if (state.isGhostMode) Color(0xFF7C3AED) else Color(0xFF4F46E5)
                 ),
-                enabled  = !state.isLoading && state.invitedUsers.isNotEmpty() && state.selectedSubject.isNotBlank()
+                enabled  = !state.isLoading && state.invitedUsers.isNotEmpty()
+                           && state.selectedSubject.isNotBlank()
+                           && (state.wagerXp == 0 || state.myCurrentXp >= state.wagerXp)
             ) {
                 if (state.isLoading) {
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -316,6 +321,80 @@ private fun ConfigRow(label: String, value: String, options: List<String>, selec
                     onClick  = { onSelect(opt) },
                     label    = { Text(opt, fontFamily = NotoSansBengali, fontSize = 11.sp) }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WagerSection(state: ChallengeUiState, vm: ChallengeViewModel) {
+    val options  = listOf(0, 10, 25, 50, 100)
+    val hasEnough = state.myCurrentXp >= state.wagerXp
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(16.dp),
+        colors   = CardDefaults.cardColors(Color.White)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column {
+                    Text("জিতলে XP পাবে, হারলে কাটা যাবে",
+                        fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                    Text("তোমার XP: ${state.myCurrentXp}",
+                        fontSize = 11.sp, color = Color(0xFF4F46E5),
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                }
+                if (state.wagerXp > 0) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFFEF3C7))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("±${state.wagerXp} XP",
+                            fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFD97706), fontFamily = NotoSansBengali)
+                    }
+                }
+            }
+
+            // Wager chips
+            androidx.compose.foundation.lazy.LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(count = options.size) { idx ->
+                    val opt = options[idx]
+                    val label = if (opt == 0) "বাজি নেই" else "$opt XP"
+                    val isSelected = state.wagerXp == opt
+                    FilterChip(
+                        selected = isSelected,
+                        onClick  = { vm.onWagerChange(opt) },
+                        label    = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
+                        colors   = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = if (opt == 0) Color(0xFFDCFCE7)
+                                                     else Color(0xFFFEF3C7),
+                            selectedLabelColor     = if (opt == 0) Color(0xFF166534)
+                                                     else Color(0xFFD97706)
+                        )
+                    )
+                }
+            }
+
+            // Warning if not enough XP
+            if (state.wagerXp > 0 && !hasEnough) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFFFF1F2))
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Text("⚠️", fontSize = 12.sp)
+                    Text("তোমার যথেষ্ট XP নেই! আগে XP অর্জন করো।",
+                        fontSize = 11.sp, color = Color(0xFF991B1B),
+                        fontFamily = NotoSansBengali)
+                }
             }
         }
     }
