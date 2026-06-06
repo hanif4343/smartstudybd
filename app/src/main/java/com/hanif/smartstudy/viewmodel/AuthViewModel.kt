@@ -36,10 +36,8 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
-    private val gasUrl: String get() = try { BuildConfig.GAS_URL } catch (e: Exception) { "" }
     private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL } catch (e: Exception) { "" }
     private val secretKey: String get() = try { BuildConfig.SECRET_KEY } catch (e: Exception) { "" }
-    private val imgbbKey: String get() = try { BuildConfig.IMGBB_API_KEY } catch (e: Exception) { "" }
 
     // ── Phone + Password Login ──
     fun login(phone: String, password: String) {
@@ -50,7 +48,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.verifyLogin(ph, pw, gasUrl)) {
+            when (val r = FirebaseAuthService.verifyLogin(ph, pw, firebaseUrl, secretKey)) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(phone = ph)
                     val fullUser = try {
@@ -73,7 +71,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         if (email.isBlank()) { _authState.value = AuthState.Error("Google থেকে email পাওয়া যায়নি"); return }
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, gasUrl, firebaseUrl, secretKey)) {
+            when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, firebaseUrl, secretKey)) {
                 is GoogleAuthResult.ExistingUser -> {
                     val user = User.fromFirebaseMap(r.userData).let { u ->
                         u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
@@ -90,7 +88,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Google Signup — photo ImgBB তে upload করবে ──
+    // ── Google Signup ──
     fun googleSignup(
         name: String,
         email: String,
@@ -129,16 +127,8 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             Log.d("GoogleSignup", "Final photo URL: $finalPhotoUrl")
             val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
 
-            // ফিক্সড: সঠিক মেথড signupWithEmail পজিশনাল আর্গুমেন্ট দিয়ে কল করা হয়েছে যাতে ব্যাকএন্ড ক্র্যাশ না করে
             when (val r = FirebaseAuthService.signupWithEmail(
-                n,
-                ph,
-                email,
-                dummyPassword,
-                finalPhotoUrl,
-                userType,
-                classLevel,
-                gasUrl
+                n, ph, email, dummyPassword, finalPhotoUrl, userType, classLevel, firebaseUrl, secretKey
             )) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(
@@ -178,7 +168,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.signup(n, ph, pw, userType, classLevel, gasUrl)) {
+            when (val r = FirebaseAuthService.signup(n, ph, pw, userType, classLevel, firebaseUrl, secretKey)) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(phone = ph, name = n)
                     session.saveUser(user)
