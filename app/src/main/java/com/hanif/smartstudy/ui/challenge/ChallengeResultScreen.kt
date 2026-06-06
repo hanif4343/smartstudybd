@@ -96,6 +96,11 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
 
         Column(Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
+            // ── Accuracy Tip ──
+            state.accuracyTip?.let { tip ->
+                AccuracyTipCard(tip)
+            }
+
             if (sorted.isNotEmpty()) {
                 // ── Leaderboard ──
                 Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
@@ -393,5 +398,37 @@ private fun WinLossBadge(text: String, color: Color) {
     ) {
         Text(text, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
             color = color, fontFamily = NotoSansBengali)
+    }
+}
+
+// ── Accuracy / Speed tip card ──
+@Composable
+private fun AccuracyTipCard(tip: String) {
+    val isWarning = tip.startsWith("⚠️") || tip.startsWith("💡")
+    val bg        = if (isWarning) Color(0xFFFFF7ED) else Color(0xFFF0FDF4)
+    val border    = if (isWarning) Color(0xFFFED7AA) else Color(0xFFBBF7D0)
+    val textColor = if (isWarning) Color(0xFF92400E) else Color(0xFF166534)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(14.dp),
+        colors   = CardDefaults.cardColors(bg),
+        border   = BorderStroke(1.dp, border)
+    ) {
+        Row(
+            modifier  = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(if (isWarning) "📊" else "🌟", fontSize = 22.sp)
+            Text(
+                text       = tip,
+                fontSize   = 12.sp,
+                color      = textColor,
+                fontFamily = NotoSansBengali,
+                lineHeight = 18.sp,
+                modifier   = Modifier.weight(1f)
+            )
+        }
     }
 }
