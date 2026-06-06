@@ -43,10 +43,17 @@ object AudienceFilter {
         }
     }
 
-    // ── List filters ─────────────────────────────────────────
+    // ── List filters — @JvmName দিয়ে JVM clash ঠেকানো ──────
+    // Kotlin-এ generic List<T> JVM bytecode-এ একই signature হয়,
+    // তাই প্রতিটাকে আলাদা @JvmName দিতে হবে।
 
+    @JvmName("filterQuizForUser")
     fun List<QuizItem>.filterForUser(user: User?)  = filter { userCanSee(it.audienceTags, user) }
+
+    @JvmName("filterQBankForUser")
     fun List<QBankItem>.filterForUser(user: User?) = filter { userCanSee(it.audienceTags, user) }
+
+    @JvmName("filterStudyForUser")
     fun List<StudyItem>.filterForUser(user: User?) = filter { userCanSee(it.audienceTags, user) }
 
     // ── AppContent filtered view ─────────────────────────────
@@ -64,19 +71,14 @@ object AudienceFilter {
      * Group নির্ধারণ:
      *   - classLevel খালি না হলে → classLevel-ই group key
      *   - classLevel খালি হলে → userType বা "Job" default
-     *
-     * উদাহরণ:
-     *   HSC (Class 12) ছাত্র → group = "Class 12"
-     *   Job seeker            → group = "Job"
-     *   Masters 1             → group = "Masters 1"
      */
     fun audienceGroupOf(user: User?): String {
         val cl = user?.classLevel?.trim() ?: ""
         val ut = user?.userType?.trim()   ?: ""
         return when {
-            cl.isNotBlank()                    -> cl
+            cl.isNotBlank()                     -> cl
             ut.equals("Job", ignoreCase = true) -> "Job"
-            else                               -> "Job"   // fallback: untagged = Job group
+            else                                -> "Job"
         }
     }
 
@@ -94,10 +96,13 @@ object AudienceFilter {
     fun audienceGroupLabel(user: User?): String {
         val group = audienceGroupOf(user)
         return when {
-            group.equals("Job", ignoreCase = true) -> "চাকরি (Job)"
-            group.startsWith("Class",  ignoreCase = true) -> "${group.removePrefix("Class").trim()} শ্রেণি"
-            group.startsWith("Masters", ignoreCase = true) -> "মাস্টার্স ${group.removePrefix("Masters").trim()} বর্ষ"
-            group.startsWith("Honours", ignoreCase = true) -> "অনার্স ${group.removePrefix("Honours").trim()} বর্ষ"
+            group.equals("Job", ignoreCase = true)      -> "চাকরি (Job)"
+            group.startsWith("Class",   ignoreCase = true) ->
+                "${group.removePrefix("Class").trim()} শ্রেণি"
+            group.startsWith("Masters", ignoreCase = true) ->
+                "মাস্টার্স ${group.removePrefix("Masters").trim()} বর্ষ"
+            group.startsWith("Honours", ignoreCase = true) ->
+                "অনার্স ${group.removePrefix("Honours").trim()} বর্ষ"
             else -> group
         }
     }
