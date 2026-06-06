@@ -16,7 +16,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── branch হলে main merge করো ──
       - name: Sync with main
         if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
         run: |
@@ -105,13 +104,15 @@ jobs:
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
           sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
-          sed -i 's|%%WEB_CLIENT_ID%%|${{ secrets.WEB_CLIENT_ID }}|g'   app/build.gradle
 
       - name: Set versionCode
         run: sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" app/build.gradle
 
       - name: Decode Keystore
-        run: echo -n "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode | tr -d '\r' > app/smartstudy.jks
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" > /tmp/ks.b64
+          base64 --decode /tmp/ks.b64 > app/smartstudy.jks
+          echo "Keystore size: $(wc -c < app/smartstudy.jks) bytes"
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
@@ -123,7 +124,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # ── Release শুধু main/master এ ──
       - name: Build Signed Release APK
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
