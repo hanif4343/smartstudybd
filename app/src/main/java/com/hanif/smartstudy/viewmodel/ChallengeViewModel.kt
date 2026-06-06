@@ -176,7 +176,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (s.selectedSubject.isBlank()) {
-            _state.update { it.copy(error = "একটি বিষয় সিলেক্ট করো") }
+            _state.update { it.copy(error = "একটি বিষয় সেলেক্ট করো") }
             return
         }
         viewModelScope.launch {
