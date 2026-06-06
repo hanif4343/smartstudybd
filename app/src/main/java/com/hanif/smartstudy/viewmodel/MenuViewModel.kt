@@ -221,6 +221,21 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Update profile (name + userType + classLevel) ─────────
+    fun updateProfile(name: String, userType: String, classLevel: String) {
+        viewModelScope.launch {
+            val user = _state.value.user ?: return@launch
+            val updated = user.copy(
+                name       = name.trim().ifBlank { user.name },
+                userType   = userType.trim().ifBlank { user.userType },
+                classLevel = classLevel.trim()
+            )
+            session.saveUser(updated)
+            saveProfileToFirebase(updated)
+            _state.update { it.copy(user = updated, successMsg = "প্রোফাইল আপডেট হয়েছে") }
+        }
+    }
+
     // ── Dark mode ─────────────────────────────────────────────
 
     fun setDarkMode(on: Boolean) {
@@ -423,6 +438,23 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             ref.updateChildren(update)
         } catch (e: Exception) {
             Log.e("Firebase", "saveUser: ${e.message}")
+        }
+    }
+
+    private fun saveProfileToFirebase(user: User) {
+        val phone = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
+        try {
+            val ref = FirebaseDatabase.getInstance().getReference("users/$phone")
+            val update = mutableMapOf<String, Any>()
+            user.name?.let      { if (it.isNotBlank()) update["Name"]       = it }
+            user.userType?.let  { if (it.isNotBlank()) update["UserType"]   = it }
+            // classLevel খালি হলেও save করতে হবে (Job seeker = classLevel ফাঁকা)
+            update["ClassLevel"] = user.classLevel ?: ""
+            user.picture?.let   { update["Picture"] = it }
+            update["XP"] = user.xp
+            ref.updateChildren(update)
+        } catch (e: Exception) {
+            Log.e("Firebase", "saveProfile: ${e.message}")
         }
     }
 }
