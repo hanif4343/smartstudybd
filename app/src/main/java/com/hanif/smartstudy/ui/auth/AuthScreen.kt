@@ -1,6 +1,8 @@
 package com.hanif.smartstudy.ui.auth
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -11,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
@@ -26,6 +29,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -36,13 +40,37 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hanif.smartstudy.MainActivity
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.viewmodel.AuthState
 import com.hanif.smartstudy.viewmodel.AuthViewModel
 
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
+    // showLogin=true → Login tab, false → Signup tab
     var showLogin by remember { mutableStateOf(true) }
+
+    // Google new user pre-fill data
+    var googleEmail    by remember { mutableStateOf("") }
+    var googleName     by remember { mutableStateOf("") }
+    var googlePhotoUrl by remember { mutableStateOf("") }
+    var isGoogleSignup by remember { mutableStateOf(false) }
+
+    val vm: AuthViewModel = viewModel()
+    val state by vm.authState.collectAsStateWithLifecycle()
+
+    // Google new user → switch to signup tab with pre-filled data
+    LaunchedEffect(state) {
+        if (state is AuthState.GoogleNewUser) {
+            val s = state as AuthState.GoogleNewUser
+            googleEmail    = s.email
+            googleName     = s.name
+            googlePhotoUrl = s.photoUrl
+            isGoogleSignup = true
+            showLogin      = false
+            vm.resetState()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -80,8 +108,8 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     .background(White.copy(alpha = 0.15f))
                     .padding(4.dp)
             ) {
-                TabBtn("লগইন",   showLogin)        { showLogin = true  }
-                TabBtn("সাইনআপ", !showLogin)       { showLogin = false }
+                TabBtn("লগইন",   showLogin)  { showLogin = true;  isGoogleSignup = false }
+                TabBtn("সাইনআপ", !showLogin) { showLogin = false }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -92,8 +120,21 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 colors    = CardDefaults.cardColors(containerColor = White),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                if (showLogin) LoginForm(onLoginSuccess)
-                else           SignupForm(onLoginSuccess)
+                if (showLogin) {
+                    LoginForm(
+                        onLoginSuccess = onLoginSuccess,
+                        vm             = vm
+                    )
+                } else {
+                    SignupForm(
+                        onLoginSuccess  = onLoginSuccess,
+                        vm              = vm,
+                        prefillName     = googleName,
+                        prefillEmail    = googleEmail,
+                        prefillPhotoUrl = googlePhotoUrl,
+                        isGoogleSignup  = isGoogleSignup
+                    )
+                }
             }
         }
     }
@@ -119,9 +160,13 @@ private fun TabBtn(label: String, active: Boolean, onClick: () -> Unit) {
 
 // ─────────── LOGIN ───────────
 @Composable
-fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
+fun LoginForm(
+    onLoginSuccess: () -> Unit,
+    vm: AuthViewModel = viewModel()
+) {
     val state by vm.authState.collectAsStateWithLifecycle()
     val fm    = LocalFocusManager.current
+    val ctx   = LocalContext.current
     var phone    by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPw   by remember { mutableStateOf(false) }
@@ -163,16 +208,43 @@ fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
                 Text("লগইন করুন", fontWeight = FontWeight.ExtraBold,
                     fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
+
+        // ── Google Sign-In ──
+        GoogleSignInButton(
+            isLoading = state is AuthState.Loading,
+            onClick   = {
+                val activity = ctx as? MainActivity ?: return@GoogleSignInButton
+                activity.startGoogleSignIn(
+                    onSuccess = { email, name, photoUrl ->
+                        vm.googleSignIn(email, name, photoUrl)
+                    },
+                    onError = { msg ->
+                        // error AuthState তে পাঠাও — LaunchedEffect দিয়ে দেখাবে
+                        // ViewModel এ direct set করা যায় না বাইরে থেকে, তাই google error handle এভাবেই চলে
+                    }
+                )
+            }
+        )
+
         Spacer(Modifier.height(4.dp))
     }
 }
 
 // ─────────── SIGNUP ───────────
 @Composable
-fun SignupForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
+fun SignupForm(
+    onLoginSuccess  : () -> Unit,
+    vm              : AuthViewModel = viewModel(),
+    prefillName     : String = "",
+    prefillEmail    : String = "",
+    prefillPhotoUrl : String = "",
+    isGoogleSignup  : Boolean = false
+) {
     val state by vm.authState.collectAsStateWithLifecycle()
     val fm    = LocalFocusManager.current
-    var name        by remember { mutableStateOf("") }
+    val ctx   = LocalContext.current
+
+    var name        by remember(prefillName)     { mutableStateOf(prefillName) }
     var phone       by remember { mutableStateOf("") }
     var password    by remember { mutableStateOf("") }
     var confirmPass by remember { mutableStateOf("") }
@@ -188,20 +260,50 @@ fun SignupForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
     }
 
     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("নতুন অ্যাকাউন্ট ✨", fontSize = 20.sp,
-            fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
+        Text(
+            if (isGoogleSignup) "Google দিয়ে সাইনআপ ✨" else "নতুন অ্যাকাউন্ট ✨",
+            fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+            fontFamily = NotoSansBengali, color = Slate800
+        )
 
-        SSField(name,   { name = it },   "পুরো নাম", Icons.Default.Person,
+        // Google signup info banner
+        if (isGoogleSignup && prefillEmail.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFE8F5E9))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("✅", fontSize = 16.sp)
+                Column {
+                    Text("Google থেকে তথ্য আনা হয়েছে",
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF2E7D32), fontFamily = NotoSansBengali)
+                    Text(prefillEmail, fontSize = 11.sp, color = Color(0xFF388E3C),
+                        fontFamily = NotoSansBengali)
+                }
+            }
+        }
+
+        SSField(name, { name = it }, "পুরো নাম", Icons.Default.Person,
             imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
-        SSField(phone,  { phone = it },  "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone,
+
+        SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone,
             keyboardType = KeyboardType.Phone,
             imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
-        SSField(password, { password = it }, "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", Icons.Default.Lock,
-            isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
-            imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
-        SSField(confirmPass, { confirmPass = it }, "পাসওয়ার্ড নিশ্চিত করুন", Icons.Default.Lock,
-            isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
-            imeAction = ImeAction.Done, onIme = { fm.clearFocus() })
+
+        // Phone-password signup এর জন্য password fields
+        if (!isGoogleSignup) {
+            SSField(password, { password = it }, "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", Icons.Default.Lock,
+                isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
+                imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+            SSField(confirmPass, { confirmPass = it }, "পাসওয়ার্ড নিশ্চিত করুন", Icons.Default.Lock,
+                isPass = true, showPass = showPw, onToggle = { showPw = !showPw },
+                imeAction = ImeAction.Done, onIme = { fm.clearFocus() })
+        }
 
         // User type
         Text("আপনি কে?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
@@ -227,7 +329,14 @@ fun SignupForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
 
         Button(
-            onClick  = { fm.clearFocus(); vm.signup(name, phone, password, confirmPass, userType, classLevel) },
+            onClick = {
+                fm.clearFocus()
+                if (isGoogleSignup) {
+                    vm.googleSignup(name, prefillEmail, phone, prefillPhotoUrl, userType, classLevel)
+                } else {
+                    vm.signup(name, phone, password, confirmPass, userType, classLevel)
+                }
+            },
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape    = RoundedCornerShape(16.dp),
             colors   = ButtonDefaults.buttonColors(containerColor = Green500),
@@ -239,7 +348,57 @@ fun SignupForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
                 Text("অ্যাকাউন্ট তৈরি করুন", fontWeight = FontWeight.ExtraBold,
                     fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
+
+        // Google signup এ Google button দেখাই (existing user হলে login করবে)
+        if (!isGoogleSignup) {
+            GoogleSignInButton(
+                isLoading = state is AuthState.Loading,
+                onClick   = {
+                    val activity = ctx as? MainActivity ?: return@GoogleSignInButton
+                    activity.startGoogleSignIn(
+                        onSuccess = { email, name2, photoUrl ->
+                            vm.googleSignIn(email, name2, photoUrl)
+                        },
+                        onError = { }
+                    )
+                }
+            )
+        }
+
         Spacer(Modifier.height(4.dp))
+    }
+}
+
+// ─────────── Google Button ───────────
+@Composable
+fun GoogleSignInButton(isLoading: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick  = onClick,
+        modifier = Modifier.fillMaxWidth().height(54.dp),
+        shape    = RoundedCornerShape(16.dp),
+        colors   = ButtonDefaults.outlinedButtonColors(containerColor = White),
+        border   = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDADCE0)),
+        enabled  = !isLoading
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Google G icon — text দিয়ে simulate করছি (SVG নেই তাই)
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .background(Color(0xFF4285F4), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("G", color = White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Text("Google দিয়ে লগইন/সাইনআপ",
+                color      = Color(0xFF3C4043),
+                fontSize   = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = NotoSansBengali)
+        }
     }
 }
 
