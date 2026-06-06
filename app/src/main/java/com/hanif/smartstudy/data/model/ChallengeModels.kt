@@ -15,14 +15,20 @@ enum class ChallengeStatus {
 }
 
 data class ChallengeParticipant(
-    val phone       : String = "",
-    val name        : String = "",
-    val status      : String = "INVITED",  // INVITED | ACCEPTED | DECLINED | SUBMITTED
-    val currentQ    : Int    = 0,
-    val submittedAt : Long   = 0L,
-    val score       : Int    = -1,
-    val correctIds  : List<String> = emptyList()
+    val phone           : String       = "",
+    val name            : String       = "",
+    val status          : String       = "INVITED",  // INVITED | ACCEPTED | DECLINED | SUBMITTED
+    val currentQ        : Int          = 0,
+    val submittedAt     : Long         = 0L,
+    val score           : Int          = -1,
+    val correctIds      : List<String> = emptyList(),
+    // Lifeline usage — প্রতি lifeline একবারই ব্যবহার করা যাবে
+    val usedFiftyFifty  : Boolean      = false,
+    val usedTimeFreeze  : Boolean      = false
 )
+
+// Lifeline types
+enum class Lifeline { FIFTY_FIFTY, TIME_FREEZE }
 
 data class Challenge(
     val id           : String = "",
@@ -39,7 +45,9 @@ data class Challenge(
     val participants : Map<String, ChallengeParticipant> = emptyMap(),
     // Ghost Mode
     val isGhostMode  : Boolean = false,
-    val ghostLockedAt: Long    = 0L
+    val ghostLockedAt: Long    = 0L,
+    // Coin/XP Wager — চ্যালেঞ্জে বাজি ধরা XP পরিমাণ
+    val wagerXp      : Int     = 0   // 0 = no wager; জিতলে পাবে, হারলে হারাবে
 ) {
     fun getStatus() = try { ChallengeStatus.valueOf(status) } catch (_: Exception) { ChallengeStatus.PENDING }
 
@@ -74,7 +82,8 @@ data class ChallengeInvite(
     val questionCount: Int    = 10,
     val timeLimitSec : Int    = 600,
     val createdAt    : Long   = 0L,
-    val isGhostMode  : Boolean = false   // Ghost invite হলে দেখাবে "Ghost Challenge"
+    val isGhostMode  : Boolean = false,
+    val wagerXp      : Int    = 0    // Ghost invite হলে দেখাবে wager amount
 )
 
 // ─────────────────────────────────────────────────────────
@@ -82,14 +91,16 @@ data class ChallengeInvite(
 // ─────────────────────────────────────────────────────────
 
 data class MatchRecord(
-    val challengeId   : String = "",
-    val subject       : String = "",
-    val myScore       : Int    = 0,
-    val opponentScore : Int    = 0,
-    val opponentName  : String = "",
-    val opponentPhone : String = "",
+    val challengeId   : String  = "",
+    val subject       : String  = "",
+    val myScore       : Int     = 0,
+    val opponentScore : Int     = 0,
+    val opponentName  : String  = "",
+    val opponentPhone : String  = "",
     val iWon          : Boolean = false,
-    val total         : Int    = 0,
-    val playedAt      : Long   = 0L,
-    val isGhostMode   : Boolean = false
+    val total         : Int     = 0,
+    val playedAt      : Long    = 0L,
+    val isGhostMode   : Boolean = false,
+    val wagerXp       : Int     = 0,   // বাজি ধরা XP পরিমাণ
+    val xpChange      : Int     = 0    // +wagerXp (জিতলে) বা -wagerXp (হারলে)
 )
