@@ -129,12 +129,15 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             Log.d("GoogleSignup", "Final photo URL: $finalPhotoUrl")
             val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
 
-            when (val r = FirebaseAuthService.signup(
-                n, 
-                ph, 
-                dummyPassword, 
-                userType, 
-                classLevel, 
+            // ফিক্সড: সঠিক মেথড signupWithEmail পজিশনাল আর্গুমেন্ট দিয়ে কল করা হয়েছে যাতে ব্যাকএন্ড ক্র্যাশ না করে
+            when (val r = FirebaseAuthService.signupWithEmail(
+                n,
+                ph,
+                email,
+                dummyPassword,
+                finalPhotoUrl,
+                userType,
+                classLevel,
                 gasUrl
             )) {
                 is AuthResult.Success -> {
