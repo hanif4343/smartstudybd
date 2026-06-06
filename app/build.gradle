@@ -93,12 +93,3 @@ dependencies {
     implementation 'androidx.activity:activity-ktx:1.8.2'
     implementation 'com.google.ai.client.generativeai:generativeai:0.9.0'
 }
-    // ── Google Sign-In (legacy — সবচেয়ে stable, minSdk 21 compatible) ──
-    implementation 'com.google.android.gms:play-services-auth:21.2.0'
-
-    // ── Image picker ──
-    implementation 'androidx.activity:activity-ktx:1.8.2'
-
-    // ── Gemini AI ──
-    implementation 'com.google.ai.client.generativeai:generativeai:0.9.0'
-}
