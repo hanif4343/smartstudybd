@@ -19,6 +19,8 @@ sealed class AuthState {
     object Loading : AuthState()
     data class Success(val user: User) : AuthState()
     data class Error(val message: String) : AuthState()
+    // আপনার আগের কোড ঠিক রেখে শুধু এই স্টেটটি যোগ করা হলো
+    data class GoogleNewUser(val email: String, val name: String, val photoUrl: String) : AuthState()
 }
 
 class AuthViewModel(app: Application) : AndroidViewModel(app) {
@@ -83,6 +85,42 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             when (val r = FirebaseAuthService.signup(n, ph, pw, userType, classLevel, gasUrl)) {
+                is AuthResult.Success -> {
+                    val user = User.fromFirebaseMap(r.userData)
+                        .copy(phone = ph, name = n)
+                    session.saveUser(user)
+                    _authState.value = AuthState.Success(user)
+                }
+                is AuthResult.Error ->
+                    _authState.value = AuthState.Error(r.message)
+            }
+        }
+    }
+
+    // আপনার আসল কোডের নিচে শুধু এই দুটি প্রয়োজনীয় ফাংশন যুক্ত করা হলো
+    fun googleSignIn(email: String, name: String, photoUrl: String) {
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+            _authState.value = AuthState.GoogleNewUser(email.trim(), name, photoUrl)
+        }
+    }
+
+    fun googleSignup(
+        name: String, email: String, phone: String, 
+        photoUrl: String, userType: String, classLevel: String
+    ) {
+        val n  = name.trim()
+        val ph = phone.trim()
+
+        when {
+            n.isBlank()    -> { _authState.value = AuthState.Error("নাম লিখুন"); return }
+            ph.length < 11 -> { _authState.value = AuthState.Error("সঠিক ১১ সংখ্যার ফোন নম্বর দিন"); return }
+        }
+
+        viewModelScope.launch {
+            _authState.value = AuthState.Loading
+            val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
+            when (val r = FirebaseAuthService.signup(n, ph, dummyPassword, userType, classLevel, gasUrl)) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData)
                         .copy(phone = ph, name = n)
