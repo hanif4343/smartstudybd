@@ -134,4 +134,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun resetState() { _authState.value = AuthState.Idle }
+
+    // Google sign-in error — MainActivity callback থেকে call হবে
+    fun setError(msg: String) { _authState.value = AuthState.Error(msg) }
 }
