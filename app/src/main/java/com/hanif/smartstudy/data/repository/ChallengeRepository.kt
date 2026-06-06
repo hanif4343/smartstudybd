@@ -55,21 +55,19 @@ class ChallengeRepository {
         subTopic      : String,
         questionCount : Int,
         timeLimitSec  : Int,
-        questionIds   : List<String>
+        questionIds   : List<String>,
+        wagerXp       : Int = 0
     ): String? {
         return try {
             val id  = challengesRef.push().key ?: return null
             val now = System.currentTimeMillis()
 
-            // সব participants map করো
             val participants = mutableMapOf<String, ChallengeParticipant>()
-            // Creator auto-ACCEPTED
             participants[creator.phone!!.firebaseKey()] = ChallengeParticipant(
                 phone  = creator.phone,
                 name   = creator.displayName(),
                 status = "ACCEPTED"
             )
-            // Invitees INVITED
             invitees.forEach { u ->
                 participants[u.phone!!.firebaseKey()] = ChallengeParticipant(
                     phone  = u.phone,
@@ -89,12 +87,12 @@ class ChallengeRepository {
                 status        = ChallengeStatus.PENDING.name,
                 createdAt     = now,
                 questionIds   = questionIds,
-                participants  = participants
+                participants  = participants,
+                wagerXp       = wagerXp
             )
 
             challengesRef.child(id).setValue(challengeToMap(challenge)).await()
 
-            // প্রতিটা invitee-র inbox এ notification লিখো
             invitees.forEach { u ->
                 writeInviteNotification(u.phone!!, ChallengeInvite(
                     challengeId   = id,
@@ -103,7 +101,8 @@ class ChallengeRepository {
                     subject       = subject,
                     questionCount = questionCount,
                     timeLimitSec  = timeLimitSec,
-                    createdAt     = now
+                    createdAt     = now,
+                    wagerXp       = wagerXp
                 ))
             }
 
@@ -231,7 +230,9 @@ class ChallengeRepository {
                             subject       = m["subject"]?.toString()      ?: "",
                             questionCount = m["questionCount"]?.toString()?.toIntOrNull() ?: 10,
                             timeLimitSec  = m["timeLimitSec"]?.toString()?.toIntOrNull()  ?: 600,
-                            createdAt     = m["createdAt"]?.toString()?.toLongOrNull()    ?: 0L
+                            createdAt     = m["createdAt"]?.toString()?.toLongOrNull()    ?: 0L,
+                            isGhostMode   = m["isGhostMode"] as? Boolean ?: false,
+                            wagerXp       = m["wagerXp"]?.toString()?.toIntOrNull() ?: 0
                         )
                     } catch (_: Exception) { null }
                 }
@@ -278,7 +279,8 @@ class ChallengeRepository {
                 "subject"       to invite.subject,
                 "questionCount" to invite.questionCount,
                 "timeLimitSec"  to invite.timeLimitSec,
-                "createdAt"     to invite.createdAt
+                "createdAt"     to invite.createdAt,
+                "wagerXp"       to invite.wagerXp
             ))
     }
 
@@ -288,13 +290,15 @@ class ChallengeRepository {
         val participants    = participantsRaw.mapValues { (_, v) ->
             val p = v as? Map<String, Any> ?: emptyMap()
             ChallengeParticipant(
-                phone       = p["phone"]?.toString() ?: "",
-                name        = p["name"]?.toString()  ?: "",
-                status      = p["status"]?.toString() ?: "INVITED",
-                currentQ    = p["currentQ"]?.toString()?.toIntOrNull() ?: 0,
-                submittedAt = p["submittedAt"]?.toString()?.toLongOrNull() ?: 0L,
-                score       = p["score"]?.toString()?.toIntOrNull() ?: -1,
-                correctIds  = (p["correctIds"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                phone           = p["phone"]?.toString() ?: "",
+                name            = p["name"]?.toString()  ?: "",
+                status          = p["status"]?.toString() ?: "INVITED",
+                currentQ        = p["currentQ"]?.toString()?.toIntOrNull() ?: 0,
+                submittedAt     = p["submittedAt"]?.toString()?.toLongOrNull() ?: 0L,
+                score           = p["score"]?.toString()?.toIntOrNull() ?: -1,
+                correctIds      = (p["correctIds"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
+                usedFiftyFifty  = p["usedFiftyFifty"] as? Boolean ?: false,
+                usedTimeFreeze  = p["usedTimeFreeze"] as? Boolean ?: false
             )
         }
         return Challenge(
@@ -311,7 +315,8 @@ class ChallengeRepository {
             questionIds   = (map["questionIds"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
             participants  = participants,
             isGhostMode   = map["isGhostMode"] as? Boolean ?: false,
-            ghostLockedAt = map["ghostLockedAt"]?.toString()?.toLongOrNull() ?: 0L
+            ghostLockedAt = map["ghostLockedAt"]?.toString()?.toLongOrNull() ?: 0L,
+            wagerXp       = map["wagerXp"]?.toString()?.toIntOrNull() ?: 0
         )
     }
 
@@ -327,16 +332,19 @@ class ChallengeRepository {
         "startedAt"     to c.startedAt,
         "questionIds"   to c.questionIds,
         "participants"  to c.participants.mapValues { (_, p) -> mapOf(
-            "phone"       to p.phone,
-            "name"        to p.name,
-            "status"      to p.status,
-            "currentQ"    to p.currentQ,
-            "submittedAt" to p.submittedAt,
-            "score"       to p.score,
-            "correctIds"  to p.correctIds
+            "phone"          to p.phone,
+            "name"           to p.name,
+            "status"         to p.status,
+            "currentQ"       to p.currentQ,
+            "submittedAt"    to p.submittedAt,
+            "score"          to p.score,
+            "correctIds"     to p.correctIds,
+            "usedFiftyFifty" to p.usedFiftyFifty,
+            "usedTimeFreeze" to p.usedTimeFreeze
         )},
         "isGhostMode"   to c.isGhostMode,
-        "ghostLockedAt" to c.ghostLockedAt
+        "ghostLockedAt" to c.ghostLockedAt,
+        "wagerXp"       to c.wagerXp
     )
 
     // ────────────────────────────────────────────────────────
@@ -397,12 +405,14 @@ class ChallengeRepository {
         subject      : String,
         myScore      : Int,
         total        : Int,
-        isGhostMode  : Boolean = false
+        isGhostMode  : Boolean = false,
+        wagerXp      : Int     = 0
     ) {
         try {
-            val iWon = myScore > opponent.score
-            val now  = System.currentTimeMillis()
-            val record = mapOf(
+            val iWon     = myScore > opponent.score
+            val xpChange = if (wagerXp > 0) if (iWon) wagerXp else -wagerXp else 0
+            val now      = System.currentTimeMillis()
+            val record   = mapOf(
                 "challengeId"   to challengeId,
                 "subject"       to subject,
                 "myScore"       to myScore,
@@ -412,13 +422,56 @@ class ChallengeRepository {
                 "iWon"          to iWon,
                 "total"         to total,
                 "playedAt"      to now,
-                "isGhostMode"   to isGhostMode
+                "isGhostMode"   to isGhostMode,
+                "wagerXp"       to wagerXp,
+                "xpChange"      to xpChange
             )
-            // আমার history তে save
             db.getReference("MatchHistory/${myPhone.firebaseKey()}/${opponent.phone.firebaseKey()}/$challengeId")
                 .setValue(record).await()
         } catch (e: Exception) {
             Log.e(TAG, "saveMatchHistory: ${e.message}")
+        }
+    }
+
+    // XP Wager — জিতলে XP যোগ, হারলে বাদ (Firebase RTDB transaction)
+    suspend fun applyWagerXp(phone: String, delta: Int): Boolean {
+        return try {
+            val ref = usersRef.orderByChild("Phone").equalTo(phone).get().await()
+                .children.firstOrNull()?.ref ?: return false
+            ref.runTransaction(object : Transaction.Handler {
+                override fun doTransaction(data: MutableData): Transaction.Result {
+                    val current = data.child("XP").getValue(Int::class.java) ?: 0
+                    val newXp   = maxOf(0, current + delta)   // XP কখনো negative হবে না
+                    data.child("XP").value = newXp
+                    return Transaction.success(data)
+                }
+                override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {
+                    if (error != null) Log.e(TAG, "XP transaction error: ${error.message}")
+                }
+            })
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "applyWagerXp: ${e.message}")
+            false
+        }
+    }
+
+    // Lifeline ব্যবহার — Firebase তে mark করো
+    suspend fun markLifelineUsed(
+        challengeId : String,
+        phone       : String,
+        lifeline    : com.hanif.smartstudy.data.model.Lifeline
+    ) {
+        try {
+            val key   = phone.firebaseKey()
+            val field = when (lifeline) {
+                com.hanif.smartstudy.data.model.Lifeline.FIFTY_FIFTY  -> "usedFiftyFifty"
+                com.hanif.smartstudy.data.model.Lifeline.TIME_FREEZE  -> "usedTimeFreeze"
+            }
+            challengesRef.child(challengeId).child("participants/$key/$field")
+                .setValue(true).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "markLifelineUsed: ${e.message}")
         }
     }
 
@@ -443,7 +496,9 @@ class ChallengeRepository {
                         iWon          = m["iWon"] as? Boolean ?: false,
                         total         = m["total"]?.toString()?.toIntOrNull() ?: 0,
                         playedAt      = m["playedAt"]?.toString()?.toLongOrNull() ?: 0L,
-                        isGhostMode   = m["isGhostMode"] as? Boolean ?: false
+                        isGhostMode   = m["isGhostMode"] as? Boolean ?: false,
+                        wagerXp       = m["wagerXp"]?.toString()?.toIntOrNull() ?: 0,
+                        xpChange      = m["xpChange"]?.toString()?.toIntOrNull() ?: 0
                     )
                 } catch (_: Exception) { null }
             }.sortedByDescending { it.playedAt }
