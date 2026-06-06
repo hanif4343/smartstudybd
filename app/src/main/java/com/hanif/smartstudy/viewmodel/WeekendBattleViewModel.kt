@@ -8,6 +8,7 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.WeekendBattleRepository
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.AudienceFilter.forUser
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -90,8 +91,10 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
                 ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
                 ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
 
-            val allQ      = c.quiz.map { QuestionItem.fromQuizItem(it) } +
-                            c.qbank.map { QuestionItem.fromQBankItem(it) }
+            val allQ      = c.forUser(session.getCurrentUser()).let { filtered ->
+                               filtered.quiz.map { QuestionItem.fromQuizItem(it) } +
+                               filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+                           }
             val questions = repo.getBattleQuestions(battle.id, allQ)
 
             if (questions.isEmpty()) {
