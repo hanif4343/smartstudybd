@@ -66,8 +66,15 @@ class MainActivity : ComponentActivity() {
             Log.d("GoogleSignIn", "Success: $email")
             googleSignInCallback?.invoke(email, name, photoUrl)
         } catch (e: ApiException) {
-            Log.e("GoogleSignIn", "Failed: ${e.statusCode} — ${e.message}")
-            googleSignInErrorCallback?.invoke("Google Sign-in বাতিল হয়েছে (${e.statusCode})")
+            Log.e("GoogleSignIn", "Failed statusCode=${e.statusCode} msg=${e.message}")
+            val reason = when (e.statusCode) {
+                10   -> "Developer error (${e.statusCode}): SHA-1 বা OAuth Client ID ঠিক নেই"
+                12500-> "Google Play Services আপডেট করো"
+                12501-> "Sign-in বাতিল করা হয়েছে"
+                7    -> "নেটওয়ার্ক সমস্যা"
+                else -> "Google Sign-in ব্যর্থ (কোড: ${e.statusCode})"
+            }
+            googleSignInErrorCallback?.invoke(reason)
         } finally {
             googleSignInCallback      = null
             googleSignInErrorCallback = null
