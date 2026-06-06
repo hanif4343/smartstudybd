@@ -1,8 +1,9 @@
-name: Build Smart Study APK
+Name: Build Smart Study APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - '**' # যেকোনো ব্রাঞ্চে পুশ বা ফাইল চেঞ্জ হলে বিল্ড শুরু হবে
   workflow_dispatch:
 
 jobs:
@@ -158,9 +159,10 @@ jobs:
           path: app/build/outputs/apk/release/SmartStudy.apk
           if-no-files-found: error
 
-      # ── GitHub Release ──
+      # ── GitHub Release (শুধুমাত্র main বা master ব্রাঞ্চে পুশ হলেই রান হবে) ──
       - name: Get version
         id: ver
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           VN=$(grep 'versionName' app/build.gradle | sed 's/.*"\(.*\)".*/\1/' | tr -d ' ')
           echo "tag=v${VN}-b${{ github.run_number }}" >> $GITHUB_OUTPUT
@@ -168,6 +170,7 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name:     ${{ steps.ver.outputs.title }}
