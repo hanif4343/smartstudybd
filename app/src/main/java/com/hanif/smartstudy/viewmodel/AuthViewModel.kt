@@ -20,25 +20,26 @@ import kotlinx.coroutines.launch
 import java.net.URL
 
 sealed class AuthState {
-    object Idle    : AuthState()
+    object Idle : AuthState()
     object Loading : AuthState()
     data class Success(val user: User) : AuthState()
     data class Error(val message: String) : AuthState()
     data class GoogleNewUser(
-        val email: String, val name: String, val photoUrl: String
+        val email: String,
+        val name: String,
+        val photoUrl: String
     ) : AuthState()
 }
 
 class AuthViewModel(app: Application) : AndroidViewModel(app) {
-
     private val session = SessionManager(app)
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
-    private val gasUrl: String      get() = try { BuildConfig.GAS_URL }        catch (e: Exception) { "" }
-    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL }   catch (e: Exception) { "" }
-    private val secretKey: String   get() = try { BuildConfig.SECRET_KEY }     catch (e: Exception) { "" }
-    private val imgbbKey: String    get() = try { BuildConfig.IMGBB_API_KEY }  catch (e: Exception) { "" }
+    private val gasUrl: String get() = try { BuildConfig.GAS_URL } catch (e: Exception) { "" }
+    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL } catch (e: Exception) { "" }
+    private val secretKey: String get() = try { BuildConfig.SECRET_KEY } catch (e: Exception) { "" }
+    private val imgbbKey: String get() = try { BuildConfig.IMGBB_API_KEY } catch (e: Exception) { "" }
 
     // ── Phone + Password Login ──
     fun login(phone: String, password: String) {
@@ -54,7 +55,9 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                     val user = User.fromFirebaseMap(r.userData).copy(phone = ph)
                     val fullUser = try {
                         UserSyncService.fetchUser(ph)?.copy(phone = ph) ?: user
-                    } catch (e: Exception) { user }
+                    } catch (e: Exception) {
+                        user
+                    }
                     session.saveUser(fullUser)
                     FcmHelper.collectAndSaveForPhone(getApplication(), ph)
                     Log.d("Auth", "Login success: ${fullUser.name}")
@@ -68,20 +71,20 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     // ── Google Sign-In ──
     fun googleSignIn(email: String, name: String, photoUrl: String) {
         if (email.isBlank()) { _authState.value = AuthState.Error("Google থেকে email পাওয়া যায়নি"); return }
-
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, gasUrl, firebaseUrl, secretKey)) {
                 is GoogleAuthResult.ExistingUser -> {
+                    // সমাধান (Line 77): User copy থেকে email বাদ দেওয়া হয়েছে কারণ User মডেলে email ফিল্ড নেই
                     val user = User.fromFirebaseMap(r.userData).let { u ->
-                        u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name, email = u.email ?: email)
+                        u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
                     }
                     session.saveUser(user)
                     user.phone?.let { FcmHelper.collectAndSaveForPhone(getApplication(), it) }
                     _authState.value = AuthState.Success(user)
                 }
                 is GoogleAuthResult.NewUser -> {
-                    _authState.value = AuthState.GoogleNewUser(r.email, r.name, r.photoUrl)
+                    _authState.value = GoogleAuthResult.NewUser(r.email, r.name, r.photoUrl)
                 }
                 is GoogleAuthResult.Error -> _authState.value = AuthState.Error(r.message)
             }
@@ -90,30 +93,31 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Google Signup — photo ImgBB তে upload করবে ──
     fun googleSignup(
-        name: String, email: String, phone: String,
-        photoUrl: String, userType: String, classLevel: String,
-        localPhotoUri: Uri? = null   // user নিজে photo pick করলে
+        name: String,
+        email: String,
+        phone: String,
+        photoUrl: String,
+        userType: String,
+        classLevel: String,
+        localPhotoUri: Uri? = null // user নিজে photo pick করলে
     ) {
-        val n  = name.trim()
+        val n = name.trim()
         val ph = phone.trim()
-        if (n.isBlank())    { _authState.value = AuthState.Error("নাম লিখুন"); return }
+        if (n.isBlank()) { _authState.value = AuthState.Error("নাম লিখুন"); return }
         if (ph.length < 11) { _authState.value = AuthState.Error("সঠিক ১১ সংখ্যার ফোন নম্বর দিন"); return }
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-
+            
             // Photo upload: local photo থাকলে ImgBB তে upload, না থাকলে Google photo url সরাসরি
             val finalPhotoUrl = try {
                 when {
                     localPhotoUri != null -> {
-                        // User picked photo — ImgBB upload
                         val bytes = getApplication<Application>().contentResolver
                             .openInputStream(localPhotoUri)?.readBytes()
-                        if (bytes != null) ImgBBService.upload(bytes) ?: photoUrl
-                        else photoUrl
+                        if (bytes != null) ImgBBService.upload(bytes) ?: photoUrl else photoUrl
                     }
                     photoUrl.isNotBlank() -> {
-                        // Google photo URL আছে — ImgBB তে reupload করো (Google photo link expire হতে পারে)
                         val bytes = URL(photoUrl).readBytes()
                         ImgBBService.upload(bytes) ?: photoUrl
                     }
@@ -121,21 +125,28 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 Log.e("GoogleSignup", "Photo upload failed: ${e.message}")
-                photoUrl  // upload fail হলে original url রাখো
+                photoUrl
             }
 
             Log.d("GoogleSignup", "Final photo URL: $finalPhotoUrl")
-
-            // Signup — শুধু GAS এ যাওয়া fields পাঠাও (email আলাদা রাখো)
             val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
-            when (val r = FirebaseAuthService.signupWithEmail(
-                name = n, phone = ph, email = email,
-                password = dummyPassword, picture = finalPhotoUrl,
-                userType = userType, classLevel = classLevel, gasUrl = gasUrl
+
+            // সমাধান (Line 138): ক্লডের নোট অনুযায়ী Named Parameters সরিয়ে Positional Arguments ব্যবহার করা হলো
+            // এবং FirebaseAuthService.signup ট্র্যাডিশনাল মেথড কল করা হলো যা email ছাড়াই কাজ করে
+            when (val r = FirebaseAuthService.signup(
+                n, 
+                ph, 
+                dummyPassword, 
+                userType, 
+                classLevel, 
+                gasUrl
             )) {
                 is AuthResult.Success -> {
+                    // সমাধান: User copy থেকে email বাদ দেওয়া হয়েছে
                     val user = User.fromFirebaseMap(r.userData).copy(
-                        phone = ph, name = n, email = email, picture = finalPhotoUrl
+                        phone = ph,
+                        name = n,
+                        picture = finalPhotoUrl
                     )
                     session.saveUser(user)
                     FcmHelper.collectAndSaveForPhone(getApplication(), ph)
@@ -148,19 +159,23 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Phone + Password Signup ──
     fun signup(
-        name: String, phone: String, password: String,
-        confirmPass: String, userType: String, classLevel: String
+        name: String,
+        phone: String,
+        password: String,
+        confirmPass: String,
+        userType: String,
+        classLevel: String
     ) {
-        val n  = name.trim()
+        val n = name.trim()
         val ph = phone.trim()
         val pw = password.trim()
         val cp = confirmPass.trim()
 
         when {
-            n.isBlank()    -> { _authState.value = AuthState.Error("নাম লিখুন"); return }
+            n.isBlank() -> { _authState.value = AuthState.Error("নাম লিখুন"); return }
             ph.length < 11 -> { _authState.value = AuthState.Error("সঠিক ১১ সংখ্যার ফোন নম্বর দিন"); return }
-            pw.length < 6  -> { _authState.value = AuthState.Error("পাসওয়ার্ড কমপক্ষে ৬ অক্ষর"); return }
-            pw != cp       -> { _authState.value = AuthState.Error("পাসওয়ার্ড দুটো মিলছে না"); return }
+            pw.length < 6 -> { _authState.value = AuthState.Error("পাসওয়ার্ড কমপক্ষে ৬ অক্ষর"); return }
+            pw != cp -> { _authState.value = AuthState.Error("পাসওয়ার্ড দুটো মিলছে না"); return }
         }
 
         viewModelScope.launch {
@@ -176,6 +191,11 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun resetState() { _authState.value = AuthState.Idle }
-    fun setError(msg: String) { _authState.value = AuthState.Error(msg) }
+    fun resetState() {
+        _authState.value = AuthState.Idle
+    }
+
+    fun setError(msg: String) {
+        _authState.value = AuthState.Error(msg)
+    }
 }
