@@ -26,41 +26,98 @@ object FirebaseAuthService {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    // ── LOGIN (Direct Firebase Phone + Password) ──
-    suspend fun verifyLogin(phone: String, password: String, firebaseUrl: String, secretKey: String): AuthResult = withContext(Dispatchers.IO) {
-        try {
-            val url = "${firebaseUrl}Users/$phone.json?auth=$secretKey"
-            Log.d("Login", "Fetching user from Firebase: $url")
-            val req = Request.Builder().url(url).get().build()
-            val resp = client.newCall(req).execute()
-            val body = resp.body?.string() ?: ""
-            Log.d("Login", "Firebase response: $body")
+    /**
+     * Firebase-এ Users node থেকে সকল user লোড করে phone দিয়ে খোঁজে।
+     * Database-এ user হয় phone-key (01XXXXXXXXX) অথবা numeric index (0,1,2...) হিসেবে থাকতে পারে।
+     * দুটো ক্ষেত্রেই কাজ করে।
+     */
+    private suspend fun findUserByPhone(phone: String, firebaseUrl: String, secretKey: String): Map<String, Any>? =
+        withContext(Dispatchers.IO) {
+            try {
+                // প্রথমে সরাসরি phone-key দিয়ে খোঁজ (নতুন format)
+                val directUrl = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
+                Log.d("Login", "Trying direct phone key: $directUrl")
+                val directReq = Request.Builder().url(directUrl).get().build()
+                val directResp = client.newCall(directReq).execute()
+                val directBody = directResp.body?.string() ?: ""
+                Log.d("Login", "Direct key response: $directBody")
 
-            if (body.isBlank() || body == "null") {
-                return@withContext AuthResult.Error("এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই")
-            }
-
-            val type = object : TypeToken<Map<String, Any>>() {}.type
-            val userMap: Map<String, Any> = gson.fromJson(body, type)
-
-            val savedPassword = (userMap["Password"] ?: userMap["password"] ?: "").toString()
-            val currentHashed = hashPassword(password)
-
-            if (savedPassword == currentHashed) {
-                val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
-                if (status == "inactive") {
-                    AuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
-                } else {
-                    AuthResult.Success(userMap)
+                if (directBody.isNotBlank() && directBody != "null") {
+                    val type = object : TypeToken<Map<String, Any>>() {}.type
+                    val userMap: Map<String, Any> = gson.fromJson(directBody, type)
+                    // নিশ্চিত করি এটা সত্যিই user data (Name বা Phone field থাকতে হবে)
+                    if (userMap.containsKey("Name") || userMap.containsKey("Phone") || userMap.containsKey("name") || userMap.containsKey("phone")) {
+                        Log.d("Login", "Found user via direct phone key")
+                        return@withContext userMap
+                    }
                 }
-            } else {
-                AuthResult.Error("পাসওয়ার্ড ভুল হয়েছে")
+
+                // সরাসরি পাওয়া না গেলে সকল user scan করো (পুরনো numeric-index format)
+                val allUrl = "${firebaseUrl}Users.json?auth=$secretKey"
+                Log.d("Login", "Scanning all users: $allUrl")
+                val allReq = Request.Builder().url(allUrl).get().build()
+                val allResp = client.newCall(allReq).execute()
+                val allBody = allResp.body?.string() ?: ""
+                Log.d("Login", "All users response length: ${allBody.length}")
+
+                if (allBody.isBlank() || allBody == "null") return@withContext null
+
+                val normPhone = phone.trim()
+
+                // Map<key, Map<field, value>> হিসেবে parse করো
+                try {
+                    val type = object : TypeToken<Map<String, Any>>() {}.type
+                    val rawMap: Map<String, Any> = gson.fromJson(allBody, type)
+
+                    for ((_, value) in rawMap) {
+                        if (value is Map<*, *>) {
+                            @Suppress("UNCHECKED_CAST")
+                            val userMap = value as Map<String, Any>
+                            val storedPhone = (userMap["Phone"] ?: userMap["phone"])?.toString()?.trim() ?: ""
+                            if (storedPhone == normPhone) {
+                                Log.d("Login", "Found user via scan: ${userMap["Name"]}")
+                                return@withContext userMap
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("Login", "Parse error during scan: ${e.message}")
+                }
+
+                null
+            } catch (e: Exception) {
+                Log.e("Login", "findUserByPhone error: ${e.message}")
+                null
             }
-        } catch (e: Exception) {
-            Log.e("Login", "Error: ${e.message}")
-            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
         }
-    }
+
+    // ── LOGIN (Phone দিয়ে খোঁজো, তারপর Password মিলাও) ──
+    suspend fun verifyLogin(phone: String, password: String, firebaseUrl: String, secretKey: String): AuthResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val userMap = findUserByPhone(phone, firebaseUrl, secretKey)
+                    ?: return@withContext AuthResult.Error("এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই")
+
+                val savedPassword = (userMap["Password"] ?: userMap["password"] ?: "").toString()
+                val currentHashed = hashPassword(password)
+
+                Log.d("Login", "Saved hash: ${savedPassword.take(10)}..., Input hash: ${currentHashed.take(10)}...")
+
+                if (savedPassword == currentHashed) {
+                    val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
+                    if (status == "inactive") {
+                        AuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
+                    } else {
+                        AuthResult.Success(userMap)
+                    }
+                } else {
+                    AuthResult.Error("পাসওয়ার্ড ভুল হয়েছে")
+                }
+            } catch (e: Exception) {
+                Log.e("Login", "Error: ${e.message}")
+                AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+            }
+        }
 
     // ── GOOGLE SIGN-IN (Direct Firebase Email Check) ──
     suspend fun googleSignIn(
@@ -85,11 +142,18 @@ object FirebaseAuthService {
             var matchedUser: Map<String, Any>? = null
 
             try {
-                val type = object : TypeToken<Map<String, Map<String, Any>>>() {}.type
-                val usersMap: Map<String, Map<String, Any>> = gson.fromJson(body, type)
-                matchedUser = usersMap.values.find { u ->
-                    val uEmail = (u["Email"] ?: u["email"])?.toString()?.trim()?.lowercase() ?: ""
-                    uEmail == normEmail
+                val type = object : TypeToken<Map<String, Any>>() {}.type
+                val rawMap: Map<String, Any> = gson.fromJson(body, type)
+                for ((_, value) in rawMap) {
+                    if (value is Map<*, *>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val userMap = value as Map<String, Any>
+                        val uEmail = (userMap["Email"] ?: userMap["email"])?.toString()?.trim()?.lowercase() ?: ""
+                        if (uEmail == normEmail) {
+                            matchedUser = userMap
+                            break
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("GoogleAuth", "Parse error: ${e.message}")
@@ -123,11 +187,9 @@ object FirebaseAuthService {
         secretKey: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
-            // প্রথমে চেক করি এই ফোন নম্বর ইতিমধ্যে আছে কিনা
-            val checkUrl = "${firebaseUrl}Users/$phone.json?auth=$secretKey"
-            val checkReq = Request.Builder().url(checkUrl).get().build()
-            val checkResp = client.newCall(checkReq).execute().body?.string() ?: ""
-            if (checkResp.isNotBlank() && checkResp != "null") {
+            // এই ফোন নম্বর ইতিমধ্যে আছে কিনা চেক করি
+            val existing = findUserByPhone(phone, firebaseUrl, secretKey)
+            if (existing != null) {
                 return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
             }
 
@@ -145,7 +207,7 @@ object FirebaseAuthService {
 
             val jsonBody = gson.toJson(userData)
             val requestBody = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
-            val url = "${firebaseUrl}Users/$phone.json?auth=$secretKey"
+            val url = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
 
             val req = Request.Builder().url(url).put(requestBody).build()
             val resp = client.newCall(req).execute()
@@ -160,7 +222,7 @@ object FirebaseAuthService {
         }
     }
 
-    // ── SIGNUP (Direct Firebase Put for Phone + Password) ──
+    // ── SIGNUP (Phone + Password) ──
     suspend fun signup(
         name: String,
         phone: String,
@@ -171,10 +233,8 @@ object FirebaseAuthService {
         secretKey: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
-            val checkUrl = "${firebaseUrl}Users/$phone.json?auth=$secretKey"
-            val checkReq = Request.Builder().url(checkUrl).get().build()
-            val checkResp = client.newCall(checkReq).execute().body?.string() ?: ""
-            if (checkResp.isNotBlank() && checkResp != "null") {
+            val existing = findUserByPhone(phone, firebaseUrl, secretKey)
+            if (existing != null) {
                 return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
             }
 
@@ -192,7 +252,7 @@ object FirebaseAuthService {
 
             val jsonBody = gson.toJson(userData)
             val requestBody = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
-            val url = "${firebaseUrl}Users/$phone.json?auth=$secretKey"
+            val url = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
 
             val req = Request.Builder().url(url).put(requestBody).build()
             val resp = client.newCall(req).execute()
