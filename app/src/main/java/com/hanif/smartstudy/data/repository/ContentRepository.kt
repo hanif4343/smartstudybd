@@ -163,6 +163,13 @@ class ContentRepository(private val context: Context) {
             .apply()
     }
 
+    fun clearExamDate() {
+        context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE).edit()
+            .remove("exam_date")
+            .remove("exam_name")
+            .apply()
+    }
+
     suspend fun submitQuizAnswer(questionId: String, isCorrect: Boolean) {
         val phone = session.getCurrentUser()?.phone ?: return
         if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
