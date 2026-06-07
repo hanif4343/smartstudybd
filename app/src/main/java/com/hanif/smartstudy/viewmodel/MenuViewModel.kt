@@ -84,6 +84,18 @@ data class MenuUiState(
     // Admin: question edit processing
     val isEditingQuestion : Boolean          = false,
     val editSuccessMsg    : String?          = null,
+
+    // ── Feature 1: Report Queue ──
+    val reportedQuestions : List<com.hanif.smartstudy.data.remote.ReportedQuestion> = emptyList(),
+    val isLoadingReports  : Boolean          = false,
+
+    // ── Feature 2: Add New Question ──
+    val isAddingQuestion  : Boolean          = false,
+    val addQuestionMsg    : String?          = null,
+
+    // ── Feature 3: Bulk Audience Change ──
+    val isBulkUpdating    : Boolean          = false,
+    val bulkUpdateMsg     : String?          = null,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -534,6 +546,105 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     fun clearEditMsg() {
         _state.update { it.copy(editSuccessMsg = null) }
     }
+
+    // ── Feature 1: Report Queue ───────────────────────────────
+
+    fun loadPendingReports() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingReports = true) }
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService.fetchPendingReports()) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success ->
+                    _state.update { it.copy(reportedQuestions = r.data, isLoadingReports = false) }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update { it.copy(isLoadingReports = false, error = "Report লোড ব্যর্থ: ${r.message}") }
+            }
+        }
+    }
+
+    fun resolveReport(reportKey: String, status: String) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            when (com.hanif.smartstudy.data.remote.GasApiService.updateReportStatus(reportKey, status)) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                    // Local list থেকে সরাও
+                    _state.update {
+                        it.copy(
+                            reportedQuestions = it.reportedQuestions.filter { r -> r.reportKey != reportKey },
+                            toast = if (status == "resolved") "✅ Report resolved" else "🗑 Report dismissed"
+                        )
+                    }
+                }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update { it.copy(toast = "❌ Update ব্যর্থ হয়েছে") }
+            }
+        }
+    }
+
+    // ── Feature 2: Add New Question ──────────────────────────
+
+    fun adminAddQuestion(sheet: String, fields: Map<String, String>) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isAddingQuestion = true, addQuestionMsg = null) }
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService.adminAddQuestion(sheet, fields)) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                    cache.clearCache()
+                    _state.update {
+                        it.copy(
+                            isAddingQuestion = false,
+                            addQuestionMsg   = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}"
+                        )
+                    }
+                }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update {
+                        it.copy(
+                            isAddingQuestion = false,
+                            addQuestionMsg   = "❌ ব্যর্থ: ${r.message}"
+                        )
+                    }
+            }
+        }
+    }
+
+    fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
+
+    // ── Feature 3: Bulk Audience Change ──────────────────────
+
+    fun adminBulkAudienceUpdate(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        newTag   : String
+    ) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isBulkUpdating = true, bulkUpdateMsg = null) }
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService.adminBulkAudienceUpdate(
+                sheet, subject, subTopic, newTag
+            )) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                    cache.clearCache()
+                    _state.update {
+                        it.copy(
+                            isBulkUpdating = false,
+                            bulkUpdateMsg  = "✅ ${r.data}টি প্রশ্নের AudienceTag আপডেট হয়েছে → \"$newTag\""
+                        )
+                    }
+                }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update {
+                        it.copy(
+                            isBulkUpdating = false,
+                            bulkUpdateMsg  = "❌ ব্যর্থ: ${r.message}"
+                        )
+                    }
+            }
+        }
+    }
+
+    fun clearBulkMsg() { _state.update { it.copy(bulkUpdateMsg = null) } }
 
     // ── Toast clear ───────────────────────────────────────────
 
