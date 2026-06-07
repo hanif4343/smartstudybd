@@ -31,6 +31,8 @@ import com.hanif.smartstudy.viewmodel.*
 @Composable
 fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+    // WeekendBattleViewModel এখানে একবারই তৈরি হয়, tab switch এ নতুন instance হয় না
+    val battleVm: WeekendBattleViewModel = viewModel()
 
     // Toast
     state.toast?.let { msg ->
@@ -91,7 +93,7 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
 
                 when (activeTab) {
                     0 -> ChallengeHubScreen(state, vm)
-                    1 -> WeekendBattleScreen()
+                    1 -> WeekendBattleScreen(vm = battleVm)   // ← parent থেকে vm পাঠাও
                 }
             }
         }
