@@ -73,11 +73,12 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
         val phone    = user.phone?.trim()?.replace(Regex("[.#\$\\[\\]\\s]"), "_") ?: return@withContext Result.success()
 
         val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
-        val authParam    = ""
         val lastCheck    = session.getLastNotifCheck()
 
         try {
-            val url  = "$firebaseBase/Notifications/$phone.json"
+            val fbToken = FirebaseTokenProvider.getToken()
+            val fbAuth  = if (fbToken.isNotBlank()) "?auth=$fbToken" else ""
+            val url  = "$firebaseBase/Notifications/$phone.json$fbAuth"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext Result.success()
 
@@ -104,7 +105,7 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
                     val title = notif.get("title")?.asString ?: "Smart Study"
                     val msgBody = notif.get("body")?.asString ?: ""
                     showLocalNotification(title, msgBody)
-                    markAsRead(firebaseBase, phone, key, authParam)
+                    markAsRead(firebaseBase, phone, key, fbAuth)
                 }
             }
 
