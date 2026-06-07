@@ -212,7 +212,6 @@ fun RichContentText(
     val segments = remember(text) { MediaLinkParser.parse(text) }
 
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
-    var pdfUrl       by remember { mutableStateOf<String?>(null) }
 
     // কিছু না থাকলে render করার দরকার নেই
     if (segments.isEmpty()) return
@@ -244,7 +243,8 @@ fun RichContentText(
                     VideoButton(url = seg.url, isYoutube = seg.isYoutube)
                 }
                 is MediaSegment.PdfLink -> {
-                    PdfButton(url = seg.url, onClick = { pdfUrl = seg.url })
+                    val ctx = LocalContext.current
+                    PdfButton(url = seg.url, onClick = { openPdfExternal(ctx, seg.url) })
                 }
             }
         }
@@ -253,11 +253,6 @@ fun RichContentText(
     // ── Image Zoom Overlay (index এর #image-zoom-overlay এর মতো) ──
     zoomImageUrl?.let { url ->
         ImageZoomOverlay(imageUrl = url, onClose = { zoomImageUrl = null })
-    }
-
-    // ── PDF Modal (index এর #pdf-modal এর মতো) ──
-    pdfUrl?.let { url ->
-        PdfViewerModal(url = url, onClose = { pdfUrl = null })
     }
 }
 
@@ -427,6 +422,24 @@ private fun openVideoApp(ctx: Context, url: String) {
                 }
             }
         }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// openPdfExternal — সরাসরি system এ PDF open করে
+// স্ক্রিনশটে তীর চিহ্ন (↗) বাটনে ক্লিক করলে যেটা হয়, এখন PDF বাটনেই সেটা হবে
+// Drive লিংক → browser এ preview
+// Direct PDF → system PDF viewer / browser
+// ─────────────────────────────────────────────────────────────────
+fun openPdfExternal(ctx: Context, url: String) {
+    try {
+        val uri = Uri.parse(url)
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        ctx.startActivity(intent)
     } catch (e: Exception) {
         e.printStackTrace()
     }
