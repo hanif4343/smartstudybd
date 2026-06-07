@@ -212,7 +212,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
-                removeWrongQId(q.id, _state.value.mode)   // সঠিক হলে remove
+                removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -232,7 +232,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
-                removeWrongQId(q.id, _state.value.mode)
+                removeWrongQIdByMode(q.id, _state.value.mode)
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -435,7 +435,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putStringSet("wrong_q_ids", ids).putStringSet("wrong_q_count", counts).apply()
     }
 
-    private fun removeWrongQId(qId: String, mode: StudyMode) {
+    /** HomeScreen WrongReviewSection থেকে call হয় — সঠিক হলে remove */
+    fun removeWrongQId(qId: String) {
+        listOf("quiz", "qbank", "study").forEach { sheet ->
+            val entry = "$sheet:$qId"
+            val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+            if (ids.remove(entry)) { prefs.edit().putStringSet("wrong_q_ids", ids).apply(); return }
+        }
+    }
+
+
+    private fun removeWrongQIdByMode(qId: String, mode: StudyMode) {
         val sheet = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
         val entry = "$sheet:$qId"
         val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
