@@ -29,7 +29,22 @@ object AudienceFilter {
 
     // ── Single item check ────────────────────────────────────
 
-    fun userCanSee(audienceTags: String?, user: User?): Boolean {
+    /**
+     * Admin যদি কোনো specific tag-এ switch করে থাকে, তাহলে সেই tag দিয়ে filter হবে।
+     * [adminOverrideTag] empty হলে normal user filtering।
+     */
+    fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = ""): Boolean {
+        // Admin override: নির্দিষ্ট tag দিয়ে দেখছে
+        if (adminOverrideTag.isNotBlank() && user?.isAdmin() == true) {
+            val tag     = audienceTags?.trim() ?: ""
+            val override = adminOverrideTag.trim()
+            return if (tag.isBlank()) {
+                override.equals("Job", ignoreCase = true) || override.isBlank()
+            } else {
+                tag.equals(override, ignoreCase = true)
+            }
+        }
+
         val tag = audienceTags?.trim() ?: ""
         val cl  = user?.classLevel?.trim() ?: ""
         val ut  = user?.userType?.trim()   ?: ""
@@ -58,10 +73,10 @@ object AudienceFilter {
 
     // ── AppContent filtered view ─────────────────────────────
 
-    fun AppContent.forUser(user: User?) = copy(
-        quiz   = quiz.filterForUser(user),
-        qbank  = qbank.filterForUser(user),
-        study  = study.filterForUser(user)
+    fun AppContent.forUser(user: User?, adminOverrideTag: String = "") = copy(
+        quiz   = quiz.filter   { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        qbank  = qbank.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        study  = study.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) }
     )
 
     // ── Challenge opponent compatibility ─────────────────────
