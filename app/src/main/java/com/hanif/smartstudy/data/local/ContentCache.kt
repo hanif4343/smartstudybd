@@ -77,6 +77,19 @@ class ContentCache(private val context: Context) {
         return (prefs[KEY_CACHE_TIME] ?: 0L) > 0L
     }
 
+    /**
+     * Cache invalidate করো — পরবর্তী fetch এ Firebase থেকে fresh data আসবে।
+     * Admin প্রশ্ন edit করলে এটা call হয়।
+     */
+    suspend fun clearCache() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_STUDY_JSON)
+            prefs.remove(KEY_QUIZ_JSON)
+            prefs.remove(KEY_QBANK_JSON)
+            prefs[KEY_CACHE_TIME] = 0L
+        }
+    }
+
     suspend fun addStudyMinutes(minutes: Int) {
         val today = todayString()
         context.dataStore.edit { prefs ->
