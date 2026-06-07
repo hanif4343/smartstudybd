@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.ads.AdBannerView
 import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.shared.SubjectListSkeleton
 import com.hanif.smartstudy.ui.shared.ErrorState
@@ -262,7 +263,10 @@ fun SubTopicListScreen(
                         fontFamily = NotoSansBengali)
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
+            // ── Banner Ad — subject header এর নিচে ──
+            AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QUIZ_LIST)
+            Spacer(Modifier.height(6.dp))
         }
 
         if (isQBank) {
