@@ -302,22 +302,57 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadExamQuestions(challenge: Challenge) {
         viewModelScope.launch {
-            val c = ContentRepository.getMemCache() ?: return@launch
-            val allQ = (c.quiz.map { QuestionItem.fromQuizItem(it) } +
-                        c.qbank.map { QuestionItem.fromQBankItem(it) })
-            val questions = challenge.questionIds.mapNotNull { id ->
-                allQ.find { it.id == id }
+            // MemCache না থাকলে content load করো (সর্বোচ্চ ১ বার retry)
+            val c = ContentRepository.getMemCache()
+                ?: run {
+                    val fetched = content.getContent()
+                    (fetched as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                }
+            if (c == null) {
+                Log.e("ChallengeVM", "loadExamQuestions: content null, retrying in 2s")
+                delay(2000)
+                val retried = ContentRepository.getMemCache()
+                    ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                if (retried == null) {
+                    _state.update { it.copy(error = "প্রশ্ন লোড হয়নি। আবার চেষ্টা করুন।") }
+                    return@launch
+                }
+                loadExamQuestionsFromContent(challenge, retried)
+                return@launch
             }
-            _state.update {
-                it.copy(
-                    questions    = questions,
-                    currentQIndex = 0,
-                    timerSec     = challenge.timeLimitSec,
-                    screen       = ChallengeScreen.Exam(challenge.id)
-                )
-            }
-            startExamTimer(challenge.id, challenge.timeLimitSec)
+            loadExamQuestionsFromContent(challenge, c)
         }
+    }
+
+    private fun loadExamQuestionsFromContent(
+        challenge : Challenge,
+        c         : com.hanif.smartstudy.data.model.AppContent
+    ) {
+        val me   = session.getCurrentUser()
+        val filtered = c.forUser(me)
+        val allQ = (filtered.quiz.map  { QuestionItem.fromQuizItem(it)  } +
+                    filtered.qbank.map { QuestionItem.fromQBankItem(it) })
+        val questions = challenge.questionIds.mapNotNull { id ->
+            allQ.find { it.id == id }
+        }.ifEmpty {
+            // questionIds দিয়ে না পেলে subject অনুযায়ী random নাও
+            allQ.filter {
+                challenge.subject.isBlank() || it.subject == challenge.subject
+            }.shuffled().take(challenge.questionCount)
+        }
+        if (questions.isEmpty()) {
+            _state.update { it.copy(error = "এই বিষয়ে কোনো প্রশ্ন পাওয়া যায়নি।") }
+            return
+        }
+        _state.update {
+            it.copy(
+                questions     = questions,
+                currentQIndex = 0,
+                timerSec      = challenge.timeLimitSec,
+                screen        = ChallengeScreen.Exam(challenge.id)
+            )
+        }
+        startExamTimer(challenge.id, challenge.timeLimitSec)
     }
 
     // ── Exam actions ──────────────────────────────────────
@@ -458,6 +493,31 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun openCreateSetup() = _state.update { it.copy(screen = ChallengeScreen.CreateSetup, error = null) }
     fun goHome()          { challengeObserveJob?.cancel(); timerJob?.cancel()
         _state.update { it.copy(screen = ChallengeScreen.Home, challenge = null, questions = emptyList(), answers = mutableMapOf()) } }
+
+    // ── Rewarded Ad: XP double ────────────────────────────
+    fun doubleXP() {
+        viewModelScope.launch {
+            try {
+                val me   = session.getCurrentUser() ?: return@launch
+                val chal = _state.value.challenge   ?: return@launch
+                val myPhone = _state.value.myPhone
+                val myResult = chal.participants[myPhone.replace(".", "_")]
+                val earnedXp = myResult?.xpEarned ?: 10
+
+                // Firebase এ XP update করো
+                val phone = me.phone?.replace("+", "").orEmpty().ifEmpty { return@launch }
+                val newXp = me.xp + earnedXp   // আরেকবার same XP যোগ = মোট double
+                val updated = me.copy(xp = newXp)
+                session.saveUser(updated)
+                com.google.firebase.database.FirebaseDatabase.getInstance()
+                    .getReference("users/$phone")
+                    .updateChildren(mapOf("XP" to newXp))
+                _state.update { it.copy(toast = "🎉 XP দ্বিগুণ হয়েছে! +$earnedXp XP") }
+            } catch (e: Exception) {
+                Log.e("ChallengeVM", "doubleXP error: ${e.message}")
+            }
+        }
+    }
 
     // ── Ghost Mode toggle ─────────────────────────────────
     fun toggleGhostMode() = _state.update { it.copy(isGhostMode = !it.isGhostMode) }
