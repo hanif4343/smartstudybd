@@ -59,7 +59,7 @@ object UserSyncService {
 
     private val TAG     = "UserSync"
     private val GAS_URL get() = BuildConfig.GAS_URL
-    private val FB_URL  get() = BuildConfig.FIREBASE_URL
+    private val FB_URL  get() = BuildConfig.FIREBASE_URL.trimEnd('/')
 
     private suspend fun authQuery(): String {
         val token = FirebaseTokenProvider.getToken()
