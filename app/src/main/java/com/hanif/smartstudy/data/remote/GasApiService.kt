@@ -41,6 +41,7 @@ object GasApiService {
                     .add("action", "login")
                     .add("phone", phone)
                     .add("password", hashPassword(password))
+                    .add("secret", BuildConfig.SECRET_KEY)
                     .build()
                 val req  = Request.Builder().url(GAS_URL).post(body).build()
                 val json = client.newCall(req).execute().body?.string()
@@ -67,6 +68,7 @@ object GasApiService {
                     .add("password", hashPassword(password))
                     .add("userType", userType)
                     .add("classLevel", classLevel)
+                    .add("secret", BuildConfig.SECRET_KEY)
                     .build()
                 val req  = Request.Builder().url(GAS_URL).post(body).build()
                 val json = client.newCall(req).execute().body?.string()
@@ -115,6 +117,7 @@ object GasApiService {
             try {
                 val url = "${BuildConfig.GAS_URL}" +
                     "?action=adminNotify" +
+                    "&secret=${BuildConfig.SECRET_KEY}" +
                     "&event=${java.net.URLEncoder.encode(event, "UTF-8")}" +
                     "&name=${java.net.URLEncoder.encode(userName, "UTF-8")}" +
                     "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
@@ -170,7 +173,7 @@ object GasApiService {
                         questionId = questionId,
                         tab        = tab
                     )
-                }
+                } else Unit
             } catch (e: Exception) {
                 Log.e("GAS", "reportQuestion: ${e.message}")
             }
