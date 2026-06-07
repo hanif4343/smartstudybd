@@ -15,11 +15,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import com.google.android.gms.ads.rewarded.RewardedAd
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.ChallengeUiState
 import com.hanif.smartstudy.viewmodel.ChallengeViewModel
 import java.text.SimpleDateFormat
@@ -31,20 +34,29 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
     val challenge = state.challenge ?: return
     val myPhone   = state.myPhone
     val total     = state.questions.size
+    val context   = LocalContext.current
 
-    // Sort by score descending
     val sorted = challenge.participants.values
         .filter { it.score >= 0 }
         .sortedByDescending { it.score }
 
-    val myResult  = sorted.find { it.phone == myPhone }
-    val myRank    = sorted.indexOfFirst { it.phone == myPhone } + 1
-    val iWon      = myRank == 1 && sorted.size > 1
-
-    // Waiting for others
+    val myResult     = sorted.find { it.phone == myPhone }
+    val myRank       = sorted.indexOfFirst { it.phone == myPhone } + 1
+    val iWon         = myRank == 1 && sorted.size > 1
     val waitingCount = challenge.participants.values.count { it.status != "SUBMITTED" }
 
     var showComparison by remember { mutableStateOf(false) }
+
+    // ── Rewarded Ad: background load ──
+    var rewardedAd    by remember { mutableStateOf<RewardedAd?>(null) }
+    var xpDoubled     by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        AdManager.loadRewarded(
+            context  = context,
+            onLoaded = { rewardedAd = it },
+            onFailed = { rewardedAd = null }
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxSize()
@@ -171,6 +183,73 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                         myPhone      = myPhone,
                         opponentName = opponent.name
                     )
+                }
+            }
+
+            // ── Rewarded Ad — XP Double বাটন ──
+            if (!xpDoubled && waitingCount == 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = CardDefaults.cardColors(Color(0xFFFEF3C7)),
+                    border   = BorderStroke(1.dp, Color(0xFFFBBF24))
+                ) {
+                    Row(
+                        modifier              = Modifier.padding(14.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("⭐", fontSize = 28.sp)
+                        Column(Modifier.weight(1f)) {
+                            Text("XP দ্বিগুণ করো!", fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold, color = Color(0xFF92400E),
+                                fontFamily = NotoSansBengali)
+                            Text("একটি ছোট ভিডিও দেখো, XP ×২ পাও",
+                                fontSize = 11.sp, color = Color(0xFFB45309),
+                                fontFamily = NotoSansBengali)
+                        }
+                        Button(
+                            onClick = {
+                                val activity = context as? android.app.Activity
+                                if (activity != null) {
+                                    AdManager.showRewarded(
+                                        activity    = activity,
+                                        ad          = rewardedAd,
+                                        onRewarded  = { _ ->
+                                            xpDoubled = true
+                                            vm.doubleXP()   // ViewModel এ XP double করো
+                                        },
+                                        onDismissed = { rewardedAd = null }
+                                    )
+                                }
+                            },
+                            enabled = rewardedAd != null,
+                            shape   = RoundedCornerShape(10.dp),
+                            colors  = ButtonDefaults.buttonColors(
+                                containerColor        = Color(0xFFF59E0B),
+                                disabledContainerColor= Color(0xFFD1D5DB)
+                            )
+                        ) {
+                            Text(if (rewardedAd != null) "▶ দেখো" else "লোড হচ্ছে...",
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp, color = Color.White)
+                        }
+                    }
+                }
+            }
+
+            // XP double হলে success message
+            if (xpDoubled) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = CardDefaults.cardColors(Color(0xFFF0FDF4)),
+                    border   = BorderStroke(1.dp, Color(0xFF86EFAC))
+                ) {
+                    Text("🎉 অভিনন্দন! XP দ্বিগুণ হয়েছে!",
+                        modifier = Modifier.padding(14.dp),
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF166534), fontSize = 14.sp)
                 }
             }
 
