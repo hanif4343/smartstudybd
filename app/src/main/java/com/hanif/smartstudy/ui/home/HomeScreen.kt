@@ -28,6 +28,9 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 
 private val PrimaryIndigo = Color(0xFF4F46E5)
 private val DeepIndigo    = Color(0xFF1E1B4B)
@@ -48,9 +51,10 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsState()
     val ctx   = LocalContext.current
 
-    // Wrong questions থেকে review data
-    val wrongItems = remember(state) {
-        quizViewModel?.getWrongQuestions() ?: emptyList()
+    // Wrong questions থেকে review data — mutableStateOf দিয়ে refresh করা যাবে
+    var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
+    LaunchedEffect(state) {
+        wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
     }
 
     Column(
@@ -90,11 +94,15 @@ fun HomeScreen(
             // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
 
-            // ── Wrong Question Review Card ──
+            // ── Wrong Question Review Section ──
             if (wrongItems.isNotEmpty()) {
-                WrongReviewCard(
-                    wrongItems = wrongItems,
-                    onStart    = { quizViewModel?.startWrongReview() }
+                WrongReviewSection(
+                    wrongItems      = wrongItems,
+                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerMcq(
+                        wrongItems.indexOfFirst { it.first.id == qId }, opt) },
+                    onAnswerWritten = { qId, text -> quizViewModel?.answerWritten(
+                        wrongItems.indexOfFirst { it.first.id == qId }, text) ?: 0 },
+                    onRemoveCorrect = { qId -> quizViewModel?.removeWrongQId(qId) }
                 )
             }
 
