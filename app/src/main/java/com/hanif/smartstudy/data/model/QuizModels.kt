@@ -56,10 +56,14 @@ data class QuestionItem(
             subject      = s.subject ?: "",
             subTopic     = s.subTopic ?: "",
             question     = s.question ?: "",
-            answer       = s.answer ?: "",
-            explanation  = s.answer ?: "",
+            // index.html: corRaw = getVal(i,'correct'), ansRaw = getVal(i,'answer')
+            // correct field আগে দেখি, না থাকলে answer
+            answer       = (s.correct ?: s.answer) ?: "",
+            // index: expRaw = getVal(i,'explanation'), ansRaw fallback
+            explanation  = (s.explanation ?: s.answer) ?: "",
+            technique    = s.technique ?: "",
+            questionType = s.questionType?.lowercase()?.trim() ?: "written",
             audienceTags = s.audienceTags ?: "",
-            questionType = "written",
             visualUrl    = s.visualUrl ?: ""
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
