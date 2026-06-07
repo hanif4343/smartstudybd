@@ -38,36 +38,46 @@ fun WrongReviewSection(
     onAnswerWritten : (questionId: String, userText: String) -> Int,
     onRemoveCorrect : (questionId: String) -> Unit
 ) {
-    var practiceMode by remember { mutableStateOf(false) }
+    var practiceMode  by remember { mutableStateOf(false) }
+    var showCongrats  by remember { mutableStateOf(false) }
 
-    // local answer states: questionId → AnswerState
+    // local answer states
     val localAnswers = remember { mutableStateMapOf<String, AnswerState>() }
 
-    // hide হয়ে যাওয়া question id গুলো — SnapshotStateList
-    val hiddenIds = remember { mutableStateListOf<String>() }
+    // practice শুরুর সময় যতগুলো ছিল সেটা মনে রাখি
+    var totalAtStart by remember { mutableStateOf(0) }
 
-    var showCongrats by remember { mutableStateOf(false) }
+    // সঠিক হয়ে যাওয়া ids (hide tracking)
+    val correctIds = remember { mutableStateListOf<String>() }
 
-    val activeItems = wrongItems.filter { it.first.id !in hiddenIds }
+    // wrongItems বাইরে থেকে আসে — practice চলাকালে snapshot নিই
+    val practiceSnapshot = remember { mutableStateListOf<Pair<QuestionItem, Int>>() }
 
-    // hiddenIds পরিবর্তন হলে check করো সব শেষ কিনা
-    LaunchedEffect(hiddenIds.size) {
-        if (practiceMode && wrongItems.isNotEmpty() && hiddenIds.size >= wrongItems.size) {
+    // active = snapshot থেকে যেগুলো এখনো correct হয়নি
+    val activeItems = practiceSnapshot.filter { it.first.id !in correctIds }
+
+    // সব সঠিক check
+    LaunchedEffect(correctIds.size, totalAtStart) {
+        if (practiceMode && totalAtStart > 0 && correctIds.size >= totalAtStart) {
             showCongrats = true
-            delay(5000)
+            delay(3000)
             showCongrats = false
             practiceMode = false
-            hiddenIds.clear()
+            correctIds.clear()
             localAnswers.clear()
+            practiceSnapshot.clear()
+            totalAtStart = 0
         }
     }
 
+    // congratulations দেখালে শুধু ওটাই
     if (showCongrats) {
         CongratsOverlay()
         return
     }
 
-    if (wrongItems.isEmpty()) return
+    // ভুল প্রশ্ন নেই — section দেখাবো না
+    if (wrongItems.isEmpty() && !practiceMode) return
 
     Card(
         modifier  = Modifier.fillMaxWidth(),
@@ -80,8 +90,9 @@ fun WrongReviewSection(
             modifier            = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Header
             WRHeader(
-                totalCount   = wrongItems.size,
+                totalCount   = if (practiceMode) totalAtStart else wrongItems.size,
                 activeCount  = activeItems.size,
                 practiceMode = practiceMode
             )
@@ -100,11 +111,17 @@ fun WrongReviewSection(
                         modifier   = Modifier.padding(start = 4.dp)
                     )
                 }
+
+                // অনুশীলন বাটন
                 Button(
-                    onClick  = {
-                        practiceMode = true
+                    onClick = {
+                        // snapshot নাও এবং practice শুরু করো
+                        practiceSnapshot.clear()
+                        practiceSnapshot.addAll(wrongItems)
+                        correctIds.clear()
                         localAnswers.clear()
-                        hiddenIds.clear()
+                        totalAtStart = wrongItems.size
+                        practiceMode = true
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape    = RoundedCornerShape(14.dp),
@@ -119,8 +136,9 @@ fun WrongReviewSection(
                         fontFamily = NotoSansBengali
                     )
                 }
+
             } else {
-                // Practice mode — সব active প্রশ্ন দেখাও
+                // Practice mode — active প্রশ্নগুলো দেখাও
                 activeItems.forEach { (q, wrongCount) ->
                     val localState = localAnswers[q.id] ?: AnswerState.Unanswered
                     WRPracticeItem(
@@ -131,27 +149,36 @@ fun WrongReviewSection(
                                 1 -> q.optionA; 2 -> q.optionB
                                 3 -> q.optionC; 4 -> q.optionD; else -> ""
                             }
-                            val correct = optText.trim().equals(q.answer.trim(), ignoreCase = true)
-                            localAnswers[q.id] = AnswerState.McqSelected(selectedOpt, correct)
+                            val isCorrect = optText.trim().equals(q.answer.trim(), ignoreCase = true)
+                            localAnswers[q.id] = AnswerState.McqSelected(selectedOpt, isCorrect)
                             onAnswerMcq(q.id, selectedOpt)
-                            if (correct) onRemoveCorrect(q.id)
+                            if (isCorrect) {
+                                onRemoveCorrect(q.id)
+                            }
                         },
                         onWrittenAnswer = { text ->
                             val pct = onAnswerWritten(q.id, text)
-                            val correct = pct >= 70
-                            localAnswers[q.id] = AnswerState.WrittenSubmitted(text, pct, correct)
-                            if (correct) onRemoveCorrect(q.id)
+                            val isCorrect = pct >= 70
+                            localAnswers[q.id] = AnswerState.WrittenSubmitted(text, pct, isCorrect)
+                            if (isCorrect) onRemoveCorrect(q.id)
                             pct
                         },
-                        onHide          = { hiddenIds.add(q.id) }
+                        onHide = {
+                            if (q.id !in correctIds) {
+                                correctIds.add(q.id)
+                            }
+                        }
                     )
                 }
 
+                // বন্ধ করুন বাটন
                 OutlinedButton(
-                    onClick  = {
+                    onClick = {
                         practiceMode = false
+                        correctIds.clear()
                         localAnswers.clear()
-                        hiddenIds.clear()
+                        practiceSnapshot.clear()
+                        totalAtStart = 0
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape    = RoundedCornerShape(12.dp),
@@ -286,7 +313,7 @@ private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
     }
 }
 
-// ─── Practice Item (একটা প্রশ্ন) ───
+// ─── Practice Item ───
 @Composable
 private fun WRPracticeItem(
     q               : QuestionItem,
@@ -302,12 +329,12 @@ private fun WRPracticeItem(
         else                            -> false
     }
 
-    // সঠিক হলে countdown এবং hide
     var countdown by remember { mutableStateOf(5) }
     var visible   by remember { mutableStateOf(true) }
 
+    // সঠিক হলে countdown তারপর hide
     LaunchedEffect(isCorrect) {
-        if (isCorrect) {
+        if (isCorrect && visible) {
             for (i in 4 downTo 0) {
                 countdown = i
                 delay(1000L)
@@ -319,7 +346,7 @@ private fun WRPracticeItem(
 
     AnimatedVisibility(
         visible = visible,
-        exit    = fadeOut(tween(500)) + shrinkVertically(tween(500))
+        exit    = fadeOut(tween(400)) + shrinkVertically(tween(400))
     ) {
         val badgeColor = when {
             wrongCount >= 3 -> WR_RedMain
@@ -351,7 +378,7 @@ private fun WRPracticeItem(
                 modifier            = Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Top row: badges
+                // Top badges row
                 Row(
                     modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -378,9 +405,7 @@ private fun WRPracticeItem(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (q.isMcq()) Color(0xFFEFF6FF) else Color(0xFFFAF5FF)
-                                )
+                                .background(if (q.isMcq()) Color(0xFFEFF6FF) else Color(0xFFFAF5FF))
                                 .border(
                                     1.dp,
                                     if (q.isMcq()) Color(0xFFBFDBFE) else Color(0xFFDDD6FE),
@@ -404,8 +429,7 @@ private fun WRPracticeItem(
                             )
                         }
                     }
-
-                    // Countdown circle
+                    // countdown circle (সঠিক হলে)
                     if (isCorrect) {
                         Box(
                             modifier         = Modifier
@@ -424,22 +448,16 @@ private fun WRPracticeItem(
                     }
                 }
 
-                // Question text
                 QuestionText(text = q.question)
 
-                // Image
-                if (q.imageUrl.isNotBlank()) {
-                    ZoomableImage(url = q.imageUrl)
-                }
+                if (q.imageUrl.isNotBlank()) ZoomableImage(url = q.imageUrl)
 
-                // MCQ বা Written
                 if (q.isMcq()) {
                     McqOptions(item = q, onAnswer = onMcqAnswer)
                 } else {
                     WrittenInput(item = q, onSubmit = onWrittenAnswer)
                 }
 
-                // উত্তর + ব্যাখ্যা (answered হলে)
                 if (isAnswered) {
                     if (q.answer.isNotBlank()) AnswerBox(text = q.answer)
                     if (q.explanation.isNotBlank() && q.explanation != q.answer) {
@@ -448,7 +466,7 @@ private fun WRPracticeItem(
                     if (q.technique.isNotBlank()) TechniqueBox(text = q.technique)
                 }
 
-                // সঠিক হলে সবুজ banner
+                // সঠিক banner
                 if (isCorrect) {
                     Row(
                         modifier = Modifier
@@ -487,15 +505,15 @@ private fun WRPracticeItem(
 private fun CongratsOverlay() {
     val pulse = rememberInfiniteTransition(label = "pulse")
     val scale by pulse.animateFloat(
-        initialValue  = 0.96f,
-        targetValue   = 1.04f,
+        initialValue  = 0.97f,
+        targetValue   = 1.03f,
         animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label         = "scale"
     )
     val starAlpha by pulse.animateFloat(
-        initialValue  = 0.6f,
+        initialValue  = 0.5f,
         targetValue   = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
         label         = "alpha"
     )
 
@@ -510,12 +528,12 @@ private fun CongratsOverlay() {
                 .fillMaxWidth()
                 .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("🏆", fontSize = 56.sp)
+            Text("🏆", fontSize = 60.sp)
             Text(
                 "অভিনন্দন!",
-                fontSize   = 26.sp,
+                fontSize   = 28.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color      = Color(0xFFFBBF24),
                 fontFamily = NotoSansBengali,
@@ -530,19 +548,18 @@ private fun CongratsOverlay() {
                 textAlign  = TextAlign.Center,
                 lineHeight = 22.sp
             )
-            Spacer(Modifier.height(4.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier              = Modifier.alpha(starAlpha)
             ) {
                 listOf("⭐", "🌟", "✨", "🌟", "⭐").forEach {
-                    Text(it, fontSize = 20.sp)
+                    Text(it, fontSize = 22.sp)
                 }
             }
             Text(
                 "কিছুক্ষণ পর এই সেকশন বন্ধ হয়ে যাবে...",
                 fontSize   = 10.sp,
-                color      = Color.White.copy(alpha = 0.45f),
+                color      = Color.White.copy(alpha = 0.4f),
                 fontFamily = NotoSansBengali,
                 textAlign  = TextAlign.Center
             )
