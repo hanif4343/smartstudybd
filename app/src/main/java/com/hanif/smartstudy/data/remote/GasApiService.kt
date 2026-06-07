@@ -145,9 +145,6 @@ object GasApiService {
         withContext(Dispatchers.IO) {
             try {
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey    = BuildConfig.SECRET_KEY
-                val authParam    = if (secretKey.isNotBlank() && !secretKey.contains("%%"))
-                    "?auth=$secretKey" else ""
 
                 val jsonObj = JsonObject().apply {
                     addProperty("questionId", questionId)
@@ -159,7 +156,7 @@ object GasApiService {
                     addProperty("status",     "pending")
                 }
 
-                val url  = "$firebaseBase/Reports.json$authParam"
+                val url  = "$firebaseBase/Reports.json"
                 val body = jsonObj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).post(body).build()
                 val resp = client.newCall(req).execute()
@@ -197,9 +194,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques/${questionId}.json$auth"
+                val url       = "$base/UserTechniques/${questionId}.json"
                 val req       = Request.Builder().url(url).get().build()
                 val json      = client.newCall(req).execute().body?.string() ?: "null"
                 if (json == "null") return@withContext GasResult.Success(emptyList())
@@ -226,9 +221,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques/$questionId.json$auth"
+                val url       = "$base/UserTechniques/$questionId.json"
                 val obj = JsonObject().apply {
                     addProperty("questionId", questionId)
                     addProperty("userId",     userId)
@@ -271,9 +264,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
+                val url       = "$base/UserTechniques/$questionId/$pushKey.json"
                 val obj = JsonObject().apply {
                     addProperty("text",      text)
                     addProperty("isPublic",  isPublic)
@@ -296,9 +287,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
+                val url       = "$base/UserTechniques/$questionId/$pushKey.json"
                 val req       = Request.Builder().url(url).delete().build()
                 client.newCall(req).execute().close()
                 GasResult.Success(Unit)
@@ -311,9 +300,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques.json$auth"
+                val url       = "$base/UserTechniques.json"
                 val req       = Request.Builder().url(url).get().build()
                 val json      = client.newCall(req).execute().body?.string() ?: "null"
                 if (json == "null") return@withContext GasResult.Success(emptyList())
@@ -340,9 +327,7 @@ object GasApiService {
         return withContext(Dispatchers.IO) {
             try {
                 val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
-                val secretKey = BuildConfig.SECRET_KEY
-                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
-                val url       = "$base/UserTechniques/$questionId/$pushKey.json$auth"
+                val url       = "$base/UserTechniques/$questionId/$pushKey.json"
                 val obj = JsonObject().apply { addProperty("status", status) }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).patch(body).build()
