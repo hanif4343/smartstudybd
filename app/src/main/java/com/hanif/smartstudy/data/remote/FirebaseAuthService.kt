@@ -58,11 +58,11 @@ object FirebaseAuthService {
      * কারণ Firebase-এ phone number leading zero (01...) থাকায়
      * direct key lookup কাজ করে না।
      */
-    private suspend fun findUserByPhone(phone: String, firebaseUrl: String, secretKey: String): Map<String, Any>? =
+    private suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
         withContext(Dispatchers.IO) {
             try {
                 val normPhone = phone.trim()
-                val allUrl = "${firebaseUrl}Users.json?auth=$secretKey"
+                val allUrl = "${firebaseUrl}Users.json"
                 Log.d("Login", "Scanning all users for phone: $normPhone")
                 val allReq = Request.Builder().url(allUrl).get().build()
                 val allResp = client.newCall(allReq).execute()
@@ -107,10 +107,10 @@ object FirebaseAuthService {
         }
 
     // ── LOGIN (Phone দিয়ে খোঁজো, তারপর Password মিলাও) ──
-    suspend fun verifyLogin(phone: String, password: String, firebaseUrl: String, secretKey: String): AuthResult =
+    suspend fun verifyLogin(phone: String, password: String, firebaseUrl: String): AuthResult =
         withContext(Dispatchers.IO) {
             try {
-                val userMap = findUserByPhone(phone, firebaseUrl, secretKey)
+                val userMap = findUserByPhone(phone, firebaseUrl)
                     ?: return@withContext AuthResult.Error("এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই")
 
                 // Gson সব number কে Double করে, তাই anyToString দিয়ে সঠিক value নাও
@@ -144,11 +144,10 @@ object FirebaseAuthService {
         email: String,
         name: String,
         photoUrl: String,
-        firebaseUrl: String,
-        secretKey: String
+        firebaseUrl: String
     ): GoogleAuthResult = withContext(Dispatchers.IO) {
         try {
-            val url = "${firebaseUrl}Users.json?auth=$secretKey"
+            val url = "${firebaseUrl}Users.json"
             Log.d("GoogleAuth", "Fetching all users from: $url")
             val req = Request.Builder().url(url).get().build()
             val resp = client.newCall(req).execute()
@@ -203,12 +202,11 @@ object FirebaseAuthService {
         picture: String,
         userType: String,
         classLevel: String,
-        firebaseUrl: String,
-        secretKey: String
+        firebaseUrl: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
             // এই ফোন নম্বর ইতিমধ্যে আছে কিনা চেক করি
-            val existing = findUserByPhone(phone, firebaseUrl, secretKey)
+            val existing = findUserByPhone(phone, firebaseUrl)
             if (existing != null) {
                 return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
             }
@@ -227,7 +225,7 @@ object FirebaseAuthService {
 
             val jsonBody = gson.toJson(userData)
             val requestBody = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
-            val url = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
+            val url = "${firebaseUrl}Users/${phone}.json"
 
             val req = Request.Builder().url(url).put(requestBody).build()
             val resp = client.newCall(req).execute()
@@ -249,11 +247,10 @@ object FirebaseAuthService {
         password: String,
         userType: String,
         classLevel: String,
-        firebaseUrl: String,
-        secretKey: String
+        firebaseUrl: String
     ): AuthResult = withContext(Dispatchers.IO) {
         try {
-            val existing = findUserByPhone(phone, firebaseUrl, secretKey)
+            val existing = findUserByPhone(phone, firebaseUrl)
             if (existing != null) {
                 return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
             }
@@ -272,7 +269,7 @@ object FirebaseAuthService {
 
             val jsonBody = gson.toJson(userData)
             val requestBody = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
-            val url = "${firebaseUrl}Users/${phone}.json?auth=$secretKey"
+            val url = "${firebaseUrl}Users/${phone}.json"
 
             val req = Request.Builder().url(url).put(requestBody).build()
             val resp = client.newCall(req).execute()
