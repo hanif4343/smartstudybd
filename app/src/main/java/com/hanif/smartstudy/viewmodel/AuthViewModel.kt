@@ -36,7 +36,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
-    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL } catch (e: Exception) { "" }
+    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL.trimEnd('/') + "/" } catch (e: Exception) { "" }
     // ── Phone + Password Login ──
     fun login(phone: String, password: String) {
         val ph = phone.trim()
