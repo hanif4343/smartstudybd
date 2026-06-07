@@ -20,9 +20,11 @@ class ReminderReceiver : BroadcastReceiver() {
         const val CHANNEL_ID       = "smart_study_reminder"
         const val REQ_MORNING      = 2001
         const val REQ_NIGHT        = 2002
+        const val REQ_EXAM_EVE     = 2025
         const val EXTRA_TYPE       = "reminder_type"
         const val TYPE_MORNING     = "morning"
         const val TYPE_NIGHT       = "night"
+        const val TYPE_EXAM_EVE    = "exam_eve"
 
         fun scheduleMorning(context: Context, hour: Int, minute: Int) {
             schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING)
@@ -100,6 +102,14 @@ class ReminderReceiver : BroadcastReceiver() {
         val hour   = intent.getIntExtra("hour", if (type == TYPE_MORNING) 7 else 21)
         val minute = intent.getIntExtra("minute", 0)
 
+        // exam eve — custom title/body সহ একবারই fire হয়, repeat নয়
+        if (type == TYPE_EXAM_EVE) {
+            val title = intent.getStringExtra("title") ?: "📅 আগামীকাল পরীক্ষা!"
+            val body  = intent.getStringExtra("body")  ?: "শেষবারের মতো রিভিশন করে নাও!"
+            showCustomNotification(context, title, body, REQ_EXAM_EVE)
+            return
+        }
+
         showNotification(context, type)
 
         // পরের দিনের জন্য আবার schedule করো
@@ -152,5 +162,26 @@ class ReminderReceiver : BroadcastReceiver() {
             .build()
 
         nm.notify(if (type == TYPE_MORNING) REQ_MORNING else REQ_NIGHT, notif)
+    }
+
+    private fun showCustomNotification(context: Context, title: String, body: String, notifId: Int) {
+        createChannel(context)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val tapIntent = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_CLEAR_TOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(tapIntent)
+            .setVibrate(longArrayOf(0, 300, 100, 300))
+            .build()
+        nm.notify(notifId, notif)
     }
 }
