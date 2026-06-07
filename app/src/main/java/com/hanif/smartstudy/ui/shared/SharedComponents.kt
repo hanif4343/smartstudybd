@@ -200,7 +200,9 @@ fun QuestionCard(
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
             }
-            if (showAnswerBox && item.answer.isNotBlank()) {
+            // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
+            val showAnswerText = showAnswerBox && !item.isMcq()
+            if (showAnswerText && item.answer.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 AnswerBox(text = item.answer)
             }
