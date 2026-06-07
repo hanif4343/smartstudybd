@@ -41,6 +41,7 @@ data class QuestionItem(
     val year        : String  = "",      // QBank only
     val examName    : String  = "",      // QBank only
     val imageUrl    : String  = "",      // embedded image
+    val visualUrl   : String  = "",      // VisualURL — image/video/pdf links from Firebase
     // Runtime state
     val answerState : AnswerState = AnswerState.Unanswered,
     val isBookmarked: Boolean     = false,
@@ -58,7 +59,8 @@ data class QuestionItem(
             answer       = s.answer ?: "",
             explanation  = s.answer ?: "",
             audienceTags = s.audienceTags ?: "",
-            questionType = "written"
+            questionType = "written",
+            visualUrl    = s.visualUrl ?: ""
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
             id           = q.id ?: "",
@@ -73,7 +75,8 @@ data class QuestionItem(
             explanation  = q.explanation ?: "",
             technique    = "",
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
-            audienceTags = q.audienceTags ?: ""
+            audienceTags = q.audienceTags ?: "",
+            visualUrl    = q.visualUrl ?: ""
         )
         fun fromQBankItem(q: QBankItem) = QuestionItem(
             id           = q.id ?: "",
@@ -89,7 +92,8 @@ data class QuestionItem(
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
             audienceTags = q.audienceTags ?: "",
             year         = q.year ?: "",
-            examName     = q.examName ?: ""
+            examName     = q.examName ?: "",
+            visualUrl    = q.visualUrl ?: ""
         )
     }
 }
