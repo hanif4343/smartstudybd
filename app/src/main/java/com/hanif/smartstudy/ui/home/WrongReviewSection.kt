@@ -10,9 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -329,24 +327,27 @@ private fun WRPracticeItem(
         else                            -> false
     }
 
-    var countdown by remember { mutableStateOf(5) }
-    var visible   by remember { mutableStateOf(true) }
+    var visible by remember { mutableStateOf(true) }
 
-    // সঠিক হলে countdown তারপর hide
+    // সঠিক হলে ১.২s পর original app এর মতো collapse animation দিয়ে hide
     LaunchedEffect(isCorrect) {
         if (isCorrect && visible) {
-            for (i in 4 downTo 0) {
-                countdown = i
-                delay(1000L)
-            }
+            delay(1200L)   // original: 1200ms
             visible = false
+            delay(520L)    // original: 520ms transition সম্পন্ন হওয়ার পর
             onHide()
         }
     }
 
+    // Original app: opacity + maxHeight collapse
+    // Compose এ: AnimatedVisibility দিয়ে fadeOut + shrinkVertically
     AnimatedVisibility(
         visible = visible,
-        exit    = fadeOut(tween(400)) + shrinkVertically(tween(400))
+        exit    = fadeOut(animationSpec = tween(400, easing = LinearEasing)) +
+                  shrinkVertically(
+                      animationSpec = tween(520, easing = FastOutSlowInEasing),
+                      shrinkTowards = Alignment.Top
+                  )
     ) {
         val badgeColor = when {
             wrongCount >= 3 -> WR_RedMain
@@ -429,23 +430,7 @@ private fun WRPracticeItem(
                             )
                         }
                     }
-                    // countdown circle (সঠিক হলে)
-                    if (isCorrect) {
-                        Box(
-                            modifier         = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(WR_Green),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "$countdown",
-                                fontSize   = 11.sp,
-                                color      = Color.White,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
+
                 }
 
                 QuestionText(text = q.question)
@@ -459,9 +444,7 @@ private fun WRPracticeItem(
                 }
 
                 if (isAnswered) {
-                    // MCQ তে সবুজ রঙে সঠিক অপশন দেখা যায়, তাই আলাদা AnswerBox দরকার নেই
-                    // Written question এ উত্তর দেখানো দরকার
-                    if (!q.isMcq() && q.answer.isNotBlank()) AnswerBox(text = q.answer)
+                    if (q.answer.isNotBlank()) AnswerBox(text = q.answer)
                     if (q.explanation.isNotBlank() && q.explanation != q.answer) {
                         ExplanationBox(text = q.explanation)
                     }
@@ -475,30 +458,23 @@ private fun WRPracticeItem(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color(0xFFDCFCE7))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("✅", fontSize = 16.sp)
-                        Column {
-                            Text(
-                                "সঠিক উত্তর দিয়েছেন!",
-                                fontSize   = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color      = Color(0xFF166534),
-                                fontFamily = NotoSansBengali
-                            )
-                            Text(
-                                "${countdown}s পর এই প্রশ্ন সরে যাবে...",
-                                fontSize   = 10.sp,
-                                color      = Color(0xFF15803D),
-                                fontFamily = NotoSansBengali
-                            )
-                        }
+                        Text("✅", fontSize = 18.sp)
+                        Text(
+                            "সঠিক উত্তর দিয়েছেন!",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color      = Color(0xFF166534),
+                            fontFamily = NotoSansBengali
+                        )
                     }
                 }
             }
         }
+    }
     }
 }
 
@@ -559,7 +535,7 @@ private fun CongratsOverlay() {
                 }
             }
             Text(
-                "কিছুক্ষণ পর এই সেকশন বন্ধ হয়ে যাবে...",
+                "আপনার প্রস্তুতি হোক আনন্দময়- Smart Study",
                 fontSize   = 10.sp,
                 color      = Color.White.copy(alpha = 0.4f),
                 fontFamily = NotoSansBengali,
