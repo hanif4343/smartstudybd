@@ -396,7 +396,187 @@ object GasApiService {
         fields["Answer"] = newAnswer
         return adminUpdateQuestionField(sheet, rowKey, fields)
     }
-} // এই ক্লোজিং ব্র্যাকেটটি মিসিং ছিল, যা যুক্ত করা হয়েছে।
+
+    // ── Feature 1: Report Queue ───────────────────────────────
+
+    /**
+     * Firebase /Reports থেকে সব pending report fetch করো।
+     * Admin এর report queue এর জন্য।
+     */
+    suspend fun fetchPendingReports(): GasResult<List<ReportedQuestion>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/Reports.json$auth"
+                val req       = Request.Builder().url(url).get().build()
+                val json      = client.newCall(req).execute().body?.string() ?: "null"
+                if (json == "null") return@withContext GasResult.Success(emptyList())
+
+                val raw: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
+                )
+                val list = raw.map { (key, v) ->
+                    ReportedQuestion(
+                        reportKey  = key,
+                        questionId = v["questionId"]?.toString() ?: "",
+                        question   = v["question"]?.toString() ?: "",
+                        issue      = v["issue"]?.toString() ?: "",
+                        userName   = v["userName"]?.toString() ?: "",
+                        userPhone  = v["userPhone"]?.toString() ?: "",
+                        tab        = v["tab"]?.toString() ?: "",
+                        status     = v["status"]?.toString() ?: "pending",
+                        timestamp  = (v["timestamp"] as? Double)?.toLong() ?: 0L
+                    )
+                }.filter { it.status == "pending" }
+                 .sortedByDescending { it.timestamp }
+                GasResult.Success(list)
+            } catch (e: Exception) {
+                GasResult.Error(e.message ?: "Fetch failed")
+            }
+        }
+    }
+
+    /** Report status আপডেট করো — "resolved" | "dismissed" */
+    suspend fun updateReportStatus(reportKey: String, status: String): GasResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base  = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth  = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url   = "$base/Reports/$reportKey.json$auth"
+                val obj   = JsonObject().apply {
+                    addProperty("status", status)
+                    addProperty("resolvedAt", System.currentTimeMillis())
+                }
+                val body  = obj.toString().toRequestBody("application/json".toMediaType())
+                val req   = Request.Builder().url(url).patch(body).build()
+                client.newCall(req).execute().close()
+                GasResult.Success(Unit)
+            } catch (e: Exception) {
+                GasResult.Error(e.message ?: "Update failed")
+            }
+        }
+    }
+
+    // ── Feature 2: Add New Question ──────────────────────────
+
+    /**
+     * Firebase এ নতুন question push করো।
+     * @param sheet "Quiz" | "QBank" | "Study"
+     * @param fields Firebase field map
+     */
+    suspend fun adminAddQuestion(sheet: String, fields: Map<String, String>): GasResult<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/$sheet.json$auth"
+                val obj       = JsonObject()
+                fields.forEach { (k, v) -> obj.addProperty(k, v) }
+                obj.addProperty("createdAt", System.currentTimeMillis())
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).post(body).build()
+                val resp = client.newCall(req).execute()
+                val respBody = resp.body?.string() ?: ""
+                resp.close()
+                if (resp.isSuccessful) {
+                    // Firebase returns {"name": "-NxyzPushKey"}
+                    val pushKey = try {
+                        val j = JsonObject()
+                        com.google.gson.JsonParser.parseString(respBody).asJsonObject
+                            .get("name")?.asString ?: ""
+                    } catch (e: Exception) { "" }
+                    GasResult.Success(pushKey)
+                } else {
+                    GasResult.Error("Firebase error: ${resp.code}")
+                }
+            } catch (e: Exception) {
+                GasResult.Error(e.message ?: "Add failed")
+            }
+        }
+    }
+
+    // ── Feature 3: Bulk Audience Change ──────────────────────
+
+    /**
+     * একটি sheet এর নির্দিষ্ট subject (এবং optional subTopic) এর
+     * সব প্রশ্নের AudienceTags একসাথে update করো।
+     * প্রথমে সব matching questions fetch করে, তারপর batch PATCH।
+     */
+    suspend fun adminBulkAudienceUpdate(
+        sheet      : String,
+        subject    : String,
+        subTopic   : String,   // blank = সব subTopic
+        newTag     : String
+    ): GasResult<Int> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+
+                // Fetch sheet
+                val url  = "$base/$sheet.json$auth"
+                val req  = Request.Builder().url(url).get().build()
+                val json = client.newCall(req).execute().body?.string() ?: "null"
+                if (json == "null") return@withContext GasResult.Error("Sheet empty")
+
+                val raw: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
+                )
+
+                // Filter matching rows
+                val matching = raw.filter { (_, v) ->
+                    val subj = v["subject"]?.toString()?.trim() ?: ""
+                    val st   = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    val subjMatch = subj.equals(subject.trim(), ignoreCase = true)
+                    val stMatch   = subTopic.isBlank() || st.equals(subTopic.trim(), ignoreCase = true)
+                    subjMatch && stMatch
+                }
+
+                if (matching.isEmpty()) return@withContext GasResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
+
+                // Batch update
+                var updated = 0
+                matching.forEach { (key, _) ->
+                    val patchUrl  = "$base/$sheet/$key.json$auth"
+                    val obj       = JsonObject().apply { addProperty("AudienceTags", newTag) }
+                    val body      = obj.toString().toRequestBody("application/json".toMediaType())
+                    val patchReq  = Request.Builder().url(patchUrl).patch(body).build()
+                    val resp      = client.newCall(patchReq).execute()
+                    if (resp.isSuccessful) updated++
+                    resp.close()
+                }
+                GasResult.Success(updated)
+            } catch (e: Exception) {
+                GasResult.Error(e.message ?: "Bulk update failed")
+            }
+        }
+    }
+
+}   // end GasApiService
+
+// ── Data model for reported questions ────────────────────────
+data class ReportedQuestion(
+    val reportKey  : String = "",
+    val questionId : String = "",
+    val question   : String = "",
+    val issue      : String = "",
+    val userName   : String = "",
+    val userPhone  : String = "",
+    val tab        : String = "",   // "quiz" | "qbank" | "study"
+    val status     : String = "pending",
+    val timestamp  : Long   = 0L
+) {
+    fun sheetName() = when (tab.lowercase()) {
+        "qbank" -> "QBank"
+        "study" -> "Study"
+        else    -> "Quiz"
+    }
+}
 
 sealed class GasResult<out T> {
     data class Success<T>(val data: T) : GasResult<T>()
