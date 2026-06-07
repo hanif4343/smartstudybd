@@ -87,7 +87,7 @@ object GasApiService {
             try {
                 val auth = authQuery()
                 val req  = Request.Builder()
-                    .url("${BuildConfig.FIREBASE_URL}Users.json$auth").get().build()
+                    .url("${BuildConfig.FIREBASE_URL.trimEnd('/')}/Users.json$auth").get().build()
                 val json = client.newCall(req).execute().body?.string()
                     ?: return@withContext GasResult.Error("No data")
                 val all: Map<String, Map<String, Any>> = gson.fromJson(
