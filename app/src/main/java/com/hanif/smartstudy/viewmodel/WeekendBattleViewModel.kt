@@ -32,31 +32,35 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadBattleInfo() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            val active   = repo.getActiveBattle()
-            val upcoming = if (active == null) repo.getUpcomingBattle() else null
+            try {
+                _state.update { it.copy(isLoading = true, error = null) }
+                val active   = tryOrNull { repo.getActiveBattle() }
+                val upcoming = if (active == null) tryOrNull { repo.getUpcomingBattle() } else null
 
-            val battle = active ?: upcoming
-            if (battle == null) {
-                _state.update { it.copy(isLoading = false, activeBattle = null, upcomingBattle = null) }
-                return@launch
-            }
+                val battle = active ?: upcoming
+                if (battle == null) {
+                    _state.update { it.copy(isLoading = false, activeBattle = null, upcomingBattle = null) }
+                    return@launch
+                }
 
-            val myPhone    = session.getCurrentUser()?.phone ?: ""
-            val myEntry    = if (active != null) repo.getMyEntry(battle.id, myPhone) else null
-            val hasSubmitted = myEntry != null
+                val myPhone      = session.getCurrentUser()?.phone ?: ""
+                val myEntry      = if (active != null) tryOrNull { repo.getMyEntry(battle.id, myPhone) } else null
+                val hasSubmitted = myEntry != null
 
-            _state.update { it.copy(
-                isLoading      = false,
-                activeBattle   = active,
-                upcomingBattle = upcoming,
-                myEntry        = myEntry,
-                hasSubmitted   = hasSubmitted
-            )}
+                _state.update { it.copy(
+                    isLoading      = false,
+                    activeBattle   = active,
+                    upcomingBattle = upcoming,
+                    myEntry        = myEntry,
+                    hasSubmitted   = hasSubmitted
+                )}
 
-            // Live leaderboard observe করো
-            if (active != null) {
-                observeLeaderboard(active.id, myPhone)
+                if (active != null) {
+                    observeLeaderboard(active.id, myPhone)
+                }
+            } catch (e: Exception) {
+                Log.e("WeekendBattleVM", "loadBattleInfo error: ${e.message}", e)
+                _state.update { it.copy(isLoading = false, error = "চ্যাম্পিয়নশিপ তথ্য লোড হয়নি। পুনরায় চেষ্টা করুন।") }
             }
         }
     }
@@ -64,53 +68,68 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
     private fun observeLeaderboard(battleId: String, myPhone: String) {
         leaderboardJob?.cancel()
         leaderboardJob = viewModelScope.launch {
-            repo.observeLeaderboard(battleId).collect { entries ->
-                val ranked = entries.mapIndexed { idx, e ->
-                    BattleRankEntry(
-                        rank  = idx + 1,
-                        entry = e,
-                        isMe  = e.phone == myPhone
-                    )
+            try {
+                repo.observeLeaderboard(battleId).collect { entries ->
+                    val ranked = entries.mapIndexed { idx, e ->
+                        BattleRankEntry(rank = idx + 1, entry = e, isMe = e.phone == myPhone)
+                    }
+                    val mine = ranked.find { it.isMe }?.entry
+                    _state.update { it.copy(leaderboard = ranked, myEntry = mine ?: it.myEntry) }
                 }
-                val mine = ranked.find { it.isMe }?.entry
-                _state.update { it.copy(
-                    leaderboard = ranked,
-                    myEntry     = mine ?: it.myEntry
-                )}
+            } catch (e: Exception) {
+                Log.e("WeekendBattleVM", "observeLeaderboard error: ${e.message}")
             }
         }
     }
+
+    // ── Null-safe suspend helper ─────────────────────────────
+    private suspend fun <T> tryOrNull(block: suspend () -> T?): T? = try { block() }
+    catch (e: Exception) { Log.e("WeekendBattleVM", "tryOrNull: ${e.message}"); null }
 
     // ── পরীক্ষা শুরু করো ───────────────────────────────
 
     fun startExam() {
         val battle = _state.value.activeBattle ?: return
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
-            val c = ContentRepository.getMemCache()
-                ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
-                ?: run { _state.update { it.copy(isLoading = false, error = "Content load হয়নি") }; return@launch }
+            try {
+                _state.update { it.copy(isLoading = true) }
+                val c = ContentRepository.getMemCache()
+                    ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                    ?: run {
+                        _state.update { it.copy(isLoading = false, error = "প্রশ্ন লোড হয়নি। ইন্টারনেট চেক করুন।") }
+                        return@launch
+                    }
 
-            val allQ      = c.forUser(session.getCurrentUser()).let { filtered ->
-                               filtered.quiz.map { QuestionItem.fromQuizItem(it) } +
-                               filtered.qbank.map { QuestionItem.fromQBankItem(it) }
-                           }
-            val questions = repo.getBattleQuestions(battle.id, allQ)
+                val allQ      = c.forUser(session.getCurrentUser()).let { filtered ->
+                    filtered.quiz.map { QuestionItem.fromQuizItem(it) } +
+                    filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+                }
+                val questions = tryOrNull { repo.getBattleQuestions(battle.id, allQ) }
+                    ?.ifEmpty {
+                        // questionIds empty হলে subject-filtered random questions নাও
+                        allQ.filter {
+                            battle.subject.isBlank() || it.subject == battle.subject
+                        }.shuffled().take(battle.questionCount)
+                    } ?: emptyList()
 
-            if (questions.isEmpty()) {
-                _state.update { it.copy(isLoading = false, error = "প্রশ্ন লোড হয়নি") }
-                return@launch
+                if (questions.isEmpty()) {
+                    _state.update { it.copy(isLoading = false, error = "এই বিষয়ে কোনো প্রশ্ন পাওয়া যায়নি।") }
+                    return@launch
+                }
+
+                _state.update { it.copy(
+                    isLoading     = false,
+                    questions     = questions,
+                    answers       = mutableMapOf(),
+                    currentQIndex = 0,
+                    timerSec      = battle.timeLimitSec,
+                    isExamMode    = true
+                )}
+                startTimer(battle.timeLimitSec)
+            } catch (e: Exception) {
+                Log.e("WeekendBattleVM", "startExam error: ${e.message}", e)
+                _state.update { it.copy(isLoading = false, error = "পরীক্ষা শুরু করতে সমস্যা হয়েছে।") }
             }
-
-            _state.update { it.copy(
-                isLoading     = false,
-                questions     = questions,
-                answers       = mutableMapOf(),
-                currentQIndex = 0,
-                timerSec      = battle.timeLimitSec,
-                isExamMode    = true
-            )}
-            startTimer(battle.timeLimitSec)
         }
     }
 
