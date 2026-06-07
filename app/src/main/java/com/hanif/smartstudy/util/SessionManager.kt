@@ -58,6 +58,9 @@ class SessionManager(private val context: Context) {
         val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         // Pending sync count
         val KEY_PENDING_SYNC     = intPreferencesKey("pending_sync_count")
+
+        // Admin: audience tag switch — "" = নিজের actual audience, অন্যথায় override tag
+        val KEY_ADMIN_AUDIENCE_TAG = stringPreferencesKey("admin_audience_tag")
     }
 
     // ── User ──────────────────────────────────────────────────
@@ -319,6 +322,20 @@ class SessionManager(private val context: Context) {
 
     suspend fun setPendingSyncCount(count: Int) {
         context.dataStore.edit { it[KEY_PENDING_SYNC] = count }
+    }
+
+    // ── Admin Audience Tag Switch ──────────────────────────────
+
+    fun getAdminAudienceTag(): String = runBlocking {
+        context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+    }
+
+    fun adminAudienceTagFlow(): Flow<String> = context.dataStore.data.map {
+        it[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+    }
+
+    suspend fun setAdminAudienceTag(tag: String) {
+        context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
     }
 
     // ── Font Scale (for accessibility user override) ──────────
