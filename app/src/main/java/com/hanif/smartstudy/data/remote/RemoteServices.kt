@@ -4,6 +4,7 @@ import android.util.Base64
 import android.util.Log
 import com.google.gson.Gson
 import com.hanif.smartstudy.BuildConfig
+import com.hanif.smartstudy.data.remote.FirebaseTokenProvider
 import com.hanif.smartstudy.viewmodel.ActiveUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -59,6 +60,11 @@ object UserSyncService {
     private val TAG     = "UserSync"
     private val GAS_URL get() = BuildConfig.GAS_URL
     private val FB_URL  get() = BuildConfig.FIREBASE_URL
+
+    private suspend fun authQuery(): String {
+        val token = FirebaseTokenProvider.getToken()
+        return if (token.isNotBlank()) "?auth=$token" else ""
+    }
     private val gson    = Gson()
 
     // ── Profile picture update ──
@@ -95,7 +101,8 @@ object UserSyncService {
     // ── Fetch active users (Admin) ──
     suspend fun fetchActiveUsers(): List<ActiveUser> = withContext(Dispatchers.IO) {
         try {
-            val url  = "$FB_URL/ActivityLog.json"
+            val fbAuth = authQuery()
+            val url  = "$FB_URL/ActivityLog.json$fbAuth"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext emptyList()
             if (body == "null" || body.isBlank()) return@withContext emptyList()
@@ -134,7 +141,8 @@ object UserSyncService {
             for (node in listOf("users", "Users")) {
                 try {
                     // Method 1: orderBy query
-                    val url = "$FB_URL/$node.json?orderBy=%22Phone%22&equalTo=%22$cleanPhone%22"
+                    val fbAuth = authQuery()
+                    val url = "$FB_URL/$node.json?orderBy=%22Phone%22&equalTo=%22$cleanPhone%22&auth=${FirebaseTokenProvider.getToken()}"
                     Log.d(TAG, "fetchUser trying: $url")
                     val req  = Request.Builder().url(url).get().build()
                     val body = client.newCall(req).execute().body?.string() ?: continue
@@ -152,7 +160,8 @@ object UserSyncService {
                     }
 
                     // Method 2: সব user scan করো
-                    val scanUrl = "$FB_URL/$node.json"
+                    val scanAuth = authQuery()
+                    val scanUrl = "$FB_URL/$node.json$scanAuth"
                     val scanReq  = Request.Builder().url(scanUrl).get().build()
                     val scanBody = client.newCall(scanReq).execute().body?.string() ?: continue
                     Log.d(TAG, "fetchUserScan $node: length=${scanBody.length}")
@@ -191,7 +200,8 @@ object UserSyncService {
     // ── Leaderboard fetch ──
     suspend fun fetchLeaderboard(): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
         try {
-            val url  = "$FB_URL/users.json?orderBy=\"XP\"&limitToLast=20"
+            val fbAuth = authQuery()
+            val url  = "$FB_URL/users.json?orderBy=\"XP\"&limitToLast=20&auth=${FirebaseTokenProvider.getToken()}"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext emptyList()
             if (body == "null" || body.isBlank()) return@withContext emptyList()
@@ -219,6 +229,7 @@ object UserSyncService {
             try {
                 val builder = FormBody.Builder()
                 params.forEach { (k, v) -> builder.add(k, v) }
+                builder.add("secret", BuildConfig.SECRET_KEY)
                 val req  = Request.Builder().url(GAS_URL).post(builder.build()).build()
                 val resp = client.newCall(req).execute()
                 resp.isSuccessful
