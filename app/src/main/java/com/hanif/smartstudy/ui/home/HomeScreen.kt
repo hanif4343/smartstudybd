@@ -31,6 +31,15 @@ import com.hanif.smartstudy.viewmodel.QuizViewModel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import com.hanif.smartstudy.receiver.ReminderReceiver
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 private val PrimaryIndigo = Color(0xFF4F46E5)
 private val DeepIndigo    = Color(0xFF1E1B4B)
@@ -40,6 +49,62 @@ private val CardBg        = Color(0xFFFFFFFF)
 private val SlateBg       = Color(0xFFF8FAFC)
 private val TextPrimary   = Color(0xFF1E293B)
 private val TextMuted     = Color(0xFF64748B)
+
+// ═══════════════════════════════════════════════════════════
+// Exam Eve Notification — পরীক্ষার আগের রাত ১০টায় রিমাইন্ডার
+// ═══════════════════════════════════════════════════════════
+object ExamNotificationHelper {
+
+    private const val EXAM_NOTIF_REQ = 2025
+
+    // পরীক্ষার তারিখের আগের রাত ২২:০০ তে alarm set করে
+    fun scheduleExamEveReminder(ctx: Context, dateStr: String, examName: String) {
+        try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val examDate = sdf.parse(dateStr) ?: return
+
+            val cal = Calendar.getInstance().apply {
+                time = examDate
+                add(Calendar.DAY_OF_YEAR, -1)   // আগের দিন
+                set(Calendar.HOUR_OF_DAY, 22)    // রাত ১০টা
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+            }
+
+            // আগের সময় চলে গেলে set করার দরকার নেই
+            if (cal.timeInMillis <= System.currentTimeMillis()) return
+
+            val intent = Intent(ctx, ReminderReceiver::class.java).apply {
+                putExtra(ReminderReceiver.EXTRA_TYPE, ReminderReceiver.TYPE_EXAM_EVE)
+                putExtra("title", "📅 আগামীকাল পরীক্ষা!")
+                putExtra("body", "\"$examName\" কাল। শেষবারের মতো রিভিশন করে নাও!")
+                putExtra("notif_id", EXAM_NOTIF_REQ)
+            }
+            val pi = PendingIntent.getBroadcast(
+                ctx, EXAM_NOTIF_REQ, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun cancelExamEveReminder(ctx: Context) {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = PendingIntent.getBroadcast(
+            ctx, EXAM_NOTIF_REQ,
+            Intent(ctx, ReminderReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        am.cancel(pi)
+    }
+}
 
 @Composable
 fun HomeScreen(
@@ -78,9 +143,6 @@ fun HomeScreen(
             // AdMob policy: ✅ content와 content 사이, 자연스러운 위치
             AdBannerPlaceholder()
 
-            // Daily Quote
-            QuoteCard(quote = state.dailyQuote)
-
             // Quick Stats
             QuickStatsRow(stats = state.studyStats)
 
@@ -106,11 +168,25 @@ fun HomeScreen(
                 )
             }
 
-            // Exam Countdown
-            if (state.examCountdown.isSet) {
-                ExamCountdownCard(countdown = state.examCountdown)
-            } else {
-                SetExamCard(onSet = { d, n -> viewModel.setExamDate(d, n) })
+            // Exam Countdown — শেষ হলে auto-hide, না থাকলে set বাটন
+            val examExpired = state.examCountdown.isSet &&
+                state.examCountdown.days   == 0L &&
+                state.examCountdown.hours  == 0L &&
+                state.examCountdown.minutes == 0L &&
+                state.examCountdown.seconds == 0L
+            when {
+                state.examCountdown.isSet && !examExpired ->
+                    ExamCountdownCard(
+                        countdown = state.examCountdown,
+                        onClear   = { viewModel.clearExamDate() }
+                    )
+                !state.examCountdown.isSet ->
+                    SetExamCard(onSet = { d, n ->
+                        viewModel.setExamDate(d, n)
+                        // পরীক্ষার আগের রাতে নোটিফিকেশন schedule করো
+                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
+                    })
+                // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
 
             // Loading / Error
@@ -120,9 +196,6 @@ fun HomeScreen(
                 }
             }
             state.error?.let { ErrorBanner(it) }
-
-            // Today's topic
-            TodayTopicCard(content = state.content)
 
             Spacer(Modifier.height(8.dp))
         }
@@ -443,23 +516,6 @@ private fun LinearProgressBar(pct: Float) {
 }
 
 @Composable
-fun QuoteCard(quote: MotivationalQuote) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
-        border = BorderStroke(1.dp, Color(0xFFA7F3D0))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-            Text("💬", fontSize = 20.sp, modifier = Modifier.padding(top = 2.dp, end = 8.dp))
-            Column {
-                Text("\"${quote.text}\"", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    color = Color(0xFF065F46), fontFamily = NotoSansBengali, lineHeight = 18.sp)
-                Text("— ${quote.author}", fontSize = 10.sp, color = Color(0xFF059669),
-                    fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-    }
-}
-
-@Composable
 fun QuickStatsRow(stats: StudyStats) {
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = DeepIndigo)) {
@@ -563,7 +619,7 @@ private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ExamCountdownCard(countdown: ExamCountdown) {
+fun ExamCountdownCard(countdown: ExamCountdown, onClear: () -> Unit = {}) {
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(DeepIndigo)) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -571,7 +627,19 @@ fun ExamCountdownCard(countdown: ExamCountdown) {
                     Text("পরীক্ষার কাউন্টডাউন ⏳", fontSize = 10.sp, color = Color.White.copy(0.55f), fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
                     Text(countdown.examName, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, fontFamily = NotoSansBengali)
                 }
-                Text("📅", fontSize = 24.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("📅", fontSize = 24.sp)
+                    // Clear বাটন
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(0.12f))
+                            .clickable { onClear() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("✕", fontSize = 12.sp, color = Color.White.copy(0.7f), fontWeight = FontWeight.ExtraBold)
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -622,35 +690,6 @@ private fun ExamDateDialog(onSet: (String, String) -> Unit, onDismiss: () -> Uni
         },
         confirmButton = { TextButton({ if (examName.isNotBlank() && examDate.isNotBlank()) onSet(examDate, examName) }, enabled = examName.isNotBlank() && examDate.isNotBlank()) { Text("সেট করুন", fontFamily = NotoSansBengali, color = PrimaryIndigo, fontWeight = FontWeight.ExtraBold) } },
         dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } })
-}
-
-@Composable
-fun TodayTopicCard(content: AppContent) {
-    if (content.isEmpty()) return
-    val dayNum  = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH)
-    val useStudy = dayNum % 2 == 0 && content.study.isNotEmpty()
-    val items   = if (useStudy) content.study.map { it.subTopic to it.subject } else content.qbank.map { it.subTopic to it.subject }
-    val topics  = items.mapNotNull { it.first }.distinct()
-    if (topics.isEmpty()) return
-    val topic   = topics[dayNum % topics.size]
-    val count   = items.count { it.first == topic }
-    val subject = items.firstOrNull { it.first == topic }?.second ?: ""
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp),
-        CardDefaults.cardColors(if (useStudy) Color(0xFFECFDF5) else Color(0xFFEFF6FF)),
-        border = BorderStroke(1.dp, if (useStudy) Color(0xFFA7F3D0) else Color(0xFFBFDBFE))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(if (useStudy) "📌 আজকের পাঠ — Study" else "📌 আজকের প্রশ্নপত্র — QBank",
-                    fontSize = 10.sp, color = if (useStudy) Color(0xFF059669) else Color(0xFF2563EB),
-                    fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 4.dp))
-                Text(topic ?: "আজকের টপিক", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-                    color = if (useStudy) Color(0xFF065F46) else Color(0xFF1E40AF), fontFamily = NotoSansBengali)
-                Text("$subject · $count টি প্রশ্ন", fontSize = 11.sp,
-                    color = if (useStudy) Color(0xFF047857) else Color(0xFF3B82F6), fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 2.dp))
-            }
-            Text(if (useStudy) "📖" else "📚", fontSize = 28.sp)
-        }
-    }
 }
 
 @Composable
