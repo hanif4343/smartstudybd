@@ -44,7 +44,11 @@ object FirebaseAuthService {
 
     /** Firebase Auth ID Token দিয়ে auth query param বানাও */
     private suspend fun authQuery(): String {
-        val token = FirebaseTokenProvider.getToken()
+        // প্রথমবার token খালি হলে refresh করে নাও
+        var token = FirebaseTokenProvider.getToken()
+        if (token.isBlank()) {
+            token = FirebaseTokenProvider.refreshToken()
+        }
         return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
@@ -57,7 +61,8 @@ object FirebaseAuthService {
             try {
                 val normPhone = phone.trim()
                 val auth = authQuery()
-                val allUrl = "${firebaseUrl}Users.json$auth"
+                val baseUrl = firebaseUrl.trimEnd('/')
+                val allUrl = "$baseUrl/Users.json$auth"
                 Log.d("Login", "Scanning users for phone: $normPhone")
                 val allReq  = Request.Builder().url(allUrl).get().build()
                 val allResp = client.newCall(allReq).execute()
@@ -133,7 +138,8 @@ object FirebaseAuthService {
     ): GoogleAuthResult = withContext(Dispatchers.IO) {
         try {
             val auth = authQuery()
-            val url  = "${firebaseUrl}Users.json$auth"
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url  = "$baseUrl/Users.json$auth"
             Log.d("GoogleAuth", "Fetching users from Firebase")
             val req  = Request.Builder().url(url).get().build()
             val resp = client.newCall(req).execute()
@@ -208,7 +214,8 @@ object FirebaseAuthService {
             )
 
             val auth        = authQuery()
-            val url         = "${firebaseUrl}Users/${phone}.json$auth"
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url         = "$baseUrl/Users/${phone}.json$auth"
             val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
             val req         = Request.Builder().url(url).put(requestBody).build()
             val resp        = client.newCall(req).execute()
@@ -248,7 +255,8 @@ object FirebaseAuthService {
             )
 
             val auth        = authQuery()
-            val url         = "${firebaseUrl}Users/${phone}.json$auth"
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url         = "$baseUrl/Users/${phone}.json$auth"
             val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
             val req         = Request.Builder().url(url).put(requestBody).build()
             val resp        = client.newCall(req).execute()
