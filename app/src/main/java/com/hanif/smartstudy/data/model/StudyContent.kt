@@ -15,7 +15,8 @@ data class StudyItem(
     @SerializedName("sub_topic")    val subTopic    : String? = null,
     @SerializedName("question")     val question    : String? = null,
     @SerializedName("answer")       val answer      : String? = null,
-    @SerializedName("AudienceTags") val audienceTags: String? = null
+    @SerializedName("AudienceTags") val audienceTags: String? = null,
+    @SerializedName("VisualURL")     val visualUrl    : String? = null
 )
 
 data class QuizItem(
@@ -32,7 +33,8 @@ data class QuizItem(
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
-    @SerializedName("Image")         val imageUrl     : String? = null
+    @SerializedName("Image")         val imageUrl     : String? = null,
+    @SerializedName("VisualURL")     val visualUrl    : String? = null
 )
 
 data class QBankItem(
@@ -50,7 +52,8 @@ data class QBankItem(
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Year")          val year         : String? = null,
     @SerializedName("Exam_Name")     val examName     : String? = null,
-    @SerializedName("Image")         val imageUrl     : String? = null
+    @SerializedName("Image")         val imageUrl     : String? = null,
+    @SerializedName("VisualURL")     val visualUrl    : String? = null
 )
 
 // ── Gson case-insensitive + multi-alias adapter ──
@@ -122,6 +125,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             // image
             k == "image" || k == "imageurl"
                 || k == "image_url"                 -> "Image"
+            // visual url
+            k == "visualurl" || k == "visual_url"
+                || k == "visualurl"                 -> "VisualURL"
             // id
             k == "id"                               -> "id"
             else                                    -> key
