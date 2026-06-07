@@ -100,7 +100,6 @@ jobs:
           sed -i 's|%%FIREBASE_URL%%|${{ secrets.FIREBASE_URL }}|g'     app/build.gradle
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
-          sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
 
       # ── Auto versionCode ──
       - name: Set versionCode
