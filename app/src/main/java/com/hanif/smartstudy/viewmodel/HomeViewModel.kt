@@ -116,6 +116,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (cd.isSet) startCountdown()
     }
 
+    // ── Exam date clear (টাইমার শেষ বা user cancel) ──
+    fun clearExamDate() {
+        repo.clearExamDate()
+        countdownJob?.cancel()
+        _uiState.value = _uiState.value.copy(examCountdown = ExamCountdown())
+    }
+
     // ── Study session complete ──
     fun onStudySessionComplete(minutes: Int, topic: String) {
         viewModelScope.launch {

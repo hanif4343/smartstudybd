@@ -9,6 +9,8 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.AudienceFilter.filterForUser
+import com.hanif.smartstudy.util.AudienceFilter.forUser
 import kotlinx.coroutines.*
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -210,7 +212,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
-                removeWrongQId(q.id, _state.value.mode)   // সঠিক হলে remove
+                removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -230,7 +232,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
-                removeWrongQId(q.id, _state.value.mode)
+                removeWrongQIdByMode(q.id, _state.value.mode)
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -343,10 +345,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
+        val user = session.getCurrentUser()
+        val filtered = content.forUser(user)
         val items = when (mode) {
-            StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
-            StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
-            StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
+            StudyMode.QUIZ  -> filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.map { QuestionItem.fromStudyItem(it) }
         }
         Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
 
@@ -377,10 +381,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun rebuildSubTopics(content: AppContent, subject: String, mode: StudyMode) {
+        val user     = session.getCurrentUser()
+        val filtered = content.forUser(user)
         val items = when (mode) {
-            StudyMode.QUIZ  -> content.quiz.filter  { it.subject == subject }.map { QuestionItem.fromQuizItem(it)  }
-            StudyMode.QBANK -> content.qbank.filter { it.subject == subject }.map { QuestionItem.fromQBankItem(it) }
-            StudyMode.STUDY -> content.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
+            StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject }.map { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject }.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
         val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
@@ -392,10 +398,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
         val bookmarks = _state.value.bookmarkedIds
+        val user      = session.getCurrentUser()
+        val filtered  = content.forUser(user)
         val items = when (mode) {
-            StudyMode.QUIZ  -> content.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
-            StudyMode.QBANK -> content.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
-            StudyMode.STUDY -> content.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
+            StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
         }.map { it.copy(isBookmarked = bookmarks.contains(it.id), isWeakTopic = isWeak(it.subTopic)) }
 
         _state.update {
@@ -427,7 +435,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putStringSet("wrong_q_ids", ids).putStringSet("wrong_q_count", counts).apply()
     }
 
-    private fun removeWrongQId(qId: String, mode: StudyMode) {
+    /** HomeScreen WrongReviewSection থেকে call হয় — সঠিক হলে remove */
+    fun removeWrongQId(qId: String) {
+        listOf("quiz", "qbank", "study").forEach { sheet ->
+            val entry = "$sheet:$qId"
+            val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+            if (ids.remove(entry)) { prefs.edit().putStringSet("wrong_q_ids", ids).apply(); return }
+        }
+    }
+
+
+    private fun removeWrongQIdByMode(qId: String, mode: StudyMode) {
         val sheet = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
         val entry = "$sheet:$qId"
         val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()

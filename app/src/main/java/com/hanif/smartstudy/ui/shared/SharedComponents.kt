@@ -28,6 +28,7 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.GasApiService
+import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.GasResult
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
@@ -178,10 +179,37 @@ fun QuestionCard(
 
             Spacer(Modifier.height(8.dp))
 
-            QuestionText(text = item.question)
+            // ── _studyNoQ logic — index.html এর মতো ──
+            // Study mode এ প্রশ্ন না থাকলে explanation/answer কেই প্রশ্ন হিসেবে দেখাবে
+            // (links সহ — PDF/image/video সব render হবে)
+            val studyNoQ = mode == StudyMode.STUDY && item.question.isBlank()
+            val displayQuestion = if (studyNoQ) (item.explanation.ifBlank { item.answer }) else item.question
+            val displayExplanation = if (studyNoQ) "" else item.explanation
 
+            // প্রশ্ন — QuestionText (LaTeX support আছে) + RichContentText (link support)
+            // studyNoQ তে explanation-ই প্রশ্ন, সেটায় link থাকতে পারে
+            if (studyNoQ) {
+                // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
+                RichContentText(
+                    text      = displayQuestion,
+                    textColor = Color(0xFF1E293B),
+                    fontSize  = 15
+                )
+            } else {
+                // সাধারণ প্রশ্ন — QuestionText (LaTeX support)
+                QuestionText(text = displayQuestion)
+            }
+
+            // imageUrl field (separate Image field from Firebase)
             if (item.imageUrl.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
                 ZoomableImage(url = item.imageUrl)
+            }
+
+            // VisualURL field — আলাদাভাবে থাকলে (image/video/pdf লিংক)
+            if (item.visualUrl.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                RichContentText(text = item.visualUrl)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -200,14 +228,18 @@ fun QuestionCard(
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
             }
-            if (showAnswerBox && item.answer.isNotBlank()) {
+            // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
+            val showAnswerText = showAnswerBox && !item.isMcq()
+            // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
+            if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
                 AnswerBox(text = item.answer)
             }
 
-            if (showAnswerBox && item.explanation.isNotBlank() && item.explanation != item.answer) {
+            // explanation — studyNoQ তে empty, নাহলে দেখাও
+            if (showAnswerBox && displayExplanation.isNotBlank() && displayExplanation != item.answer) {
                 Spacer(Modifier.height(6.dp))
-                ExplanationBox(text = item.explanation)
+                ExplanationBox(text = displayExplanation)
             }
 
             if (showAnswerBox && item.technique.isNotBlank()) {
@@ -410,8 +442,11 @@ fun AnswerBox(text: String) {
             Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF166534), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
-            Text(text, fontSize = 13.sp, color = Color(0xFF14532D),
-                fontFamily = NotoSansBengali, lineHeight = 18.sp)
+            RichContentText(
+                text      = text,
+                textColor = Color(0xFF14532D),
+                fontSize  = 13
+            )
         }
     }
 }
@@ -427,8 +462,11 @@ fun ExplanationBox(text: String) {
             Text("ব্যাখ্যা:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0369A1), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
-            Text(text, fontSize = 12.sp, color = Color(0xFF0C4A6E),
-                fontFamily = NotoSansBengali, lineHeight = 18.sp)
+            RichContentText(
+                text      = text,
+                textColor = Color(0xFF0C4A6E),
+                fontSize  = 12
+            )
         }
     }
 }
@@ -444,8 +482,11 @@ fun TechniqueBox(text: String) {
             Text("💡 টেকনিক:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF92400E), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
-            Text(text, fontSize = 12.sp, color = Color(0xFF78350F),
-                fontFamily = NotoSansBengali, lineHeight = 18.sp)
+            RichContentText(
+                text      = text,
+                textColor = Color(0xFF78350F),
+                fontSize  = 12
+            )
         }
     }
 }

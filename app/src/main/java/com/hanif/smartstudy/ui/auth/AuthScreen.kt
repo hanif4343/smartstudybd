@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -34,6 +33,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,6 +43,31 @@ import com.hanif.smartstudy.MainActivity
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.viewmodel.AuthState
 import com.hanif.smartstudy.viewmodel.AuthViewModel
+
+// ── শ্রেণী গ্রুপ ──
+data class ClassGroup(val label: String, val emoji: String, val items: List<String>)
+
+val CLASS_GROUPS = listOf(
+    ClassGroup("মাধ্যমিক", "📚", listOf(
+        "Class 1","Class 2","Class 3","Class 4","Class 5",
+        "Class 6","Class 7","Class 8","Class 9","Class 10"
+    )),
+    ClassGroup("উচ্চ মাধ্যমিক", "🎓", listOf(
+        "HSC-1st","HSC Final"
+    )),
+    ClassGroup("অনার্স", "🏛️", listOf(
+        "Honours-1st","Honours-2nd","Honours-3rd","Honours-Final"
+    )),
+    ClassGroup("ডিগ্রি", "📜", listOf(
+        "Degree-1st","Degree-2nd","Degree-Final"
+    )),
+    ClassGroup("মাস্টার্স", "🔬", listOf(
+        "Masters-1st","Masters-Final"
+    )),
+    ClassGroup("চাকরি", "💼", listOf(
+        "Job Seeker"
+    ))
+)
 
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
@@ -151,9 +176,9 @@ fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
         Text("অ্যাকাউন্টে লগইন করুন", fontSize = 13.sp, color = Color.Gray, fontFamily = NotoSansBengali)
         SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
         SSField(password, { password = it }, "পাসওয়ার্ড", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Done, onIme = { fm.clearFocus(); vm.login(phone, password) })
-        
+
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
-        
+
         Button(
             onClick = { fm.clearFocus(); vm.login(phone, password) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -194,15 +219,15 @@ fun SignupForm(
     var confirmPass by remember { mutableStateOf("") }
     var showPw by remember { mutableStateOf(false) }
     var userType by remember { mutableStateOf("Student") }
-    var classLevel by remember { mutableStateOf("HSC") }
-    
+    var classLevel by remember { mutableStateOf("HSC-1st") }
+    var showClassPicker by remember { mutableStateOf(false) }
+
     var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri -> selectedPhotoUri = uri }
 
     val userTypes = listOf("Student", "Job Seeker", "General")
-    val classLevels = listOf("SSC", "HSC", "Degree", "Masters", "BCS", "Bank", "Other")
 
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
@@ -273,27 +298,60 @@ fun SignupForm(
         }
         SSField(name, { name = it }, "পুরো নাম", Icons.Default.Person, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
         SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
-        
+
         if (!isGoogleSignup) {
             SSField(password, { password = it }, "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
             SSField(confirmPass, { confirmPass = it }, "পাসওয়ার্ড নিশ্চিত করুন", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Done, onIme = { fm.clearFocus() })
         }
-        
+
+        // আপনি কে?
         Text("আপনি কে?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Slate800, fontFamily = NotoSansBengali)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             userTypes.forEach { t ->
                 FilterChip(t == userType, { userType = t }, label = { Text(t, fontSize = 12.sp, fontFamily = NotoSansBengali) })
             }
         }
+
+        // শ্রেণী / স্তর picker
         Text("শ্রেণী / স্তর", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Slate800, fontFamily = NotoSansBengali)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            classLevels.forEach { cl ->
-                FilterChip(cl == classLevel, { classLevel = cl }, label = { Text(cl, fontSize = 12.sp, fontFamily = NotoSansBengali) })
+
+        // Selected class display button
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .border(2.dp, Indigo600, RoundedCornerShape(14.dp))
+                .clickable { showClassPicker = !showClassPicker }
+                .background(Indigo600.copy(alpha = 0.06f))
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("নির্বাচিত শ্রেণী", fontSize = 11.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
+                    Text(classLevel, fontSize = 15.sp, color = Slate800, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+                Icon(
+                    if (showClassPicker) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = Indigo600
+                )
             }
         }
-        
+
+        // Class picker panel
+        if (showClassPicker) {
+            ClassLevelPicker(
+                selected = classLevel,
+                onSelect = { classLevel = it; showClassPicker = false }
+            )
+        }
+
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
-        
+
         if (state is AuthState.Loading && isGoogleSignup) {
             Row(
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
@@ -305,7 +363,7 @@ fun SignupForm(
                 Text("ছবি আপলোড ও অ্যাকাউন্ট তৈরি হচ্ছে...", fontSize = 12.sp, color = Indigo600, fontFamily = NotoSansBengali)
             }
         }
-        
+
         Button(
             onClick = {
                 fm.clearFocus()
@@ -323,7 +381,7 @@ fun SignupForm(
             if (state is AuthState.Loading) CircularProgressIndicator(color = White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
             else Text("অ্যাকাউন্ট তৈরি করুন", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
-        
+
         if (!isGoogleSignup) {
             GoogleSignInButton(isLoading = state is AuthState.Loading) {
                 val activity = ctx as? MainActivity ?: return@GoogleSignInButton
@@ -334,6 +392,87 @@ fun SignupForm(
             }
         }
         Spacer(Modifier.height(4.dp))
+    }
+}
+
+// ─────────── CLASS LEVEL PICKER ───────────
+@Composable
+fun ClassLevelPicker(selected: String, onSelect: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFFF5F3FF))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        CLASS_GROUPS.forEach { group ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Group header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 2.dp)
+                ) {
+                    Text(group.emoji, fontSize = 14.sp)
+                    Text(
+                        group.label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Indigo700,
+                        fontFamily = NotoSansBengali
+                    )
+                    Divider(
+                        modifier = Modifier.weight(1f).padding(start = 4.dp),
+                        color = Indigo600.copy(alpha = 0.2f),
+                        thickness = 1.dp
+                    )
+                }
+
+                // Grid of class items
+                val chunked = group.items.chunked(3)
+                chunked.forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        rowItems.forEach { item ->
+                            val isSelected = item == selected
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isSelected) Indigo600 else White
+                                    )
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (isSelected) Indigo600 else Color(0xFFE2E8F0),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { onSelect(item) }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = item,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) White else Slate800,
+                                    textAlign = TextAlign.Center,
+                                    fontFamily = NotoSansBengali,
+                                    maxLines = 2
+                                )
+                            }
+                        }
+                        // Fill empty slots in last row
+                        repeat(3 - rowItems.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

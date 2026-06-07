@@ -2,7 +2,7 @@ name: Build Smart Study APK
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ "**" ]        # সব branch এ build হবে
   workflow_dispatch:
 
 jobs:
@@ -12,18 +12,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sync with main
-        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
-        run: |
-          git config user.email "ci@github.com"
-          git config user.name "GitHub CI"
-          git fetch origin main
-          git merge origin/main --no-edit --strategy-option=ours || true
-          echo "✅ Synced with main"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,6 +28,7 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "build-tools;34.0.0" "platforms;android-34" "platform-tools"
 
+      # ── Gradle wrapper ──
       - name: Install Gradle & generate wrapper
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
@@ -51,9 +40,11 @@ jobs:
           chmod +x gradlew
           echo "✅ Wrapper generated"
 
+      # ── google-services.json ──
       - name: Create google-services.json
         run: echo -n "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode | tr -d '\021' > app/google-services.json
 
+      # ── Bengali fonts ──
       - name: Download Noto Sans Bengali fonts
         run: |
           mkdir -p app/src/main/res/font
@@ -63,7 +54,9 @@ jobs:
           curl -fsSL "${BASE}/NotoSansBengali-SemiBold.ttf"  -o app/src/main/res/font/noto_sans_bengali_semibold.ttf
           curl -fsSL "${BASE}/NotoSansBengali-Bold.ttf"      -o app/src/main/res/font/noto_sans_bengali_bold.ttf
           curl -fsSL "${BASE}/NotoSansBengali-ExtraBold.ttf" -o app/src/main/res/font/noto_sans_bengali_extrabold.ttf
+          ls -lh app/src/main/res/font/
 
+      # ── App icons ──
       - name: Generate app icons
         run: |
           sudo apt-get install -y imagemagick 2>/dev/null || true
@@ -90,13 +83,17 @@ jobs:
             cp "${dir}/ic_launcher.png" "${dir}/ic_launcher_round.png"
             cp "${dir}/ic_launcher.png" "${dir}/ic_launcher_foreground.png"
           done
+          echo "Icons done"
 
+      # ── Remove duplicate files ──
       - name: Remove duplicate files
         run: |
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/StatsScreen.kt
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/ProfileScreen.kt
           rm -f app/src/main/java/com/hanif/smartstudy/ui/menu/sections/MenuScreen.kt
+          echo "Cleaned"
 
+      # ── Inject secrets ──
       - name: Inject API keys
         run: |
           sed -i 's|%%GAS_URL%%|${{ secrets.GAS_URL }}|g'               app/build.gradle
@@ -105,15 +102,15 @@ jobs:
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
           sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
 
+      # ── Auto versionCode ──
       - name: Set versionCode
         run: sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" app/build.gradle
 
+      # ── Keystore ──
       - name: Decode Keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" > /tmp/ks.b64
-          base64 --decode /tmp/ks.b64 > app/smartstudy.jks
-          echo "Keystore size: $(wc -c < app/smartstudy.jks) bytes"
+        run: echo -n "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/smartstudy.jks
 
+      # ── Debug APK (সব branch এ) ──
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
@@ -124,6 +121,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+      # ── Release APK (শুধু main/master branch এ) ──
       - name: Build Signed Release APK
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
@@ -139,6 +137,7 @@ jobs:
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -n "$APK" ]; then
             mv "$APK" app/build/outputs/apk/release/SmartStudy.apk
+            echo "✅ Renamed: SmartStudy.apk"
           else
             echo "No release APK found!"
             exit 1
@@ -152,6 +151,7 @@ jobs:
           path: app/build/outputs/apk/release/SmartStudy.apk
           if-no-files-found: error
 
+      # ── GitHub Release (শুধু main/master) ──
       - name: Get version
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         id: ver
@@ -168,8 +168,10 @@ jobs:
           name:     ${{ steps.ver.outputs.title }}
           body: |
             ## 📚 Smart Study
+
             নিচের **SmartStudy.apk** ডাউনলোড করো।
             > Settings → Unknown sources চালু করে install করো।
+
             🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
           files: app/build/outputs/apk/release/SmartStudy.apk
           make_latest: true

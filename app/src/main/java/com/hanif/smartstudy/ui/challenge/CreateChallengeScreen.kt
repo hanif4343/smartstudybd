@@ -168,7 +168,11 @@ private fun InviteSection(state: ChallengeUiState, vm: ChallengeViewModel) {
 
             // Search result
             state.searchResult?.let { user ->
-                SearchResultCard(user = user, onAdd = vm::addInvitee)
+                SearchResultCard(
+                    user   = user,
+                    canAdd = state.canAddOpponent,
+                    onAdd  = vm::addInvitee
+                )
             }
             state.searchError?.let { err ->
                 Text("⚠️ $err", fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
@@ -188,26 +192,68 @@ private fun InviteSection(state: ChallengeUiState, vm: ChallengeViewModel) {
 }
 
 @Composable
-private fun SearchResultCard(user: User, onAdd: () -> Unit) {
-    Row(
+private fun SearchResultCard(user: User, canAdd: Boolean, onAdd: () -> Unit) {
+    val btnColor = if (canAdd) Color(0xFF10B981) else Color(0xFF94A3B8)  // সবুজ বা ধূসর
+    Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFF0FDF4)).border(1.dp, Color(0xFFA7F3D0), RoundedCornerShape(12.dp))
+            .background(if (canAdd) Color(0xFFF0FDF4) else Color(0xFFF1F5F9))
+            .border(1.dp,
+                if (canAdd) Color(0xFFA7F3D0) else Color(0xFFCBD5E1),
+                RoundedCornerShape(12.dp))
             .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF10B981)),
-            contentAlignment = Alignment.Center) {
-            Text(user.displayName().first().toString(), fontSize = 16.sp,
-                fontWeight = FontWeight.ExtraBold, color = Color.White)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(btnColor),
+                contentAlignment = Alignment.Center) {
+                Text(user.displayName().first().toString(), fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold, color = Color.White)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(user.displayName(), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    color = if (canAdd) Color(0xFF065F46) else Color(0xFF475569),
+                    fontFamily = NotoSansBengali)
+                Text(user.phone ?: "", fontSize = 10.sp,
+                    color = if (canAdd) Color(0xFF047857) else Color(0xFF94A3B8))
+                // শ্রেণি/group দেখাও
+                val cl = user.classLevel?.trim() ?: ""
+                val ut = user.userType?.trim() ?: ""
+                val groupLabel = when {
+                    cl.isNotBlank() -> "🎓 $cl"
+                    ut.isNotBlank() -> "💼 $ut"
+                    else            -> "💼 Job"
+                }
+                Text(groupLabel, fontSize = 10.sp,
+                    color = if (canAdd) Color(0xFF059669) else Color(0xFFDC2626),
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+            }
+            // Add বাটন — group mismatch হলে disabled + ধূসর
+            IconButton(
+                onClick  = { if (canAdd) onAdd() },
+                enabled  = canAdd,
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(btnColor)
+            ) {
+                Icon(
+                    if (canAdd) Icons.Default.Add else Icons.Default.Close,
+                    contentDescription = if (canAdd) "যোগ করুন" else "এই শ্রেণির সাথে challenge করা যাবে না",
+                    tint   = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(user.displayName(), fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                color = Color(0xFF065F46), fontFamily = NotoSansBengali)
-            Text(user.phone ?: "", fontSize = 10.sp, color = Color(0xFF047857))
-        }
-        IconButton(onClick = onAdd, modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF10B981))) {
-            Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        // Group mismatch হলে ছোট warning দেখাও
+        if (!canAdd) {
+            Text(
+                "⚠️ ভিন্ন শ্রেণির শিক্ষার্থীকে challenge করা যাবে না",
+                fontSize = 10.sp,
+                color    = Color(0xFFDC2626),
+                fontFamily = NotoSansBengali,
+                modifier = Modifier.padding(start = 4.dp)
+            )
         }
     }
 }

@@ -41,6 +41,7 @@ data class QuestionItem(
     val year        : String  = "",      // QBank only
     val examName    : String  = "",      // QBank only
     val imageUrl    : String  = "",      // embedded image
+    val visualUrl   : String  = "",      // VisualURL — image/video/pdf links from Firebase
     // Runtime state
     val answerState : AnswerState = AnswerState.Unanswered,
     val isBookmarked: Boolean     = false,
@@ -55,10 +56,15 @@ data class QuestionItem(
             subject      = s.subject ?: "",
             subTopic     = s.subTopic ?: "",
             question     = s.question ?: "",
-            answer       = s.answer ?: "",
-            explanation  = s.answer ?: "",
+            // index.html: corRaw = getVal(i,'correct'), ansRaw = getVal(i,'answer')
+            // correct field আগে দেখি, না থাকলে answer
+            answer       = (s.correct ?: s.answer) ?: "",
+            // index: expRaw = getVal(i,'explanation'), ansRaw fallback
+            explanation  = (s.explanation ?: s.answer) ?: "",
+            technique    = s.technique ?: "",
+            questionType = s.questionType?.lowercase()?.trim() ?: "written",
             audienceTags = s.audienceTags ?: "",
-            questionType = "written"
+            visualUrl    = s.visualUrl ?: ""
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
             id           = q.id ?: "",
@@ -73,7 +79,8 @@ data class QuestionItem(
             explanation  = q.explanation ?: "",
             technique    = "",
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
-            audienceTags = q.audienceTags ?: ""
+            audienceTags = q.audienceTags ?: "",
+            visualUrl    = q.visualUrl ?: ""
         )
         fun fromQBankItem(q: QBankItem) = QuestionItem(
             id           = q.id ?: "",
@@ -89,7 +96,8 @@ data class QuestionItem(
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
             audienceTags = q.audienceTags ?: "",
             year         = q.year ?: "",
-            examName     = q.examName ?: ""
+            examName     = q.examName ?: "",
+            visualUrl    = q.visualUrl ?: ""
         )
     }
 }
