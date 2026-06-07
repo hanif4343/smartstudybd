@@ -33,17 +33,14 @@ object ContentFetchService {
     private val gson = CaseInsensitiveGson.instance
 
     private val BASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-    private val SECRET_KEY get() = BuildConfig.SECRET_KEY
 
     private fun authParam(): String {
-        val key = SECRET_KEY
-        return if (key.isNotBlank() && !key.contains("%%")) "?auth=$key" else ""
+        return ""
     }
 
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
         Log.d(TAG, "=== FETCH START ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
-        Log.d(TAG, "SECRET_KEY: ${if (SECRET_KEY.contains("%%")) "NOT SET" else "set(${SECRET_KEY.length})"}")
 
         try {
             // আলাদা আলাদে fetch — root fetch too large হয়
