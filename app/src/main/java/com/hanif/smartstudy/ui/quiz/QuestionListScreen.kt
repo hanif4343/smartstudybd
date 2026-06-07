@@ -89,7 +89,8 @@ fun QuestionListScreen(
                             onWritten   = { text -> viewModel.answerWritten(idx, text) },
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
                             onReport    = { reportIdx = idx },
-                            currentUser = currentUser
+                            currentUser = currentUser,
+                            onAdminRefresh = { viewModel.adminRefreshContent() }
                         )
                     }
                 }
