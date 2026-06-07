@@ -10,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -475,7 +477,6 @@ private fun WRPracticeItem(
             }
         }
     }
-    }
 }
 
 // ─── Congratulations ───
@@ -535,7 +536,7 @@ private fun CongratsOverlay() {
                 }
             }
             Text(
-                "আপনার প্রস্তুতি হোক আনন্দময়- Smart Study",
+                "কিছুক্ষণ পর এই সেকশন বন্ধ হয়ে যাবে...",
                 fontSize   = 10.sp,
                 color      = Color.White.copy(alpha = 0.4f),
                 fontFamily = NotoSansBengali,
