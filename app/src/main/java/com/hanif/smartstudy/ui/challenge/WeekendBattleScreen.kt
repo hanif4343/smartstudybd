@@ -21,7 +21,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.ads.AdBannerView
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.WeekendBattleViewModel
 import com.hanif.smartstudy.data.model.WeekendBattleUiState
 import java.text.SimpleDateFormat
@@ -34,6 +36,16 @@ import java.util.*
 @Composable
 fun WeekendBattleScreen(vm: WeekendBattleViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+
+    // Retry button এর জন্য — error হলে reload করার সুযোগ
+    LaunchedEffect(Unit) {
+        if (!vm.state.value.isLoading &&
+            vm.state.value.activeBattle == null &&
+            vm.state.value.upcomingBattle == null &&
+            vm.state.value.error == null) {
+            vm.loadBattleInfo()
+        }
+    }
 
     // Toast
     state.toast?.let { msg ->
@@ -103,6 +115,9 @@ private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewMo
             }
         }
 
+        // ── Banner Ad — header এর নিচে ──
+        AdBannerView(adUnitId = AdManager.BANNER_WEEKEND)
+
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
             if (state.isLoading) {
@@ -114,6 +129,16 @@ private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewMo
 
             state.error?.let { err ->
                 ErrorCard(err) { vm.dismissError() }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick  = { vm.dismissError(); vm.loadBattleInfo() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(12.dp),
+                    colors   = ButtonDefaults.buttonColors(Color(0xFF7C3AED))
+                ) {
+                    Text("🔄 পুনরায় চেষ্টা করুন", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold)
+                }
                 return@Column
             }
 
