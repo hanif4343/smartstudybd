@@ -6,15 +6,20 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.gson.Gson
+import com.hanif.smartstudy.data.model.CaseInsensitiveGson
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.util.dataStore
 import kotlinx.coroutines.flow.first
 
 class ContentCache(private val context: Context) {
 
-    private val gson = Gson()
+    // CaseInsensitiveGson — Firebase field names (correct, explanation, Question Type) ঠিকমতো handle করে
+    private val gson = CaseInsensitiveGson.instance
 
     companion object {
+        // version bump করলে পুরানো cache auto-invalidate হয়
+        private const val CACHE_VERSION = 4  // StudyItem fields যোগের পর bump করো
+        val KEY_CACHE_VERSION = intPreferencesKey("cache_version")
         val KEY_STUDY_JSON    = stringPreferencesKey("cache_study_json")
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
         val KEY_QBANK_JSON    = stringPreferencesKey("cache_qbank_json")
@@ -32,6 +37,7 @@ class ContentCache(private val context: Context) {
 
     suspend fun saveContent(content: AppContent) {
         context.dataStore.edit { prefs ->
+            prefs[KEY_CACHE_VERSION] = CACHE_VERSION
             prefs[KEY_STUDY_JSON] = gson.toJson(content.study)
             prefs[KEY_QUIZ_JSON]  = gson.toJson(content.quiz)
             prefs[KEY_QBANK_JSON] = gson.toJson(content.qbank)
@@ -39,14 +45,15 @@ class ContentCache(private val context: Context) {
         }
     }
 
-    // FIX: যেকোনো একটা key null হলেও বাকিগুলো দিয়ে AppContent বানাও
+    // FIX: version mismatch হলে cache invalid — নতুন data fetch হবে
     suspend fun loadContent(): AppContent? {
         return try {
             val prefs = context.dataStore.data.first()
             val fetchedAt = prefs[KEY_CACHE_TIME] ?: 0L
+            val savedVersion = prefs[KEY_CACHE_VERSION] ?: 0
 
-            // কোনো cache নেই
-            if (fetchedAt == 0L) return null
+            // কোনো cache নেই বা পুরানো version
+            if (fetchedAt == 0L || savedVersion < CACHE_VERSION) return null
 
             val studyJson = prefs[KEY_STUDY_JSON] ?: "[]"
             val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
