@@ -459,7 +459,9 @@ private fun WRPracticeItem(
                 }
 
                 if (isAnswered) {
-                    if (q.answer.isNotBlank()) AnswerBox(text = q.answer)
+                    // MCQ তে সবুজ রঙে সঠিক অপশন দেখা যায়, তাই আলাদা AnswerBox দরকার নেই
+                    // Written question এ উত্তর দেখানো দরকার
+                    if (!q.isMcq() && q.answer.isNotBlank()) AnswerBox(text = q.answer)
                     if (q.explanation.isNotBlank() && q.explanation != q.answer) {
                         ExplanationBox(text = q.explanation)
                     }
