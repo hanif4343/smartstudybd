@@ -24,6 +24,7 @@ import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.items
 
 // ─────────────────────────────────────────────────────────────
 //  MenuScreen — Profile / Settings / Stats / Admin
@@ -213,6 +214,12 @@ fun MainMenuScreen(
                 MenuGroup("🔑 অ্যাডমিন") {
                     MenuRow("🛡 Admin Panel", "ইউজার ম্যানেজমেন্ট", Icons.Default.AdminPanelSettings) { onNavigate(MenuNav.ADMIN) }
                 }
+
+                // ── Switch to audience tag ──
+                AdminSwitchTagSection(
+                    currentTag = state.adminViewingTag,
+                    onSwitch   = { tag -> vm.adminSwitchAudienceTag(tag) }
+                )
             }
 
             MenuGroup("❓ অন্যান্য") {
@@ -459,4 +466,111 @@ fun MenuRow(
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.3f), modifier = Modifier.size(18.dp))
     }
     HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(0.15f))
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Admin Switch Tag Section — Menu তে audience switch করার UI
+// ─────────────────────────────────────────────────────────────
+
+private val AUDIENCE_TAGS = listOf(
+    "" to "👔 Job Seeker (Default)",
+    "Job" to "👔 Job",
+    "Honours 1" to "🎓 Honours 1st Year",
+    "Honours 2" to "🎓 Honours 2nd Year",
+    "Honours 3" to "🎓 Honours 3rd Year",
+    "Honours 4" to "🎓 Honours 4th Year",
+    "Masters 1" to "🎓 Masters 1st Year",
+    "Masters 2" to "🎓 Masters 2nd Year",
+    "Class 9" to "📚 Class 9",
+    "Class 10" to "📚 Class 10",
+    "Class 11" to "📚 Class 11",
+    "Class 12" to "📚 Class 12"
+)
+
+@Composable
+fun AdminSwitchTagSection(
+    currentTag : String,
+    onSwitch   : (String) -> Unit
+) {
+    val activeColor = Color(0xFF4F46E5)
+    val activeBg    = Color(0xFFEEF2FF)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        // Header
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .background(activeColor.copy(0.1f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.SwapHoriz, null, tint = activeColor, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "🔄 Switch Audience",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = NotoSansBengali,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                val tagLabel = AUDIENCE_TAGS.find { it.first == currentTag }?.second ?: "Custom: $currentTag"
+                Text(
+                    "এখন: $tagLabel",
+                    fontSize = 11.sp,
+                    color = if (currentTag.isBlank()) MaterialTheme.colorScheme.onSurface.copy(0.5f) else activeColor,
+                    fontFamily = NotoSansBengali,
+                    fontWeight = if (currentTag.isBlank()) FontWeight.Normal else FontWeight.Bold
+                )
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(0.15f))
+
+        // Tag chips
+        androidx.compose.foundation.lazy.LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(AUDIENCE_TAGS.size) { i ->
+                val (tag, label) = AUDIENCE_TAGS[i]
+                val isActive = tag == currentTag
+                Surface(
+                    onClick = { onSwitch(tag) },
+                    shape   = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                    color   = if (isActive) activeBg else MaterialTheme.colorScheme.surfaceVariant,
+                    border  = if (isActive) androidx.compose.foundation.BorderStroke(1.5.dp, activeColor) else null,
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isActive) {
+                            Icon(Icons.Default.Check, null, tint = activeColor, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurface.copy(0.7f),
+                            fontFamily = NotoSansBengali
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
