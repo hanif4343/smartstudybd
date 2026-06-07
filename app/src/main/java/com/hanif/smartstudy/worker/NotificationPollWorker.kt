@@ -73,12 +73,11 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
         val phone    = user.phone?.trim()?.replace(Regex("[.#\$\\[\\]\\s]"), "_") ?: return@withContext Result.success()
 
         val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
-        val secretKey    = BuildConfig.SECRET_KEY
-        val authParam    = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+        val authParam    = ""
         val lastCheck    = session.getLastNotifCheck()
 
         try {
-            val url  = "$firebaseBase/Notifications/$phone.json$authParam"
+            val url  = "$firebaseBase/Notifications/$phone.json"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext Result.success()
 
