@@ -10,12 +10,17 @@ import com.google.gson.annotations.SerializedName
 // ─────────────────────────────────────────────────────────
 
 data class StudyItem(
-    @SerializedName("id")           val id          : String? = null,
-    @SerializedName("subject")      val subject     : String? = null,
-    @SerializedName("sub_topic")    val subTopic    : String? = null,
-    @SerializedName("question")     val question    : String? = null,
-    @SerializedName("answer")       val answer      : String? = null,
-    @SerializedName("AudienceTags") val audienceTags: String? = null,
+    @SerializedName("id")            val id           : String? = null,
+    @SerializedName("subject")       val subject      : String? = null,
+    @SerializedName("sub_topic")     val subTopic     : String? = null,
+    @SerializedName("question")      val question     : String? = null,
+    @SerializedName("answer")        val answer       : String? = null,
+    // Firebase তে correct field — index.html getVal(i,'correct') এর মতো
+    @SerializedName("correct")       val correct      : String? = null,
+    @SerializedName("explanation")   val explanation  : String? = null,
+    @SerializedName("technique")     val technique    : String? = null,
+    @SerializedName("Question Type") val questionType : String? = null,
+    @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("VisualURL")     val visualUrl    : String? = null
 )
 
