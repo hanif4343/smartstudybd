@@ -351,7 +351,51 @@ object GasApiService {
             } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
         }
     }
-}
+
+    /**
+     * Admin: যেকোনো sheet এর যেকোনো question এর field direct Firebase PATCH করো।
+     *
+     * @param sheet  "Quiz" | "QBank" | "Study"
+     * @param rowKey Firebase row key (e.g. "-Nxyz123")
+     * @param fields পরিবর্তনযোগ্য field map (e.g. mapOf("Question" to "নতুন প্রশ্ন"))
+     */
+    suspend fun adminUpdateQuestionField(
+        sheet    : String,
+        rowKey   : String,
+        fields   : Map<String, String>
+    ): GasResult<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val base      = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val secretKey = BuildConfig.SECRET_KEY
+                val auth      = if (secretKey.isNotBlank() && !secretKey.contains("%%")) "?auth=$secretKey" else ""
+                val url       = "$base/$sheet/$rowKey.json$auth"
+                val obj = JsonObject()
+                fields.forEach { (k, v) -> obj.addProperty(k, v) }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).patch(body).build()
+                val resp = client.newCall(req).execute()
+                resp.close()
+                if (resp.isSuccessful) GasResult.Success(Unit)
+                else GasResult.Error("Firebase error: ${resp.code}")
+            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+        }
+    }
+
+    /**
+     * Admin: MCQ options এর position swap করো (A↔B, A↔C etc.)
+     * Firebase এ optionA, optionB, optionC, optionD এবং Answer field update হবে।
+     */
+    suspend fun adminSwapOptions(
+        sheet    : String,
+        rowKey   : String,
+        options  : Map<String, String>,   // {"OptionA":"...", "OptionB":"...", ...}
+        newAnswer: String
+    ): GasResult<Unit> {
+        val fields = options.toMutableMap()
+        fields["Answer"] = newAnswer
+        return adminUpdateQuestionField(sheet, rowKey, fields)
+    }
 
 sealed class GasResult<out T> {
     data class Success<T>(val data: T) : GasResult<T>()
