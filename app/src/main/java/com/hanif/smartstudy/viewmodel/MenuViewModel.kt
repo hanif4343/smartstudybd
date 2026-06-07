@@ -79,6 +79,11 @@ data class MenuUiState(
     // Admin: list of all users from Firebase
     val allUsers        : List<Map<String,String>> = emptyList(),
     val viewingAsUser   : User?              = null,  // admin impersonation
+    // Admin: audience tag switch — "" = নিজের, অন্যথায় override করে দেখছে
+    val adminViewingTag : String             = "",
+    // Admin: question edit processing
+    val isEditingQuestion : Boolean          = false,
+    val editSuccessMsg    : String?          = null,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -118,6 +123,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
             val prefs = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
+            val adminTag  = if (localUser?.isAdmin() == true) session.getAdminAudienceTag() else ""
 
             val weakTopics = prefs.all.entries
                 .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
@@ -157,7 +163,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     xpHistory      = xpHist,
                     fcmToken       = fcm,
                     bookmarkedIds  = bookmarks,
-                    weakTopics     = weakTopics
+                    weakTopics     = weakTopics,
+                    adminViewingTag = adminTag
                 )
             }
 
@@ -417,6 +424,115 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun adminExitViewAs() {
         _state.update { it.copy(viewingAsUser = null) }
+    }
+
+    // ── Admin: Audience Tag Switch ─────────────────────────────
+
+    /**
+     * Admin এর জন্য audience tag switch করো।
+     * [tag] = "" হলে নিজের actual audience তে ফিরে যাবে।
+     * এই tag টা SessionManager এও save হয় যাতে restart এর পরেও থাকে।
+     */
+    fun adminSwitchAudienceTag(tag: String) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            session.setAdminAudienceTag(tag)
+            _state.update {
+                val label = if (tag.isBlank()) "নিজের audience" else tag
+                it.copy(
+                    adminViewingTag = tag,
+                    toast = "🔄 এখন দেখছেন: $label"
+                )
+            }
+        }
+    }
+
+    // ── Admin: Edit Question Field ────────────────────────────
+
+    /**
+     * Admin যেকোনো প্রশ্নের যেকোনো field Firebase এ সরাসরি update করতে পারবে।
+     *
+     * @param sheet   "Quiz" | "QBank" | "Study"
+     * @param rowKey  Firebase row key (question id)
+     * @param fields  পরিবর্তিত fields map
+     */
+    fun adminEditQuestion(
+        sheet  : String,
+        rowKey : String,
+        fields : Map<String, String>
+    ) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
+            try {
+                val result = com.hanif.smartstudy.data.remote.GasApiService
+                    .adminUpdateQuestionField(sheet, rowKey, fields)
+                when (result) {
+                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                        // Cache invalidate করো যাতে পরবর্তী fetch এ নতুন data আসে
+                        cache.clearCache()
+                        _state.update {
+                            it.copy(
+                                isEditingQuestion = false,
+                                editSuccessMsg = "✅ সংরক্ষিত হয়েছে! Cache clear করা হয়েছে।",
+                                toast = "✅ প্রশ্ন আপডেট হয়েছে"
+                            )
+                        }
+                    }
+                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                        _state.update {
+                            it.copy(
+                                isEditingQuestion = false,
+                                error = "❌ আপডেট ব্যর্থ: ${result.message}"
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(isEditingQuestion = false, error = "❌ Error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Admin: MCQ options position swap করো।
+     * Firebase এ optionA/B/C/D এবং answer একসাথে update হবে।
+     */
+    fun adminSwapOptions(
+        sheet    : String,
+        rowKey   : String,
+        options  : Map<String, String>,
+        newAnswer: String
+    ) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isEditingQuestion = true) }
+            try {
+                val result = com.hanif.smartstudy.data.remote.GasApiService
+                    .adminSwapOptions(sheet, rowKey, options, newAnswer)
+                when (result) {
+                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                        cache.clearCache()
+                        _state.update {
+                            it.copy(isEditingQuestion = false, toast = "✅ Options position আপডেট হয়েছে")
+                        }
+                    }
+                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                        _state.update {
+                            it.copy(isEditingQuestion = false, error = "❌ Swap ব্যর্থ: ${result.message}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(isEditingQuestion = false, error = "❌ ${e.message}") }
+            }
+        }
+    }
+
+    fun clearEditMsg() {
+        _state.update { it.copy(editSuccessMsg = null) }
     }
 
     // ── Toast clear ───────────────────────────────────────────
