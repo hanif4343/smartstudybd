@@ -396,6 +396,7 @@ object GasApiService {
         fields["Answer"] = newAnswer
         return adminUpdateQuestionField(sheet, rowKey, fields)
     }
+} // এই ক্লোজিং ব্র্যাকেটটি মিসিং ছিল, যা যুক্ত করা হয়েছে।
 
 sealed class GasResult<out T> {
     data class Success<T>(val data: T) : GasResult<T>()
