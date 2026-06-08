@@ -3,26 +3,6 @@ package com.hanif.smartstudy.ui.menu.sections
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.*
-import com.hanif.smartstudy.ui.theme.NotoSansBengali
-import com.hanif.smartstudy.viewmodel.MenuUiState
-import com.hanif.smartstudy.viewmodel.MenuViewModel
-import java.text.SimpleDateFormat
-import java.util.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -556,10 +536,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-//  FEATURE 2 — Add New Question Tab
-// ══════════════════════════════════════════════════════════════
-
+// ── New Question Tab ──
 private val SHEETS_LIST = listOf("Quiz", "QBank", "Study")
 private val AUDIENCE_LIST = listOf(
     "" to "Job Seeker (default)", "Job" to "Job",
@@ -636,7 +613,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
                 Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("প্রশ্নের ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("强的 ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Switch(checked = isMcq, onCheckedChange = { isMcq = it })
                 Spacer(Modifier.width(8.dp))
                 Text(if (isMcq) "MCQ" else "Written", fontFamily = NotoSansBengali,
@@ -736,10 +713,7 @@ private fun AdminTabField(label: String, value: String, onChange: (String) -> Un
         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp))
 }
 
-// ══════════════════════════════════════════════════════════════
-//  FEATURE 3 — Bulk Audience Tag Tab
-// ══════════════════════════════════════════════════════════════
-
+// ── Bulk Audience Tag Tab ──
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
