@@ -29,31 +29,20 @@ object AudienceFilter {
 
     // ── Single item check ────────────────────────────────────
 
-    /**
-     * Admin যদি কোনো specific tag-এ switch করে থাকে, তাহলে সেই tag দিয়ে filter হবে।
-     * [adminOverrideTag] empty হলে normal user filtering।
-     */
     fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = ""): Boolean {
-        // Admin override: নির্দিষ্ট tag দিয়ে দেখছে
+        // Admin override mode
         if (adminOverrideTag.isNotBlank() && user?.isAdmin() == true) {
-            val tag     = audienceTags?.trim() ?: ""
-            val override = adminOverrideTag.trim()
-            return if (tag.isBlank()) {
-                override.equals("Job", ignoreCase = true) || override.isBlank()
-            } else {
-                tag.equals(override, ignoreCase = true)
-            }
+            val tag = audienceTags?.trim() ?: ""
+            return if (tag.isBlank()) adminOverrideTag.equals("Job", ignoreCase = true)
+                   else tag.equals(adminOverrideTag.trim(), ignoreCase = true)
         }
-
         val tag = audienceTags?.trim() ?: ""
         val cl  = user?.classLevel?.trim() ?: ""
         val ut  = user?.userType?.trim()   ?: ""
 
         return if (tag.isBlank()) {
-            // ফাঁকা tag → শুধু Job seeker
             ut.equals("Job", ignoreCase = true) || cl.isBlank()
         } else {
-            // নির্দিষ্ট tag → classLevel বা userType যেকোনোটা মিললেই হবে
             tag.equals(cl, ignoreCase = true) || tag.equals(ut, ignoreCase = true)
         }
     }
