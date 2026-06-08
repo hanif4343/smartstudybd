@@ -82,7 +82,6 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Null-safe suspend helper ─────────────────────────────
     private suspend fun <T> tryOrNull(block: suspend () -> T?): T? = try { block() }
     catch (e: Exception) { Log.e("WeekendBattleVM", "tryOrNull: ${e.message}"); null }
 
@@ -100,16 +99,14 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
                         return@launch
                     }
 
-                val allQ      = c.forUser(session.getCurrentUser()).let { filtered ->
+                val allQ = c.forUser(session.getCurrentUser()).let { filtered ->
                     filtered.quiz.map { QuestionItem.fromQuizItem(it) } +
                     filtered.qbank.map { QuestionItem.fromQBankItem(it) }
                 }
                 val questions = tryOrNull { repo.getBattleQuestions(battle.id, allQ) }
                     ?.ifEmpty {
-                        // questionIds empty হলে subject-filtered random questions নাও
-                        allQ.filter {
-                            battle.subject.isBlank() || it.subject == battle.subject
-                        }.shuffled().take(battle.questionCount)
+                        allQ.filter { battle.subject.isBlank() || it.subject == battle.subject }
+                            .shuffled().take(battle.questionCount)
                     } ?: emptyList()
 
                 if (questions.isEmpty()) {
