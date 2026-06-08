@@ -36,9 +36,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
-    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL } catch (e: Exception) { "" }
-    private val secretKey: String get() = try { BuildConfig.SECRET_KEY } catch (e: Exception) { "" }
-
+    private val firebaseUrl: String get() = try { BuildConfig.FIREBASE_URL.trimEnd('/') + "/" } catch (e: Exception) { "" }
     // ── Phone + Password Login ──
     fun login(phone: String, password: String) {
         val ph = phone.trim()
@@ -48,7 +46,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.verifyLogin(ph, pw, firebaseUrl, secretKey)) {
+            when (val r = FirebaseAuthService.verifyLogin(ph, pw, firebaseUrl)) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(phone = ph)
                     val fullUser = try {
@@ -71,7 +69,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         if (email.isBlank()) { _authState.value = AuthState.Error("Google থেকে email পাওয়া যায়নি"); return }
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, firebaseUrl, secretKey)) {
+            when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, firebaseUrl)) {
                 is GoogleAuthResult.ExistingUser -> {
                     val user = User.fromFirebaseMap(r.userData).let { u ->
                         u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
@@ -128,7 +126,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             val dummyPassword = "GoogleUser_${ph.takeLast(4)}"
 
             when (val r = FirebaseAuthService.signupWithEmail(
-                n, ph, email, dummyPassword, finalPhotoUrl, userType, classLevel, firebaseUrl, secretKey
+                n, ph, email, dummyPassword, finalPhotoUrl, userType, classLevel, firebaseUrl
             )) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(
@@ -168,7 +166,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            when (val r = FirebaseAuthService.signup(n, ph, pw, userType, classLevel, firebaseUrl, secretKey)) {
+            when (val r = FirebaseAuthService.signup(n, ph, pw, userType, classLevel, firebaseUrl)) {
                 is AuthResult.Success -> {
                     val user = User.fromFirebaseMap(r.userData).copy(phone = ph, name = n)
                     session.saveUser(user)

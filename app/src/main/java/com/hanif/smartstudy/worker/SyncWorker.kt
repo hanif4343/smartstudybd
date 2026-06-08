@@ -88,12 +88,14 @@ class SyncWorker(
                     .add("phone",      payload["phone"]?.toString() ?: "")
                     .add("questionId", payload["questionId"]?.toString() ?: "")
                     .add("isCorrect",  payload["isCorrect"]?.toString() ?: "false")
+                    .add("secret",     BuildConfig.SECRET_KEY)
                     .build()
 
                 "xp_update" -> FormBody.Builder()
                     .add("action",  "updateXP")
                     .add("phone",   payload["phone"]?.toString() ?: "")
                     .add("xpDelta", payload["xpDelta"]?.toString() ?: "0")
+                    .add("secret",  BuildConfig.SECRET_KEY)
                     .build()
 
                 "study_progress" -> FormBody.Builder()
@@ -101,6 +103,7 @@ class SyncWorker(
                     .add("phone",   payload["phone"]?.toString() ?: "")
                     .add("minutes", payload["minutes"]?.toString() ?: "0")
                     .add("topic",   payload["topic"]?.toString() ?: "")
+                    .add("secret",  BuildConfig.SECRET_KEY)
                     .build()
 
                 else -> return false

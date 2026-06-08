@@ -17,7 +17,7 @@ android {
         buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
-        buildConfigField "String", "SECRET_KEY",     "\"%%SECRET_KEY%%\""
+        buildConfigField "String", "SECRET_KEY",      "\"%%SECRET_KEY%%\""
     }
 
     signingConfigs {
@@ -95,6 +95,7 @@ dependencies {
     implementation 'com.google.firebase:firebase-messaging-ktx'
     implementation 'com.google.firebase:firebase-analytics-ktx'
     implementation 'com.google.firebase:firebase-database-ktx'
+    implementation 'com.google.firebase:firebase-auth-ktx'
 
     // ── Google Sign-In (legacy — সবচেয়ে stable, minSdk 21 compatible) ──
     implementation 'com.google.android.gms:play-services-auth:21.2.0'
