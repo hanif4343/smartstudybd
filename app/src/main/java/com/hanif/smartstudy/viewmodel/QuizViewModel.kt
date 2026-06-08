@@ -135,10 +135,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Admin প্রশ্ন edit করার পরে call করো।
-     * Cache clear করে current mode reload করে।
-     */
     fun adminRefreshContent() {
         viewModelScope.launch {
             cache.clearCache()
