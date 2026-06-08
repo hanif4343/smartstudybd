@@ -59,7 +59,7 @@ class SessionManager(private val context: Context) {
         // Pending sync count
         val KEY_PENDING_SYNC     = intPreferencesKey("pending_sync_count")
 
-        // Admin: audience tag switch — "" = নিজের actual audience, অন্যথায় override tag
+        // Admin: audience tag switch
         val KEY_ADMIN_AUDIENCE_TAG = stringPreferencesKey("admin_audience_tag")
     }
 
@@ -324,20 +324,6 @@ class SessionManager(private val context: Context) {
         context.dataStore.edit { it[KEY_PENDING_SYNC] = count }
     }
 
-    // ── Admin Audience Tag Switch ──────────────────────────────
-
-    fun getAdminAudienceTag(): String = runBlocking {
-        context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
-    }
-
-    fun adminAudienceTagFlow(): Flow<String> = context.dataStore.data.map {
-        it[KEY_ADMIN_AUDIENCE_TAG] ?: ""
-    }
-
-    suspend fun setAdminAudienceTag(tag: String) {
-        context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
-    }
-
     // ── Font Scale (for accessibility user override) ──────────
     // Default 1.0f = normal size, larger = bigger text
 
@@ -349,5 +335,13 @@ class SessionManager(private val context: Context) {
 
     suspend fun setFontScale(scale: Float) {
         context.dataStore.edit { it[KEY_FONT_SIZE] = scale }
+    }
+
+    // ── Admin Audience Tag ────────────────────────────────────
+    fun getAdminAudienceTag(): String = runBlocking {
+        context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+    }
+    suspend fun setAdminAudienceTag(tag: String) {
+        context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
     }
 }
