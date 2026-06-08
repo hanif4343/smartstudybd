@@ -76,24 +76,20 @@ data class MenuUiState(
     val weekStudyMin    : Int                = 0,
     // Active users (Admin)
     val activeUsers     : List<ActiveUser>   = emptyList(),
-    // Admin: list of all users from Firebase
     val allUsers        : List<Map<String,String>> = emptyList(),
-    val viewingAsUser   : User?              = null,  // admin impersonation
-    // Admin: audience tag switch — "" = নিজের, অন্যথায় override করে দেখছে
-    val adminViewingTag : String             = "",
-    // Admin: question edit processing
+    val viewingAsUser   : User?              = null,
+
+    // ── Admin Power features ──────────────────────────────────
+    val adminViewingTag   : String           = "",   // audience switch
     val isEditingQuestion : Boolean          = false,
     val editSuccessMsg    : String?          = null,
-
-    // ── Feature 1: Report Queue ──
+    // Report Queue
     val reportedQuestions : List<com.hanif.smartstudy.data.remote.ReportedQuestion> = emptyList(),
     val isLoadingReports  : Boolean          = false,
-
-    // ── Feature 2: Add New Question ──
+    // Add Question
     val isAddingQuestion  : Boolean          = false,
     val addQuestionMsg    : String?          = null,
-
-    // ── Feature 3: Bulk Audience Change ──
+    // Bulk Audience
     val isBulkUpdating    : Boolean          = false,
     val bulkUpdateMsg     : String?          = null,
 )
@@ -438,117 +434,53 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(viewingAsUser = null) }
     }
 
-    // ── Admin: Audience Tag Switch ─────────────────────────────
-
-    /**
-     * Admin এর জন্য audience tag switch করো।
-     * [tag] = "" হলে নিজের actual audience তে ফিরে যাবে।
-     * এই tag টা SessionManager এও save হয় যাতে restart এর পরেও থাকে।
-     */
+    // ── Admin: Audience Tag Switch ────────────────────────────
     fun adminSwitchAudienceTag(tag: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             session.setAdminAudienceTag(tag)
-            _state.update {
-                val label = if (tag.isBlank()) "নিজের audience" else tag
-                it.copy(
-                    adminViewingTag = tag,
-                    toast = "🔄 এখন দেখছেন: $label"
-                )
-            }
+            val label = if (tag.isBlank()) "Job Seeker (default)" else tag
+            _state.update { it.copy(adminViewingTag = tag, toast = "🔄 দেখছেন: $label") }
         }
     }
 
-    // ── Admin: Edit Question Field ────────────────────────────
-
-    /**
-     * Admin যেকোনো প্রশ্নের যেকোনো field Firebase এ সরাসরি update করতে পারবে।
-     *
-     * @param sheet   "Quiz" | "QBank" | "Study"
-     * @param rowKey  Firebase row key (question id)
-     * @param fields  পরিবর্তিত fields map
-     */
-    fun adminEditQuestion(
-        sheet  : String,
-        rowKey : String,
-        fields : Map<String, String>
-    ) {
+    // ── Admin: Edit Question ──────────────────────────────────
+    fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
-            try {
-                val result = com.hanif.smartstudy.data.remote.GasApiService
-                    .adminUpdateQuestionField(sheet, rowKey, fields)
-                when (result) {
-                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                        // Cache invalidate করো যাতে পরবর্তী fetch এ নতুন data আসে
-                        cache.clearCache()
-                        _state.update {
-                            it.copy(
-                                isEditingQuestion = false,
-                                editSuccessMsg = "✅ সংরক্ষিত হয়েছে! Cache clear করা হয়েছে।",
-                                toast = "✅ প্রশ্ন আপডেট হয়েছে"
-                            )
-                        }
-                    }
-                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
-                        _state.update {
-                            it.copy(
-                                isEditingQuestion = false,
-                                error = "❌ আপডেট ব্যর্থ: ${result.message}"
-                            )
-                        }
-                    }
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService
+                    .adminUpdateQuestionField(sheet, rowKey, fields)) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                    cache.clearCache()
+                    _state.update { it.copy(isEditingQuestion = false,
+                        editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত") }
                 }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(isEditingQuestion = false, error = "❌ Error: ${e.message}")
-                }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
             }
         }
     }
 
-    /**
-     * Admin: MCQ options position swap করো।
-     * Firebase এ optionA/B/C/D এবং answer একসাথে update হবে।
-     */
-    fun adminSwapOptions(
-        sheet    : String,
-        rowKey   : String,
-        options  : Map<String, String>,
-        newAnswer: String
-    ) {
+    fun adminSwapOptions(sheet: String, rowKey: String, options: Map<String, String>, newAnswer: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true) }
-            try {
-                val result = com.hanif.smartstudy.data.remote.GasApiService
-                    .adminSwapOptions(sheet, rowKey, options, newAnswer)
-                when (result) {
-                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                        cache.clearCache()
-                        _state.update {
-                            it.copy(isEditingQuestion = false, toast = "✅ Options position আপডেট হয়েছে")
-                        }
-                    }
-                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
-                        _state.update {
-                            it.copy(isEditingQuestion = false, error = "❌ Swap ব্যর্থ: ${result.message}")
-                        }
-                    }
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService
+                    .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
+                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                    cache.clearCache()
+                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট") }
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(isEditingQuestion = false, error = "❌ ${e.message}") }
+                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                    _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
             }
         }
     }
 
-    fun clearEditMsg() {
-        _state.update { it.copy(editSuccessMsg = null) }
-    }
+    fun clearEditMsg() { _state.update { it.copy(editSuccessMsg = null) } }
 
-    // ── Feature 1: Report Queue ───────────────────────────────
-
+    // ── Admin: Report Queue ───────────────────────────────────
     fun loadPendingReports() {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -557,32 +489,37 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 is com.hanif.smartstudy.data.remote.GasResult.Success ->
                     _state.update { it.copy(reportedQuestions = r.data, isLoadingReports = false) }
                 is com.hanif.smartstudy.data.remote.GasResult.Error ->
-                    _state.update { it.copy(isLoadingReports = false, error = "Report লোড ব্যর্থ: ${r.message}") }
+                    _state.update { it.copy(isLoadingReports = false, error = "❌ ${r.message}") }
             }
         }
     }
 
-    fun resolveReport(reportKey: String, status: String) {
+    /** Report resolve + reporter কে notification পাঠাও */
+    fun resolveReport(
+        reportKey      : String,
+        status         : String,
+        userPhone      : String,
+        questionSnippet: String = ""
+    ) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
-            when (com.hanif.smartstudy.data.remote.GasApiService.updateReportStatus(reportKey, status)) {
+            when (com.hanif.smartstudy.data.remote.GasApiService
+                    .resolveReportAndNotify(reportKey, status, userPhone, questionSnippet)) {
                 is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                    // Local list থেকে সরাও
                     _state.update {
                         it.copy(
                             reportedQuestions = it.reportedQuestions.filter { r -> r.reportKey != reportKey },
-                            toast = if (status == "resolved") "✅ Report resolved" else "🗑 Report dismissed"
+                            toast = if (status == "resolved") "✅ Resolved — ইউজারকে নোটিফিকেশন গেছে" else "🗑 Dismissed"
                         )
                     }
                 }
                 is com.hanif.smartstudy.data.remote.GasResult.Error ->
-                    _state.update { it.copy(toast = "❌ Update ব্যর্থ হয়েছে") }
+                    _state.update { it.copy(toast = "❌ Update ব্যর্থ") }
             }
         }
     }
 
-    // ── Feature 2: Add New Question ──────────────────────────
-
+    // ── Admin: Add New Question ───────────────────────────────
     fun adminAddQuestion(sheet: String, fields: Map<String, String>) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -590,56 +527,33 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             when (val r = com.hanif.smartstudy.data.remote.GasApiService.adminAddQuestion(sheet, fields)) {
                 is com.hanif.smartstudy.data.remote.GasResult.Success -> {
                     cache.clearCache()
-                    _state.update {
-                        it.copy(
-                            isAddingQuestion = false,
-                            addQuestionMsg   = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}"
-                        )
-                    }
+                    _state.update { it.copy(isAddingQuestion = false,
+                        addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}") }
                 }
                 is com.hanif.smartstudy.data.remote.GasResult.Error ->
-                    _state.update {
-                        it.copy(
-                            isAddingQuestion = false,
-                            addQuestionMsg   = "❌ ব্যর্থ: ${r.message}"
-                        )
-                    }
+                    _state.update { it.copy(isAddingQuestion = false,
+                        addQuestionMsg = "❌ ব্যর্থ: ${r.message}") }
             }
         }
     }
 
     fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
 
-    // ── Feature 3: Bulk Audience Change ──────────────────────
-
-    fun adminBulkAudienceUpdate(
-        sheet    : String,
-        subject  : String,
-        subTopic : String,
-        newTag   : String
-    ) {
+    // ── Admin: Bulk Audience Update ───────────────────────────
+    fun adminBulkAudienceUpdate(sheet: String, subject: String, subTopic: String, newTag: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isBulkUpdating = true, bulkUpdateMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService.adminBulkAudienceUpdate(
-                sheet, subject, subTopic, newTag
-            )) {
+            when (val r = com.hanif.smartstudy.data.remote.GasApiService
+                    .adminBulkAudienceUpdate(sheet, subject, subTopic, newTag)) {
                 is com.hanif.smartstudy.data.remote.GasResult.Success -> {
                     cache.clearCache()
-                    _state.update {
-                        it.copy(
-                            isBulkUpdating = false,
-                            bulkUpdateMsg  = "✅ ${r.data}টি প্রশ্নের AudienceTag আপডেট হয়েছে → \"$newTag\""
-                        )
-                    }
+                    _state.update { it.copy(isBulkUpdating = false,
+                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"") }
                 }
                 is com.hanif.smartstudy.data.remote.GasResult.Error ->
-                    _state.update {
-                        it.copy(
-                            isBulkUpdating = false,
-                            bulkUpdateMsg  = "❌ ব্যর্থ: ${r.message}"
-                        )
-                    }
+                    _state.update { it.copy(isBulkUpdating = false,
+                        bulkUpdateMsg = "❌ ${r.message}") }
             }
         }
     }
