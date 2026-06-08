@@ -187,9 +187,9 @@ class WeekendBattleRepository {
                 subject          = m["subject"]?.toString() ?: "",
                 // Firebase questionIds List বা Map হিসেবে আসতে পারে
                 questionIds      = when (val qi = m["questionIds"]) {
-                                       is List<*> -> qi.mapNotNull { it?.toString() }
+                                       is List<*>  -> qi.mapNotNull { it?.toString() }
                                        is Map<*, *> -> qi.values.mapNotNull { it?.toString() }
-                                       else -> emptyList()
+                                       else        -> emptyList()
                                    },
                 questionCount    = m["questionCount"]?.toString()?.toIntOrNull()    ?: 20,
                 timeLimitSec     = m["timeLimitSec"]?.toString()?.toIntOrNull()     ?: 1200,
@@ -200,7 +200,7 @@ class WeekendBattleRepository {
                 participantCount = m["participantCount"]?.toString()?.toIntOrNull() ?: 0
             )
         } catch (e: Exception) {
-            Log.e(TAG, "battleFromSnap error: ${e.message}")
+            android.util.Log.e("WeekendBattleRepo", "battleFromSnap error: ${e.message}")
             null
         }
     }
@@ -221,7 +221,7 @@ class WeekendBattleRepository {
                 xpEarned     = m["xpEarned"]?.toString()?.toIntOrNull()     ?: 0
             )
         } catch (e: Exception) {
-            Log.e(TAG, "entryFromSnap error: ${e.message}")
+            android.util.Log.e("WeekendBattleRepo", "entryFromSnap error: ${e.message}")
             null
         }
     }
