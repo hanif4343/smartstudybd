@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import com.hanif.smartstudy.BuildConfig // BuildConfig ইমপোর্ট নিশ্চিত করার জন্য
 
 object FirebaseAuthService {
     private val client = OkHttpClient.Builder()
@@ -42,14 +43,10 @@ object FirebaseAuthService {
         }
     }
 
-    /** Firebase Auth ID Token দিয়ে auth query param বানাও */
-    private suspend fun authQuery(): String {
-        // প্রথমবার token খালি হলে refresh করে নাও
-        var token = FirebaseTokenProvider.getToken()
-        if (token.isBlank()) {
-            token = FirebaseTokenProvider.refreshToken()
-        }
-        return if (token.isNotBlank()) "?auth=$token" else ""
+    /** Firebase Database Secret দিয়ে auth query param বানাও */
+    private fun authQuery(): String {
+        val secret = BuildConfig.FIREBASE_DB_SECRET
+        return if (secret.isNotBlank()) "?auth=$secret" else ""
     }
 
     /**
@@ -116,7 +113,7 @@ object FirebaseAuthService {
                 if (passwordMatches) {
                     val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
                     if (status == "inactive") {
-                        AuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
+                        AuthResult.Error("অযাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
                     } else {
                         AuthResult.Success(userMap)
                     }
@@ -204,7 +201,7 @@ object FirebaseAuthService {
             val userData = mapOf(
                 "Name"       to name,
                 "Phone"      to phone,
-                "Email"      to email,
+                "Email" to email,
                 "Password"   to hashPassword(password),
                 "Picture"    to picture,
                 "UserType"   to userType,
