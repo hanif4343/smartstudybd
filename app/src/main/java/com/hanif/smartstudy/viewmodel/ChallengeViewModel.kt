@@ -302,14 +302,13 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadExamQuestions(challenge: Challenge) {
         viewModelScope.launch {
-            // MemCache না থাকলে content load করো (সর্বোচ্চ ১ বার retry)
+            // MemCache null হলে content fetch করো
             val c = ContentRepository.getMemCache()
                 ?: run {
                     val fetched = content.getContent()
                     (fetched as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
                 }
             if (c == null) {
-                Log.e("ChallengeVM", "loadExamQuestions: content null, retrying in 2s")
                 delay(2000)
                 val retried = ContentRepository.getMemCache()
                     ?: (content.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
@@ -328,14 +327,13 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         challenge : Challenge,
         c         : com.hanif.smartstudy.data.model.AppContent
     ) {
-        val me   = session.getCurrentUser()
+        val me       = session.getCurrentUser()
         val filtered = c.forUser(me)
-        val allQ = (filtered.quiz.map  { QuestionItem.fromQuizItem(it)  } +
-                    filtered.qbank.map { QuestionItem.fromQBankItem(it) })
+        val allQ     = (filtered.quiz.map { QuestionItem.fromQuizItem(it) } +
+                        filtered.qbank.map { QuestionItem.fromQBankItem(it) })
         val questions = challenge.questionIds.mapNotNull { id ->
             allQ.find { it.id == id }
         }.ifEmpty {
-            // questionIds দিয়ে না পেলে subject অনুযায়ী random নাও
             allQ.filter {
                 challenge.subject.isBlank() || it.subject == challenge.subject
             }.shuffled().take(challenge.questionCount)
@@ -498,15 +496,15 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun doubleXP() {
         viewModelScope.launch {
             try {
-                val me   = session.getCurrentUser() ?: return@launch
-                val chal = _state.value.challenge   ?: return@launch
+                val me    = session.getCurrentUser() ?: return@launch
+                val total = _state.value.questions.size
                 val myPhone = _state.value.myPhone
-                val myResult = chal.participants[myPhone.replace(".", "_")]
-                val earnedXp = myResult?.xpEarned ?: 10
-
-                // Firebase এ XP update করো
-                val phone = me.phone?.replace("+", "").orEmpty().ifEmpty { return@launch }
-                val newXp = me.xp + earnedXp   // আরেকবার same XP যোগ = মোট double
+                val myScore = _state.value.challenge?.participants
+                    ?.get(myPhone.replace(".", "_"))?.score ?: 0
+                // XP bonus = score পয়েন্ট (যত প্রশ্ন সঠিক)
+                val earnedXp = myScore.coerceAtLeast(5)
+                val phone  = me.phone?.replace("+", "").orEmpty().ifEmpty { return@launch }
+                val newXp  = me.xp + earnedXp
                 val updated = me.copy(xp = newXp)
                 session.saveUser(updated)
                 com.google.firebase.database.FirebaseDatabase.getInstance()
