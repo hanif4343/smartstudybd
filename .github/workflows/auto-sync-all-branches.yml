@@ -1,0 +1,80 @@
+name: 🔄 Auto Sync Main → All Branches
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  sync-all-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Sync main to ALL branches
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Main branch এর নাম detect করো
+          MAIN_BRANCH="${{ github.ref_name }}"
+          echo "📌 Main branch: $MAIN_BRANCH"
+
+          # Remote সব branches fetch করো
+          git fetch --all
+
+          # সব remote branch এর list (main/master বাদে)
+          BRANCHES=$(git branch -r \
+            | grep 'origin/' \
+            | grep -v 'HEAD' \
+            | grep -v "origin/$MAIN_BRANCH" \
+            | sed 's|origin/||' \
+            | tr -d ' ')
+
+          if [ -z "$BRANCHES" ]; then
+            echo "ℹ️ কোনো অতিরিক্ত branch নেই।"
+            exit 0
+          fi
+
+          echo "📋 Sync হবে এই branches এ:"
+          echo "$BRANCHES"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          SUCCESS=0
+          FAILED=0
+
+          for BRANCH in $BRANCHES; do
+            echo ""
+            echo "➡️  Syncing: $BRANCH"
+
+            git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+
+            # Main এর latest merge করো — conflict হলে main জিতবে
+            if git merge "origin/$MAIN_BRANCH" --no-edit --strategy-option=theirs -m "🔄 Auto-sync from $MAIN_BRANCH [skip ci]"; then
+              git push origin "$BRANCH"
+              echo "✅ $BRANCH — synced"
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "⚠️  Merge failed for $BRANCH — force applying main"
+              git merge --abort 2>/dev/null || true
+              git reset --hard "origin/$MAIN_BRANCH"
+              git push origin "$BRANCH" --force-with-lease
+              echo "✅ $BRANCH — force synced"
+              SUCCESS=$((SUCCESS + 1))
+            fi
+
+            # Main এ ফিরে যাও পরের branch এর জন্য
+            git checkout "$MAIN_BRANCH"
+          done
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 সম্পন্ন: ✅ $SUCCESS synced, ❌ $FAILED failed"
+
