@@ -1,0 +1,67 @@
+name: 🧹 Auto Cleanup Old Artifacts
+
+on:
+  # প্রতিদিন রাত ২টায় চলবে
+  schedule:
+    - cron: '0 20 * * *'   # UTC 20:00 = BD রাত 2:00
+  # Manual trigger ও রাখলাম
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+
+    steps:
+      - name: 🗑 Delete artifacts older than 2 days (keep latest 2 days)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const twoDaysAgo = new Date();
+            twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+            console.log(`Deleting artifacts older than: ${twoDaysAgo.toISOString()}`);
+
+            let page = 1;
+            let totalDeleted = 0;
+            let totalKept = 0;
+
+            while (true) {
+              const { data } = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                per_page: 100,
+                page: page
+              });
+
+              if (data.artifacts.length === 0) break;
+
+              for (const artifact of data.artifacts) {
+                const createdAt = new Date(artifact.created_at);
+                const ageDays = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+
+                if (createdAt < twoDaysAgo) {
+                  try {
+                    await github.rest.actions.deleteArtifact({
+                      owner:       context.repo.owner,
+                      repo:        context.repo.repo,
+                      artifact_id: artifact.id
+                    });
+                    console.log(`❌ Deleted: ${artifact.name} (${ageDays.toFixed(1)} days old, ${(artifact.size_in_bytes/1024/1024).toFixed(2)} MB)`);
+                    totalDeleted++;
+                  } catch (e) {
+                    console.log(`⚠️ Could not delete ${artifact.name}: ${e.message}`);
+                  }
+                } else {
+                  console.log(`✅ Kept: ${artifact.name} (${ageDays.toFixed(1)} days old)`);
+                  totalKept++;
+                }
+              }
+
+              if (data.artifacts.length < 100) break;
+              page++;
+            }
+
+            console.log(`\n📊 Summary: ${totalDeleted} deleted, ${totalKept} kept`);
+

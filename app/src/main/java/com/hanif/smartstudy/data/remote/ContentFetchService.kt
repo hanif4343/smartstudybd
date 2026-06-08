@@ -1,7 +1,6 @@
 package com.hanif.smartstudy.data.remote
 
 import android.util.Log
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
@@ -33,20 +32,18 @@ object ContentFetchService {
     private val gson = CaseInsensitiveGson.instance
 
     private val BASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-    private val SECRET_KEY get() = BuildConfig.SECRET_KEY
 
-    private fun authParam(): String {
-        val key = SECRET_KEY
-        return if (key.isNotBlank() && !key.contains("%%")) "?auth=$key" else ""
+    /** Firebase Auth ID Token দিয়ে secure auth param */
+    private suspend fun authParam(): String {
+        val token = FirebaseTokenProvider.getToken()
+        return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
         Log.d(TAG, "=== FETCH START ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
-        Log.d(TAG, "SECRET_KEY: ${if (SECRET_KEY.contains("%%")) "NOT SET" else "set(${SECRET_KEY.length})"}")
 
         try {
-            // আলাদা আলাদে fetch — root fetch too large হয়
             val quiz  = fetchSheet<QuizItem>("Quiz")
             val qbank = fetchSheet<QBankItem>("QBank")
             val study = fetchSheet<StudyItem>("Study")
@@ -70,7 +67,8 @@ object ContentFetchService {
     private suspend inline fun <reified T> fetchSheet(sheet: String): List<T> =
         withContext(Dispatchers.IO) {
             try {
-                val url = "$BASE_URL/$sheet.json${authParam()}"
+                val auth = authParam()
+                val url  = "$BASE_URL/$sheet.json$auth"
                 Log.d(TAG, "Fetching $sheet: ${url.take(60)}...")
 
                 val req  = Request.Builder().url(url).get().build()
@@ -86,15 +84,12 @@ object ContentFetchService {
 
                 val trimmed = body.trim()
                 val items: List<T> = when {
-                    // Array format: [0: {...}, 1: {...}]
                     trimmed.startsWith("[") -> {
                         val type = object : TypeToken<List<T>>() {}.type
                         gson.fromJson<List<T>>(trimmed, type) ?: emptyList()
                     }
-                    // Object format: {"0": {...}, "1": {...}} or {"-key": {...}}
                     trimmed.startsWith("{") -> {
                         val obj = gson.fromJson(trimmed, JsonObject::class.java)
-                        // "error" response চেক করো
                         if (obj.has("error")) {
                             Log.e(TAG, "$sheet Firebase error: ${obj.get("error")}")
                             return@withContext emptyList()
