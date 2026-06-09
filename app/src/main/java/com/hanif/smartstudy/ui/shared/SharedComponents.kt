@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.GasApiService
@@ -102,16 +104,17 @@ fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) 
 
 @Composable
 fun QuestionCard(
-    index       : Int,
-    item        : QuestionItem,
-    mode        : StudyMode,
-    totalCount  : Int       = 0,
-    onMcqAnswer : (Int) -> Unit,
-    onWritten   : (String) -> Int,
-    onBookmark  : () -> Unit,
-    onReport    : () -> Unit,
-    currentUser : User?     = null,
-    modifier    : Modifier = Modifier
+    index          : Int,
+    item           : QuestionItem,
+    mode           : StudyMode,
+    totalCount     : Int       = 0,
+    onMcqAnswer    : (Int) -> Unit,
+    onWritten      : (String) -> Int,
+    onBookmark     : () -> Unit,
+    onReport       : () -> Unit,
+    currentUser    : User?     = null,
+    onAdminRefresh : (() -> Unit)? = null,
+    modifier       : Modifier = Modifier
 ) {
     Card(
         modifier  = modifier.fillMaxWidth(),
@@ -173,6 +176,19 @@ fun QuestionCard(
                     }
                     IconButton(onClick = onReport, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Flag, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
+                    }
+                    // Admin edit button
+                    if (currentUser?.isAdmin() == true) {
+                        var showEdit by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showEdit = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Edit, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
+                        }
+                        if (showEdit) {
+                            AdminQuestionEditDialog(item = item, onDismiss = {
+                                showEdit = false
+                                onAdminRefresh?.invoke()
+                            })
+                        }
                     }
                 }
             }
@@ -975,4 +991,297 @@ fun ReportDialog(
         },
         shape = RoundedCornerShape(20.dp)
     )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AdminQuestionEditDialog — inline edit from any QuestionCard
+// ═══════════════════════════════════════════════════════════════
+
+@Composable
+fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
+    val sheet = when {
+        item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
+        item.isMcq() -> "Quiz"
+        else         -> "Study"
+    }
+
+    var editQuestion    by remember { mutableStateOf(item.question) }
+    var editOptionA     by remember { mutableStateOf(item.optionA) }
+    var editOptionB     by remember { mutableStateOf(item.optionB) }
+    var editOptionC     by remember { mutableStateOf(item.optionC) }
+    var editOptionD     by remember { mutableStateOf(item.optionD) }
+    var editAnswer      by remember { mutableStateOf(item.answer) }
+    var editExplanation by remember { mutableStateOf(item.explanation) }
+    var editTechnique   by remember { mutableStateOf(item.technique) }
+    var editAudience    by remember { mutableStateOf(item.audienceTags) }
+
+    // Options list for swap UI
+    var optionOrder by remember {
+        mutableStateOf(
+            listOf("A" to item.optionA, "B" to item.optionB,
+                   "C" to item.optionC, "D" to item.optionD)
+                .filter { it.second.isNotBlank() }
+        )
+    }
+
+    LaunchedEffect(optionOrder) {
+        editOptionA = optionOrder.getOrNull(0)?.second ?: ""
+        editOptionB = optionOrder.getOrNull(1)?.second ?: ""
+        editOptionC = optionOrder.getOrNull(2)?.second ?: ""
+        editOptionD = optionOrder.getOrNull(3)?.second ?: ""
+    }
+
+    var isSaving  by remember { mutableStateOf(false) }
+    var saveMsg   by remember { mutableStateOf<String?>(null) }
+    var activeTab by remember { mutableStateOf(0) }
+    val scope     = rememberCoroutineScope()
+    val adminIndigo = Color(0xFF4F46E5)
+
+    Dialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress      = !isSaving,
+            dismissOnClickOutside   = !isSaving
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.97f).fillMaxHeight(0.92f),
+            shape    = RoundedCornerShape(20.dp),
+            color    = Color.White
+        ) {
+            Column(Modifier.fillMaxSize()) {
+
+                // Header
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            listOf(Color(0xFF1E1B4B), adminIndigo)
+                        ))
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Edit, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("✏️ Admin Edit", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                        Surface(shape = RoundedCornerShape(6.dp), color = Color.White.copy(0.2f)) {
+                            Text(sheet, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                color = Color.White, fontFamily = NotoSansBengali)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                // Tabs
+                TabRow(selectedTabIndex = activeTab, containerColor = Color(0xFFF8F9FF), contentColor = adminIndigo) {
+                    listOf("📝 প্রশ্ন", "🔄 Options", "💡 উত্তর/ব্যাখ্যা").forEachIndexed { i, label ->
+                        Tab(selected = activeTab == i, onClick = { activeTab = i },
+                            text = { Text(label, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold) })
+                    }
+                }
+
+                // Tab Content
+                Column(
+                    Modifier.weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    when (activeTab) {
+                        0 -> {
+                            AdminTextField("প্রশ্ন (question)", editQuestion, { editQuestion = it }, 3)
+                            AdminTextField("Audience Tags", editAudience, { editAudience = it },
+                                hint = "Job / Honours 1 / Class 10 / ফাঁকা=Job Seeker")
+                            AdminInfoRow("Subject", item.subject)
+                            AdminInfoRow("SubTopic", item.subTopic)
+                        }
+                        1 -> {
+                            if (item.isMcq()) {
+                                Text("🔄 তীর দিয়ে position পরিবর্তন করুন",
+                                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = adminIndigo, fontFamily = NotoSansBengali)
+                                val posLabels = listOf("A","B","C","D")
+                                optionOrder.forEachIndexed { idx, (_, text) ->
+                                    val isAns = text.trim().equals(editAnswer.trim(), ignoreCase = true)
+                                    Card(
+                                        Modifier.fillMaxWidth(),
+                                        shape  = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isAns) Color(0xFFF0FDF4) else Color(0xFFF8FAFC)
+                                        ),
+                                        border = if (isAns) androidx.compose.foundation.BorderStroke(1.5.dp, GreenOk) else null
+                                    ) {
+                                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                Modifier.size(26.dp)
+                                                    .background(if (isAns) GreenOk else adminIndigo, RoundedCornerShape(6.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(posLabels.getOrElse(idx) { "${idx+1}" }, fontSize = 11.sp,
+                                                    fontWeight = FontWeight.ExtraBold, color = Color.White)
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(text, Modifier.weight(1f), fontSize = 12.sp,
+                                                fontFamily = NotoSansBengali,
+                                                color = if (isAns) Color(0xFF166534) else SlateText,
+                                                fontWeight = if (isAns) FontWeight.Bold else FontWeight.Normal)
+                                            if (isAns) Icon(Icons.Default.CheckCircle, null,
+                                                tint = GreenOk, modifier = Modifier.size(16.dp))
+                                            Column {
+                                                IconButton(onClick = {
+                                                    if (idx > 0) {
+                                                        val l = optionOrder.toMutableList()
+                                                        val t = l[idx-1]; l[idx-1] = l[idx]; l[idx] = t
+                                                        optionOrder = l
+                                                    }
+                                                }, enabled = idx > 0, modifier = Modifier.size(26.dp)) {
+                                                    Icon(Icons.Default.KeyboardArrowUp, null,
+                                                        tint = if (idx > 0) adminIndigo else Color(0xFFCBD5E1),
+                                                        modifier = Modifier.size(16.dp))
+                                                }
+                                                IconButton(onClick = {
+                                                    if (idx < optionOrder.size-1) {
+                                                        val l = optionOrder.toMutableList()
+                                                        val t = l[idx+1]; l[idx+1] = l[idx]; l[idx] = t
+                                                        optionOrder = l
+                                                    }
+                                                }, enabled = idx < optionOrder.size-1, modifier = Modifier.size(26.dp)) {
+                                                    Icon(Icons.Default.KeyboardArrowDown, null,
+                                                        tint = if (idx < optionOrder.size-1) adminIndigo else Color(0xFFCBD5E1),
+                                                        modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                                Text("✏️ Option text সরাসরি edit করুন", fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold, color = adminIndigo, fontFamily = NotoSansBengali)
+                                optionOrder.forEachIndexed { idx, _ ->
+                                    val cur = when(idx) { 0->editOptionA; 1->editOptionB; 2->editOptionC; else->editOptionD }
+                                    AdminTextField("Option ${listOf("A","B","C","D").getOrElse(idx){""}} ", cur, { v ->
+                                        val l = optionOrder.toMutableList()
+                                        l[idx] = l[idx].copy(second = v)
+                                        optionOrder = l
+                                    })
+                                }
+                            } else {
+                                Text("Written প্রশ্ন — option নেই", fontFamily = NotoSansBengali, color = MutedText)
+                            }
+                        }
+                        2 -> {
+                            AdminTextField("✅ সঠিক উত্তর", editAnswer, { editAnswer = it })
+                            AdminTextField("💡 ব্যাখ্যা", editExplanation, { editExplanation = it }, 3)
+                            AdminTextField("🧠 টেকনিক", editTechnique, { editTechnique = it }, 2)
+                        }
+                    }
+                }
+
+                // Save message
+                saveMsg?.let { msg ->
+                    val ok = msg.startsWith("✅")
+                    LaunchedEffect(msg) {
+                        kotlinx.coroutines.delay(2500)
+                        saveMsg = null
+                        if (ok) onDismiss()
+                    }
+                    Surface(color = if (ok) Color(0xFFF0FDF4) else Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
+                        Text(msg, Modifier.padding(12.dp), fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
+                    }
+                }
+
+                // Bottom bar
+                Surface(color = Color.White, modifier = Modifier.fillMaxWidth(), shadowElevation = 6.dp) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(onClick = { if (!isSaving) onDismiss() },
+                            modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
+                            Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isSaving = true
+                                    saveMsg  = null
+                                    try {
+                                        val fields = mutableMapOf<String, String>()
+                                        if (editQuestion    != item.question)    fields["question"]     = editQuestion
+                                        if (editExplanation != item.explanation) fields["explanation"]  = editExplanation
+                                        if (editTechnique   != item.technique)   fields["technique"]    = editTechnique
+                                        if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
+                                        if (editAnswer      != item.answer)      { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
+                                        val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
+                                        val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
+                                        if (newOpts != origOpts) {
+                                            if (editOptionA.isNotBlank()) fields["option1"] = editOptionA
+                                            if (editOptionB.isNotBlank()) fields["option2"] = editOptionB
+                                            if (editOptionC.isNotBlank()) fields["option3"] = editOptionC
+                                            if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
+                                            fields["correct"] = editAnswer
+                                        }
+                                        if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
+                                        saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
+                                            is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
+                                            is GasResult.Error   -> "❌ ${r.message}"
+                                        }
+                                    } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
+                                    isSaving = false
+                                }
+                            },
+                            enabled  = !isSaving,
+                            modifier = Modifier.weight(2f),
+                            shape    = RoundedCornerShape(12.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = adminIndigo)
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(Modifier.size(16.dp), Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            } else {
+                                Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text("💾 Firebase এ সংরক্ষণ", fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminTextField(label: String, value: String, onChange: (String) -> Unit,
+                           minLines: Int = 1, hint: String = "") {
+    OutlinedTextField(
+        value = value, onValueChange = onChange,
+        label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
+        modifier = Modifier.fillMaxWidth(), minLines = minLines,
+        shape = RoundedCornerShape(10.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
+        placeholder = if (hint.isNotBlank()) {
+            { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1)) }
+        } else null
+    )
+}
+
+@Composable
+private fun AdminInfoRow(label: String, value: String) {
+    if (value.isBlank()) return
+    Row(
+        Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedText, fontFamily = NotoSansBengali)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateText, fontFamily = NotoSansBengali)
+    }
 }

@@ -58,6 +58,9 @@ class SessionManager(private val context: Context) {
         val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         // Pending sync count
         val KEY_PENDING_SYNC     = intPreferencesKey("pending_sync_count")
+
+        // Admin: audience tag switch
+        val KEY_ADMIN_AUDIENCE_TAG = stringPreferencesKey("admin_audience_tag")
     }
 
     // ── User ──────────────────────────────────────────────────
@@ -332,5 +335,13 @@ class SessionManager(private val context: Context) {
 
     suspend fun setFontScale(scale: Float) {
         context.dataStore.edit { it[KEY_FONT_SIZE] = scale }
+    }
+
+    // ── Admin Audience Tag ────────────────────────────────────
+    fun getAdminAudienceTag(): String = runBlocking {
+        context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+    }
+    suspend fun setAdminAudienceTag(tag: String) {
+        context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
     }
 }

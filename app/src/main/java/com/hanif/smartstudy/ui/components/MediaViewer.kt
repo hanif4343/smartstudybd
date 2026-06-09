@@ -201,7 +201,7 @@ object MediaLinkParser {
 //   - technique field
 //   - VisualURL field (আলাদা field হলে)
 //
-// এই composable সব ক্ষেত্রে ব্যবহার করো।
+// এই composable সব ক্ষেত্রে ব্যবহার করো
 // ─────────────────────────────────────────────────────────────────
 @Composable
 fun RichContentText(

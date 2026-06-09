@@ -63,17 +63,22 @@ fun AdminPage(
         Column(Modifier.fillMaxSize().padding(padding)) {
 
             // Tab row
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = tab,
                 containerColor   = DeepIndigo,
-                contentColor     = Color.White
+                contentColor     = Color.White,
+                edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM").forEachIndexed { i, label ->
-                    Tab(selected = tab == i, onClick = { tab = i },
-                        text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold) })
-                }
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag")
+                    .forEachIndexed { i, label ->
+                        Tab(selected = tab == i, onClick = { tab = i },
+                            text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold) })
+                    }
             }
+
+            // Auto-load reports when tab 3 opens
+            LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -86,6 +91,9 @@ fun AdminPage(
                         notifyTitle = ""; notifyBody = ""; targetPhone = ""
                     })
                 2 -> FcmTab(state)
+                3 -> ReportQueueTab(state, vm)
+                4 -> AddQuestionTab(state, vm)
+                5 -> BulkAudienceTab(state, vm)
             }
         }
     }
@@ -350,5 +358,480 @@ private fun FcmTab(state: MenuUiState) {
                 }
             }
         }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FEATURE 1 — Report Queue Tab
+// ══════════════════════════════════════════════════════════════
+
+@Composable
+private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
+    val reports = state.reportedQuestions
+    val loading = state.isLoadingReports
+    val sdf     = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
+    var editTarget by remember { mutableStateOf<com.hanif.smartstudy.data.remote.ReportedQuestion?>(null) }
+
+    Column(Modifier.fillMaxSize()) {
+        // Header
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFFFF7ED))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Flag, null, tint = Color(0xFFEA580C), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("${reports.size}টি pending report", fontFamily = NotoSansBengali,
+                fontWeight = FontWeight.ExtraBold, fontSize = 13.sp,
+                color = Color(0xFF9A3412), modifier = Modifier.weight(1f))
+            IconButton(onClick = { vm.loadPendingReports() }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Refresh, null, tint = Color(0xFFEA580C), modifier = Modifier.size(18.dp))
+            }
+        }
+
+        if (loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color(0xFF4F46E5))
+                    Spacer(Modifier.height(10.dp))
+                    Text("লোড হচ্ছে...", fontFamily = NotoSansBengali, color = Color(0xFF64748B))
+                }
+            }
+            return@Column
+        }
+
+        if (reports.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🎉", fontSize = 48.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("কোনো pending report নেই!", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold, color = Color(0xFF10B981), fontSize = 16.sp)
+                }
+            }
+            return@Column
+        }
+
+        LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(reports, key = { it.reportKey }) { report ->
+                Card(
+                    Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF4F46E5).copy(0.1f)) {
+                                Text(report.tab.uppercase(), Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(sdf.format(Date(report.timestamp)), fontSize = 10.sp,
+                                color = Color(0xFF64748B), fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.Person, null, tint = Color(0xFF64748B), modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text(report.userName.ifBlank { report.userPhone }, fontSize = 10.sp,
+                                color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        }
+                        Text("❓ " + report.question.take(100) + if (report.question.length > 100) "…" else "",
+                            fontSize = 12.sp, color = Color(0xFF1E293B), fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Medium)
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFFFF1F2)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ReportProblem, null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(report.issue, fontSize = 12.sp, color = Color(0xFF9F1239),
+                                    fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { editTarget = report },
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                            ) {
+                                Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Edit প্রশ্ন", fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(onClick = {
+                                vm.resolveReport(report.reportKey, "resolved", report.userPhone, report.question)
+                            }, modifier = Modifier.weight(1f).height(36.dp), shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981))
+                            ) {
+                                Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Resolve", fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                            }
+                            IconButton(onClick = {
+                                vm.resolveReport(report.reportKey, "dismissed", report.userPhone, report.question)
+                            }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Close, null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Edit dialog for reported question
+    editTarget?.let { r ->
+        var editQ   by remember { mutableStateOf("") }
+        var editAns by remember { mutableStateOf("") }
+        var editExp by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { editTarget = null },
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Edit, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Report থেকে Edit", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFF8FAFC)) {
+                        Text("মূল: " + r.question.take(80), Modifier.padding(10.dp),
+                            fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                    }
+                    Text("🚩 ${r.issue}", fontSize = 12.sp, color = Color(0xFFEF4444),
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(value = editQ, onValueChange = { editQ = it },
+                        label = { Text("নতুন প্রশ্ন (ফাঁকা = অপরিবর্তিত)", fontFamily = NotoSansBengali, fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(10.dp))
+                    OutlinedTextField(value = editAns, onValueChange = { editAns = it },
+                        label = { Text("নতুন উত্তর (ফাঁকা = অপরিবর্তিত)", fontFamily = NotoSansBengali, fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp))
+                    OutlinedTextField(value = editExp, onValueChange = { editExp = it },
+                        label = { Text("নতুন ব্যাখ্যা (ফাঁকা = অপরিবর্তিত)", fontFamily = NotoSansBengali, fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(10.dp))
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val fields = mutableMapOf<String, String>()
+                    if (editQ.isNotBlank())   fields["question"]    = editQ
+                    if (editAns.isNotBlank()) fields["correct"]     = editAns
+                    if (editExp.isNotBlank()) fields["explanation"] = editExp
+                    if (fields.isNotEmpty()) vm.adminEditQuestion(r.sheetName(), r.questionId, fields)
+                    vm.resolveReport(r.reportKey, "resolved", r.userPhone, r.question)
+                    editTarget = null
+                }, shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                ) {
+                    Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("সংরক্ষণ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editTarget = null }) { Text("বাতিল", fontFamily = NotoSansBengali) }
+            }
+        )
+    }
+}
+
+// ── New Question Tab ──
+private val SHEETS_LIST = listOf("Quiz", "QBank", "Study")
+private val AUDIENCE_LIST = listOf(
+    "" to "Job Seeker (default)", "Job" to "Job",
+    "Honours 1" to "Honours 1st Year", "Honours 2" to "Honours 2nd Year",
+    "Honours 3" to "Honours 3rd Year", "Honours 4" to "Honours 4th Year",
+    "Masters 1" to "Masters 1st Year", "Masters 2" to "Masters 2nd Year",
+    "Class 9" to "Class 9", "Class 10" to "Class 10",
+    "Class 11" to "Class 11", "Class 12" to "Class 12"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
+    var sheet       by remember { mutableStateOf("Quiz") }
+    var subject     by remember { mutableStateOf("") }
+    var subTopic    by remember { mutableStateOf("") }
+    var question    by remember { mutableStateOf("") }
+    var optA        by remember { mutableStateOf("") }
+    var optB        by remember { mutableStateOf("") }
+    var optC        by remember { mutableStateOf("") }
+    var optD        by remember { mutableStateOf("") }
+    var answer      by remember { mutableStateOf("") }
+    var explanation by remember { mutableStateOf("") }
+    var technique   by remember { mutableStateOf("") }
+    var audience    by remember { mutableStateOf("") }
+    var isMcq       by remember { mutableStateOf(true) }
+    var audExp      by remember { mutableStateOf(false) }
+
+    val msg    = state.addQuestionMsg
+    val saving = state.isAddingQuestion
+    val isOk   = msg?.startsWith("✅") == true
+
+    LaunchedEffect(isOk) {
+        if (isOk) {
+            kotlinx.coroutines.delay(2000)
+            question = ""; optA = ""; optB = ""; optC = ""; optD = ""
+            answer = ""; explanation = ""; technique = ""
+            vm.clearAddQuestionMsg()
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFEEF2FF), RoundedCornerShape(12.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.AddCircle, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("নতুন প্রশ্ন যোগ করুন", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color(0xFF4F46E5))
+                Text("Firebase এ সরাসরি push — সব ডিভাইসে দেখাবে",
+                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF64748B))
+            }
+        }
+
+        // Sheet chips
+        Text("📂 Sheet", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SHEETS_LIST.forEach { s ->
+                FilterChip(selected = sheet == s, onClick = { sheet = s; if (s == "Study") isMcq = false },
+                    label = { Text(s, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF4F46E5), selectedLabelColor = Color.White))
+            }
+        }
+
+        if (sheet != "Study") {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("强的 ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Switch(checked = isMcq, onCheckedChange = { isMcq = it })
+                Spacer(Modifier.width(8.dp))
+                Text(if (isMcq) "MCQ" else "Written", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, color = Color(0xFF4F46E5))
+            }
+        }
+
+        HorizontalDivider()
+        AdminTabField("বিষয় (Subject) *", subject, { subject = it })
+        AdminTabField("অধ্যায় (SubTopic)", subTopic, { subTopic = it })
+        AdminTabField("প্রশ্ন (Question) *", question, { question = it }, 3)
+
+        if (isMcq) {
+            Text("📝 Options", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.sp, color = Color(0xFF4F46E5))
+            AdminTabField("Option A *", optA, { optA = it })
+            AdminTabField("Option B *", optB, { optB = it })
+            AdminTabField("Option C", optC, { optC = it })
+            AdminTabField("Option D", optD, { optD = it })
+            AdminTabField("✅ সঠিক উত্তর (Option এর exact text) *", answer, { answer = it })
+        } else {
+            AdminTabField("✅ উত্তর *", answer, { answer = it }, 2)
+        }
+        AdminTabField("💡 ব্যাখ্যা", explanation, { explanation = it }, 2)
+        AdminTabField("🧠 টেকনিক", technique, { technique = it }, 2)
+
+        // Audience dropdown
+        ExposedDropdownMenuBox(expanded = audExp, onExpandedChange = { audExp = it }) {
+            OutlinedTextField(
+                value = AUDIENCE_LIST.find { it.first == audience }?.second ?: "Job Seeker (default)",
+                onValueChange = {}, readOnly = true,
+                label = { Text("🎯 Audience Tag", fontFamily = NotoSansBengali) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(audExp) },
+                modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4F46E5))
+            )
+            ExposedDropdownMenu(expanded = audExp, onDismissRequest = { audExp = false }) {
+                AUDIENCE_LIST.forEach { (tag, label) ->
+                    DropdownMenuItem(text = { Text(label, fontFamily = NotoSansBengali) },
+                        onClick = { audience = tag; audExp = false })
+                }
+            }
+        }
+
+        msg?.let {
+            Surface(shape = RoundedCornerShape(10.dp), color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF1F2),
+                modifier = Modifier.fillMaxWidth()) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = if (isOk) Color(0xFF166534) else Color(0xFF991B1B))
+            }
+        }
+
+        val isValid = subject.isNotBlank() && question.isNotBlank() && answer.isNotBlank() &&
+                (!isMcq || (optA.isNotBlank() && optB.isNotBlank()))
+
+        Button(
+            onClick = {
+                val fields = mutableMapOf("subject" to subject, "sub_topic" to subTopic,
+                    "question" to question, "correct" to answer, "explanation" to explanation,
+                    "technique" to technique, "AudienceTags" to audience,
+                    "type" to if (isMcq) "mcq" else "written")
+                if (isMcq) {
+                    if (optA.isNotBlank()) fields["option1"] = optA
+                    if (optB.isNotBlank()) fields["option2"] = optB
+                    if (optC.isNotBlank()) fields["option3"] = optC
+                    if (optD.isNotBlank()) fields["option4"] = optD
+                }
+                vm.adminAddQuestion(sheet, fields)
+            },
+            enabled = isValid && !saving,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+        ) {
+            if (saving) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("যোগ হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Firebase এ যোগ করুন ($sheet)", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun AdminTabField(label: String, value: String, onChange: (String) -> Unit, minLines: Int = 1) {
+    OutlinedTextField(value = value, onValueChange = onChange,
+        label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
+        modifier = Modifier.fillMaxWidth(), minLines = minLines, shape = RoundedCornerShape(10.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp))
+}
+
+// ── Bulk Audience Tag Tab ──
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
+    var sheet     by remember { mutableStateOf("Quiz") }
+    var subject   by remember { mutableStateOf("") }
+    var subTopic  by remember { mutableStateOf("") }
+    var newTag    by remember { mutableStateOf("") }
+    var tagExp    by remember { mutableStateOf(false) }
+    var confirmed by remember { mutableStateOf(false) }
+
+    val msg      = state.bulkUpdateMsg
+    val updating = state.isBulkUpdating
+    val isOk     = msg?.startsWith("✅") == true
+
+    LaunchedEffect(isOk) {
+        if (isOk) { kotlinx.coroutines.delay(3000); vm.clearBulkMsg(); subject = ""; subTopic = ""; confirmed = false }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFFFFBEB),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFBBF24))
+        ) {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.Warning, null, tint = Color(0xFFD97706), modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("সাবধান! Bulk Operation", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF92400E))
+                    Text("একসাথে অনেক প্রশ্নের AudienceTag পরিবর্তন হবে।",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF92400E))
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SHEETS_LIST.forEach { s ->
+                FilterChip(selected = sheet == s, onClick = { sheet = s },
+                    label = { Text(s, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF4F46E5), selectedLabelColor = Color.White))
+            }
+        }
+
+        AdminTabField("বিষয় (Subject) *", subject, { subject = it })
+        AdminTabField("অধ্যায় (SubTopic) — ফাঁকা = সব অধ্যায়", subTopic, { subTopic = it })
+
+        ExposedDropdownMenuBox(expanded = tagExp, onExpandedChange = { tagExp = it }) {
+            OutlinedTextField(
+                value = AUDIENCE_LIST.find { it.first == newTag }?.second ?: "বেছে নিন",
+                onValueChange = {}, readOnly = true,
+                label = { Text("নতুন Audience Tag *", fontFamily = NotoSansBengali) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(tagExp) },
+                modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4F46E5))
+            )
+            ExposedDropdownMenu(expanded = tagExp, onDismissRequest = { tagExp = false }) {
+                AUDIENCE_LIST.forEach { (tag, label) ->
+                    DropdownMenuItem(text = { Text(label, fontFamily = NotoSansBengali) },
+                        onClick = { newTag = tag; tagExp = false })
+                }
+            }
+        }
+
+        if (subject.isNotBlank()) {
+            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFEEF2FF),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F46E5).copy(0.3f))
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("📋 Summary:", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4F46E5))
+                    Text("Sheet: $sheet | Subject: $subject", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    Text("SubTopic: ${subTopic.ifBlank { "সব অধ্যায়" }}", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    Text("নতুন Tag: \"${newTag.ifBlank { "Job Seeker (খালি)" }}\"",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFFFF1F2), RoundedCornerShape(10.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = confirmed, onCheckedChange = { confirmed = it },
+                colors = CheckboxDefaults.colors(checkedColor = Color(0xFFEF4444)))
+            Spacer(Modifier.width(8.dp))
+            Text("আমি নিশ্চিত যে এই Bulk আপডেট করতে চাই।",
+                fontFamily = NotoSansBengali, fontSize = 12.sp,
+                color = Color(0xFF9F1239), fontWeight = FontWeight.Bold)
+        }
+
+        msg?.let {
+            Surface(shape = RoundedCornerShape(10.dp), color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF1F2),
+                modifier = Modifier.fillMaxWidth()) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = if (isOk) Color(0xFF166534) else Color(0xFF991B1B))
+            }
+        }
+
+        Button(
+            onClick = { vm.adminBulkAudienceUpdate(sheet, subject, subTopic, newTag) },
+            enabled = subject.isNotBlank() && newTag.isNotEmpty() && confirmed && !updating,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+        ) {
+            if (updating) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("আপডেট হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.Bolt, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Bulk Update চালান 🚀", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(40.dp))
     }
 }

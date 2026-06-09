@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.menu
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -213,6 +214,10 @@ fun MainMenuScreen(
                 MenuGroup("🔑 অ্যাডমিন") {
                     MenuRow("🛡 Admin Panel", "ইউজার ম্যানেজমেন্ট", Icons.Default.AdminPanelSettings) { onNavigate(MenuNav.ADMIN) }
                 }
+                AdminSwitchTagSection(
+                    currentTag = state.adminViewingTag,
+                    onSwitch   = { vm.adminSwitchAudienceTag(it) }
+                )
             }
 
             MenuGroup("❓ অন্যান্য") {
@@ -459,4 +464,76 @@ fun MenuRow(
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.3f), modifier = Modifier.size(18.dp))
     }
     HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(0.15f))
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Admin Audience Switch Section
+// ─────────────────────────────────────────────────────────────
+
+private val AUDIENCE_TAGS = listOf(
+    "" to "👔 Job Seeker (Default)",
+    "Job" to "👔 Job",
+    "Honours 1" to "🎓 Honours 1st",
+    "Honours 2" to "🎓 Honours 2nd",
+    "Honours 3" to "🎓 Honours 3rd",
+    "Honours 4" to "🎓 Honours 4th",
+    "Masters 1" to "🎓 Masters 1st",
+    "Masters 2" to "🎓 Masters 2nd",
+    "Class 9"   to "📚 Class 9",
+    "Class 10"  to "📚 Class 10",
+    "Class 11"  to "📚 Class 11",
+    "Class 12"  to "📚 Class 12"
+)
+
+@Composable
+fun AdminSwitchTagSection(currentTag: String, onSwitch: (String) -> Unit) {
+    val activeColor = Color(0xFF4F46E5)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.SwapHoriz, null, tint = activeColor, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("🔄 Switch Audience", fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                Text(
+                    "এখন: ${AUDIENCE_TAGS.find { it.first == currentTag }?.second ?: currentTag.ifBlank { "Job Seeker" }}",
+                    fontSize = 11.sp,
+                    color = if (currentTag.isBlank()) MaterialTheme.colorScheme.onSurface.copy(0.5f) else activeColor,
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(0.15f))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(AUDIENCE_TAGS.size) { i ->
+                val (tag, label) = AUDIENCE_TAGS[i]
+                val isActive = tag == currentTag
+                Surface(
+                    onClick = { onSwitch(tag) },
+                    shape   = RoundedCornerShape(20.dp),
+                    color   = if (isActive) Color(0xFFEEF2FF) else MaterialTheme.colorScheme.surfaceVariant,
+                    border  = if (isActive) androidx.compose.foundation.BorderStroke(1.5.dp, activeColor) else null,
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (isActive) { Icon(Icons.Default.Check, null, tint = activeColor, modifier = Modifier.size(11.dp)); Spacer(Modifier.width(3.dp)) }
+                        Text(label, fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurface.copy(0.7f))
+                    }
+                }
+            }
+        }
+    }
 }

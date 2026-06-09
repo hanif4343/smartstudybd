@@ -29,16 +29,20 @@ object AudienceFilter {
 
     // ── Single item check ────────────────────────────────────
 
-    fun userCanSee(audienceTags: String?, user: User?): Boolean {
+    fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = ""): Boolean {
+        // Admin override mode
+        if (adminOverrideTag.isNotBlank() && user?.isAdmin() == true) {
+            val tag = audienceTags?.trim() ?: ""
+            return if (tag.isBlank()) adminOverrideTag.equals("Job", ignoreCase = true)
+                   else tag.equals(adminOverrideTag.trim(), ignoreCase = true)
+        }
         val tag = audienceTags?.trim() ?: ""
         val cl  = user?.classLevel?.trim() ?: ""
         val ut  = user?.userType?.trim()   ?: ""
 
         return if (tag.isBlank()) {
-            // ফাঁকা tag → শুধু Job seeker
             ut.equals("Job", ignoreCase = true) || cl.isBlank()
         } else {
-            // নির্দিষ্ট tag → classLevel বা userType যেকোনোটা মিললেই হবে
             tag.equals(cl, ignoreCase = true) || tag.equals(ut, ignoreCase = true)
         }
     }
@@ -58,10 +62,10 @@ object AudienceFilter {
 
     // ── AppContent filtered view ─────────────────────────────
 
-    fun AppContent.forUser(user: User?) = copy(
-        quiz   = quiz.filterForUser(user),
-        qbank  = qbank.filterForUser(user),
-        study  = study.filterForUser(user)
+    fun AppContent.forUser(user: User?, adminOverrideTag: String = "") = copy(
+        quiz   = quiz.filter   { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        qbank  = qbank.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        study  = study.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) }
     )
 
     // ── Challenge opponent compatibility ─────────────────────

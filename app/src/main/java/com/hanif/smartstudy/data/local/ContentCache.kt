@@ -77,6 +77,16 @@ class ContentCache(private val context: Context) {
         return (prefs[KEY_CACHE_TIME] ?: 0L) > 0L
     }
 
+    /** Admin edit এর পরে cache invalidate করো */
+    suspend fun clearCache() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_STUDY_JSON)
+            prefs.remove(KEY_QUIZ_JSON)
+            prefs.remove(KEY_QBANK_JSON)
+            prefs[KEY_CACHE_TIME] = 0L
+        }
+    }
+
     suspend fun addStudyMinutes(minutes: Int) {
         val today = todayString()
         context.dataStore.edit { prefs ->

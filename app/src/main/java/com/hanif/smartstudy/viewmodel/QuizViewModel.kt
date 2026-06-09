@@ -135,6 +135,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun adminRefreshContent() {
+        viewModelScope.launch {
+            cache.clearCache()
+            setMode(_state.value.mode)
+        }
+    }
+
     fun navigateBack() {
         val path = _state.value.navPath
         timerJob?.cancel()
@@ -345,8 +352,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
-        val user = session.getCurrentUser()
-        val filtered = content.forUser(user)
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }
             StudyMode.QBANK -> filtered.qbank.map { QuestionItem.fromQBankItem(it) }
@@ -382,7 +390,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun rebuildSubTopics(content: AppContent, subject: String, mode: StudyMode) {
         val user     = session.getCurrentUser()
-        val filtered = content.forUser(user)
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject }.map { QuestionItem.fromQuizItem(it)  }
             StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject }.map { QuestionItem.fromQBankItem(it) }
@@ -399,7 +408,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
         val bookmarks = _state.value.bookmarkedIds
         val user      = session.getCurrentUser()
-        val filtered  = content.forUser(user)
+        val adminTag  = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered  = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
             StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }

@@ -101,6 +101,16 @@ fun MainScreen(
         studyViewModel.setMode(StudyMode.STUDY)
     }
 
+    // Admin audience tag পরিবর্তন হলে সব ViewModel reload
+    val menuState by menuViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(menuState.adminViewingTag) {
+        if (menuState.isAdmin) {
+            quizViewModel.adminRefreshContent()
+            qbankViewModel.adminRefreshContent()
+            studyViewModel.adminRefreshContent()
+        }
+    }
+
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
             DeepLinkAction.Type.QUIZ       -> { currentTab = BottomTab.QUIZ  }
