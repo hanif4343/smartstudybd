@@ -77,6 +77,9 @@ fun AdminPage(
                     }
             }
 
+            // Auto-load users when admin panel first opens
+            LaunchedEffect(Unit) { vm.loadActiveUsers() }
+
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
 
@@ -169,7 +172,7 @@ private fun ActiveUsersTab(
                 Text("কোনো ইউজার নেই", fontFamily = NotoSansBengali,
                     color = MutedText, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { vm.loadAll() }) {
+                OutlinedButton(onClick = { vm.loadActiveUsers() }) {
                     Text("Refresh", fontFamily = NotoSansBengali)
                 }
             }
