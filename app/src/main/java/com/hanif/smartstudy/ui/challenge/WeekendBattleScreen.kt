@@ -37,14 +37,9 @@ import java.util.*
 fun WeekendBattleScreen(vm: WeekendBattleViewModel = viewModel()) {
     val state by vm.state.collectAsState()
 
-    // Retry button এর জন্য — error হলে reload করার সুযোগ
+    // Tab open হলে একবার load করো
     LaunchedEffect(Unit) {
-        if (!vm.state.value.isLoading &&
-            vm.state.value.activeBattle == null &&
-            vm.state.value.upcomingBattle == null &&
-            vm.state.value.error == null) {
-            vm.loadBattleInfo()
-        }
+        vm.loadIfNeeded()
     }
 
     // Toast
