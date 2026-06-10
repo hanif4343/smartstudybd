@@ -32,6 +32,10 @@ import com.hanif.smartstudy.viewmodel.*
 fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
     val state by vm.state.collectAsState()
 
+    // battleVm সবসময় top-level এ — Compose rules: viewModel() কখনো when/if এর ভেতরে না
+    // কিন্তু init এ load করে না — loadIfNeeded() দিয়ে lazy load
+    val battleVm: WeekendBattleViewModel = viewModel()
+
     state.toast?.let { msg ->
         LaunchedEffect(msg) {
             kotlinx.coroutines.delay(2500)
@@ -87,11 +91,7 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
 
                 when (activeTab) {
                     0 -> ChallengeHubScreen(state, vm)
-                    // battleVm এখানে — শুধু tab=1 হলেই তৈরি হয়, আগে নয়
-                    1 -> {
-                        val battleVm: WeekendBattleViewModel = viewModel()
-                        WeekendBattleScreen(vm = battleVm)
-                    }
+                    1 -> WeekendBattleScreen(vm = battleVm)
                 }
             }
         }
