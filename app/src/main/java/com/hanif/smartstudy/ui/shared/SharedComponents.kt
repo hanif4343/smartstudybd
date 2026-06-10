@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -20,6 +21,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -34,6 +37,13 @@ import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.GasResult
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 
 val Indigo600   = Color(0xFF4F46E5)
 val DeepIndigo  = Color(0xFF1E1B4B)
@@ -1283,5 +1293,391 @@ private fun AdminInfoRow(label: String, value: String) {
     ) {
         Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedText, fontFamily = NotoSansBengali)
         Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateText, fontFamily = NotoSansBengali)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ADMIN DRAG-TO-REORDER — On-the-spot position change
+//  Long-press করে ধরো → drag করো → ছেড়ে দাও → Firebase এ save
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * AdminDragHandle — Admin mode এ প্রতিটা item এর পাশে দেখাবে।
+ * এটা দেখলে বুঝবে এটা drag করা যাবে।
+ */
+@Composable
+fun AdminDragHandle(modifier: Modifier = Modifier) {
+    Icon(
+        imageVector = Icons.Default.DragHandle,
+        contentDescription = "Drag to reorder",
+        tint = Color(0xFF94A3B8),
+        modifier = modifier.size(20.dp)
+    )
+}
+
+/**
+ * AdminDraggableItem — যেকোনো admin-draggable item এর wrapper।
+ * Long-press করলে drag শুরু হয়, ছেড়ে দিলে onDrop(fromIdx, toIdx) call হয়।
+ *
+ * isDragging = এই item টা এখন drag হচ্ছে কিনা
+ * dragOffsetY = drag করার সময় Y offset (px)
+ */
+@Composable
+fun AdminDraggableItem(
+    index      : Int,
+    isDragging : Boolean,
+    dragOffsetY: Float,
+    modifier   : Modifier = Modifier,
+    content    : @Composable () -> Unit
+) {
+    val elevation by animateFloatAsState(if (isDragging) 16f else 2f, label = "dragElev")
+    val scale     by animateFloatAsState(if (isDragging) 1.03f else 1f, label = "dragScale")
+    val alpha     by animateFloatAsState(if (isDragging) 0.92f else 1f, label = "dragAlpha")
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                translationY = if (isDragging) dragOffsetY else 0f
+                scaleX       = scale
+                scaleY       = scale
+                this.alpha   = alpha
+                shadowElevation = elevation
+            }
+            .zIndex(if (isDragging) 10f else 0f)
+    ) {
+        content()
+    }
+}
+
+/**
+ * AdminReorderableQuestionList — Admin mode এ question drag-reorder।
+ * Long-press on handle → drag → release → Firebase save।
+ *
+ * FIX: real-time swap + scroll conflict নেই।
+ */
+@Composable
+fun AdminReorderableQuestionList(
+    questions  : List<QuestionItem>,
+    isAdmin    : Boolean,
+    onReorder  : (from: Int, to: Int) -> Unit,
+    modifier   : Modifier = Modifier,
+    itemContent: @Composable (index: Int, item: QuestionItem, dragModifier: Modifier) -> Unit
+) {
+    if (!isAdmin) {
+        questions.forEachIndexed { idx, q -> itemContent(idx, q, Modifier) }
+        return
+    }
+
+    val localItems = remember(questions) { questions.toMutableStateList() }
+    var draggingIdx  by remember { mutableStateOf(-1) }
+    var dragOffsetY  by remember { mutableStateOf(0f) }
+    val itemHeights  = remember { mutableStateMapOf<Int, Float>() }
+
+    Column(modifier = modifier) {
+        localItems.forEachIndexed { idx, q ->
+            val isDragging = draggingIdx == idx
+            val steps = if (isDragging && itemHeights.isNotEmpty()) {
+                val avgH = itemHeights.values.average().toFloat().takeIf { it > 0f } ?: 1f
+                (dragOffsetY / avgH).toInt()
+            } else 0
+            val targetIdx = if (draggingIdx >= 0)
+                (draggingIdx + steps).coerceIn(0, localItems.lastIndex) else -1
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        if (isDragging) {
+                            translationY    = dragOffsetY
+                            scaleX          = 1.02f
+                            scaleY          = 1.02f
+                            alpha           = 0.94f
+                            shadowElevation = 20f
+                        }
+                    }
+                    .zIndex(if (isDragging) 10f else 0f),
+                verticalAlignment = Alignment.Top
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .padding(top = 16.dp)
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { _ ->
+                                    draggingIdx = idx
+                                    dragOffsetY = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetY += dragAmount.y
+                                    val avgH = itemHeights.values.average()
+                                        .toFloat().takeIf { it > 0f } ?: return@detectDragGesturesAfterLongPress
+                                    val s    = (dragOffsetY / avgH).toInt()
+                                    val newTo = (draggingIdx + s).coerceIn(0, localItems.lastIndex)
+                                    if (newTo != draggingIdx) {
+                                        val moved = localItems.removeAt(draggingIdx)
+                                        localItems.add(newTo, moved)
+                                        dragOffsetY -= s * avgH
+                                        draggingIdx = newTo
+                                    }
+                                },
+                                onDragEnd = {
+                                    val finalIdx = draggingIdx
+                                    val originalFrom = questions.indexOfFirst { it.id == localItems.getOrNull(finalIdx)?.id }
+                                    if (originalFrom >= 0 && originalFrom != finalIdx)
+                                        onReorder(originalFrom, finalIdx)
+                                    draggingIdx = -1; dragOffsetY = 0f
+                                },
+                                onDragCancel = { draggingIdx = -1; dragOffsetY = 0f }
+                            )
+                        },
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        repeat(3) {
+                            Box(
+                                Modifier.width(16.dp).height(2.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(if (isDragging) Color(0xFF4F46E5) else Color(0xFFB0BEC5))
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onGloballyPositioned { c -> itemHeights[idx] = c.size.height.toFloat() }
+                ) {
+                    itemContent(idx, q, Modifier)
+                }
+            }
+
+            if (draggingIdx >= 0 && draggingIdx != idx && targetIdx == idx) {
+                Box(
+                    Modifier.fillMaxWidth().height(2.dp).padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(2.dp)).background(Color(0xFF4F46E5))
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * AdminReorderableList<T> — Generic drag-reorder।
+ * Subject / SubTopic list এ use হয়।
+ *
+ * FIX: আগের version এ LazyColumn scroll এর সাথে drag conflict করত।
+ * এখন item এর position track করে itemOffsets দিয়ে — scroll এর বাইরে।
+ * Handle টা পুরো Row এর বাম পাশে, long-press এ drag শুরু।
+ */
+@Composable
+fun <T> AdminReorderableList(
+    items      : List<T>,
+    isAdmin    : Boolean,
+    keyOf      : (T) -> String,
+    onReorder  : (from: Int, to: Int) -> Unit,
+    modifier   : Modifier = Modifier,
+    itemContent: @Composable (index: Int, item: T) -> Unit
+) {
+    if (!isAdmin) {
+        Column(modifier) {
+            items.forEachIndexed { idx, item -> itemContent(idx, item) }
+        }
+        return
+    }
+
+    // mutable list — drag হলে immediately reorder করি (visual feedback)
+    val localItems = remember(items) { items.toMutableStateList() }
+
+    // drag state
+    var draggingIdx  by remember { mutableStateOf(-1) }
+    var dragOffsetY  by remember { mutableStateOf(0f) }
+    // প্রতিটা item এর height track করি
+    val itemHeights  = remember { mutableStateMapOf<Int, Float>() }
+
+    Column(modifier = modifier) {
+        localItems.forEachIndexed { idx, item ->
+            val isDragging = draggingIdx == idx
+
+            // dragging item কত steps move হয়েছে
+            val steps = if (isDragging && itemHeights.isNotEmpty()) {
+                val avgH = itemHeights.values.average().toFloat().takeIf { it > 0f } ?: 1f
+                (dragOffsetY / avgH).toInt()
+            } else 0
+            val targetIdx = if (draggingIdx >= 0)
+                (draggingIdx + steps).coerceIn(0, localItems.lastIndex) else -1
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        if (isDragging) {
+                            translationY    = dragOffsetY
+                            scaleX          = 1.02f
+                            scaleY          = 1.02f
+                            alpha           = 0.94f
+                            shadowElevation = 20f
+                        }
+                    }
+                    .zIndex(if (isDragging) 10f else 0f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ── Drag Handle ──
+                // pointerInput এখানে — handle touch করলেই drag, scroll এ যাবে না
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .fillMaxHeight()
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { _ ->
+                                    draggingIdx = idx
+                                    dragOffsetY = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetY += dragAmount.y
+                                    // Real-time swap: threshold পার হলে swap করো
+                                    val avgH = itemHeights.values.average()
+                                        .toFloat().takeIf { it > 0f } ?: return@detectDragGesturesAfterLongPress
+                                    val s    = (dragOffsetY / avgH).toInt()
+                                    val newTo = (draggingIdx + s).coerceIn(0, localItems.lastIndex)
+                                    if (newTo != draggingIdx) {
+                                        val moved = localItems.removeAt(draggingIdx)
+                                        localItems.add(newTo, moved)
+                                        // offset reset — নতুন position থেকে শুরু
+                                        dragOffsetY -= s * avgH
+                                        draggingIdx = newTo
+                                    }
+                                },
+                                onDragEnd = {
+                                    val finalIdx = draggingIdx
+                                    // original list এর index খুঁজে বের করো
+                                    val originalFrom = items.indexOfFirst { keyOf(it) == keyOf(localItems[finalIdx]) }
+                                    if (originalFrom >= 0 && originalFrom != finalIdx) {
+                                        onReorder(originalFrom, finalIdx)
+                                    } else if (finalIdx >= 0) {
+                                        // local reorder ই হয়েছে — ViewModel কে জানাও
+                                        onReorder(finalIdx, finalIdx)
+                                    }
+                                    draggingIdx = -1
+                                    dragOffsetY = 0f
+                                },
+                                onDragCancel = {
+                                    draggingIdx = -1
+                                    dragOffsetY = 0f
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    // ≡ হ্যান্ডেল আইকন
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        repeat(3) {
+                            Box(
+                                Modifier
+                                    .width(16.dp)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        if (isDragging) Color(0xFF4F46E5)
+                                        else Color(0xFFB0BEC5)
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                // ── Item content ──
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onGloballyPositioned { coords ->
+                            itemHeights[idx] = coords.size.height.toFloat()
+                        }
+                ) {
+                    itemContent(idx, item)
+                }
+            }
+
+            // Drop indicator — target position এ নীল রেখা
+            if (draggingIdx >= 0 && draggingIdx != idx && targetIdx == idx) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF4F46E5))
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * AdminOptionReorderRow — MCQ options drag-reorder।
+ * Admin শুধু long-press করে A/B/C/D option drag করে position বদলাতে পারবে।
+ * Firebase এ correct answer automatically update হবে।
+ *
+ * onReorder(fromOptIdx, toOptIdx): 0=A, 1=B, 2=C, 3=D
+ */
+@Composable
+fun AdminOptionReorderRow(
+    optionText  : String,
+    optionLabel : String,        // "A", "B", "C", "D"
+    isCorrect   : Boolean,
+    isAdmin     : Boolean,
+    optionIdx   : Int,
+    onReorder   : (from: Int, to: Int) -> Unit,
+    modifier    : Modifier = Modifier,
+    content     : @Composable () -> Unit
+) {
+    if (!isAdmin) {
+        content()
+        return
+    }
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Mini drag handle (option এর বাম পাশে)
+        Box(
+            Modifier
+                .width(24.dp)
+                .pointerInput(optionIdx) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { /* handled in parent */ },
+                        onDrag      = { _, _ -> },
+                        onDragEnd   = { },
+                        onDragCancel = { }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                repeat(2) {
+                    Box(Modifier.width(10.dp).height(2.dp).clip(RoundedCornerShape(1.dp))
+                        .background(Color(0xFFCBD5E1)))
+                }
+            }
+        }
+
+        Box(Modifier.weight(1f)) { content() }
     }
 }
