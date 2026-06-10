@@ -5,8 +5,8 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.messaging.FirebaseMessaging
+import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.data.remote.ImgBbResult
@@ -20,7 +20,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 // ─────────────────────────────────────────────────────────────
 //  MenuViewModel — all Menu tab state
@@ -99,6 +106,56 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val session = SessionManager(app)
     private val cache   = ContentCache(app)
     private val ctx     = app.applicationContext
+
+    // ── Firebase REST helpers ─────────────────────────────────
+    private val http    = OkHttpClient()
+    private val JSON_MT = "application/json; charset=utf-8".toMediaType()
+    private val fbUrl   get() = BuildConfig.FIREBASE_URL.trimEnd('/')
+    private val fbAuth  get() = BuildConfig.FIREBASE_DB_SECRET
+
+    private suspend fun fbPatch(path: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
+        val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
+            .toRequestBody(JSON_MT)
+        val req = Request.Builder()
+            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .patch(body).build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw Exception("fbPatch $path failed: ${r.code}")
+        }
+    }
+
+    private suspend fun fbSet(path: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
+        val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
+            .toRequestBody(JSON_MT)
+        val req = Request.Builder()
+            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .put(body).build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw Exception("fbSet $path failed: ${r.code}")
+        }
+    }
+
+    private suspend fun fbPost(path: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
+        val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
+            .toRequestBody(JSON_MT)
+        val req = Request.Builder()
+            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .post(body).build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw Exception("fbPost $path failed: ${r.code}")
+        }
+    }
+
+    private suspend fun fbGet(path: String): JSONObject? = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .get().build()
+        http.newCall(req).execute().use { r ->
+            val txt = r.body?.string() ?: return@withContext null
+            if (txt == "null") return@withContext null
+            JSONObject(txt)
+        }
+    }
 
     private val _state = MutableStateFlow(MenuUiState())
     val state: StateFlow<MenuUiState> = _state.asStateFlow()
@@ -332,21 +389,20 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadAllUsers() {
         if (!(_state.value.isAdmin)) return
-        try {
-            val ref = FirebaseDatabase.getInstance().getReference("users")
-            ref.get().addOnSuccessListener { snapshot ->
+        viewModelScope.launch {
+            try {
+                val json = fbGet("users") ?: return@launch
                 val list = mutableListOf<Map<String, String>>()
-                snapshot.children.forEach { child ->
+                json.keys().forEach { key ->
+                    val child = json.optJSONObject(key) ?: return@forEach
                     val map = mutableMapOf<String, String>()
-                    child.children.forEach { field ->
-                        map[field.key ?: ""] = field.value?.toString() ?: ""
-                    }
+                    child.keys().forEach { field -> map[field] = child.optString(field) }
                     list.add(map)
                 }
                 _state.update { it.copy(allUsers = list) }
+            } catch (e: Exception) {
+                Log.e("Admin", "loadAllUsers: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e("Admin", "loadAllUsers: ${e.message}")
         }
     }
 
@@ -398,8 +454,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val ref = FirebaseDatabase.getInstance().getReference("broadcasts").push()
-                ref.setValue(mapOf(
+                fbPost("broadcasts", mapOf(
                     "title"       to title,
                     "body"        to body,
                     "targetPhone" to (targetPhone ?: "ALL"),
@@ -417,16 +472,21 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun adminViewAs(phone: String) {
         if (!_state.value.isAdmin) return
-        try {
-            val ref = FirebaseDatabase.getInstance().getReference("users/${phone.replace("+", "")}")
-            ref.get().addOnSuccessListener { snap ->
-                val map = mutableMapOf<String, Any>()
-                snap.children.forEach { map[it.key ?: ""] = it.value ?: "" }
-                val user = User.fromFirebaseMap(map)
-                _state.update { it.copy(viewingAsUser = user, toast = "👁 ${user.name} হিসেবে দেখছেন") }
+        viewModelScope.launch {
+            try {
+                val cleanPhone = phone.replace("+", "")
+                val json = fbGet("users/$cleanPhone")
+                if (json != null) {
+                    val map = mutableMapOf<String, Any>()
+                    json.keys().forEach { map[it] = json.get(it) }
+                    val user = User.fromFirebaseMap(map)
+                    _state.update { it.copy(viewingAsUser = user, toast = "👁 ${user.name} হিসেবে দেখছেন") }
+                } else {
+                    _state.update { it.copy(toast = "❌ ইউজার পাওয়া যায়নি") }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(toast = "❌ ইউজার লোড হয়নি") }
             }
-        } catch (e: Exception) {
-            _state.update { it.copy(toast = "❌ ইউজার লোড হয়নি") }
         }
     }
 
@@ -570,32 +630,34 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveUserToFirebase(user: User) {
         val phone = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
-        try {
-            val ref = FirebaseDatabase.getInstance().getReference("users/$phone")
-            val update = mutableMapOf<String, Any>()
-            user.name?.let    { update["Name"]    = it }
-            user.picture?.let { update["Picture"] = it }
-            update["XP"] = user.xp
-            ref.updateChildren(update)
-        } catch (e: Exception) {
-            Log.e("Firebase", "saveUser: ${e.message}")
+        viewModelScope.launch {
+            try {
+                val update = mutableMapOf<String, Any?>()
+                user.name?.let    { update["Name"]    = it }
+                user.picture?.let { update["Picture"] = it }
+                update["XP"] = user.xp
+                fbPatch("users/$phone", update)
+            } catch (e: Exception) {
+                Log.e("Firebase", "saveUser: ${e.message}")
+            }
         }
     }
 
     private fun saveProfileToFirebase(user: User) {
         val phone = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
-        try {
-            val ref = FirebaseDatabase.getInstance().getReference("users/$phone")
-            val update = mutableMapOf<String, Any>()
-            user.name?.let      { if (it.isNotBlank()) update["Name"]       = it }
-            user.userType?.let  { if (it.isNotBlank()) update["UserType"]   = it }
-            // classLevel খালি হলেও save করতে হবে (Job seeker = classLevel ফাঁকা)
-            update["ClassLevel"] = user.classLevel ?: ""
-            user.picture?.let   { update["Picture"] = it }
-            update["XP"] = user.xp
-            ref.updateChildren(update)
-        } catch (e: Exception) {
-            Log.e("Firebase", "saveProfile: ${e.message}")
+        viewModelScope.launch {
+            try {
+                val update = mutableMapOf<String, Any?>()
+                user.name?.let      { if (it.isNotBlank()) update["Name"]       = it }
+                user.userType?.let  { if (it.isNotBlank()) update["UserType"]   = it }
+                // classLevel খালি হলেও save করতে হবে (Job seeker = classLevel ফাঁকা)
+                update["ClassLevel"] = user.classLevel ?: ""
+                user.picture?.let   { update["Picture"] = it }
+                update["XP"] = user.xp
+                fbPatch("users/$phone", update)
+            } catch (e: Exception) {
+                Log.e("Firebase", "saveProfile: ${e.message}")
+            }
         }
     }
 }
