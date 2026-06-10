@@ -25,7 +25,6 @@ import com.hanif.smartstudy.ui.ads.AdBannerView
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.WeekendBattleViewModel
-import com.hanif.smartstudy.data.model.WeekendBattleUiState
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -42,12 +41,10 @@ fun WeekendBattleScreen(vm: WeekendBattleViewModel = viewModel()) {
         vm.loadIfNeeded()
     }
 
-    // Toast
     state.toast?.let { msg ->
         LaunchedEffect(msg) { kotlinx.coroutines.delay(3000); vm.dismissToast() }
     }
 
-    // Exam mode এ back = exit confirm
     if (state.isExamMode) {
         var showExitDialog by remember { mutableStateOf(false) }
         BackHandler { showExitDialog = true }
@@ -77,7 +74,7 @@ fun WeekendBattleScreen(vm: WeekendBattleViewModel = viewModel()) {
     BattleHubScreen(state = state, vm = vm)
 }
 
-// ── Hub Screen (info + leaderboard) ───────────────────────
+// ── Hub Screen ────────────────────────────────────────────
 
 @Composable
 private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewModel) {
@@ -88,29 +85,27 @@ private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewMo
             .verticalScroll(rememberScrollState())
             .padding(bottom = 32.dp)
     ) {
-        // Header gradient
+        // Header
         Box(
             modifier = Modifier.fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color(0xFF7C3AED), Color(0xFFDB2777))))
                 .padding(16.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🏆", fontSize = 28.sp)
-                    Column {
-                        Text("মেগা চ্যাম্পিয়নশিপ", fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold, color = Color.White,
-                            fontFamily = NotoSansBengali)
-                        Text("প্রতি সপ্তাহে শুক্র-শনি • সবাই একসাথে লড়াই",
-                            fontSize = 11.sp, color = Color.White.copy(0.8f),
-                            fontFamily = NotoSansBengali)
-                    }
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🏆", fontSize = 28.sp)
+                Column {
+                    Text("মেগা চ্যাম্পিয়নশিপ", fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold, color = Color.White,
+                        fontFamily = NotoSansBengali)
+                    Text("প্রতি সপ্তাহে শুক্র-শনি • সবাই একসাথে লড়াই",
+                        fontSize = 11.sp, color = Color.White.copy(0.8f),
+                        fontFamily = NotoSansBengali)
                 }
             }
         }
 
-        // ── Banner Ad — header এর নিচে ──
+        // Banner Ad
         AdBannerView(adUnitId = AdManager.BANNER_WEEKEND)
 
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -123,50 +118,47 @@ private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewMo
             }
 
             state.error?.let { err ->
-                ErrorCard(err) { vm.dismissError() }
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick  = { vm.dismissError(); vm.loadBattleInfo() },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(12.dp),
-                    colors   = ButtonDefaults.buttonColors(Color(0xFF7C3AED))
-                ) {
-                    Text("🔄 পুনরায় চেষ্টা করুন", fontFamily = NotoSansBengali,
-                        fontWeight = FontWeight.ExtraBold)
+                Card(Modifier.fillMaxWidth(), RoundedCornerShape(12.dp),
+                    CardDefaults.cardColors(Color(0xFFFFF1F2)),
+                    border = BorderStroke(1.dp, Color(0xFFFCA5A5))) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("⚠️ $err", fontFamily = NotoSansBengali, color = Color(0xFF9F1239))
+                        Button(
+                            onClick = { vm.dismissError(); vm.loadBattleInfo() },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(Color(0xFF7C3AED))
+                        ) {
+                            Text("🔄 পুনরায় চেষ্টা করুন", fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold)
+                        }
+                    }
                 }
                 return@Column
             }
 
-            // Toast banner
-            state.toast?.let { msg ->
-                ToastBanner(msg)
-            }
+            state.toast?.let { ToastBanner(it) }
 
             val battle = state.activeBattle ?: state.upcomingBattle
 
             if (battle == null) {
-                // কোনো battle নেই
                 NoBattleCard()
             } else {
-                // Battle info card
                 BattleInfoCard(battle = battle, state = state, onStart = { vm.startExam() })
-
-                // Leaderboard
                 if (state.leaderboard.isNotEmpty()) {
                     BattleLeaderboard(ranked = state.leaderboard)
                 }
-
-                // My result
                 if (state.hasSubmitted && state.myEntry != null) {
                     MyResultCard(entry = state.myEntry!!, battle = battle)
                 }
             }
 
-            // How it works
             BattleHowItWorksCard()
         }
     }
 }
+
+// ── Battle Info Card ──────────────────────────────────────
 
 @Composable
 private fun BattleInfoCard(
@@ -175,130 +167,131 @@ private fun BattleInfoCard(
     onStart : () -> Unit
 ) {
     val now       = System.currentTimeMillis()
-    val isActive  = battle.startsAt <= now && now <= battle.endsAt
-    val isUpcoming = battle.startsAt > now
-    val fmt       = SimpleDateFormat("EEE d MMM, hh:mm a", Locale("bn"))
+    val isActive  = battle.startsAt > 0 && battle.endsAt > 0 &&
+                    battle.startsAt <= now && now <= battle.endsAt
+    val isUpcoming = battle.startsAt > 0 && battle.startsAt > now
+
+    // Safe date format — crash করবে না
+    val startStr = safeDateFormat(battle.startsAt)
+    val endStr   = safeDateFormat(battle.endsAt)
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(18.dp),
-        colors   = CardDefaults.cardColors(Color.White),
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(Color.White),
         elevation = CardDefaults.cardElevation(3.dp)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text(battle.title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                Text(battle.title.ifBlank { "সাপ্তাহিক চ্যাম্পিয়নশিপ" },
+                    fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF1E293B), fontFamily = NotoSansBengali,
                     modifier = Modifier.weight(1f))
-                StatusBadge(isActive = isActive, isUpcoming = isUpcoming)
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(when {
+                            isActive   -> Color(0xFF10B981)
+                            isUpcoming -> Color(0xFF3B82F6)
+                            else       -> Color(0xFF94A3B8)
+                        })
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        when { isActive -> "চলছে"; isUpcoming -> "আসছে"; else -> "শেষ" },
+                        fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali
+                    )
+                }
             }
 
-            // Stats row
+            // Stats
             Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
-                BattleStatChip("📚 ${battle.subject}", Color(0xFF4F46E5))
+                if (battle.subject.isNotBlank()) {
+                    BattleStatChip("📚 ${battle.subject}", Color(0xFF4F46E5))
+                }
                 BattleStatChip("❓ ${battle.questionCount}টি", Color(0xFF0891B2))
                 BattleStatChip("⏱ ${battle.timeLimitSec / 60} মিনিট", Color(0xFF059669))
             }
 
-            // Reward
-            Row(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFFEF3C7))
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("🎁", fontSize = 16.sp)
-                Column {
-                    Text("পুরস্কার", fontSize = 10.sp, color = Color(0xFF92400E),
-                        fontFamily = NotoSansBengali)
-                    Text("🥇 +${battle.xpReward} XP  🥈 +${battle.xpReward/2} XP  🥉 +${battle.xpReward/4} XP",
-                        fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFFD97706), fontFamily = NotoSansBengali)
+            if (battle.startsAt > 0) {
+                Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("শুরু", fontSize = 10.sp, color = Color(0xFF64748B),
+                            fontFamily = NotoSansBengali)
+                        Text(startStr, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                    }
+                    if (battle.endsAt > 0) {
+                        Column(Modifier.weight(1f)) {
+                            Text("শেষ", fontSize = 10.sp, color = Color(0xFF64748B),
+                                fontFamily = NotoSansBengali)
+                            Text(endStr, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                        }
+                    }
                 }
             }
 
-            // Participants count
-            if (battle.participantCount > 0) {
-                Text("👥 ${battle.participantCount} জন অংশ নিচ্ছে",
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Text("🏅 ${battle.participantCount} জন অংশ নিয়েছে",
                     fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                Text("🎖 পুরস্কার: ${battle.xpReward} XP",
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
             }
 
-            // Time info
-            if (isUpcoming) {
-                Text("শুরু হবে: ${fmt.format(Date(battle.startsAt))}",
-                    fontSize = 11.sp, color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
-            } else if (isActive) {
-                Text("শেষ হবে: ${fmt.format(Date(battle.endsAt))}",
-                    fontSize = 11.sp, color = Color(0xFFEF4444), fontFamily = NotoSansBengali)
-            }
-
-            // CTA button
-            when {
-                state.hasSubmitted -> {
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFF0FDF4))
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("✅ তুমি ইতিমধ্যে অংশ নিয়েছ!", fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold, color = Color(0xFF166534),
-                            fontFamily = NotoSansBengali)
-                    }
+            if (isActive && !state.hasSubmitted) {
+                Button(
+                    onClick  = onStart,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.buttonColors(
+                        Brush.horizontalGradient(listOf(Color(0xFF7C3AED), Color(0xFFDB2777)))
+                            .let { Color(0xFF7C3AED) }
+                    )
+                ) {
+                    Text("🚀 পরীক্ষা শুরু করো", fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
                 }
-                isActive -> {
-                    Button(
-                        onClick  = onStart,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape    = RoundedCornerShape(14.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF7C3AED))
-                    ) {
-                        Text("⚔️ পরীক্ষায় অংশ নাও", fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-                    }
+            } else if (state.hasSubmitted) {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF0FDF4))
+                        .padding(12.dp),
+                    Alignment.Center
+                ) {
+                    Text("✅ তুমি ইতিমধ্যে অংশ নিয়েছ!", fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold, color = Color(0xFF166534),
+                        fontFamily = NotoSansBengali)
                 }
-                isUpcoming -> {
-                    OutlinedButton(
-                        onClick  = {},
-                        enabled  = false,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape    = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("⏳ এখনো শুরু হয়নি", fontSize = 14.sp,
-                            fontFamily = NotoSansBengali)
-                    }
+            } else if (isUpcoming) {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFEFF6FF))
+                        .padding(12.dp),
+                    Alignment.Center
+                ) {
+                    Text("⏳ $startStr থেকে শুরু হবে", fontSize = 12.sp,
+                        color = Color(0xFF1D4ED8), fontFamily = NotoSansBengali,
+                        textAlign = TextAlign.Center)
                 }
             }
         }
     }
 }
 
+// ── Leaderboard ───────────────────────────────────────────
+
 @Composable
 private fun BattleLeaderboard(ranked: List<BattleRankEntry>) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(16.dp),
-        colors   = CardDefaults.cardColors(Color.White)
-    ) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
+        CardDefaults.cardColors(Color.White), CardDefaults.cardElevation(2.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("🏆 লাইভ লিডারবোর্ড", fontSize = 14.sp,
-                fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B),
-                fontFamily = NotoSansBengali)
-
-            ranked.take(10).forEach { r ->
-                BattleRankRow(r)
-            }
-
-            if (ranked.size > 10) {
-                Text("... মোট ${ranked.size} জন অংশ নিচ্ছে", fontSize = 10.sp,
-                    color = Color(0xFF94A3B8), fontFamily = NotoSansBengali,
-                    modifier = Modifier.align(Alignment.CenterHorizontally))
-            }
+            Text("🏆 লিডারবোর্ড", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+            ranked.take(20).forEach { r -> BattleRankRow(r) }
         }
     }
 }
@@ -306,14 +299,12 @@ private fun BattleLeaderboard(ranked: List<BattleRankEntry>) {
 @Composable
 private fun BattleRankRow(r: BattleRankEntry) {
     val rankEmoji = when (r.rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#${r.rank}" }
-    val bg        = if (r.isMe) Color(0xFFEEF2FF) else Color(0xFFF8FAFC)
-    val border    = if (r.isMe) Color(0xFF4F46E5) else Color.Transparent
-
     Row(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(bg)
-            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .background(if (r.isMe) Color(0xFFEEF2FF) else Color(0xFFF8FAFC))
+            .border(1.dp, if (r.isMe) Color(0xFF4F46E5) else Color.Transparent,
+                RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -321,31 +312,25 @@ private fun BattleRankRow(r: BattleRankEntry) {
         Text(rankEmoji, fontSize = if (r.rank <= 3) 18.sp else 13.sp,
             fontWeight = FontWeight.ExtraBold)
         Column(Modifier.weight(1f)) {
-            Text(
-                text = if (r.isMe) "${r.entry.name} (তুমি)" else r.entry.name,
-                fontSize = 13.sp, fontWeight = if (r.isMe) FontWeight.ExtraBold else FontWeight.Bold,
+            Text(if (r.isMe) "${r.entry.name} (তুমি)" else r.entry.name,
+                fontSize = 13.sp,
+                fontWeight = if (r.isMe) FontWeight.ExtraBold else FontWeight.Bold,
                 color = if (r.isMe) Color(0xFF4F46E5) else Color(0xFF1E293B),
-                fontFamily = NotoSansBengali
-            )
-            Text("${r.entry.score}/${r.entry.total} • ${r.entry.accuracy.toInt()}% • ${r.entry.timeTakenSec}s",
+                fontFamily = NotoSansBengali)
+            Text("${r.entry.score}/${r.entry.total} • ${r.entry.accuracy.toInt()}%",
                 fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("+${r.entry.xpEarned} XP", fontSize = 11.sp,
-                fontWeight = FontWeight.ExtraBold, color = Color(0xFF7C3AED),
-                fontFamily = NotoSansBengali)
-        }
+        Text("+${r.entry.xpEarned} XP", fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold, color = Color(0xFF7C3AED),
+            fontFamily = NotoSansBengali)
     }
 }
 
 @Composable
 private fun MyResultCard(entry: BattleEntry, battle: WeekendBattle) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(16.dp),
-        colors   = CardDefaults.cardColors(Color(0xFFEEF2FF)),
-        border   = BorderStroke(1.5.dp, Color(0xFF4F46E5).copy(0.4f))
-    ) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
+        CardDefaults.cardColors(Color(0xFFEEF2FF)),
+        border = BorderStroke(1.5.dp, Color(0xFF4F46E5).copy(0.4f))) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("📊 আমার ফলাফল", fontSize = 13.sp,
                 fontWeight = FontWeight.ExtraBold, color = Color(0xFF3730A3),
@@ -365,8 +350,75 @@ private fun StatBox(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
             color = color, fontFamily = NotoSansBengali)
-        Text(label, fontSize = 9.sp, color = Color(0xFF64748B),
-            fontFamily = NotoSansBengali)
+        Text(label, fontSize = 9.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+    }
+}
+
+@Composable
+private fun NoBattleCard() {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(18.dp),
+        CardDefaults.cardColors(Color(0xFFF5F3FF))) {
+        Column(Modifier.padding(24.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("🏆", fontSize = 40.sp)
+            Text("এই মুহূর্তে কোনো চ্যাম্পিয়নশিপ নেই",
+                fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF4C1D95), fontFamily = NotoSansBengali,
+                textAlign = TextAlign.Center)
+            Text("প্রতি শুক্রবার রাত ৮টায় নতুন চ্যাম্পিয়নশিপ শুরু হয়",
+                fontSize = 12.sp, color = Color(0xFF6D28D9), fontFamily = NotoSansBengali,
+                textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun BattleHowItWorksCard() {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
+        CardDefaults.cardColors(Color(0xFFF5F3FF)),
+        border = BorderStroke(1.dp, Color(0xFFDDD6FE))) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("কীভাবে কাজ করে?", fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold, color = Color(0xFF4C1D95),
+                fontFamily = NotoSansBengali)
+            listOf(
+                "📅" to "প্রতি শুক্র-শনি সবাই একই প্রশ্নে পরীক্ষা দেয়",
+                "📊" to "Score + Speed মিলিয়ে rank নির্ধারণ হয়",
+                "🥇" to "১ম: +500 XP, ২য়: +250 XP, ৩য়: +125 XP",
+                "⚡" to "প্রতি সঠিক উত্তরে +5 XP পাবে সবাই"
+            ).forEach { (icon, text) ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(icon, fontSize = 14.sp)
+                    Text(text, fontSize = 12.sp, color = Color(0xFF5B21B6),
+                        fontFamily = NotoSansBengali, lineHeight = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToastBanner(msg: String) {
+    Box(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1E293B))
+            .padding(12.dp),
+        Alignment.Center
+    ) {
+        Text(msg, color = Color.White, fontSize = 13.sp,
+            fontFamily = NotoSansBengali, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun BattleStatChip(label: String, color: Color) {
+    Box(Modifier.clip(RoundedCornerShape(8.dp))
+        .background(color.copy(0.1f))
+        .padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            color = color, fontFamily = NotoSansBengali)
     }
 }
 
@@ -374,9 +426,9 @@ private fun StatBox(label: String, value: String, color: Color) {
 
 @Composable
 private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewModel) {
-    val battle    = state.activeBattle ?: return
+    val battle   = state.activeBattle ?: return
     val questions = state.questions
-    val currentQ  = questions.getOrNull(state.currentQIndex) ?: return
+    val currentQ = questions.getOrNull(state.currentQIndex) ?: return
 
     Scaffold(
         topBar = {
@@ -390,8 +442,10 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                         Text("🏆 মেগা চ্যাম্পিয়নশিপ", fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold, color = Color.White,
                             fontFamily = NotoSansBengali)
-                        Text(battle.subject, fontSize = 10.sp,
-                            color = Color.White.copy(0.7f), fontFamily = NotoSansBengali)
+                        if (battle.subject.isNotBlank()) {
+                            Text(battle.subject, fontSize = 10.sp,
+                                color = Color.White.copy(0.7f), fontFamily = NotoSansBengali)
+                        }
                     }
                     BattleExamTimer(timerSec = state.timerSec, totalSec = battle.timeLimitSec)
                 }
@@ -399,10 +453,8 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
         },
         bottomBar = {
             Column {
-                // Progress dots
-                androidx.compose.foundation.lazy.LazyRow(
-                    modifier = Modifier.fillMaxWidth()
-                        .background(Color.White)
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().background(Color.White)
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -420,8 +472,6 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                         )
                     }
                 }
-
-                // Nav row
                 Row(
                     Modifier.fillMaxWidth().background(Color.White)
                         .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -430,7 +480,7 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                     OutlinedButton(
                         onClick = { vm.goToQuestion(state.currentQIndex - 1) },
                         enabled = state.currentQIndex > 0,
-                        shape   = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.ArrowBack, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -442,15 +492,15 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                             fontWeight = FontWeight.ExtraBold, color = Color(0xFF1E293B),
                             fontFamily = NotoSansBengali)
                         Text("${state.answers.size} উত্তর", fontSize = 10.sp,
-                            color = Color(0xFF10B981), fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold)
+                            color = Color(0xFF10B981), fontWeight = FontWeight.Bold,
+                            fontFamily = NotoSansBengali)
                     }
 
                     if (state.currentQIndex < questions.size - 1) {
                         Button(
                             onClick = { vm.goToQuestion(state.currentQIndex + 1) },
-                            shape   = RoundedCornerShape(12.dp),
-                            colors  = ButtonDefaults.buttonColors(Color(0xFF7C3AED))
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(Color(0xFF7C3AED))
                         ) {
                             Text("পরে", fontFamily = NotoSansBengali, fontSize = 12.sp)
                             Spacer(Modifier.width(4.dp))
@@ -460,8 +510,8 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                         var showDialog by remember { mutableStateOf(false) }
                         Button(
                             onClick = { showDialog = true },
-                            shape   = RoundedCornerShape(12.dp),
-                            colors  = ButtonDefaults.buttonColors(Color(0xFF10B981))
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(Color(0xFF10B981))
                         ) {
                             Text("✅ জমা দাও", fontFamily = NotoSansBengali, fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold)
@@ -506,7 +556,6 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Question card — ChallengeExamScreen এর মতো
             Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
                 CardDefaults.cardColors(Color.White), CardDefaults.cardElevation(2.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -518,8 +567,10 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                             Text("#${state.currentQIndex + 1}", fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold, color = Color(0xFF7C3AED))
                         }
-                        Text(currentQ.subTopic, fontSize = 10.sp,
-                            color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        if (currentQ.subTopic.isNotBlank()) {
+                            Text(currentQ.subTopic, fontSize = 10.sp,
+                                color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        }
                     }
                     Text(currentQ.question.replace(Regex("<[^>]+>"), ""),
                         fontSize = 14.sp, fontWeight = FontWeight.Bold,
@@ -529,7 +580,7 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
                     listOf(currentQ.optionA, currentQ.optionB, currentQ.optionC, currentQ.optionD)
                         .filterIndexed { _, opt -> opt.isNotBlank() }
                         .forEachIndexed { i, opt ->
-                            val optNum     = i + 1
+                            val optNum = i + 1
                             val isSelected = state.answers[currentQ.id] == optNum
                             Row(
                                 modifier = Modifier.fillMaxWidth()
@@ -561,12 +612,12 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
         }
     }
 
-    // Submitting overlay
     if (state.isSubmitting) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(0.5f)),
             contentAlignment = Alignment.Center) {
             Card(shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                Column(Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     CircularProgressIndicator(color = Color(0xFF7C3AED))
                     Text("জমা হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
@@ -576,114 +627,38 @@ private fun BattleExamScreen(state: WeekendBattleUiState, vm: WeekendBattleViewM
     }
 }
 
-// ── Small composables ─────────────────────────────────────
+// ── Timer ─────────────────────────────────────────────────
 
 @Composable
 private fun BattleExamTimer(timerSec: Int, totalSec: Int) {
-    val pct   = timerSec.toFloat() / totalSec.coerceAtLeast(1)
+    val mins = timerSec / 60
+    val secs = timerSec % 60
+    val pct  = if (totalSec > 0) timerSec.toFloat() / totalSec else 0f
     val color = when {
-        pct > 0.5f  -> Color.White
-        pct > 0.25f -> Color(0xFFFBBF24)
-        else        -> Color(0xFFFCA5A5)
+        pct > 0.5f -> Color(0xFF10B981)
+        pct > 0.25f -> Color(0xFFF59E0B)
+        else -> Color(0xFFEF4444)
     }
-    val min = timerSec / 60
-    val sec = timerSec % 60
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("%02d:%02d".format(min, sec), fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
-        Text("সময়", fontSize = 9.sp, color = Color.White.copy(0.5f), fontFamily = NotoSansBengali)
-    }
-}
-
-@Composable
-private fun StatusBadge(isActive: Boolean, isUpcoming: Boolean) {
-    val (bg, text) = when {
-        isActive   -> Pair(Color(0xFF10B981), "🔴 চলছে")
-        isUpcoming -> Pair(Color(0xFF3B82F6), "⏳ আসছে")
-        else       -> Pair(Color(0xFF94A3B8), "✅ শেষ")
-    }
-    Box(Modifier.clip(RoundedCornerShape(8.dp)).background(bg.copy(0.15f))
-        .padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Text(text, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-            color = bg, fontFamily = NotoSansBengali)
+    Box(
+        Modifier.clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(0.15f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(String.format("%02d:%02d", mins, secs), fontSize = 16.sp,
+            fontWeight = FontWeight.ExtraBold, color = color)
     }
 }
 
-@Composable
-private fun BattleStatChip(label: String, color: Color) {
-    Box(Modifier.clip(RoundedCornerShape(20.dp)).background(color.copy(0.1f))
-        .padding(horizontal = 10.dp, vertical = 4.dp)) {
-        Text(label, fontSize = 10.sp, color = color,
-            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-    }
-}
+// ── Helpers ───────────────────────────────────────────────
 
-@Composable
-private fun NoBattleCard() {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
-        CardDefaults.cardColors(Color(0xFFF3E8FF))) {
-        Column(Modifier.padding(24.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("🏆", fontSize = 48.sp)
-            Text("এই মুহূর্তে কোনো চ্যাম্পিয়নশিপ নেই", fontSize = 14.sp,
-                fontWeight = FontWeight.ExtraBold, color = Color(0xFF4A1D96),
-                fontFamily = NotoSansBengali, textAlign = TextAlign.Center)
-            Text("প্রতি শুক্রবার রাত ৮টায় নতুন চ্যাম্পিয়নশিপ শুরু হয়",
-                fontSize = 12.sp, color = Color(0xFF7C3AED), fontFamily = NotoSansBengali,
-                textAlign = TextAlign.Center)
-        }
-    }
-}
-
-@Composable
-private fun BattleHowItWorksCard() {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
-        CardDefaults.cardColors(Color(0xFFF0F9FF)),
-        border = BorderStroke(1.dp, Color(0xFFBAE6FD))) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("কীভাবে কাজ করে?", fontSize = 13.sp,
-                fontWeight = FontWeight.ExtraBold, color = Color(0xFF0C4A6E),
-                fontFamily = NotoSansBengali)
-            listOf(
-                "🗓️" to "প্রতি শুক্র-শনি সবাই একই প্রশ্নে পরীক্ষা দেয়",
-                "📊" to "Score + Speed মিলিয়ে rank নির্ধারণ হয়",
-                "🥇" to "১ম: +${500} XP, ২য়: +${250} XP, ৩য়: +${125} XP",
-                "⚡" to "প্রতি সঠিক উত্তরে +5 XP পাবে সবাই"
-            ).forEach { (icon, text) ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(icon, fontSize = 14.sp)
-                    Text(text, fontSize = 12.sp, color = Color(0xFF0369A1),
-                        fontFamily = NotoSansBengali, lineHeight = 16.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ErrorCard(msg: String, onDismiss: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(12.dp),
-        CardDefaults.cardColors(Color(0xFFFFF1F2))) {
-        Row(Modifier.padding(12.dp), Arrangement.spacedBy(8.dp), Alignment.CenterVertically) {
-            Text("⚠️", fontSize = 16.sp)
-            Text(msg, fontSize = 12.sp, color = Color(0xFF991B1B),
-                fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-            TextButton(onClick = onDismiss) {
-                Text("✕", color = Color(0xFF991B1B))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToastBanner(msg: String) {
-    val isSuccess = msg.startsWith("✅")
-    val bg = if (isSuccess) Color(0xFFF0FDF4) else Color(0xFFFFF7ED)
-    val tc = if (isSuccess) Color(0xFF166534) else Color(0xFF92400E)
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(bg)
-        .padding(12.dp)) {
-        Text(msg, fontSize = 12.sp, color = tc, fontFamily = NotoSansBengali,
-            fontWeight = FontWeight.Bold)
+private fun safeDateFormat(timestampMs: Long): String {
+    if (timestampMs <= 0L) return "—"
+    return try {
+        // Locale.ENGLISH — Bengali locale SimpleDateFormat crash করে
+        val fmt = SimpleDateFormat("EEE d MMM, hh:mm a", Locale.ENGLISH)
+        fmt.format(Date(timestampMs))
+    } catch (e: Exception) {
+        "—"
     }
 }
