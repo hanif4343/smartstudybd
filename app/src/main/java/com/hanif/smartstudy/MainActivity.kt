@@ -88,8 +88,9 @@ class MainActivity : ComponentActivity() {
     ) {
         googleSignInCallback      = onSuccess
         googleSignInErrorCallback = onError
-        // Sign out আগে করো — fresh account picker দেখানোর জন্য
-        googleSignInClient.signOut().addOnCompleteListener {
+        // signOut করে fresh account picker দেখাও
+        // addOnCompleteListener main thread এ run করে, তাই launch সরাসরি কাজ করবে
+        googleSignInClient.signOut().addOnCompleteListener(this) {
             googleSignInLauncher.launch(googleSignInClient.signInIntent)
         }
     }
