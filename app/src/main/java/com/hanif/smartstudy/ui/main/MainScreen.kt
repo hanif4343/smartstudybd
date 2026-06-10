@@ -90,7 +90,8 @@ fun MainScreen(
     val qbankViewModel : QuizViewModel = viewModel(key = "qbank_vm")
     val studyViewModel : QuizViewModel = viewModel(key = "study_vm")
     val menuViewModel       : MenuViewModel       = viewModel()
-    val challengeViewModel : ChallengeViewModel   = viewModel()
+    val challengeViewModel  : ChallengeViewModel  = viewModel()
+    val battleViewModel     : com.hanif.smartstudy.viewmodel.WeekendBattleViewModel = viewModel()
     val challengeState by challengeViewModel.state.collectAsState()
     val pendingInvites = challengeState.pendingInvites.size
 
@@ -196,7 +197,7 @@ fun MainScreen(
                     onAchievementUnlocked = onAchievementUnlocked,
                     onStreakUpdated       = onStreakUpdated
                 )
-                BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel)
+                BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
                 BottomTab.MENU  -> MenuScreen(
                     vm                   = menuViewModel,
                     onLogout             = onLogout,
