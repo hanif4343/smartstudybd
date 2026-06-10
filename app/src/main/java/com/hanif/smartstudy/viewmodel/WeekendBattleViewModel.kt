@@ -26,7 +26,15 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
     private var timerJob        : Job? = null
     private var leaderboardJob  : Job? = null
 
-    init { loadBattleInfo() }
+    private var hasLoaded = false   // একবারই auto-load হবে
+
+    // Tab open হলে call করো — init এ না
+    fun loadIfNeeded() {
+        if (!hasLoaded) {
+            hasLoaded = true
+            loadBattleInfo()
+        }
+    }
 
     // ── Battle info + leaderboard লোড করো ───────────────
 
