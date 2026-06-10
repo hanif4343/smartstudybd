@@ -149,7 +149,7 @@ private fun BattleHubScreen(state: WeekendBattleUiState, vm: WeekendBattleViewMo
                     BattleLeaderboard(ranked = state.leaderboard)
                 }
                 if (state.hasSubmitted && state.myEntry != null) {
-                    MyResultCard(entry = state.myEntry!!, battle = battle)
+                    MyResultCard(entry = state.myEntry, battle = battle)
                 }
             }
 
