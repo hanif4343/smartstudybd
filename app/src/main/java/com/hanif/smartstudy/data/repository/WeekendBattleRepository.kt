@@ -24,7 +24,18 @@ class WeekendBattleRepository {
     }
 
     private val db: FirebaseDatabase by lazy {
-        FirebaseDatabase.getInstance(BuildConfig.FIREBASE_URL)
+        try {
+            val url = BuildConfig.FIREBASE_URL
+            if (url.isNullOrBlank()) {
+                Log.w(TAG, "FIREBASE_URL empty, using default instance")
+                FirebaseDatabase.getInstance()
+            } else {
+                FirebaseDatabase.getInstance(url)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "FirebaseDatabase init error: ${e.message}")
+            FirebaseDatabase.getInstance()
+        }
     }
 
     private val ref get() = db.getReference(ROOT)
