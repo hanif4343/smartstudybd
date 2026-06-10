@@ -28,6 +28,7 @@ class SmartStudyApp : Application() {
             try {
                 MobileAds.initialize(this@SmartStudyApp) {
                     Log.d("AdMob", "SDK initialized")
+                    com.hanif.smartstudy.ui.ads.AdInitTracker.isReady = true
                 }
             } catch (e: Exception) {
                 Log.e("AdMob", "Init failed: ${e.message}")
