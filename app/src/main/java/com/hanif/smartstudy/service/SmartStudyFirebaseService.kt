@@ -10,12 +10,18 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.MainActivity
 import com.hanif.smartstudy.R
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 // ─────────────────────────────────────────────────────────────
 //  FCM Service — token save to Firebase RTDB + show notification
@@ -27,25 +33,40 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
         const val CHANNEL_ID   = "smart_study_channel"
         const val CHANNEL_NAME = "Smart Study"
 
+        private val http   = OkHttpClient()
+        private val JSON_MT = "application/json; charset=utf-8".toMediaType()
+        private val fbUrl   get() = BuildConfig.FIREBASE_URL.trimEnd('/')
+        private val fbAuth  get() = BuildConfig.FIREBASE_DB_SECRET
+
+        private fun fbPatchAsync(path: String, data: Map<String, Any?>) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL })
+                        .toString().toRequestBody(JSON_MT)
+                    val req = Request.Builder()
+                        .url("$fbUrl/$path.json?auth=$fbAuth")
+                        .patch(body).build()
+                    http.newCall(req).execute().close()
+                } catch (e: Exception) {
+                    Log.e("FBRest", "fbPatch $path failed: ${e.message}")
+                }
+            }
+        }
+
         // Save FCM token to Firebase RTDB under users/{phone}/fcmToken
         fun saveFcmTokenToFirebase(context: Context, token: String) {
             val session = SessionManager(context)
             val user    = session.getCurrentUser() ?: return
             val phone   = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
 
-            try {
-                val db  = com.google.firebase.database.FirebaseDatabase.getInstance()
-                val ref = db.getReference("users/$phone")
-                ref.child("fcmToken").setValue(token)
-                ref.child("lastSeen").setValue(System.currentTimeMillis())
-                // Update user object with token
-                CoroutineScope(Dispatchers.IO).launch {
-                    session.saveUser(user.copy(fcmToken = token))
-                }
-                Log.d("FCM", "Token saved: $token")
-            } catch (e: Exception) {
-                Log.e("FCM", "Token save failed: ${e.message}")
+            fbPatchAsync("users/$phone", mapOf(
+                "fcmToken" to token,
+                "lastSeen" to System.currentTimeMillis()
+            ))
+            CoroutineScope(Dispatchers.IO).launch {
+                session.saveUser(user.copy(fcmToken = token))
             }
+            Log.d("FCM", "Token save initiated: $token")
         }
 
         // Record presence: online/offline in Firebase RTDB
@@ -54,23 +75,13 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             val user    = session.getCurrentUser() ?: return
             val phone   = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
 
-            try {
-                val db  = com.google.firebase.database.FirebaseDatabase.getInstance()
-                val ref = db.getReference("presence/$phone")
-                ref.child("online").setValue(isOnline)
-                ref.child("lastSeen").setValue(System.currentTimeMillis())
-                ref.child("name").setValue(user.name ?: "")
-
-                // On disconnect: auto-mark offline
-                if (isOnline) {
-                    ref.child("online").onDisconnect().setValue(false)
-                    ref.child("lastSeen").onDisconnect().setValue(
-                        com.google.firebase.database.ServerValue.TIMESTAMP
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e("Presence", "updatePresence failed: ${e.message}")
-            }
+            fbPatchAsync("presence/$phone", mapOf(
+                "online"   to isOnline,
+                "lastSeen" to System.currentTimeMillis(),
+                "name"     to (user.name ?: "")
+            ))
+            // Note: onDisconnect() is Firebase SDK-only feature.
+            // Presence will update next time updatePresence(false) is called (app pause/stop).
         }
 
         // Record app session time to Firebase (for admin)
@@ -80,23 +91,10 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             val phone   = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
             if (sessionMinutes <= 0) return
 
-            try {
-                val db  = com.google.firebase.database.FirebaseDatabase.getInstance()
-                val ref = db.getReference("users/$phone")
-                // Increment total session time server-side
-                ref.child("totalAppMinutes").runTransaction(object :
-                    com.google.firebase.database.Transaction.Handler {
-                    override fun doTransaction(mutableData: com.google.firebase.database.MutableData): com.google.firebase.database.Transaction.Result {
-                        val cur = mutableData.getValue(Int::class.java) ?: 0
-                        mutableData.value = cur + sessionMinutes
-                        return com.google.firebase.database.Transaction.success(mutableData)
-                    }
-                    override fun onComplete(error: com.google.firebase.database.DatabaseError?, committed: Boolean, snapshot: com.google.firebase.database.DataSnapshot?) {}
-                })
-                ref.child("lastActive").setValue(System.currentTimeMillis())
-            } catch (e: Exception) {
-                Log.e("Session", "recordAppSession failed: ${e.message}")
-            }
+            // REST PATCH - lastActive update (increment handled server-side via GAS if needed)
+            fbPatchAsync("users/$phone", mapOf(
+                "lastActive" to System.currentTimeMillis()
+            ))
         }
     }
 
@@ -115,7 +113,7 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
 
         val title = message.notification?.title ?: message.data["title"] ?: "Smart Study"
         val body  = message.notification?.body  ?: message.data["body"]  ?: ""
-        val data  = message.data  // url, questionId, tab, type
+        val data  = message.data
 
         showNotification(title, body, data)
     }
@@ -127,7 +125,6 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
     ) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Create channel (API 26+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT
@@ -135,7 +132,6 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             nm.createNotificationChannel(channel)
         }
 
-        // FCM data payload → Intent extras (deep link এর জন্য)
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
             data.forEach { (key, value) -> putExtra(key, value) }
