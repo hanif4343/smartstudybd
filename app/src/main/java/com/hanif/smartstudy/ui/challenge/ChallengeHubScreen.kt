@@ -31,10 +31,7 @@ import com.hanif.smartstudy.viewmodel.*
 @Composable
 fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
     val state by vm.state.collectAsState()
-    // WeekendBattleViewModel এখানে একবারই তৈরি হয়, tab switch এ নতুন instance হয় না
-    val battleVm: WeekendBattleViewModel = viewModel()
 
-    // Toast
     state.toast?.let { msg ->
         LaunchedEffect(msg) {
             kotlinx.coroutines.delay(2500)
@@ -42,7 +39,6 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
         }
     }
 
-    // Exam / Result screen — back handler
     val isInsideChallenge = state.screen !is ChallengeScreen.Home
     if (isInsideChallenge) {
         androidx.activity.compose.BackHandler(
@@ -51,13 +47,11 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
         ) { vm.goHome() }
     }
 
-    // ── Challenge vs Championship tab ──
-    var activeTab by remember { mutableStateOf(0) }   // 0=Challenge, 1=Championship
+    var activeTab by remember { mutableStateOf(0) }
 
-    when (val screen = state.screen) {
+    when (state.screen) {
         is ChallengeScreen.Home -> {
             Column(Modifier.fillMaxSize()) {
-                // Tab row — only on Home
                 TabRow(
                     selectedTabIndex = activeTab,
                     containerColor   = Color(0xFF1E1B4B),
@@ -93,7 +87,11 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
 
                 when (activeTab) {
                     0 -> ChallengeHubScreen(state, vm)
-                    1 -> WeekendBattleScreen(vm = battleVm)   // ← parent থেকে vm পাঠাও
+                    // battleVm এখানে — শুধু tab=1 হলেই তৈরি হয়, আগে নয়
+                    1 -> {
+                        val battleVm: WeekendBattleViewModel = viewModel()
+                        WeekendBattleScreen(vm = battleVm)
+                    }
                 }
             }
         }
