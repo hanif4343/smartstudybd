@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'com.google.gms.google-services'
+apply plugin: 'com.google.firebase.crashlytics'
 
 android {
     namespace 'com.hanif.smartstudy'
@@ -97,9 +98,12 @@ dependencies {
     implementation 'com.google.firebase:firebase-analytics-ktx'
     implementation 'com.google.firebase:firebase-database-ktx'
     implementation 'com.google.firebase:firebase-auth-ktx'
+    implementation 'com.google.firebase:firebase-crashlytics-ktx'
 
     // ── Google Sign-In (legacy — সবচেয়ে stable, minSdk 21 compatible) ──
     implementation 'com.google.android.gms:play-services-auth:21.2.0'
+    // ── Google AdMob ──
+    implementation 'com.google.android.gms:play-services-ads:23.2.0'
 
     // ── Image picker ──
     implementation 'androidx.activity:activity-ktx:1.8.2'

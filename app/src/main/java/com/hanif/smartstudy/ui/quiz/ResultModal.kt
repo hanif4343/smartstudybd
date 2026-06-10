@@ -14,12 +14,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.AdManager
 
 // ─────────────────────────────────────────────────────────
 // Result Modal (Bottom Sheet style)
@@ -31,10 +34,36 @@ fun ResultModal(
     onRetry  : () -> Unit,
     onHome   : () -> Unit
 ) {
+    val context    = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // ── Interstitial: background load করো ──
+    var interstitialAd by remember { mutableStateOf<InterstitialAd?>(null) }
+    LaunchedEffect(Unit) {
+        AdManager.loadInterstitial(
+            context  = context,
+            onLoaded = { interstitialAd = it },
+            onFailed = { interstitialAd = null }
+        )
+    }
+
+    // Home button এ ad দেখাও তারপর navigate করো
+    val onHomeWithAd: () -> Unit = {
+        val activity = context as? android.app.Activity
+        if (activity != null && interstitialAd != null) {
+            AdManager.showInterstitial(
+                activity    = activity,
+                ad          = interstitialAd,
+                onDismissed = { onHome() }
+            )
+            interstitialAd = null
+        } else {
+            onHome()
+        }
+    }
+
     ModalBottomSheet(
-        onDismissRequest  = onHome,
+        onDismissRequest  = onHomeWithAd,
         sheetState        = sheetState,
         containerColor    = CardBg,
         shape             = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -99,7 +128,7 @@ fun ResultModal(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
-                        onClick  = onHome,
+                        onClick  = onHomeWithAd,   // ← ad দেখাবে তারপর home
                         modifier = Modifier.weight(1f),
                         shape    = RoundedCornerShape(14.dp)
                     ) {

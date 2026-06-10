@@ -29,10 +29,12 @@ import com.hanif.smartstudy.viewmodel.*
 // ─────────────────────────────────────────────────────────
 
 @Composable
-fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
+fun ChallengeZone(
+    vm       : ChallengeViewModel = viewModel(),
+    battleVm : WeekendBattleViewModel = viewModel()
+) {
     val state by vm.state.collectAsState()
 
-    // Toast
     state.toast?.let { msg ->
         LaunchedEffect(msg) {
             kotlinx.coroutines.delay(2500)
@@ -40,7 +42,6 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
         }
     }
 
-    // Exam / Result screen — back handler
     val isInsideChallenge = state.screen !is ChallengeScreen.Home
     if (isInsideChallenge) {
         androidx.activity.compose.BackHandler(
@@ -49,13 +50,11 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
         ) { vm.goHome() }
     }
 
-    // ── Challenge vs Championship tab ──
-    var activeTab by remember { mutableStateOf(0) }   // 0=Challenge, 1=Championship
+    var activeTab by remember { mutableStateOf(0) }
 
-    when (val screen = state.screen) {
+    when (state.screen) {
         is ChallengeScreen.Home -> {
             Column(Modifier.fillMaxSize()) {
-                // Tab row — only on Home
                 TabRow(
                     selectedTabIndex = activeTab,
                     containerColor   = Color(0xFF1E1B4B),
@@ -91,7 +90,7 @@ fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
 
                 when (activeTab) {
                     0 -> ChallengeHubScreen(state, vm)
-                    1 -> WeekendBattleScreen()
+                    1 -> ChampionshipComingSoon()
                 }
             }
         }
@@ -204,7 +203,7 @@ private fun InviteCard(invite: ChallengeInvite, onAccept: () -> Unit, onDecline:
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onDecline, modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonColors(Color.White, Color(0xFFEF4444), Color(0xFFEF4444).copy(0.3f), Color(0xFF64748B))) {
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))) {
                     Text("❌ না", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                 }
                 Button(onClick = onAccept, modifier = Modifier.weight(1f),
@@ -237,6 +236,44 @@ private fun HowItWorksCard() {
                         fontFamily = NotoSansBengali, lineHeight = 16.sp)
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ChampionshipComingSoon() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF5F3FF)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Text("🏆", fontSize = 64.sp)
+            Text(
+                "মেগা চ্যাম্পিয়নশিপ",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF4C1D95),
+                fontFamily = NotoSansBengali
+            )
+            Text(
+                "শীঘ্রই আসছে...",
+                fontSize = 16.sp,
+                color = Color(0xFF6D28D9),
+                fontFamily = NotoSansBengali
+            )
+            Text(
+                "প্রতি শুক্রবার রাত ৮টায় নতুন চ্যাম্পিয়নশিপ শুরু হবে",
+                fontSize = 12.sp,
+                color = Color(0xFF7C3AED),
+                fontFamily = NotoSansBengali,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         }
     }
 }

@@ -203,73 +203,23 @@ fun HomeScreen(
 }
 
 // ═══════════════════════════════════════════════════════════
-// AD PLACEHOLDERS — এখানে পরে AdMob SDK দিয়ে replace করো
+// REAL ADMOB ADS
 // ═══════════════════════════════════════════════════════════
 
 @Composable
 fun AdBannerPlaceholder() {
-    // TODO: Replace with AdMob BannerAd — AdSize.BANNER (320x50)
-    // AdView(context).apply { adUnitId = "ca-app-pub-XXXXX/YYYYY"; loadAd(AdRequest.Builder().build()) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFFFF7ED))
-            .border(1.dp, Color(0xFFFB923C), RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
-            Modifier.clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFFFB923C))
-                .padding(horizontal = 5.dp, vertical = 2.dp)
-        ) {
-            Text("AD", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.ExtraBold)
-        }
-        Text("স্পনসর করা বিজ্ঞাপন — AdMob Banner (320×50)",
-            fontSize = 11.sp, color = Color(0xFF92400E),
-            fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-        Text("✕", fontSize = 14.sp, color = Color(0xFF9CA3AF))
-    }
+    com.hanif.smartstudy.ui.ads.AdBannerView(
+        adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
+    )
 }
 
 @Composable
 fun AdNativePlaceholder() {
-    // TODO: Replace with AdMob Native Ad (NativeAdView)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White)
-            .border(1.5.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
-            .padding(10.dp),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
-            contentAlignment = Alignment.Center
-        ) { Text("📢", fontSize = 20.sp) }
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("স্পনসর কন্টেন্ট", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    color = TextPrimary, fontFamily = NotoSansBengali)
-                Box(Modifier.clip(RoundedCornerShape(4.dp))
-                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp)) {
-                    Text("বিজ্ঞাপন", fontSize = 8.sp, color = Color(0xFF9CA3AF))
-                }
-            }
-            Text("Native Ad placeholder — AdMob NativeAdView",
-                fontSize = 10.sp, color = TextMuted, fontFamily = NotoSansBengali)
-        }
-        Box(
-            Modifier.clip(RoundedCornerShape(6.dp)).background(PrimaryIndigo)
-                .padding(horizontal = 10.dp, vertical = 4.dp)
-        ) { Text("দেখুন", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold) }
-    }
+    // Native Ad — Banner দিয়ে replace করা হচ্ছে (Native ad XML layout ছাড়া কাজ করে না)
+    // একটু বেশি জায়গায় banner দেখাও
+    com.hanif.smartstudy.ui.ads.AdBannerView(
+        adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
+    )
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -24,7 +24,19 @@ class WeekendBattleRepository {
     }
 
     private val db: FirebaseDatabase by lazy {
-        FirebaseDatabase.getInstance(BuildConfig.FIREBASE_URL)
+        try {
+            val url = BuildConfig.FIREBASE_URL
+            // placeholder মান বা invalid URL হলে default instance নাও
+            if (url.isNullOrBlank() || url.contains("%%") || !url.startsWith("https://")) {
+                android.util.Log.w(TAG, "FIREBASE_URL invalid ($url), using default instance")
+                FirebaseDatabase.getInstance()
+            } else {
+                FirebaseDatabase.getInstance(url)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "FirebaseDatabase init error: ${e.message}")
+            FirebaseDatabase.getInstance()
+        }
     }
 
     private val ref get() = db.getReference(ROOT)
@@ -178,38 +190,51 @@ class WeekendBattleRepository {
 
     private fun battleFromSnap(snap: DataSnapshot): WeekendBattle? {
         return try {
+            if (!snap.exists()) return null
             @Suppress("UNCHECKED_CAST")
             val m = snap.value as? Map<String, Any> ?: return null
             WeekendBattle(
-                id               = snap.key ?: "",
-                title            = m["title"]?.toString() ?: "সাপ্তাহিক চ্যাম্পিয়নশিপ",
+                id               = snap.key ?: return null,
+                title            = m["title"]?.toString()   ?: "সাপ্তাহিক চ্যাম্পিয়নশিপ",
                 subject          = m["subject"]?.toString() ?: "",
-                questionIds      = (m["questionIds"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
-                questionCount    = m["questionCount"]?.toString()?.toIntOrNull() ?: 20,
-                timeLimitSec     = m["timeLimitSec"]?.toString()?.toIntOrNull() ?: 1200,
-                startsAt         = m["startsAt"]?.toString()?.toLongOrNull() ?: 0L,
-                endsAt           = m["endsAt"]?.toString()?.toLongOrNull() ?: 0L,
-                status           = m["status"]?.toString() ?: BattleStatus.UPCOMING.name,
-                xpReward         = m["xpReward"]?.toString()?.toIntOrNull() ?: 500,
+                // Firebase questionIds List বা Map হিসেবে আসতে পারে
+                questionIds      = when (val qi = m["questionIds"]) {
+                                       is List<*>  -> qi.mapNotNull { it?.toString() }
+                                       is Map<*, *> -> qi.values.mapNotNull { it?.toString() }
+                                       else        -> emptyList()
+                                   },
+                questionCount    = m["questionCount"]?.toString()?.toIntOrNull()    ?: 20,
+                timeLimitSec     = m["timeLimitSec"]?.toString()?.toIntOrNull()     ?: 1200,
+                startsAt         = m["startsAt"]?.toString()?.toLongOrNull()        ?: 0L,
+                endsAt           = m["endsAt"]?.toString()?.toLongOrNull()          ?: 0L,
+                status           = m["status"]?.toString()                          ?: BattleStatus.UPCOMING.name,
+                xpReward         = m["xpReward"]?.toString()?.toIntOrNull()         ?: 500,
                 participantCount = m["participantCount"]?.toString()?.toIntOrNull() ?: 0
             )
-        } catch (e: Exception) { null }
+        } catch (e: Exception) {
+            android.util.Log.e("WeekendBattleRepo", "battleFromSnap error: ${e.message}")
+            null
+        }
     }
 
     private fun entryFromSnap(snap: DataSnapshot): BattleEntry? {
         return try {
+            if (!snap.exists()) return null
             @Suppress("UNCHECKED_CAST")
             val m = snap.value as? Map<String, Any> ?: return null
             BattleEntry(
-                phone        = m["phone"]?.toString() ?: snap.key?.replace(",", ".") ?: "",
-                name         = m["name"]?.toString() ?: "Unknown",
-                score        = m["score"]?.toString()?.toIntOrNull() ?: 0,
-                total        = m["total"]?.toString()?.toIntOrNull() ?: 0,
-                accuracy     = m["accuracy"]?.toString()?.toFloatOrNull() ?: 0f,
+                phone        = m["phone"]?.toString()        ?: snap.key?.replace("_", ".") ?: "",
+                name         = m["name"]?.toString()         ?: "অজানা",
+                score        = m["score"]?.toString()?.toIntOrNull()        ?: 0,
+                total        = m["total"]?.toString()?.toIntOrNull()        ?: 0,
+                accuracy     = m["accuracy"]?.toString()?.toFloatOrNull()   ?: 0f,
                 timeTakenSec = m["timeTakenSec"]?.toString()?.toIntOrNull() ?: 0,
                 submittedAt  = m["submittedAt"]?.toString()?.toLongOrNull() ?: 0L,
-                xpEarned     = m["xpEarned"]?.toString()?.toIntOrNull() ?: 0
+                xpEarned     = m["xpEarned"]?.toString()?.toIntOrNull()     ?: 0
             )
-        } catch (e: Exception) { null }
+        } catch (e: Exception) {
+            android.util.Log.e("WeekendBattleRepo", "entryFromSnap error: ${e.message}")
+            null
+        }
     }
 }

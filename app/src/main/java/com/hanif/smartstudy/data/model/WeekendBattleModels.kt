@@ -42,20 +42,20 @@ data class BattleRankEntry(
 
 // ViewModel UI state
 data class WeekendBattleUiState(
-    val activeBattle      : WeekendBattle?      = null,
-    val upcomingBattle    : WeekendBattle?      = null,
+    val activeBattle      : WeekendBattle?        = null,
+    val upcomingBattle    : WeekendBattle?        = null,
     val leaderboard       : List<BattleRankEntry> = emptyList(),
-    val myEntry           : BattleEntry?        = null,
-    val hasSubmitted      : Boolean             = false,
+    val myEntry           : BattleEntry?          = null,
+    val hasSubmitted      : Boolean               = false,
     // Exam
-    val questions         : List<QuestionItem>  = emptyList(),
-    val answers           : MutableMap<String, Int> = mutableMapOf(),
-    val currentQIndex     : Int                 = 0,
-    val timerSec          : Int                 = 0,
-    val isExamMode        : Boolean             = false,
-    val isSubmitting      : Boolean             = false,
+    val questions         : List<QuestionItem>    = emptyList(),
+    val answers           : Map<String, Int>      = emptyMap(),   // MutableMap থেকে Map — crash fix
+    val currentQIndex     : Int                   = 0,
+    val timerSec          : Int                   = 0,
+    val isExamMode        : Boolean               = false,
+    val isSubmitting      : Boolean               = false,
     // UI
-    val isLoading         : Boolean             = false,
-    val error             : String?             = null,
-    val toast             : String?             = null
+    val isLoading         : Boolean               = false,
+    val error             : String?               = null,
+    val toast             : String?               = null
 )

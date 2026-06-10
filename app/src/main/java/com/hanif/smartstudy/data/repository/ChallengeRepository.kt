@@ -22,7 +22,18 @@ class ChallengeRepository {
     }
 
     private val db: FirebaseDatabase by lazy {
-        FirebaseDatabase.getInstance(BuildConfig.FIREBASE_URL)
+        try {
+            val url = BuildConfig.FIREBASE_URL
+            if (url.isNullOrBlank() || url.contains("%%") || !url.startsWith("https://")) {
+                android.util.Log.w(TAG, "FIREBASE_URL invalid, using default instance")
+                FirebaseDatabase.getInstance()
+            } else {
+                FirebaseDatabase.getInstance(url)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "FirebaseDatabase init: ${e.message}")
+            FirebaseDatabase.getInstance()
+        }
     }
 
     private val challengesRef get() = db.getReference("Challenges")
