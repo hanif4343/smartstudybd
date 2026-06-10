@@ -29,12 +29,11 @@ import com.hanif.smartstudy.viewmodel.*
 // ─────────────────────────────────────────────────────────
 
 @Composable
-fun ChallengeZone(vm: ChallengeViewModel = viewModel()) {
+fun ChallengeZone(
+    vm       : ChallengeViewModel = viewModel(),
+    battleVm : WeekendBattleViewModel = viewModel()
+) {
     val state by vm.state.collectAsState()
-
-    // battleVm সবসময় top-level এ — Compose rules: viewModel() কখনো when/if এর ভেতরে না
-    // কিন্তু init এ load করে না — loadIfNeeded() দিয়ে lazy load
-    val battleVm: WeekendBattleViewModel = viewModel()
 
     state.toast?.let { msg ->
         LaunchedEffect(msg) {
@@ -204,7 +203,7 @@ private fun InviteCard(invite: ChallengeInvite, onAccept: () -> Unit, onDecline:
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onDecline, modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonColors(Color.White, Color(0xFFEF4444), Color(0xFFEF4444).copy(0.3f), Color(0xFF64748B))) {
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))) {
                     Text("❌ না", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                 }
                 Button(onClick = onAccept, modifier = Modifier.weight(1f),
