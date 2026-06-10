@@ -125,7 +125,7 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(
                     isLoading     = false,
                     questions     = questions,
-                    answers       = mutableMapOf(),
+                    answers       = emptyMap(),
                     currentQIndex = 0,
                     timerSec      = battle.timeLimitSec,
                     isExamMode    = true
@@ -139,9 +139,8 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun answerQuestion(questionId: String, option: Int) {
-        val answers = _state.value.answers.toMutableMap()
-        answers[questionId] = option
-        _state.update { it.copy(answers = answers) }
+        val updated = _state.value.answers.toMutableMap().also { it[questionId] = option }
+        _state.update { it.copy(answers = updated.toMap()) }
     }
 
     fun goToQuestion(index: Int) {
