@@ -80,6 +80,8 @@ fun MainScreen(
         when {
             showSearch                   -> showSearch = false
             showTyping                   -> showTyping = false
+            // Menu tab এ থাকলে MenuScreen এর নিজস্ব BackHandler handle করবে
+            currentTab == BottomTab.MENU -> { /* MenuScreen BackHandler consume করবে */ }
             currentTab != BottomTab.HOME -> currentTab = BottomTab.HOME
             else                         -> showExitDialog = true
         }
