@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.menu.sections
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -69,7 +70,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "📋 Logs")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -82,6 +83,8 @@ fun AdminPage(
 
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
+            // Auto-load debug log phone list when tab 6 opens
+            LaunchedEffect(tab) { if (tab == 6) vm.loadDebugLogPhones() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -97,6 +100,7 @@ fun AdminPage(
                 3 -> ReportQueueTab(state, vm)
                 4 -> AddQuestionTab(state, vm)
                 5 -> BulkAudienceTab(state, vm)
+                6 -> LogsTab(state, vm)
             }
         }
     }
@@ -706,8 +710,97 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
     }
 }
 
+// ── Logs tab (Admin) ──
 @Composable
-private fun AdminTabField(label: String, value: String, onChange: (String) -> Unit, minLines: Int = 1) {
+private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
+    val sdf = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
+    var selectedPhone by remember { mutableStateOf("") }
+    var phoneExp by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+
+        Text("📋 অ্যাপ লগ (Remote Logcat)", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+            color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 8.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            ExposedDropdownMenuBox(expanded = phoneExp, onExpandedChange = { phoneExp = it },
+                modifier = Modifier.weight(1f)) {
+                OutlinedTextField(
+                    value = selectedPhone.ifBlank { "নিজের ফোন (default)" },
+                    onValueChange = {}, readOnly = true,
+                    label = { Text("ফোন নম্বর বাছাই করো", fontFamily = NotoSansBengali, fontSize = 11.sp) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(phoneExp) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                )
+                ExposedDropdownMenu(expanded = phoneExp, onDismissRequest = { phoneExp = false }) {
+                    DropdownMenuItem(text = { Text("নিজের ফোন (default)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                        onClick = { selectedPhone = ""; phoneExp = false; vm.loadDebugLogs("") })
+                    state.debugLogPhones.forEach { p ->
+                        DropdownMenuItem(text = { Text(p, fontSize = 12.sp) },
+                            onClick = { selectedPhone = p; phoneExp = false; vm.loadDebugLogs(p) })
+                    }
+                }
+            }
+
+            OutlinedButton(onClick = { vm.loadDebugLogPhones(); vm.loadDebugLogs(selectedPhone) },
+                modifier = Modifier.height(56.dp)) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        if (state.isLoadingLogs) {
+            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (state.debugLogs.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📋", fontSize = 36.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("কোনো লগ পাওয়া যায়নি। উপরে \"নিজের ফোন\" বা একটা নম্বর সিলেক্ট করে Refresh দাও।",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = MutedText,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp))
+                }
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(state.debugLogs) { entry ->
+                    val color = when (entry.level) {
+                        "E" -> RedWrong
+                        "W" -> Color(0xFFD97706)
+                        "I" -> Indigo600
+                        else -> MutedText
+                    }
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(CardBg)
+                    ) {
+                        Column(Modifier.padding(8.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("${entry.level} • ${entry.tag}", fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold, color = color)
+                                Text(if (entry.ts > 0) sdf.format(Date(entry.ts)) else "",
+                                    fontSize = 9.sp, color = MutedText)
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            SelectionContainer {
+                                Text(entry.msg, fontSize = 10.sp, color = SlateText,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
     OutlinedTextField(value = value, onValueChange = onChange,
         label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
         modifier = Modifier.fillMaxWidth(), minLines = minLines, shape = RoundedCornerShape(10.dp),
