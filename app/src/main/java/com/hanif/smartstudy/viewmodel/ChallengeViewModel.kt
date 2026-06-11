@@ -352,7 +352,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 if (challenge.getStatus() == ChallengeStatus.PENDING ||
                    (challenge.getStatus() == ChallengeStatus.WAITING &&
                     challenge.allAccepted() &&
-                    challenge.creatorPhone == _state.value.myPhone) {
+                    challenge.creatorPhone == _state.value.myPhone)) {
                     repo.startChallenge(challengeId)
                 }
 
@@ -707,7 +707,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(isLoading = false, error = "চ্যালেঞ্জ তৈরি ব্যর্থ হয়েছে") }
                 return@launch
             }
-            // সরাসরি Exam এ যাও — creator একাই পরীক্ষা দেবে
+            // সরাসরি Exam 에 যাও — creator একাই পরীক্ষা দেবে
             val ghostChallenge = repo.getChallenge(id)
             val questions = c.quiz.filter { it.id in questionIds }.map { QuestionItem.fromQuizItem(it) }
             _state.update { it.copy(
