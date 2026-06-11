@@ -55,8 +55,17 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val nm = context.getSystemService(NotificationManager::class.java)
                 if (nm.getNotificationChannel(CHANNEL_FCM) == null) {
-                    NotificationChannel(CHANNEL_FCM, "Smart Study", NotificationManager.IMPORTANCE_DEFAULT)
-                        .apply { description = "Admin notifications" }
+                    NotificationChannel(CHANNEL_FCM, "Smart Study", NotificationManager.IMPORTANCE_HIGH)
+                        .apply {
+                            description = "Admin notifications"
+                            enableVibration(true)
+                            setSound(
+                                android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
+                                android.media.AudioAttributes.Builder()
+                                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                                    .build()
+                            )
+                        }
                         .also { nm.createNotificationChannel(it) }
                 }
             }
@@ -105,7 +114,14 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
                 if (notifTime > lastCheck) {
                     val title = notif.get("title")?.asString ?: "Smart Study"
                     val msgBody = notif.get("body")?.asString ?: ""
-                    showLocalNotification(title, msgBody)
+                    val extras = mapOf(
+                        "url"        to (notif.get("url")?.asString ?: ""),
+                        "type"       to (notif.get("type")?.asString ?: ""),
+                        "questionId" to (notif.get("questionId")?.asString ?: ""),
+                        "tab"        to (notif.get("tab")?.asString ?: ""),
+                        "challengeId" to (notif.get("challengeId")?.asString ?: "")
+                    ).filterValues { it.isNotBlank() }
+                    showLocalNotification(title, msgBody, extras)
                     markAsRead(firebaseBase, phone, key, fbAuth)
                 }
             }
@@ -119,13 +135,16 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
         Result.success()
     }
 
-    private fun showLocalNotification(title: String, body: String) {
+    private fun showLocalNotification(title: String, body: String, extras: Map<String, String> = emptyMap()) {
         createChannel(applicationContext)
         val nm = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         val tapIntent = PendingIntent.getActivity(
-            applicationContext, 0,
-            Intent(applicationContext, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_CLEAR_TOP },
+            applicationContext, System.currentTimeMillis().toInt(),
+            Intent(applicationContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+                extras.forEach { (k, v) -> putExtra(k, v) }
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -136,7 +155,9 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setContentIntent(tapIntent)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .build()
 
         nm.notify(System.currentTimeMillis().toInt(), notif)
