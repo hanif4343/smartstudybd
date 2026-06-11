@@ -680,12 +680,15 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         reportKey      : String,
         status         : String,
         userPhone      : String,
-        questionSnippet: String = ""
+        questionSnippet: String = "",
+        userName       : String = "",
+        questionId     : String = "",
+        tab            : String = ""
     ) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             when (com.hanif.smartstudy.data.remote.GasApiService
-                    .resolveReportAndNotify(reportKey, status, userPhone, questionSnippet)) {
+                    .resolveReportAndNotify(reportKey, status, userPhone, questionSnippet, userName, questionId, tab)) {
                 is com.hanif.smartstudy.data.remote.GasResult.Success -> {
                     _state.update {
                         it.copy(
