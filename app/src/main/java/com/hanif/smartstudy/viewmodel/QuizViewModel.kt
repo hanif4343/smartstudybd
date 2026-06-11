@@ -37,7 +37,8 @@ data class QuizUiState(
     val readingIndex  : Int              = 0,
     val bookmarkedIds : Set<String>      = emptySet(),
     val weakTopics    : List<WeakTopic>  = emptyList(),
-    val contentLoaded : Boolean          = false
+    val contentLoaded : Boolean          = false,
+    val highlightQuestionId : String?    = null
 )
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
@@ -133,6 +134,28 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
             loadQuestions(content, subject, subTopic, _state.value.mode)
         }
+    }
+
+    /** নোটিফিকেশন থেকে এসে নির্দিষ্ট প্রশ্নে সরাসরি navigate করো */
+    fun navigateToQuestion(questionId: String) {
+        if (questionId.isBlank()) return
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val pool = when (_state.value.mode) {
+                StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it) }
+                StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+                StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
+            }
+            val target = pool.find { it.id == questionId } ?: return@launch
+            _state.update {
+                it.copy(navPath = NavPath(target.subject, target.subTopic), highlightQuestionId = questionId)
+            }
+            loadQuestions(content, target.subject, target.subTopic, _state.value.mode)
+        }
+    }
+
+    fun consumeHighlight() {
+        _state.update { it.copy(highlightQuestionId = null) }
     }
 
     fun adminRefreshContent() {
