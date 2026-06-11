@@ -19,6 +19,7 @@ import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -111,6 +112,10 @@ data class MenuUiState(
     // Bulk Audience
     val isBulkUpdating    : Boolean          = false,
     val bulkUpdateMsg     : String?          = null,
+    // Offline admin edits
+    val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
+    val isSyncingEdits    : Boolean          = false,
+    val syncEditsMsg      : String?          = null,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -546,23 +551,98 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Admin: Edit Question ──────────────────────────────────
-    fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>) {
+    // ── Admin: Edit Question (offline-aware) ──────────────────
+    fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>, questionPreview: String = "") {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService
-                    .adminUpdateQuestionField(sheet, rowKey, fields)) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                    cache.clearCache()
-                    _state.update { it.copy(isEditingQuestion = false,
-                        editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত") }
+            val isOnline = com.hanif.smartstudy.util.ConnectivityObserver
+                .observe(getApplication())
+                .let { flow ->
+                    kotlinx.coroutines.flow.first(flow) { true }
                 }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
-                    _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
+
+            if (isOnline) {
+                // Online — সরাসরি Firebase এ save
+                when (val r = com.hanif.smartstudy.data.remote.GasApiService
+                        .adminUpdateQuestionField(sheet, rowKey, fields)) {
+                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                        cache.clearCache()
+                        _state.update { it.copy(isEditingQuestion = false,
+                            editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত") }
+                    }
+                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                        // Online কিন্তু fail — queue এ রাখো
+                        val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                        q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
+                        loadPendingEdits()
+                        _state.update { it.copy(isEditingQuestion = false,
+                            editSuccessMsg = "⚠️ সংরক্ষিত — sync হবে", error = "❌ ${r.message}") }
+                    }
+                }
+            } else {
+                // Offline — queue এ রাখো, net আসলে auto sync হবে
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
+                loadPendingEdits()
+                _state.update { it.copy(isEditingQuestion = false,
+                    editSuccessMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে") }
             }
         }
     }
+
+    // ── Pending admin edits লোড করো ──────────────────────────
+    fun loadPendingEdits() {
+        viewModelScope.launch {
+            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+            _state.update { it.copy(pendingEdits = q.getPendingAdminEdits()) }
+        }
+    }
+
+    // ── Manual sync now ───────────────────────────────────────
+    fun syncPendingEditsNow() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isSyncingEdits = true, syncEditsMsg = null) }
+            val q       = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+            val pending = q.getPendingAdminEdits()
+            if (pending.isEmpty()) {
+                _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = "✅ কোনো pending edit নেই") }
+                return@launch
+            }
+            var successCount = 0
+            var failCount    = 0
+            val gson = com.google.gson.Gson()
+            for (action in pending) {
+                try {
+                    val payload    = gson.fromJson(action.payload, Map::class.java)
+                    val sheet      = payload["sheet"]?.toString() ?: continue
+                    val questionId = payload["questionId"]?.toString() ?: continue
+                    @Suppress("UNCHECKED_CAST")
+                    val fields     = payload["fields"] as? Map<String, String> ?: continue
+                    when (com.hanif.smartstudy.data.remote.GasApiService
+                            .adminUpdateQuestionField(sheet, questionId, fields)) {
+                        is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                            q.remove(action.id); successCount++
+                        }
+                        is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                            q.incrementRetry(action.id); failCount++
+                        }
+                    }
+                } catch (e: Exception) { failCount++ }
+            }
+            if (successCount > 0) cache.clearCache()
+            loadPendingEdits()
+            val msg = when {
+                failCount == 0 -> "✅ $successCount টি edit sync সফল!"
+                successCount == 0 -> "❌ সব ($failCount টি) fail হয়েছে"
+                else -> "⚠️ $successCount টি সফল, $failCount টি fail"
+            }
+            _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = msg) }
+        }
+    }
+
+    fun clearSyncEditsMsg() { _state.update { it.copy(syncEditsMsg = null) } }
 
     fun adminSwapOptions(sheet: String, rowKey: String, options: Map<String, String>, newAnswer: String) {
         if (!_state.value.isAdmin) return
