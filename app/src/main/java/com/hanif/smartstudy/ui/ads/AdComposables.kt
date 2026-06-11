@@ -74,6 +74,50 @@ fun AdBannerView(
     )
 }
 
+/**
+ * QuizBannerEvery10 — Quiz screen এ প্রতি ১০ প্রশ্নের পর sticky top banner দেখায়।
+ *
+ * LazyList এর firstVisibleItemIndex pass করো।
+ * index 0-9  → কোনো ad নেই
+ * index 10   → banner দেখায়  (প্রতি ১০ এর গুণিতকে)
+ * index 20   → banner দেখায়
+ * ইত্যাদি।
+ */
+@Composable
+fun QuizBannerEvery10(
+    currentQuestionIndex: Int,
+    adUnitId: String = AdManager.BANNER_QUIZ_LIST
+) {
+    // প্রতি ১০ প্রশ্নের threshold — index 10, 20, 30 ...
+    val showBanner = currentQuestionIndex > 0 && currentQuestionIndex % 10 == 0
+
+    if (showBanner) {
+        // key(currentQuestionIndex) দিলে threshold বদলালে নতুন ad load হয়
+        key(currentQuestionIndex / 10) {
+            AdBannerView(
+                adUnitId = adUnitId,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/**
+ * StickyBottomBannerView — Screen এর একদম নিচে সব সময় থাকে।
+ * Study / QBank screen এর জন্য — user দীর্ঘ সময় থাকে।
+ *
+ * Box layout এ Alignment.BottomCenter এ রাখো।
+ */
+@Composable
+fun StickyBottomBannerView(
+    adUnitId: String = AdManager.BANNER_STUDY
+) {
+    AdBannerView(
+        adUnitId = adUnitId,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
 /** MobileAds initialize কবে হলো সেটা track করে */
 object AdInitTracker {
     @Volatile var isReady: Boolean = false
