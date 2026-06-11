@@ -69,7 +69,7 @@ class ChallengeRepository {
                 val map = child.value as? Map<String, Any> ?: return@mapNotNull null
                 val user = User.fromFirebaseMap(map)
                 if (user.phone == excludePhone || user.phone.isNullOrBlank()) null else user
-            }.filter { it.status?.lowercase() == "active" }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "getAllUsers: ${e.message}")
             emptyList()
