@@ -23,9 +23,10 @@ data class DeepLinkAction(
     val query      : String? = null,
     val questionId : String? = null,
     val tab        : String? = null,   // "quiz" | "qbank" | "study"
-    val menuPage   : String? = null    // "reports" | "techniques" | "stats" | "bookmarks"
+    val menuPage   : String? = null,   // "reports" | "techniques" | "stats" | "bookmarks"
+    val challengeId: String? = null
 ) {
-    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, NONE }
+    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, NONE }
 }
 
 fun Intent.parseDeepLink(): DeepLinkAction {
@@ -33,10 +34,13 @@ fun Intent.parseDeepLink(): DeepLinkAction {
     val fcmUrl    = getStringExtra("url")
     val fcmQid    = getStringExtra("questionId")
     val fcmTab    = getStringExtra("tab")
-    val fcmType   = getStringExtra("type")  // "admin_technique" | "admin_report" | ...
+    val fcmType   = getStringExtra("type")  // "admin_technique" | "admin_report" | "challenge_invite"
+    val fcmChallengeId = getStringExtra("challengeId")
 
     if (fcmUrl != null || fcmType != null) {
         return when {
+            fcmType == "challenge_invite" ->
+                DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
             fcmUrl == "techniques" || fcmType == "admin_technique" ->
                 DeepLinkAction(DeepLinkAction.Type.TECHNIQUES, questionId = fcmQid, tab = fcmTab)
             fcmUrl == "reports"    || fcmType == "admin_report"    ->
