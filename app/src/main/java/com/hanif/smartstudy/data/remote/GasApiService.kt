@@ -416,7 +416,10 @@ object GasApiService {
         reportKey  : String,
         status     : String,      // "resolved" | "dismissed"
         userPhone  : String,      // reporter এর phone
-        questionSnippet: String = ""
+        questionSnippet: String = "",
+        userName   : String = "",
+        questionId : String = "",
+        tab        : String = ""
     ): GasResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val auth     = authQuery()
@@ -453,15 +456,16 @@ object GasApiService {
                 } else null
 
                 // ── ৩. FCM notification পাঠাও ──
+                val displayName = userName.ifBlank { "ব্যবহারকারী" }
+                val notifMsg = if (status == "resolved")
+                    "প্রিয় $displayName, আপনার রিপোর্ট করা প্রশ্নটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
+                else
+                    "প্রিয় $displayName, আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
+
+                val snippet = if (questionSnippet.isNotBlank())
+                    questionSnippet.take(60) + "..." else ""
+
                 if (!fcmToken.isNullOrBlank()) {
-                    val notifMsg = if (status == "resolved")
-                        "আপনার রিপোর্টটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
-                    else
-                        "আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
-
-                    val snippet = if (questionSnippet.isNotBlank())
-                        questionSnippet.take(60) + "..." else ""
-
                     try {
                         val gasUrl = "${BuildConfig.GAS_URL}" +
                             "?action=sendNotification" +
@@ -469,13 +473,41 @@ object GasApiService {
                             "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
                             "&title=${java.net.URLEncoder.encode("SmartStudyBD", "UTF-8")}" +
                             "&body=${java.net.URLEncoder.encode(notifMsg, "UTF-8")}" +
-                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}"
+                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}" +
+                            "&type=admin_report" +
+                            "&url=reports" +
+                            "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
+                            "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}" +
+                            "&sound=default"
                         client.newCall(Request.Builder().url(gasUrl).get().build())
                             .execute().close()
                         Log.d("GAS", "Report notification sent to $userPhone")
                     } catch (e: Exception) {
                         Log.e("GAS", "FCM send failed: ${e.message}")
                     }
+                }
+
+                // ── ৪. Notifications/{phone} এ fallback entry লিখো (poll worker এর জন্য) ──
+                try {
+                    val notifKey = "notif_${System.currentTimeMillis()}"
+                    val notifObj = JsonObject().apply {
+                        addProperty("title", "SmartStudyBD")
+                        addProperty("body", notifMsg)
+                        addProperty("type", "admin_report")
+                        addProperty("url", "reports")
+                        addProperty("questionId", questionId)
+                        addProperty("tab", tab)
+                        addProperty("read", false)
+                        addProperty("time", System.currentTimeMillis())
+                    }
+                    val notifUrl = "$base/Notifications/$phoneEncoded/$notifKey.json$auth"
+                    client.newCall(
+                        Request.Builder().url(notifUrl)
+                            .put(notifObj.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().close()
+                } catch (e: Exception) {
+                    Log.e("GAS", "Notifications fallback write failed: ${e.message}")
                 }
             }
 
