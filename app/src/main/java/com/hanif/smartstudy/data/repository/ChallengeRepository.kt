@@ -61,21 +61,18 @@ class ChallengeRepository {
 
     suspend fun getAllUsers(excludePhone: String): List<User> {
         return try {
-            Log.d(TAG, "getAllUsers: fetching from Firebase Users node")
+            Log.d(TAG, "getAllUsers: fetching via Phone index...")
+            // Rules এ Phone index আছে তাই এটা কাজ করবে
             val snap = withTimeout(15_000L) {
-                usersRef.get().await()
+                usersRef.orderByChild("Phone").startAt(" ").get().await()
             }
-            Log.d(TAG, "getAllUsers: snap children count = ${snap.childrenCount}")
-            val result = snap.children.mapNotNull { child ->
+            Log.d(TAG, "getAllUsers: children=${snap.childrenCount}")
+            snap.children.mapNotNull { child ->
                 @Suppress("UNCHECKED_CAST")
                 val map = child.value as? Map<String, Any> ?: return@mapNotNull null
                 val user = User.fromFirebaseMap(map)
-                Log.d(TAG, "getAllUsers: user=${user.name}, phone=${user.phone}")
-                // শুধু নিজেকে বাদ দাও
-                if (!excludePhone.isNullOrBlank() && user.phone == excludePhone) null else user
+                if (user.phone == excludePhone) null else user
             }
-            Log.d(TAG, "getAllUsers: final count = ${result.size}")
-            result
         } catch (e: Exception) {
             Log.e(TAG, "getAllUsers error: ${e.message}")
             emptyList()
