@@ -14,6 +14,12 @@ class SmartStudyApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // ── Remote Logger — পুরো অ্যাপের log/crash Firebase এ জমা হবে ──
+        val savedPhone = runCatching {
+            com.hanif.smartstudy.util.SessionManager(this).getCurrentUser()?.phone
+        }.getOrNull()
+        com.hanif.smartstudy.util.RemoteLogger.init(this, savedPhone)
+
         // Firebase Anonymous Auth — app start এ sign in নিশ্চিত করো
         FirebaseTokenProvider.ensureSignedIn()
 
