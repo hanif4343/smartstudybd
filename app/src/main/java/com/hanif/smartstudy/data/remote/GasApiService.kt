@@ -327,13 +327,20 @@ object GasApiService {
         try {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
+            android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
             val obj  = JsonObject().apply { fields.forEach { (k, v) -> addProperty(k, v) } }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+            val respBody = resp.body?.string() ?: ""
+            val code = resp.code
+            android.util.Log.d("AdminEdit", "Response: $code | $respBody")
             resp.close()
             if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+            else GasResult.Error("Firebase error: $code — $respBody")
+        } catch (e: Exception) {
+            android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
+            GasResult.Error(e.message ?: "Network error")
+        }
     }
 
     /** Admin: Options swap করো — Firebase এ option1-4 + correct একসাথে update */
