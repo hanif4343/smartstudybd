@@ -96,9 +96,17 @@ object ContentFetchService {
                         }
                         obj.entrySet()
                             .sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }
-                            .mapNotNull { (_, v) ->
+                            .mapNotNull { (key, v) ->
                                 try {
-                                    if (v.isJsonObject) gson.fromJson(v, T::class.java) else null
+                                    if (v.isJsonObject) {
+                                        // Firebase push key (যেমন -NxAbc123) টা "id" হিসেবে inject করো
+                                        // এটা ছাড়া admin edit এ correct Firebase path পাওয়া যায় না
+                                        val obj2 = v.asJsonObject.deepCopy()
+                                        if (!obj2.has("id") || obj2.get("id").asString.isNullOrBlank()) {
+                                            obj2.addProperty("id", key)
+                                        }
+                                        gson.fromJson(obj2, T::class.java)
+                                    } else null
                                 } catch (e: Exception) { null }
                             }
                     }
