@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.remote.FirebaseTokenProvider
 import com.hanif.smartstudy.viewmodel.ActiveUser
+import com.hanif.smartstudy.viewmodel.DebugLogEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
