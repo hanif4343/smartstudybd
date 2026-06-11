@@ -13,11 +13,11 @@ import kotlinx.coroutines.flow.first
  * Internet না থাকলে actions queue-এ রাখে।
  * Internet আসলে WorkManager দিয়ে sync হয়।
  *
- * Supported actions: quiz_answer, study_progress, xp_update
+ * Supported actions: quiz_answer, study_progress, xp_update, admin_edit_question
  */
 data class PendingAction(
     val id         : String = java.util.UUID.randomUUID().toString(),
-    val type       : String,      // "quiz_answer" | "study_progress" | "xp_update"
+    val type       : String,      // "quiz_answer" | "study_progress" | "xp_update" | "admin_edit_question"
     val payload    : String,      // JSON string
     val createdAt  : Long   = System.currentTimeMillis(),
     val retryCount : Int    = 0
@@ -70,6 +70,28 @@ class PendingQueue(private val context: Context) {
             ))
         ))
     }
+
+    // ── Admin: offline question edit ──
+    suspend fun enqueueAdminEdit(
+        sheet      : String,
+        questionId : String,
+        fields     : Map<String, String>,
+        questionPreview: String = ""   // UI তে দেখানোর জন্য প্রশ্নের প্রথম কিছু অংশ
+    ) {
+        enqueue(PendingAction(
+            type    = "admin_edit_question",
+            payload = gson.toJson(mapOf(
+                "sheet"           to sheet,
+                "questionId"      to questionId,
+                "fields"          to fields,
+                "questionPreview" to questionPreview.take(80)
+            ))
+        ))
+    }
+
+    // ── Pending admin edits আলাদা করে দেখাও ──
+    suspend fun getPendingAdminEdits(): List<PendingAction> =
+        getAll().filter { it.type == "admin_edit_question" }
 
     // ── সব pending action পড়ো ──
     suspend fun getAll(): List<PendingAction> {
