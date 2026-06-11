@@ -108,7 +108,9 @@ fun CoreScreen(
                 answered    = state.answeredCount,
                 onBack      = { viewModel.navigateBack() },
                 onSubmit    = { viewModel.submitQuiz() },
-                currentUser = currentUser
+                currentUser = currentUser,
+                highlightQuestionId = state.highlightQuestionId,
+                onHighlightConsumed = { viewModel.consumeHighlight() }
             )
         }
 
