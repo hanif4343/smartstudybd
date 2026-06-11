@@ -674,7 +674,7 @@ private fun WagerSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                 }
             }
 
-            // ── Rewarded Ad: Earn 50 XP ──
+            // ── Rewarded Ad: Earn 20 XP ──
             RewardedAdEarnCard(vm = vm)
         }
     }
@@ -714,12 +714,12 @@ private fun RewardedAdEarnCard(vm: ChallengeViewModel) {
     ) {
         Column {
             Text(
-                if (earned) "✅ +50 XP পেয়েছ!" else "🎬 বিজ্ঞাপন দেখো",
+                if (earned) "✅ +20 XP পেয়েছ!" else "🎬 বিজ্ঞাপন দেখো",
                 fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
                 color = Color.White, fontFamily = NotoSansBengali
             )
             Text(
-                if (earned) "ধন্যবাদ! XP যোগ হয়েছে।" else "একটি বিজ্ঞাপন দেখে 50 XP অর্জন করো",
+                if (earned) "ধন্যবাদ! XP যোগ হয়েছে।" else "একটি বিজ্ঞাপন দেখে 20 XP অর্জন করো",
                 fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f),
                 fontFamily = NotoSansBengali
             )
@@ -766,7 +766,7 @@ private fun RewardedAdEarnCard(vm: ChallengeViewModel) {
                     .background(Color.White.copy(alpha = 0.2f))
                     .padding(horizontal = 12.dp, vertical = 7.dp)
             ) {
-                Text("+50 XP ✓", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                Text("+20 XP ✓", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color.White, fontFamily = NotoSansBengali)
             }
         }
