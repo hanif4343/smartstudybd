@@ -116,6 +116,18 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsState()
     val ctx   = LocalContext.current
 
+    // XP ও user data — যেকোনো screen থেকে ফিরলে auto-refresh
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refresh()
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     // Wrong questions থেকে review data — mutableStateOf দিয়ে refresh করা যাবে
     var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
     LaunchedEffect(state) {
