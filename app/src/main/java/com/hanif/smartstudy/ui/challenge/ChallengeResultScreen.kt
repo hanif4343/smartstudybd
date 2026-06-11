@@ -58,6 +58,31 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
         )
     }
 
+    // ── Interstitial Ad: Challenge শেষ হওয়ার পর auto-show ──
+    var interstitialAd by remember { mutableStateOf<com.google.android.gms.ads.interstitial.InterstitialAd?>(null) }
+    var interstitialShown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        AdManager.loadInterstitial(
+            context  = context,
+            adUnitId = AdManager.INTERSTITIAL_CHALLENGE,
+            onLoaded = { interstitialAd = it },
+            onFailed = { interstitialAd = null }
+        )
+    }
+    // Result load হলে interstitial দেখাও (একবারই)
+    LaunchedEffect(interstitialAd) {
+        val ad = interstitialAd
+        if (ad != null && !interstitialShown) {
+            kotlinx.coroutines.delay(1200) // result দেখার সময় দাও
+            val activity = context as? android.app.Activity
+            if (activity != null) {
+                interstitialShown = true
+                AdManager.showInterstitial(activity = activity, ad = ad)
+                interstitialAd = null
+            }
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF1E1B4B), Color(0xFF312E81))))
