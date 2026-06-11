@@ -57,6 +57,25 @@ class ChallengeRepository {
         }
     }
 
+    // ── Get all users (for dropdown) ─────────────────────
+
+    suspend fun getAllUsers(excludePhone: String): List<User> {
+        return try {
+            val snap = withTimeout(15_000L) {
+                usersRef.get().await()
+            }
+            snap.children.mapNotNull { child ->
+                @Suppress("UNCHECKED_CAST")
+                val map = child.value as? Map<String, Any> ?: return@mapNotNull null
+                val user = User.fromFirebaseMap(map)
+                if (user.phone == excludePhone || user.phone.isNullOrBlank()) null else user
+            }.filter { it.status?.lowercase() == "active" }
+        } catch (e: Exception) {
+            Log.e(TAG, "getAllUsers: ${e.message}")
+            emptyList()
+        }
+    }
+
     // ── Create challenge ──────────────────────────────────
 
     suspend fun createChallenge(
