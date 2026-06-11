@@ -37,6 +37,7 @@ data class ChallengeUiState(
     val canAddOpponent  : Boolean               = false,   // group match হলে true
     val isSearching     : Boolean               = false,
     val invitedUsers    : List<User>            = emptyList(),
+    val selectedSource  : String                = "",   // "Quiz" | "QBank" | ""
     val selectedSubject : String                = "",
     val selectedSubTopic: String                = "",
     val questionCount   : Int                   = 10,
@@ -70,6 +71,11 @@ data class ChallengeUiState(
     val isFreezing        : Boolean               = false,
     // Accuracy tip — দ্রুত কিন্তু কম accurate হলে পরামর্শ
     val accuracyTip       : String?               = null,
+    // All Users dropdown
+    val allUsers          : List<User>            = emptyList(),
+    val isLoadingUsers    : Boolean               = false,
+    val showUserDropdown  : Boolean               = false,
+    val selectedDropUser  : User?                 = null,
     // Match History (current opponent)
     val matchHistory      : List<MatchRecord>     = emptyList(),
     val winLossSummary    : Map<String, Pair<Int,Int>> = emptyMap()
@@ -100,6 +106,8 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Subjects from content ────────────────────────────
 
+    // ── Source + Subjects from content ──────────────────
+
     private fun loadSubjects() {
         viewModelScope.launch {
             val c = ContentRepository.getMemCache() ?: content.getContent()
@@ -114,20 +122,50 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun onSourceSelect(source: String) {
+        viewModelScope.launch {
+            val c = ContentRepository.getMemCache() ?: content.getContent()
+                .let { (it as? com.hanif.smartstudy.data.repository.DataState.Success)?.data }
+            if (c == null) return@launch
+            val me       = session.getCurrentUser()
+            val filtered = c.forUser(me)
+            val subjects = when (source) {
+                "Quiz"  -> filtered.quiz.map { it.subject ?: "" }
+                "QBank" -> filtered.qbank.map { it.subject ?: "" }
+                else    -> filtered.quiz.map { it.subject ?: "" } + filtered.qbank.map { it.subject ?: "" }
+            }.filter { it.isNotBlank() }.distinct().sorted()
+            _state.update { it.copy(
+                selectedSource   = source,
+                subjects         = subjects,
+                selectedSubject  = "",
+                selectedSubTopic = "",
+                subTopics        = emptyList()
+            )}
+        }
+    }
+
     fun onSubjectSelect(subject: String) {
         viewModelScope.launch {
             val c = ContentRepository.getMemCache() ?: return@launch
             val me       = session.getCurrentUser()
             val filtered = c.forUser(me)
-            val subTopics = (filtered.quiz.filter { it.subject == subject }.map { it.subTopic ?: "" } +
-                             filtered.qbank.filter { it.subject == subject }.map { it.subTopic ?: "" })
-                .filter { it.isNotBlank() }.distinct().sorted()
+            val source   = _state.value.selectedSource
+            val subTopics = when (source) {
+                "Quiz"  -> filtered.quiz.filter { it.subject == subject }.map { it.subTopic ?: "" }
+                "QBank" -> filtered.qbank.filter { it.subject == subject }.map { it.subTopic ?: "" }
+                else    -> (filtered.quiz.filter { it.subject == subject }.map { it.subTopic ?: "" } +
+                            filtered.qbank.filter { it.subject == subject }.map { it.subTopic ?: "" })
+            }.filter { it.isNotBlank() }.distinct().sorted()
             _state.update { it.copy(selectedSubject = subject, selectedSubTopic = "", subTopics = subTopics) }
         }
     }
 
     fun onSubTopicSelect(sub: String) = _state.update { it.copy(selectedSubTopic = sub) }
-    fun onQuestionCountChange(n: Int) = _state.update { it.copy(questionCount = n.coerceIn(5, 30)) }
+    fun onQuestionCountChange(n: Int) {
+        val count = n.coerceIn(5, 30)
+        // ১ প্রশ্ন = ১ মিনিট, auto-set time
+        _state.update { it.copy(questionCount = count, timeLimitSec = count * 60) }
+    }
     fun onTimeLimitChange(sec: Int)   = _state.update { it.copy(timeLimitSec = sec) }
     fun onPhoneInput(phone: String)   = _state.update { it.copy(phoneInput = phone, searchResult = null, searchError = null, canAddOpponent = false) }
     fun onWagerChange(xp: Int)        = _state.update { it.copy(wagerXp = xp) }
@@ -187,6 +225,44 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             phoneInput   = "",
             toast        = "${user.displayName()} যোগ করা হয়েছে"
         )}
+    }
+
+    fun addInviteeFromDropdown(user: User) {
+        val s = _state.value
+        if (s.invitedUsers.any { it.phone == user.phone }) {
+            _state.update { it.copy(
+                showUserDropdown = false,
+                selectedDropUser = null,
+                toast = "${user.displayName()} ইতিমধ্যে যোগ করা হয়েছে"
+            )}
+            return
+        }
+        _state.update { it.copy(
+            invitedUsers     = it.invitedUsers + user,
+            showUserDropdown = false,
+            selectedDropUser = null,
+            toast            = "${user.displayName()} যোগ করা হয়েছে"
+        )}
+    }
+
+    fun loadAllUsers() {
+        if (_state.value.allUsers.isNotEmpty()) {
+            _state.update { it.copy(showUserDropdown = true) }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingUsers = true, showUserDropdown = true) }
+            val users = repo.getAllUsers(_state.value.myPhone)
+            _state.update { it.copy(isLoadingUsers = false, allUsers = users) }
+        }
+    }
+
+    fun selectDropUser(user: User) {
+        _state.update { it.copy(selectedDropUser = if (it.selectedDropUser?.phone == user.phone) null else user) }
+    }
+
+    fun dismissUserDropdown() {
+        _state.update { it.copy(showUserDropdown = false, selectedDropUser = null) }
     }
 
     fun removeInvitee(phone: String) {
@@ -491,6 +567,28 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun openCreateSetup() = _state.update { it.copy(screen = ChallengeScreen.CreateSetup, error = null) }
     fun goHome()          { challengeObserveJob?.cancel(); timerJob?.cancel()
         _state.update { it.copy(screen = ChallengeScreen.Home, challenge = null, questions = emptyList(), answers = mutableMapOf()) } }
+
+    // ── Rewarded Ad: Earn 50 XP (Wager section) ──────────
+    fun earnXpFromAd(earnAmount: Int = 50) {
+        viewModelScope.launch {
+            try {
+                val me = session.getCurrentUser() ?: return@launch
+                val phone = me.phone?.replace("+", "").orEmpty().ifEmpty { return@launch }
+                val newXp = me.xp + earnAmount
+                val updated = me.copy(xp = newXp)
+                session.saveUser(updated)
+                com.google.firebase.database.FirebaseDatabase.getInstance()
+                    .getReference("users/$phone")
+                    .updateChildren(mapOf("XP" to newXp))
+                _state.update { it.copy(
+                    myCurrentXp = newXp,
+                    toast       = "🎉 বিজ্ঞাপন দেখার জন্য +$earnAmount XP পেয়েছ!"
+                )}
+            } catch (e: Exception) {
+                Log.e("ChallengeVM", "earnXpFromAd error: ${e.message}")
+            }
+        }
+    }
 
     // ── Rewarded Ad: XP double ────────────────────────────
     fun doubleXP() {
