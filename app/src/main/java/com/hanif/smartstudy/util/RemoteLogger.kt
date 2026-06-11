@@ -109,7 +109,8 @@ object RemoteLogger {
         scope.launch { flushBlocking() }
     }
 
-    /** crash হ্যান্ডলারে synchronously পাঠানোর জন্য */
+    /** crash হ্যান্ডলারে synchronously পাঠানোর জন্য — main thread হলেও যেন
+     *  NetworkOnMainThreadException না হয় তাই আলাদা থ্রেডে চালাই এবং join করি। */
     private fun flushBlocking() {
         if (buffer.isEmpty()) return
         val toSend: List<JSONObject>
@@ -117,24 +118,28 @@ object RemoteLogger {
             toSend = ArrayList(buffer)
             buffer.clear()
         }
-        try {
-            val secret = runCatching {
-                kotlinx.coroutines.runBlocking { FirebaseTokenProvider.getToken() }
-            }.getOrDefault("")
-            val safePhone = phone.replace(Regex("[.#$\\[\\]/]"), "_")
-            val today = sdf.format(Date())
-            val patch = JSONObject()
-            toSend.forEach { entry ->
-                val key = "${entry.optLong("ts")}_${seq.incrementAndGet()}"
-                patch.put(key, entry)
+        val worker = Thread {
+            try {
+                val secret = runCatching {
+                    kotlinx.coroutines.runBlocking { FirebaseTokenProvider.getToken() }
+                }.getOrDefault("")
+                val safePhone = phone.replace(Regex("[.#$\\[\\]/]"), "_")
+                val today = sdf.format(Date())
+                val patch = JSONObject()
+                toSend.forEach { entry ->
+                    val key = "${entry.optLong("ts")}_${seq.incrementAndGet()}"
+                    patch.put(key, entry)
+                }
+                val authQ = if (secret.isNotBlank()) "?auth=$secret" else ""
+                val url = "$FB_URL/DebugLogs/$safePhone/$today.json$authQ"
+                val body = patch.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).patch(body).build()
+                client.newCall(req).execute().close()
+            } catch (e: Exception) {
+                Log.e(TAG, "flush failed: ${e.message}")
             }
-            val authQ = if (secret.isNotBlank()) "?auth=$secret" else ""
-            val url = "$FB_URL/DebugLogs/$safePhone/$today.json$authQ"
-            val body = patch.toString().toRequestBody("application/json".toMediaType())
-            val req  = Request.Builder().url(url).patch(body).build()
-            client.newCall(req).execute().close()
-        } catch (e: Exception) {
-            Log.e(TAG, "flush failed: ${e.message}")
         }
+        worker.start()
+        try { worker.join(8000) } catch (_: InterruptedException) {}
     }
 }
