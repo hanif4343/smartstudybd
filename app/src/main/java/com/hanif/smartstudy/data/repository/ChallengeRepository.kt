@@ -285,7 +285,7 @@ class ChallengeRepository {
 
     // ── Helpers ───────────────────────────────────────────
 
-    private fun writeInviteNotification(toPhone: String, invite: ChallengeInvite) {
+    private suspend fun writeInviteNotification(toPhone: String, invite: ChallengeInvite) {
         db.getReference("Invites/${toPhone.firebaseKey()}/${invite.challengeId}")
             .setValue(mapOf(
                 "challengeId"   to invite.challengeId,
@@ -296,7 +296,50 @@ class ChallengeRepository {
                 "timeLimitSec"  to invite.timeLimitSec,
                 "createdAt"     to invite.createdAt,
                 "wagerXp"       to invite.wagerXp
-            ))
+            )).await()
+
+        // ── Push notification (sound + deep link to Challenge tab/Accept) ──
+        try {
+            val title = "⚔️ নতুন চ্যালেঞ্জ!"
+            val body  = "${invite.creatorName} আপনাকে \"${invite.subject}\" বিষয়ে চ্যালেঞ্জ করেছে। Accept করুন!"
+            val phoneEncoded = toPhone.firebaseKey()
+            val auth = if (BuildConfig.FIREBASE_DB_SECRET.isNotBlank())
+                "?auth=${BuildConfig.FIREBASE_DB_SECRET}" else ""
+            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+
+            // Notifications fallback (poll worker picks this up)
+            val notifKey = "notif_${System.currentTimeMillis()}"
+            val notifObj = com.google.gson.JsonObject().apply {
+                addProperty("title", title)
+                addProperty("body", body)
+                addProperty("type", "challenge_invite")
+                addProperty("url", "challenge")
+                addProperty("challengeId", invite.challengeId)
+                addProperty("read", false)
+                addProperty("time", System.currentTimeMillis())
+            }
+            db.getReference("Notifications/$phoneEncoded/$notifKey")
+                .setValue(com.google.gson.Gson().fromJson(notifObj, Map::class.java)).await()
+
+            // FCM push via GAS (if the user has a token saved)
+            val userSnap = db.getReference("Users/$phoneEncoded/fcmToken").get().await()
+            val fcmToken = userSnap.getValue(String::class.java)
+            if (!fcmToken.isNullOrBlank() && BuildConfig.GAS_URL.isNotBlank()) {
+                val client = okhttp3.OkHttpClient()
+                val gasUrl = "${BuildConfig.GAS_URL}" +
+                    "?action=sendNotification" +
+                    "&secret=${BuildConfig.SECRET_KEY}" +
+                    "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
+                    "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
+                    "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
+                    "&type=challenge_invite" +
+                    "&challengeId=${java.net.URLEncoder.encode(invite.challengeId, "UTF-8")}" +
+                    "&sound=default"
+                client.newCall(okhttp3.Request.Builder().url(gasUrl).get().build()).execute().close()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "writeInviteNotification push failed: ${e.message}")
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
