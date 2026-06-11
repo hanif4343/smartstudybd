@@ -19,6 +19,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.items // সঠিক items লুপের জন্য এই ইমপোর্টটি প্রয়োজন
 import androidx.compose.ui.unit.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import coil.compose.rememberAsyncImagePainter
 import com.hanif.smartstudy.data.model.User
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
@@ -423,39 +424,129 @@ private fun InvitedUserChip(user: User, onRemove: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), CardDefaults.cardColors(Color.White)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Subject chips
-            Text("বিষয়:", fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
-            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(items = state.subjects) { subject ->
-                    FilterChip(
-                        selected = state.selectedSubject == subject,
-                        onClick  = { vm.onSubjectSelect(subject) },
-                        label    = { Text(subject, fontFamily = NotoSansBengali, fontSize = 11.sp) }
-                    )
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            // ── Step 1: Quiz / QBank ──
+            StepLabel(step = "১", label = "উৎস বেছে নাও")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Quiz", "QBank").forEach { source ->
+                    val selected = state.selectedSource == source
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) Color(0xFF4F46E5) else Color(0xFFF1F5F9))
+                            .clickable { vm.onSourceSelect(source) }
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            source,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (selected) Color.White else Color(0xFF64748B),
+                            fontFamily = NotoSansBengali
+                        )
+                    }
                 }
             }
 
-            // SubTopic chips (optional)
-            if (state.subTopics.isNotEmpty()) {
-                Text("টপিক (ঐচ্ছিক):", fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item {
-                        FilterChip(selected = state.selectedSubTopic.isEmpty(),
-                            onClick = { vm.onSubTopicSelect("") },
-                            label   = { Text("সব টপিক", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                    items(items = state.subTopics) { sub ->
-                        FilterChip(selected = state.selectedSubTopic == sub,
-                            onClick = { vm.onSubTopicSelect(sub) },
-                            label   = { Text(sub, fontFamily = NotoSansBengali, fontSize = 11.sp) })
+            // ── Step 2: Subject (visible after source selected) ──
+            if (state.selectedSource.isNotEmpty()) {
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                StepLabel(step = "২", label = "বিষয় বেছে নাও")
+                if (state.subjects.isEmpty()) {
+                    Text("কোনো বিষয় পাওয়া যায়নি", fontSize = 11.sp,
+                        color = Color(0xFF94A3B8), fontFamily = NotoSansBengali)
+                } else {
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement   = Arrangement.spacedBy(6.dp)
+                    ) {
+                        state.subjects.forEach { subject ->
+                            val sel = state.selectedSubject == subject
+                            Box(
+                                Modifier.clip(RoundedCornerShape(20.dp))
+                                    .background(if (sel) Color(0xFF4F46E5) else Color(0xFFEEF2FF))
+                                    .clickable { vm.onSubjectSelect(subject) }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                            ) {
+                                Text(subject, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                    fontWeight = if (sel) FontWeight.ExtraBold else FontWeight.Normal,
+                                    color = if (sel) Color.White else Color(0xFF4F46E5))
+                            }
+                        }
                     }
                 }
             }
+
+            // ── Step 3: SubTopic (visible after subject selected) ──
+            if (state.selectedSubject.isNotEmpty() && state.subTopics.isNotEmpty()) {
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                StepLabel(step = "৩", label = "টপিক বেছে নাও (ঐচ্ছিক)")
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement   = Arrangement.spacedBy(6.dp)
+                ) {
+                    // "সব টপিক" chip
+                    val allSel = state.selectedSubTopic.isEmpty()
+                    Box(
+                        Modifier.clip(RoundedCornerShape(20.dp))
+                            .background(if (allSel) Color(0xFF10B981) else Color(0xFFEEF2FF))
+                            .clickable { vm.onSubTopicSelect("") }
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Text("সব টপিক", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = if (allSel) FontWeight.ExtraBold else FontWeight.Normal,
+                            color = if (allSel) Color.White else Color(0xFF4F46E5))
+                    }
+                    state.subTopics.forEach { sub ->
+                        val sel = state.selectedSubTopic == sub
+                        Box(
+                            Modifier.clip(RoundedCornerShape(20.dp))
+                                .background(if (sel) Color(0xFF10B981) else Color(0xFFEEF2FF))
+                                .clickable { vm.onSubTopicSelect(sub) }
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                        ) {
+                            Text(sub, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                fontWeight = if (sel) FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (sel) Color.White else Color(0xFF4F46E5))
+                        }
+                    }
+                }
+            }
+
+            // ── Selected summary ──
+            if (state.selectedSubject.isNotEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFF0FDF4)).padding(10.dp)
+                ) {
+                    val subtopicLabel = if (state.selectedSubTopic.isEmpty()) "সব টপিক" else state.selectedSubTopic
+                    Text(
+                        "✅ ${state.selectedSource} › ${state.selectedSubject} › $subtopicLabel",
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF166534), fontFamily = NotoSansBengali
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun StepLabel(step: String, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.size(22.dp).clip(CircleShape).background(Color(0xFF4F46E5)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(step, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+        }
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            color = Color(0xFF374151), fontFamily = NotoSansBengali)
     }
 }
 
@@ -465,25 +556,24 @@ private fun ConfigSection(state: ChallengeUiState, vm: ChallengeViewModel) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             // Question count
             ConfigRow(
-                label = "প্রশ্ন সংখ্যা",
-                value = "${state.questionCount}টি",
+                label   = "প্রশ্ন সংখ্যা",
+                value   = "${state.questionCount}টি",
                 options = listOf(5, 10, 15, 20, 25, 30).map { "$it" },
                 selected = "${state.questionCount}",
                 onSelect = { vm.onQuestionCountChange(it.toInt()) }
             )
-            // Time limit
-            ConfigRow(
-                label    = "সময়সীমা",
-                value    = "${state.timeLimitSec / 60} মিনিট",
-                options  = listOf("5 মি" to 300, "10 মি" to 600, "15 মি" to 900, "20 মি" to 1200).map { it.first },
-                selected = "${state.timeLimitSec / 60} মিনিট",
-                onSelect = { label ->
-                    val sec = when (label) {
-                        "5 মি" -> 300; "10 মি" -> 600; "15 মি" -> 900; else -> 1200
-                    }
-                    vm.onTimeLimitChange(sec)
-                }
-            )
+            // Auto time info
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFEEF2FF)).padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text("⏱ সময়সীমা (স্বয়ংক্রিয়)", fontSize = 12.sp,
+                    color = Color(0xFF4F46E5), fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                Text("${state.questionCount} মিনিট", fontSize = 13.sp,
+                    color = Color(0xFF4F46E5), fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+            }
         }
     }
 }
@@ -582,6 +672,102 @@ private fun WagerSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                         fontSize = 11.sp, color = Color(0xFF991B1B),
                         fontFamily = NotoSansBengali)
                 }
+            }
+
+            // ── Rewarded Ad: Earn 50 XP ──
+            RewardedAdEarnCard(vm = vm)
+        }
+    }
+}
+
+@Composable
+private fun RewardedAdEarnCard(vm: ChallengeViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = context as? android.app.Activity
+
+    var rewardedAd by remember { mutableStateOf<com.google.android.gms.ads.rewarded.RewardedAd?>(null) }
+    var isLoading  by remember { mutableStateOf(false) }
+    var earned     by remember { mutableStateOf(false) }
+
+    // Load ad on first composition
+    LaunchedEffect(Unit) {
+        isLoading = true
+        com.hanif.smartstudy.util.AdManager.loadRewarded(
+            context  = context,
+            onLoaded = { rewardedAd = it; isLoading = false },
+            onFailed = { rewardedAd = null; isLoading = false }
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFF7C3AED), Color(0xFF4F46E5))
+                )
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                if (earned) "✅ +50 XP পেয়েছ!" else "🎬 বিজ্ঞাপন দেখো",
+                fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                color = Color.White, fontFamily = NotoSansBengali
+            )
+            Text(
+                if (earned) "ধন্যবাদ! XP যোগ হয়েছে।" else "একটি বিজ্ঞাপন দেখে 50 XP অর্জন করো",
+                fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f),
+                fontFamily = NotoSansBengali
+            )
+        }
+
+        if (!earned) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White)
+                    .clickable(enabled = rewardedAd != null && !isLoading) {
+                        activity?.let { act ->
+                            com.hanif.smartstudy.util.AdManager.showRewarded(
+                                activity    = act,
+                                ad          = rewardedAd,
+                                onRewarded  = { _ ->
+                                    earned = true
+                                    vm.earnXpFromAd(50)
+                                    rewardedAd = null
+                                },
+                                onDismissed = { rewardedAd = null }
+                            )
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF7C3AED),
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        if (rewardedAd != null) "▶ দেখো" else "লোড হচ্ছে...",
+                        fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF7C3AED), fontFamily = NotoSansBengali
+                    )
+                }
+            }
+        } else {
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.2f))
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text("+50 XP ✓", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color.White, fontFamily = NotoSansBengali)
             }
         }
     }
