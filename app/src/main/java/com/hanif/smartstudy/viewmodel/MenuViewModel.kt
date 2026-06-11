@@ -441,9 +441,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val users = com.hanif.smartstudy.data.remote.UserSyncService.fetchActiveUsers()
-                _state.update { it.copy(activeUsers = users) }
+                _state.update { it.copy(activeUsers = users, error = if (users.isEmpty()) "ইউজার লিস্ট খালি (${users.size})" else null) }
             } catch (e: Exception) {
                 Log.e("Admin", "loadActiveUsers: ${e.message}")
+                _state.update { it.copy(error = "loadActiveUsers error: ${e.message}") }
             }
         }
     }
