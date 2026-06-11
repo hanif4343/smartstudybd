@@ -41,6 +41,14 @@ data class ActiveUser(
     val fcmToken : String = ""
 )
 
+data class DebugLogEntry(
+    val ts    : Long   = 0L,
+    val level : String = "D",
+    val tag   : String = "",
+    val msg   : String = "",
+    val phone : String = ""
+)
+
 data class MenuUiState(
     val user            : User?              = null,
     val isAdmin         : Boolean            = false,
@@ -85,6 +93,10 @@ data class MenuUiState(
     val activeUsers     : List<ActiveUser>   = emptyList(),
     val allUsers        : List<Map<String,String>> = emptyList(),
     val viewingAsUser   : User?              = null,
+    // Remote debug logs (Admin)
+    val debugLogPhones  : List<String>       = emptyList(),
+    val debugLogs       : List<DebugLogEntry> = emptyList(),
+    val isLoadingLogs   : Boolean            = false,
 
     // ── Admin Power features ──────────────────────────────────
     val adminViewingTag   : String           = "",   // audience switch
@@ -426,6 +438,35 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = e.message) }
+            }
+        }
+    }
+
+    // ── Admin: load list of phones that have debug logs ──
+    fun loadDebugLogPhones() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            try {
+                val phones = com.hanif.smartstudy.data.remote.UserSyncService.fetchDebugLogPhones()
+                _state.update { it.copy(debugLogPhones = phones) }
+            } catch (e: Exception) {
+                Log.e("Admin", "loadDebugLogPhones: ${e.message}")
+            }
+        }
+    }
+
+    // ── Admin: load logs for a phone (or "" = own phone) ──
+    fun loadDebugLogs(phone: String) {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingLogs = true) }
+            try {
+                val targetPhone = phone.ifBlank { _state.value.user?.phone ?: "" }
+                val logs = com.hanif.smartstudy.data.remote.UserSyncService.fetchDebugLogs(targetPhone)
+                _state.update { it.copy(debugLogs = logs, isLoadingLogs = false) }
+            } catch (e: Exception) {
+                Log.e("Admin", "loadDebugLogs: ${e.message}")
+                _state.update { it.copy(isLoadingLogs = false, error = "loadDebugLogs error: ${e.message}") }
             }
         }
     }
