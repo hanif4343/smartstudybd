@@ -711,6 +711,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
 }
 
 // ── Logs tab (Admin) ──
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
     val sdf = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
