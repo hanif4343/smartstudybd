@@ -19,7 +19,6 @@ import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -556,11 +555,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
-            val isOnline = com.hanif.smartstudy.util.ConnectivityObserver
-                .observe(getApplication())
-                .let { flow ->
-                    kotlinx.coroutines.flow.first(flow) { true }
-                }
+            val cm = getApplication<android.app.Application>()
+                .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                    as android.net.ConnectivityManager
+            val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
 
             if (isOnline) {
                 // Online — সরাসরি Firebase এ save
