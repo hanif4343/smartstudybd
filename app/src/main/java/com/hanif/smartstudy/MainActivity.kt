@@ -195,9 +195,8 @@ class MainActivity : ComponentActivity() {
             kotlinx.coroutines.runBlocking { session.recordSessionMinutes(sessionMin) }
         }
         SmartStudyFirebaseService.updatePresence(this, false)
+        com.hanif.smartstudy.util.RemoteLogger.flush()
     }
-
-    override fun onStop() {
         super.onStop()
         SmartStudyFirebaseService.updatePresence(this, false)
     }
