@@ -404,10 +404,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                     Text("লোড হচ্ছে...", fontFamily = NotoSansBengali, color = Color(0xFF64748B))
                 }
             }
-            return@Column
-        }
-
-        if (reports.isEmpty()) {
+        } else if (reports.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🎉", fontSize = 48.sp)
@@ -416,9 +413,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                         fontWeight = FontWeight.Bold, color = Color(0xFF10B981), fontSize = 16.sp)
                 }
             }
-            return@Column
-        }
-
+        } else {
         LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(reports, key = { it.reportKey }) { report ->
                 Card(
@@ -482,6 +477,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                     }
                 }
             }
+        }
         }
     }
 
