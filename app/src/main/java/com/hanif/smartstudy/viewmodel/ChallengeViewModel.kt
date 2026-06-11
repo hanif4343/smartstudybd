@@ -568,18 +568,28 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     fun goHome()          { challengeObserveJob?.cancel(); timerJob?.cancel()
         _state.update { it.copy(screen = ChallengeScreen.Home, challenge = null, questions = emptyList(), answers = mutableMapOf()) } }
 
-    // ── Rewarded Ad: Earn 50 XP (Wager section) ──────────
-    fun earnXpFromAd(earnAmount: Int = 50) {
+    // ── Rewarded Ad: Earn 20 XP (Wager section) ──────────
+    fun earnXpFromAd(earnAmount: Int = 20) {
         viewModelScope.launch {
             try {
                 val me = session.getCurrentUser() ?: return@launch
-                val phone = me.phone?.replace("+", "").orEmpty().ifEmpty { return@launch }
                 val newXp = me.xp + earnAmount
                 val updated = me.copy(xp = newXp)
                 session.saveUser(updated)
-                com.google.firebase.database.FirebaseDatabase.getInstance()
-                    .getReference("users/$phone")
-                    .updateChildren(mapOf("XP" to newXp))
+                // Firebase update — try both path casings
+                val phones = listOf(
+                    me.phone?.replace("+", "").orEmpty(),
+                    me.phone.orEmpty()
+                ).filter { it.isNotBlank() }.distinct()
+                for (node in listOf("Users", "users")) {
+                    for (phone in phones) {
+                        try {
+                            com.google.firebase.database.FirebaseDatabase.getInstance()
+                                .getReference("$node/$phone")
+                                .updateChildren(mapOf("XP" to newXp))
+                        } catch (_: Exception) {}
+                    }
+                }
                 _state.update { it.copy(
                     myCurrentXp = newXp,
                     toast       = "🎉 বিজ্ঞাপন দেখার জন্য +$earnAmount XP পেয়েছ!"
