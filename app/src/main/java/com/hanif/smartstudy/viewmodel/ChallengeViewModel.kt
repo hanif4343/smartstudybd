@@ -349,7 +349,8 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(challenge = challenge) }
 
                 // WAITING → ACTIVE: সবাই accept হলে creator start করবে
-                if (challenge.getStatus() == ChallengeStatus.WAITING &&
+                if ((challenge.getStatus() == ChallengeStatus.PENDING ||
+                   (challenge.getStatus() == ChallengeStatus.WAITING &&
                     challenge.allAccepted() &&
                     challenge.creatorPhone == _state.value.myPhone) {
                     repo.startChallenge(challengeId)
