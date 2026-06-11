@@ -3,8 +3,7 @@ package com.hanif.smartstudy.ui.menu.sections
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainerimport androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -1041,10 +1040,10 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
                 fontSize = 12.sp, color = MutedText
             )
-            androidx.compose.foundation.lazy.LazyColumn(
+            LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                androidx.compose.foundation.lazy.items(pending, key = { it.id }) { action ->
+                items(pending, key = { it.id }) { action ->
                     val payload = try {
                         gson.fromJson(action.payload, Map::class.java)
                     } catch (e: Exception) { emptyMap<String, Any>() }
