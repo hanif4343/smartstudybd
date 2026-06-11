@@ -116,13 +116,34 @@ fun MainScreen(
 
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
-            DeepLinkAction.Type.QUIZ       -> { currentTab = BottomTab.QUIZ  }
-            DeepLinkAction.Type.QBANK      -> { currentTab = BottomTab.QBANK }
-            DeepLinkAction.Type.STUDY      -> { currentTab = BottomTab.STUDY }
+            DeepLinkAction.Type.QUIZ       -> {
+                currentTab = BottomTab.QUIZ
+                deepLink.questionId?.let { quizViewModel.navigateToQuestion(it) }
+            }
+            DeepLinkAction.Type.QBANK      -> {
+                currentTab = BottomTab.QBANK
+                deepLink.questionId?.let { qbankViewModel.navigateToQuestion(it) }
+            }
+            DeepLinkAction.Type.STUDY      -> {
+                currentTab = BottomTab.STUDY
+                deepLink.questionId?.let { studyViewModel.navigateToQuestion(it) }
+            }
             DeepLinkAction.Type.SEARCH     -> { showSearch = true }
-            DeepLinkAction.Type.REPORTS    -> { currentTab = BottomTab.MENU  }
+            DeepLinkAction.Type.REPORTS    -> {
+                val qid = deepLink.questionId
+                if (!qid.isNullOrBlank()) {
+                    when (deepLink.tab?.lowercase()) {
+                        "qbank" -> { currentTab = BottomTab.QBANK; qbankViewModel.navigateToQuestion(qid) }
+                        "study" -> { currentTab = BottomTab.STUDY; studyViewModel.navigateToQuestion(qid) }
+                        else    -> { currentTab = BottomTab.QUIZ;  quizViewModel.navigateToQuestion(qid) }
+                    }
+                } else {
+                    currentTab = BottomTab.MENU
+                }
+            }
             DeepLinkAction.Type.TECHNIQUES -> { currentTab = BottomTab.MENU  }
             DeepLinkAction.Type.MENU       -> { currentTab = BottomTab.MENU  }
+            DeepLinkAction.Type.CHALLENGE  -> { currentTab = BottomTab.CHALLENGE }
             DeepLinkAction.Type.NONE       -> {}
         }
     }
@@ -130,7 +151,7 @@ fun MainScreen(
     // deepLink থেকে menuPage বের করো
     val menuInitialPage = remember(deepLink) {
         when (deepLink.type) {
-            DeepLinkAction.Type.REPORTS    -> "admin"
+            DeepLinkAction.Type.REPORTS    -> if (deepLink.questionId.isNullOrBlank()) "admin" else null
             DeepLinkAction.Type.TECHNIQUES -> "admin"
             DeepLinkAction.Type.MENU       -> deepLink.menuPage
             else                           -> null
