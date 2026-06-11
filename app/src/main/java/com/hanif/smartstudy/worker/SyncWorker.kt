@@ -12,8 +12,10 @@ import com.hanif.smartstudy.data.remote.ContentResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
@@ -106,6 +108,11 @@ class SyncWorker(
                     .add("secret",  BuildConfig.SECRET_KEY)
                     .build()
 
+                "admin_edit_question" -> {
+                    // Firebase REST PATCH — GAS দিয়ে নয়, সরাসরি Firebase এ
+                    return syncAdminEdit(payload)
+                }
+
                 else -> return false
             }
 
@@ -116,6 +123,37 @@ class SyncWorker(
             resp.isSuccessful
         } catch (e: Exception) {
             Log.e(TAG, "syncAction error: ${e.message}")
+            false
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminEdit(payload: Map<*, *>): Boolean {
+        return try {
+            val sheet      = payload["sheet"]?.toString() ?: return false
+            val questionId = payload["questionId"]?.toString() ?: return false
+            val fields     = payload["fields"] as? Map<String, String> ?: return false
+            if (questionId.isBlank() || fields.isEmpty()) return false
+
+            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val url    = "$base/$sheet/$questionId.json?auth=$secret"
+
+            val jsonObj = com.google.gson.JsonObject().apply {
+                fields.forEach { (k, v) -> addProperty(k, v) }
+            }
+            val body = jsonObj.toString()
+                .toRequestBody("application/json".toMediaType())
+            val resp = client.newCall(
+                okhttp3.Request.Builder().url(url).patch(body).build()
+            ).execute()
+            val code = resp.code
+            val respBody = resp.body?.string() ?: ""
+            resp.close()
+            Log.d(TAG, "syncAdminEdit $sheet/$questionId → $code $respBody")
+            resp.isSuccessful
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminEdit error: ${e.message}")
             false
         }
     }
