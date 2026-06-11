@@ -737,7 +737,7 @@ private fun RewardedAdEarnCard(vm: ChallengeViewModel) {
                                 ad          = rewardedAd,
                                 onRewarded  = { _ ->
                                     earned = true
-                                    vm.earnXpFromAd(50)
+                                    vm.earnXpFromAd(20)
                                     rewardedAd = null
                                 },
                                 onDismissed = { rewardedAd = null }
