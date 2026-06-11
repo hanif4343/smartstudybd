@@ -43,14 +43,7 @@ class ChallengeRepository {
 
     suspend fun findUserByPhone(phone: String): User? {
         return try {
-            val snap = withTimeout(10_000L) {
-                usersRef.orderByChild("Phone").equalTo(phone).get().await()
-            }
-            snap.children.firstOrNull()?.let { child ->
-                @Suppress("UNCHECKED_CAST")
-                val map = child.value as? Map<String, Any> ?: return@let null
-                User.fromFirebaseMap(map)
-            }
+            com.hanif.smartstudy.data.remote.UserSyncService.fetchUser(phone)
         } catch (e: Exception) {
             Log.e(TAG, "findUserByPhone: ${e.message}")
             null
@@ -61,18 +54,7 @@ class ChallengeRepository {
 
     suspend fun getAllUsers(excludePhone: String): List<User> {
         return try {
-            Log.d(TAG, "getAllUsers: fetching via Phone index...")
-            // Rules এ Phone index আছে তাই এটা কাজ করবে
-            val snap = withTimeout(15_000L) {
-                usersRef.orderByChild("Phone").startAt(" ").get().await()
-            }
-            Log.d(TAG, "getAllUsers: children=${snap.childrenCount}")
-            snap.children.mapNotNull { child ->
-                @Suppress("UNCHECKED_CAST")
-                val map = child.value as? Map<String, Any> ?: return@mapNotNull null
-                val user = User.fromFirebaseMap(map)
-                if (user.phone == excludePhone) null else user
-            }
+            com.hanif.smartstudy.data.remote.UserSyncService.fetchAllUsers(excludePhone)
         } catch (e: Exception) {
             Log.e(TAG, "getAllUsers error: ${e.message}")
             emptyList()
