@@ -246,10 +246,6 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadAllUsers() {
-        if (_state.value.allUsers.isNotEmpty()) {
-            _state.update { it.copy(showUserDropdown = true) }
-            return
-        }
         viewModelScope.launch {
             _state.update { it.copy(isLoadingUsers = true, showUserDropdown = true) }
             val users = repo.getAllUsers(_state.value.myPhone)
