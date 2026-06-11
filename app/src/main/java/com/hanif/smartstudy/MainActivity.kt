@@ -197,6 +197,8 @@ class MainActivity : ComponentActivity() {
         SmartStudyFirebaseService.updatePresence(this, false)
         com.hanif.smartstudy.util.RemoteLogger.flush()
     }
+
+    override fun onStop() {
         super.onStop()
         SmartStudyFirebaseService.updatePresence(this, false)
     }
