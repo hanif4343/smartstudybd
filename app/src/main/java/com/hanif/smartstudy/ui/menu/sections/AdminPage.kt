@@ -801,6 +801,9 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
         }
     }
 }
+
+@Composable
+private fun AdminTabField(label: String, value: String, onChange: (String) -> Unit, minLines: Int = 1) {
     OutlinedTextField(value = value, onValueChange = onChange,
         label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
         modifier = Modifier.fillMaxWidth(), minLines = minLines, shape = RoundedCornerShape(10.dp),
