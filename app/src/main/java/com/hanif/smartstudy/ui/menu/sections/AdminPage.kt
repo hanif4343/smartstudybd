@@ -70,7 +70,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "📋 Logs")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "📋 Logs", "⏳ Sync")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -79,7 +79,7 @@ fun AdminPage(
             }
 
             // Auto-load users when admin panel first opens
-            LaunchedEffect(Unit) { vm.loadActiveUsers() }
+            LaunchedEffect(Unit) { vm.loadActiveUsers(); vm.loadPendingEdits() }
 
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
@@ -101,6 +101,7 @@ fun AdminPage(
                 4 -> AddQuestionTab(state, vm)
                 5 -> BulkAudienceTab(state, vm)
                 6 -> LogsTab(state, vm)
+                7 -> PendingSyncTab(state, vm)
             }
         }
     }
@@ -521,7 +522,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                     if (editQ.isNotBlank())   fields["question"]    = editQ
                     if (editAns.isNotBlank()) fields["correct"]     = editAns
                     if (editExp.isNotBlank()) fields["explanation"] = editExp
-                    if (fields.isNotEmpty()) vm.adminEditQuestion(r.sheetName(), r.questionId, fields)
+                    if (fields.isNotEmpty()) vm.adminEditQuestion(r.sheetName(), r.questionId, fields, r.question)
                     vm.resolveReport(r.reportKey, "resolved", r.userPhone, r.question)
                     editTarget = null
                 }, shape = RoundedCornerShape(10.dp),
@@ -929,5 +930,179 @@ private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
             }
         }
         Spacer(Modifier.height(40.dp))
+    }
+}
+
+// ── Pending Sync Tab ──
+@Composable
+private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
+    val pending  = state.pendingEdits
+    val syncing  = state.isSyncingEdits
+    val syncMsg  = state.syncEditsMsg
+    val gson     = remember { com.google.gson.Gson() }
+    val sdf      = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()) }
+
+    LaunchedEffect(syncMsg) {
+        if (syncMsg != null) {
+            kotlinx.coroutines.delay(3000)
+            vm.clearSyncEditsMsg()
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+        // Header card
+        Card(
+            Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Row(
+                Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("⏳", fontSize = 28.sp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (pending.isEmpty()) "কোনো pending edit নেই" else "${pending.size}টি edit sync হয়নি",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp, color = Color(0xFF1E1B4B)
+                    )
+                    Text(
+                        "Offline এ করা edit গুলো এখানে জমা থাকে",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp, color = MutedText
+                    )
+                }
+                // Badge
+                if (pending.isNotEmpty()) {
+                    Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFFEF4444)) {
+                        Text(
+                            "${pending.size}",
+                            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Sync Now button
+        Button(
+            onClick  = { vm.syncPendingEditsNow() },
+            enabled  = !syncing,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape    = RoundedCornerShape(14.dp),
+            colors   = ButtonDefaults.buttonColors(
+                containerColor = if (pending.isEmpty()) Color(0xFF94A3B8) else Color(0xFF4F46E5)
+            )
+        ) {
+            if (syncing) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("Sync হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (pending.isEmpty()) "✅ সব Sync হয়ে গেছে" else "☁ Sync Now (${pending.size}টি)",
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp
+                )
+            }
+        }
+
+        // Sync result message
+        syncMsg?.let {
+            val isOk = it.startsWith("✅")
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF7ED),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isOk) Color(0xFF166534) else Color(0xFF92400E))
+            }
+        }
+
+        // Pending list
+        if (pending.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("✅", fontSize = 48.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("সব edit sync হয়ে গেছে!", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold, color = GreenOk, fontSize = 15.sp)
+                }
+            }
+        } else {
+            Text(
+                "pending edits:",
+                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                fontSize = 12.sp, color = MutedText
+            )
+            androidx.compose.foundation.lazy.LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                androidx.compose.foundation.lazy.items(pending, key = { it.id }) { action ->
+                    val payload = try {
+                        gson.fromJson(action.payload, Map::class.java)
+                    } catch (e: Exception) { emptyMap<String, Any>() }
+
+                    val sheet    = payload["sheet"]?.toString() ?: "?"
+                    val preview  = payload["questionPreview"]?.toString() ?: ""
+                    val retry    = action.retryCount
+
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(CardBg),
+                        elevation = CardDefaults.cardElevation(1.dp)
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Status icon
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (retry > 0) Color(0xFFFFF7ED) else Color(0xFFEEF2FF)
+                            ) {
+                                Text(
+                                    if (retry > 0) "⚠️" else "📴",
+                                    Modifier.padding(6.dp), fontSize = 16.sp
+                                )
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF4F46E5).copy(0.1f)) {
+                                        Text(sheet, Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
+                                    }
+                                    Text(sdf.format(java.util.Date(action.createdAt)),
+                                        fontSize = 9.sp, color = MutedText, fontFamily = NotoSansBengali)
+                                    if (retry > 0) {
+                                        Text("retry: $retry", fontSize = 9.sp,
+                                            color = Color(0xFFEA580C), fontFamily = NotoSansBengali,
+                                            fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    preview.ifBlank { "প্রশ্ন preview নেই" },
+                                    fontSize = 11.sp, color = SlateText,
+                                    fontFamily = NotoSansBengali,
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
