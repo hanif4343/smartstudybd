@@ -460,7 +460,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                                 Text("Edit প্রশ্ন", fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(onClick = {
-                                vm.resolveReport(report.reportKey, "resolved", report.userPhone, report.question)
+                                vm.resolveReport(report.reportKey, "resolved", report.userPhone, report.question, report.userName, report.questionId, report.tab)
                             }, modifier = Modifier.weight(1f).height(36.dp), shape = RoundedCornerShape(10.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981))
                             ) {
@@ -470,7 +470,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                                     fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
                             }
                             IconButton(onClick = {
-                                vm.resolveReport(report.reportKey, "dismissed", report.userPhone, report.question)
+                                vm.resolveReport(report.reportKey, "dismissed", report.userPhone, report.question, report.userName, report.questionId, report.tab)
                             }, modifier = Modifier.size(36.dp)) {
                                 Icon(Icons.Default.Close, null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp))
                             }
@@ -523,7 +523,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                     if (editAns.isNotBlank()) fields["correct"]     = editAns
                     if (editExp.isNotBlank()) fields["explanation"] = editExp
                     if (fields.isNotEmpty()) vm.adminEditQuestion(r.sheetName(), r.questionId, fields, r.question)
-                    vm.resolveReport(r.reportKey, "resolved", r.userPhone, r.question)
+                    vm.resolveReport(r.reportKey, "resolved", r.userPhone, r.question, r.userName, r.questionId, r.tab)
                     editTarget = null
                 }, shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
