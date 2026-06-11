@@ -29,18 +29,26 @@ object AdManager {
     const val NATIVE_TEST_ID       = "ca-app-pub-3940256099942544/2247696110"
 
     // ── Production IDs (পরে এখানে নিজের ID বসাবে) ──────────
-    // const val BANNER_HOME_ID        = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
-    // const val BANNER_QUIZ_ID        = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
-    // const val INTERSTITIAL_RESULT_ID= "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
-    // const val REWARDED_XP_BONUS_ID  = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val BANNER_HOME_ID              = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val BANNER_QUIZ_ID              = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val BANNER_QBANK_SUBJECT_ID     = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val BANNER_STUDY_ID             = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val INTERSTITIAL_RESULT_ID      = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val INTERSTITIAL_CHALLENGE_ID   = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val REWARDED_XP_BONUS_ID        = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
+    // const val REWARDED_DAILY_LOGIN_ID     = "ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX"
 
     // ── Active IDs (test phase এ test ID, release এ production ID) ──
-    val BANNER_HOME         get() = BANNER_TEST_ID
-    val BANNER_QUIZ_LIST    get() = BANNER_TEST_ID
-    val BANNER_WEEKEND      get() = BANNER_TEST_ID
-    val INTERSTITIAL_RESULT get() = INTERSTITIAL_TEST_ID
-    val REWARDED_XP_BONUS   get() = REWARDED_TEST_ID
-    val NATIVE_HOME         get() = NATIVE_TEST_ID
+    val BANNER_HOME              get() = BANNER_TEST_ID
+    val BANNER_QUIZ_LIST         get() = BANNER_TEST_ID
+    val BANNER_QBANK_SUBJECT     get() = BANNER_TEST_ID   // QBank subject list
+    val BANNER_STUDY             get() = BANNER_TEST_ID   // Study screen bottom
+    val BANNER_WEEKEND           get() = BANNER_TEST_ID
+    val INTERSTITIAL_RESULT      get() = INTERSTITIAL_TEST_ID
+    val INTERSTITIAL_CHALLENGE   get() = INTERSTITIAL_TEST_ID   // Challenge শেষে
+    val REWARDED_XP_BONUS        get() = REWARDED_TEST_ID
+    val REWARDED_DAILY_LOGIN     get() = REWARDED_TEST_ID       // Daily login bonus
+    val NATIVE_HOME              get() = NATIVE_TEST_ID
 
     // ── Standard AdRequest ───────────────────────────────────
     fun request(): AdRequest = AdRequest.Builder().build()
@@ -48,12 +56,13 @@ object AdManager {
     // ── Interstitial load helper ─────────────────────────────
     fun loadInterstitial(
         context  : Context,
+        adUnitId : String = INTERSTITIAL_RESULT,
         onLoaded : (InterstitialAd) -> Unit,
         onFailed : () -> Unit = {}
     ) {
         InterstitialAd.load(
             context,
-            INTERSTITIAL_RESULT,
+            adUnitId,
             request(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {

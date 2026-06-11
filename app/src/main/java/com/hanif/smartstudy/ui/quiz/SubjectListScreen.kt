@@ -132,6 +132,15 @@ fun SubjectListScreen(
             SubjectCard(subject = subject, onClick = { onSubject(subject.name) })
         }
 
+        // ── QBank subject list — banner ad (list এর শেষে, Mock button এর আগে) ──
+        if (mode == StudyMode.QBANK && subjects.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QBANK_SUBJECT)
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+
         // Mock Zone button (quiz + qbank)
         if (mode != StudyMode.STUDY) {
             item {

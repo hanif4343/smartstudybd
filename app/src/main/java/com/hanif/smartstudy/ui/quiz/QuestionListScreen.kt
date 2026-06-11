@@ -20,8 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
+import com.hanif.smartstudy.ui.ads.StickyBottomBannerView
 import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
 @Composable
@@ -69,6 +72,17 @@ fun QuestionListScreen(
                     TimerBar(timerSec = timerSec, totalSec = totalTime)
                 }
 
+                // ── Quiz: প্রতি ১০ প্রশ্নে sticky top banner ──
+                if (mode != StudyMode.STUDY) {
+                    QuizBannerEvery10(
+                        currentQuestionIndex = readingIdx,
+                        adUnitId = AdManager.BANNER_QUIZ_LIST
+                    )
+                }
+
+                // ── Study mode: bottom sticky banner ──
+                // (Box layout এর নিচে আলাদাভাবে দেখানো হবে)
+
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = questions.size)
 
@@ -94,6 +108,17 @@ fun QuestionListScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // ── Study mode: bottom sticky banner ──
+        if (mode == StudyMode.STUDY) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                StickyBottomBannerView(adUnitId = AdManager.BANNER_STUDY)
             }
         }
 
