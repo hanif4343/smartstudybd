@@ -39,11 +39,26 @@ fun QuestionListScreen(
     answered    : Int,
     onBack      : () -> Unit,
     onSubmit    : () -> Unit,
-    currentUser : com.hanif.smartstudy.data.model.User? = null
+    currentUser : com.hanif.smartstudy.data.model.User? = null,
+    highlightQuestionId : String? = null,
+    onHighlightConsumed : () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
+    var activeHighlightId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(highlightQuestionId, questions) {
+        val targetId = highlightQuestionId ?: return@LaunchedEffect
+        val idx = questions.indexOfFirst { it.id == targetId }
+        if (idx >= 0) {
+            listState.animateScrollToItem(idx)
+            activeHighlightId = targetId
+            kotlinx.coroutines.delay(2500)
+            activeHighlightId = null
+            onHighlightConsumed()
+        }
+    }
 
     val readingIdx by remember { derivedStateOf { listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
@@ -94,6 +109,37 @@ fun QuestionListScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(questions, key = { _, q -> q.id }) { idx, q ->
+                        val isHighlighted = q.id == activeHighlightId
+                        if (isHighlighted) {
+                            val transition = rememberInfiniteTransition(label = "highlight")
+                            val hlColor by transition.animateColor(
+                                initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                                targetValue   = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                                animationSpec = infiniteRepeatable(
+                                    animation  = tween(600),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "highlightColor"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(hlColor)
+                            ) {
+                                QuestionCard(
+                                    index       = idx,
+                                    item        = q,
+                                    mode        = mode,
+                                    totalCount  = questions.size,
+                                    onMcqAnswer = { opt -> viewModel.answerMcq(idx, opt) },
+                                    onWritten   = { text -> viewModel.answerWritten(idx, text) },
+                                    onBookmark  = { viewModel.toggleBookmark(q.id) },
+                                    onReport    = { reportIdx = idx },
+                                    currentUser = currentUser,
+                                    onAdminRefresh = { viewModel.adminRefreshContent() }
+                                )
+                            }
+                        } else {
                         QuestionCard(
                             index       = idx,
                             item        = q,
@@ -106,6 +152,7 @@ fun QuestionListScreen(
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() }
                         )
+                        }
                     }
                 }
             }
