@@ -99,25 +99,52 @@ object UserSyncService {
     ))
 
     // ── Fetch active users (Admin) ──
+    // Activity/presence ডাটা আছে "users" (lowercase) node এ, phone-key দিয়ে
+    // (fcmToken, lastActive, lastSeen, totalAppMinutes)। নাম পাওয়া যাবে
+    // "Users" (capital, profile) node থেকে।
     suspend fun fetchActiveUsers(): List<ActiveUser> = withContext(Dispatchers.IO) {
         try {
             val fbAuth = authQuery()
-            val url  = "$FB_URL/ActivityLog.json$fbAuth"
+
+            // ১) প্রোফাইল node থেকে phone -> name ম্যাপ বানাও
+            val nameMap = mutableMapOf<String, String>()
+            try {
+                val profUrl  = "$FB_URL/Users.json$fbAuth"
+                val profReq  = Request.Builder().url(profUrl).get().build()
+                val profBody = client.newCall(profReq).execute().body?.string()
+                if (!profBody.isNullOrBlank() && profBody != "null") {
+                    val profObj = JSONObject(profBody)
+                    profObj.keys().forEach { key ->
+                        val u = profObj.optJSONObject(key) ?: return@forEach
+                        val phone = u.optString("Phone", u.optString("phone", "")).trim()
+                        val name  = u.optString("Name", u.optString("name", ""))
+                        if (phone.isNotBlank()) {
+                            nameMap[phone] = name.ifBlank { phone }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchActiveUsers (names): ${e.message}")
+            }
+
+            // ২) presence/activity node ("users", lowercase)
+            val url  = "$FB_URL/users.json$fbAuth"
             val req  = Request.Builder().url(url).get().build()
             val body = client.newCall(req).execute().body?.string() ?: return@withContext emptyList()
             if (body == "null" || body.isBlank()) return@withContext emptyList()
+
             val obj  = JSONObject(body)
             val now  = System.currentTimeMillis()
             val list = mutableListOf<ActiveUser>()
             obj.keys().forEach { phone ->
-                val entry = obj.getJSONObject(phone)
-                val lastSeen = entry.optLong("ts", 0L)
-                val isOnline = entry.optBoolean("isActive", false) &&
-                        (now - lastSeen) < 5 * 60 * 1000L // 5 min window
+                val entry = obj.optJSONObject(phone) ?: return@forEach
+                val lastSeen   = entry.optLong("lastSeen", 0L)
+                val lastActive = entry.optLong("lastActive", lastSeen)
+                val isOnline   = (now - lastActive) < 5 * 60 * 1000L // 5 min window
                 list.add(ActiveUser(
                     phone    = phone,
-                    name     = entry.optString("name", phone),
-                    lastSeen = lastSeen,
+                    name     = nameMap[phone] ?: phone,
+                    lastSeen = if (lastSeen > 0L) lastSeen else lastActive,
                     isOnline = isOnline,
                     fcmToken = entry.optString("fcmToken", "")
                 ))
@@ -128,6 +155,28 @@ object UserSyncService {
             emptyList()
         }
     }
+
+    // ── Fetch all users (for challenge friend dropdown) ──
+    suspend fun fetchAllUsers(excludePhone: String): List<com.hanif.smartstudy.data.model.User> =
+        withContext(Dispatchers.IO) {
+            try {
+                val fbAuth = authQuery()
+                val url  = "$FB_URL/Users.json$fbAuth"
+                val req  = Request.Builder().url(url).get().build()
+                val body = client.newCall(req).execute().body?.string()
+                if (body.isNullOrBlank() || body == "null") return@withContext emptyList()
+
+                val rootMap = gson.fromJson(body, Map::class.java) as? Map<String, Any> ?: return@withContext emptyList()
+                rootMap.values.mapNotNull { value ->
+                    val userMap = value as? Map<String, Any> ?: return@mapNotNull null
+                    val u = com.hanif.smartstudy.data.model.User.fromFirebaseMap(userMap)
+                    if (u.phone.isNullOrBlank() || u.phone == excludePhone) null else u
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchAllUsers: ${e.message}")
+                emptyList()
+            }
+        }
 
     // ── Fetch single user from Firebase ──
     // Firebase এ user গুলো numeric key (1, 2, 3...) তে আছে
