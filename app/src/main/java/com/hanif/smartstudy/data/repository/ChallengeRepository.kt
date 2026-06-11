@@ -67,8 +67,11 @@ class ChallengeRepository {
             snap.children.mapNotNull { child ->
                 @Suppress("UNCHECKED_CAST")
                 val map = child.value as? Map<String, Any> ?: return@mapNotNull null
-                val user = User.fromFirebaseMap(map)
-                if (user.phone == excludePhone || user.phone.isNullOrBlank()) null else user
+                User.fromFirebaseMap(map)
+            }.filter { user ->
+                // শুধু নিজেকে বাদ দাও, name আছে এমন user দেখাও
+                val phone = user.phone.orEmpty()
+                phone != excludePhone && user.name.isNullOrBlank().not()
             }
         } catch (e: Exception) {
             Log.e(TAG, "getAllUsers: ${e.message}")
