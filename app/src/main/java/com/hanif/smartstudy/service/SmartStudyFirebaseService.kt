@@ -143,7 +143,10 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+            // Pass all FCM data fields as intent extras for deep link parsing
             data.forEach { (key, value) -> putExtra(key, value) }
+            // Ensure type-specific extras are always present for DeepLinkHandler
+            // (FCM data map already contains them via forEach above)
         }
 
         val pendingIntent = PendingIntent.getActivity(
