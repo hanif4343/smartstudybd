@@ -39,12 +39,32 @@ fun Intent.parseDeepLink(): DeepLinkAction {
 
     if (fcmUrl != null || fcmType != null) {
         return when {
+            // Challenge invite → go directly to Challenge tab
             fcmType == "challenge_invite" ->
                 DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
+
+            // Report resolved → navigate to the specific question with highlight
+            fcmType == "report_resolved" -> {
+                val qsheet = getStringExtra("qsheet") ?: ""
+                val tab    = getStringExtra("tab") ?: ""
+                val resolvedTab = when {
+                    tab.equals("study", ignoreCase = true) || qsheet.contains("study", ignoreCase = true) -> "study"
+                    tab.equals("quiz",  ignoreCase = true) || qsheet.contains("quiz",  ignoreCase = true) -> "quiz"
+                    else -> "qbank"
+                }
+                DeepLinkAction(DeepLinkAction.Type.REPORTS, questionId = fcmQid, tab = resolvedTab)
+            }
+
+            // Technique approved/rejected → go to question
+            fcmType == "technique_status" ->
+                DeepLinkAction(DeepLinkAction.Type.QBANK, questionId = fcmQid)
+
             fcmUrl == "techniques" || fcmType == "admin_technique" ->
                 DeepLinkAction(DeepLinkAction.Type.TECHNIQUES, questionId = fcmQid, tab = fcmTab)
             fcmUrl == "reports"    || fcmType == "admin_report"    ->
                 DeepLinkAction(DeepLinkAction.Type.REPORTS, questionId = fcmQid, tab = fcmTab)
+            fcmUrl == "challenge" ->
+                DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
             fcmUrl == "quiz"   -> DeepLinkAction(DeepLinkAction.Type.QUIZ,  questionId = fcmQid)
             fcmUrl == "qbank"  -> DeepLinkAction(DeepLinkAction.Type.QBANK, questionId = fcmQid)
             fcmUrl == "study"  -> DeepLinkAction(DeepLinkAction.Type.STUDY, questionId = fcmQid)
