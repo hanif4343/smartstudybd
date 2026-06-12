@@ -321,20 +321,26 @@ class ChallengeRepository {
             db.getReference("Notifications/$phoneEncoded/$notifKey")
                 .setValue(com.google.gson.Gson().fromJson(notifObj, Map::class.java)).await()
 
-            // FCM push via GAS (if the user has a token saved)
-            val userSnap = db.getReference("Users/$phoneEncoded/fcmToken").get().await()
-            val fcmToken = userSnap.getValue(String::class.java)
+            // FCM push via GAS — try lowercase users/ first (SmartStudyFirebaseService saves here),
+            // then fallback to capital Users/ (legacy path)
+            val tokenSnap1 = db.getReference("users/$phoneEncoded/fcmToken").get().await()
+            val tokenSnap2 = if (tokenSnap1.getValue(String::class.java).isNullOrBlank())
+                db.getReference("Users/$phoneEncoded/fcmToken").get().await() else null
+            val fcmToken = tokenSnap1.getValue(String::class.java)?.takeIf { it.isNotBlank() }
+                ?: tokenSnap2?.getValue(String::class.java)
             if (!fcmToken.isNullOrBlank() && BuildConfig.GAS_URL.isNotBlank()) {
-                val client = okhttp3.OkHttpClient()
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
                 val gasUrl = "${BuildConfig.GAS_URL}" +
                     "?action=sendNotification" +
-                    "&secret=${BuildConfig.SECRET_KEY}" +
                     "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
                     "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
                     "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
                     "&type=challenge_invite" +
-                    "&challengeId=${java.net.URLEncoder.encode(invite.challengeId, "UTF-8")}" +
-                    "&sound=default"
+                    "&url=challenge" +
+                    "&challengeId=${java.net.URLEncoder.encode(invite.challengeId, "UTF-8")}"
                 client.newCall(okhttp3.Request.Builder().url(gasUrl).get().build()).execute().close()
             }
         } catch (e: Exception) {
