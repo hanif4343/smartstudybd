@@ -31,6 +31,9 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.delay
 
 private val Indigo600  = Color(0xFF4F46E5)
+private val SlateText  = Color(0xFF1E293B)
+private val MutedText  = Color(0xFF64748B)
+private val CardBg     = Color(0xFFFFFFFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,27 +87,27 @@ fun GlobalSearchScreen(
                     OutlinedTextField(
                         value = query, onValueChange = { query = it },
                         placeholder = { Text("প্রশ্ন, বিষয়, উত্তর খোঁজুন...",
-                            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            fontFamily = NotoSansBengali, color = MutedText) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().focusRequester(focusReq),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor   = Indigo600,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            focusedContainerColor   = MaterialTheme.colorScheme.surfaceVariant,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                            unfocusedBorderColor = Color(0xFFE2E8F0),
+                            focusedContainerColor   = Color(0xFFF8FAFC),
+                            unfocusedContainerColor = Color(0xFFF8FAFC)
                         ),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                         trailingIcon = {
                             if (query.isNotEmpty()) IconButton(onClick = { query = ""; activeQuery = "" }) {
-                                Icon(Icons.Default.Clear, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Icons.Default.Clear, null, tint = MutedText)
                             }
                         }
                     )
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
             )
         }
     ) { padding ->
@@ -127,7 +130,7 @@ fun GlobalSearchScreen(
 
                 if (isSearching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = Indigo600)
 
-                Text("${filtered.size}টি ফলাফল", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text("${filtered.size}টি ফলাফল", fontSize = 11.sp, color = MutedText,
                     fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
 
                 LazyColumn(
@@ -140,7 +143,7 @@ fun GlobalSearchScreen(
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("🔍", fontSize = 36.sp)
                                     Spacer(Modifier.height(8.dp))
-                                    Text("\"$activeQuery\" পাওয়া যায়নি", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                    Text("\"$activeQuery\" পাওয়া যায়নি", fontFamily = NotoSansBengali, color = MutedText, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -154,7 +157,7 @@ fun GlobalSearchScreen(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("🔍", fontSize = 48.sp)
-                        Text("কমপক্ষে ২টি অক্ষর লিখুন", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("কমপক্ষে ২টি অক্ষর লিখুন", fontFamily = NotoSansBengali, color = MutedText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Text("প্রশ্ন, উত্তর, বিষয়, SubTopic দিয়ে খুঁজতে পারবেন", fontFamily = NotoSansBengali, color = Color(0xFFCBD5E1), fontSize = 11.sp)
                     }
                 }
@@ -167,21 +170,21 @@ fun GlobalSearchScreen(
 private fun SearchResultCard(q: QuestionItem, query: String, onClick: (QuestionItem) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick(q) },
-        shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(CardBg),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(q.subject, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
-                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                Text(q.subject, fontSize = 9.sp, color = MutedText, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    modifier = Modifier.background(Color(0xFFF1F5F9), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
                 if (q.subTopic.isNotBlank()) Text(q.subTopic, fontSize = 9.sp, color = Indigo600, fontWeight = FontWeight.Bold,
-                    fontFamily = NotoSansBengali, modifier = Modifier.background(Indigo600.copy(alpha = 0.12f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                    fontFamily = NotoSansBengali, modifier = Modifier.background(Color(0xFFEEF2FF), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
                 Spacer(Modifier.weight(1f))
                 val (typeColor, typeBg) = if (q.isMcq()) Color(0xFF059669) to Color(0xFFD1FAE5) else Color(0xFF7C3AED) to Color(0xFFEDE9FE)
                 Text(if (q.isMcq()) "MCQ" else "Written", fontSize = 9.sp, color = typeColor, fontWeight = FontWeight.ExtraBold,
                     fontFamily = NotoSansBengali, modifier = Modifier.background(typeBg, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
             }
-            Text(highlightText(q.question, query), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 2)
+            Text(highlightText(q.question, query), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateText, fontFamily = NotoSansBengali, maxLines = 2)
             if (q.answer.isNotBlank()) {
                 Text(highlightText("✅ " + q.answer.take(80) + if (q.answer.length > 80) "..." else "", query),
                     fontSize = 11.sp, color = Color(0xFF059669), fontFamily = NotoSansBengali, maxLines = 1)

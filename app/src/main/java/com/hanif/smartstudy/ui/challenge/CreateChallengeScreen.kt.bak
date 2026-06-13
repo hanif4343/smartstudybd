@@ -41,7 +41,7 @@ fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
     ) { padding ->
         Column(
             modifier            = Modifier.fillMaxSize().padding(padding)
-                .background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState())
+                .background(Color(0xFFF8FAFC)).verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -238,12 +238,12 @@ private fun InviteSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                                         }
                                         Column(Modifier.weight(1f)) {
                                             Text(user.displayName(), fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                                                color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 val cl = user.classLevel?.trim() ?: ""
                                                 val ut = user.userType?.trim() ?: ""
                                                 val label = when { cl.isNotBlank() -> "🎓 $cl"; ut.isNotBlank() -> "💼 $ut"; else -> "💼 User" }
-                                                Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                                                Text(label, fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
                                                 Text("⭐ ${user.xp} XP", fontSize = 10.sp, color = Color(0xFF7C3AED), fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
                                             }
                                         }
@@ -292,7 +292,7 @@ private fun InviteSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                                     }
                                 }
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 0.5.dp)
                         }
                     }
                 }
@@ -312,7 +312,7 @@ private fun InviteSection(state: ChallengeUiState, vm: ChallengeViewModel) {
 
             // Invited list
             if (state.invitedUsers.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(color = Color(0xFFF1F5F9))
                 Text("${state.invitedUsers.size} জন যোগ করা হয়েছে", fontSize = 11.sp,
                     color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
                 state.invitedUsers.forEach { user ->
@@ -338,7 +338,7 @@ private fun SearchResultCard(user: User, canAdd: Boolean, onAdd: () -> Unit) {
     val btnColor = if (canAdd) Color(0xFF10B981) else Color(0xFF94A3B8)  // সবুজ বা ধূসর
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(if (canAdd) Color(0xFF10B981).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant)
+            .background(if (canAdd) Color(0xFFF0FDF4) else Color(0xFFF1F5F9))
             .border(1.dp,
                 if (canAdd) Color(0xFFA7F3D0) else Color(0xFFCBD5E1),
                 RoundedCornerShape(12.dp))
@@ -404,7 +404,7 @@ private fun SearchResultCard(user: User, canAdd: Boolean, onAdd: () -> Unit) {
 private fun InvitedUserChip(user: User, onRemove: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp),
+            .background(Color(0xFFF8FAFC)).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -415,7 +415,7 @@ private fun InvitedUserChip(user: User, onRemove: () -> Unit) {
         }
         Column(Modifier.weight(1f)) {
             Text(user.displayName(), fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
             Text(user.phone ?: "", fontSize = 10.sp, color = Color(0xFF64748B))
         }
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
@@ -438,7 +438,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (selected) Color(0xFF4F46E5) else MaterialTheme.colorScheme.surfaceVariant)
+                            .background(if (selected) Color(0xFF4F46E5) else Color(0xFFF1F5F9))
                             .clickable { vm.onSourceSelect(source) }
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                     ) {
@@ -446,7 +446,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                             source,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (selected) Color.White else Color(0xFF64748B),
                             fontFamily = NotoSansBengali
                         )
                     }
@@ -455,7 +455,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
 
             // ── Step 2: Subject (visible after source selected) ──
             if (state.selectedSource.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(color = Color(0xFFF1F5F9))
                 StepLabel(step = "২", label = "বিষয় বেছে নাও")
                 if (state.subjects.isEmpty()) {
                     Text("কোনো বিষয় পাওয়া যায়নি", fontSize = 11.sp,
@@ -469,7 +469,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                             val sel = state.selectedSubject == subject
                             Box(
                                 Modifier.clip(RoundedCornerShape(20.dp))
-                                    .background(if (sel) Color(0xFF4F46E5) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .background(if (sel) Color(0xFF4F46E5) else Color(0xFFEEF2FF))
                                     .clickable { vm.onSubjectSelect(subject) }
                                     .padding(horizontal = 14.dp, vertical = 7.dp)
                             ) {
@@ -484,7 +484,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
 
             // ── Step 3: SubTopic (visible after subject selected) ──
             if (state.selectedSubject.isNotEmpty() && state.subTopics.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(color = Color(0xFFF1F5F9))
                 StepLabel(step = "৩", label = "টপিক বেছে নাও (ঐচ্ছিক)")
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -506,7 +506,7 @@ private fun SubjectSection(state: ChallengeUiState, vm: ChallengeViewModel) {
                         val sel = state.selectedSubTopic == sub
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(if (sel) Color(0xFF10B981) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                .background(if (sel) Color(0xFF10B981) else Color(0xFFEEF2FF))
                                 .clickable { vm.onSubTopicSelect(sub) }
                                 .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
@@ -565,7 +565,7 @@ private fun ConfigSection(state: ChallengeUiState, vm: ChallengeViewModel) {
             // Auto time info
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)).padding(horizontal = 12.dp, vertical = 8.dp),
+                    .background(Color(0xFFEEF2FF)).padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically
             ) {
@@ -583,8 +583,8 @@ private fun ConfigRow(label: String, value: String, options: List<String>, selec
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFEEF2FF))
                 .padding(horizontal = 10.dp, vertical = 4.dp)) {
                 Text(value, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
@@ -617,7 +617,7 @@ private fun WagerSection(state: ChallengeUiState, vm: ChallengeViewModel) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Column {
                     Text("জিতলে XP পাবে, হারলে কাটা যাবে",
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                        fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
                     Text("তোমার XP: ${state.myCurrentXp}",
                         fontSize = 11.sp, color = Color(0xFF4F46E5),
                         fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
@@ -776,5 +776,5 @@ private fun RewardedAdEarnCard(vm: ChallengeViewModel) {
 @Composable
 private fun SectionHeader(title: String) {
     Text(title, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+        color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
 }

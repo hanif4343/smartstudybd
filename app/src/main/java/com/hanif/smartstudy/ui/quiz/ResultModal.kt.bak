@@ -65,7 +65,7 @@ fun ResultModal(
     ModalBottomSheet(
         onDismissRequest  = onHomeWithAd,
         sheetState        = sheetState,
-        containerColor    = MaterialTheme.colorScheme.surface,
+        containerColor    = CardBg,
         shape             = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         LazyColumn(
@@ -80,10 +80,10 @@ fun ResultModal(
                 Spacer(Modifier.height(12.dp))
                 Text(result.emoji, fontSize = 36.sp)
                 Text(result.title, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                    color = SlateText, fontFamily = NotoSansBengali,
                     textAlign = TextAlign.Center)
                 Text("মোট ${result.total} প্রশ্নের মধ্যে ${result.correct} সঠিক",
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
+                    fontSize = 12.sp, color = MutedText, fontFamily = NotoSansBengali,
                     textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(16.dp))
             }
@@ -110,7 +110,7 @@ fun ResultModal(
             if (result.subjectBreakdown.isNotEmpty()) {
                 item {
                     Text("বিষয় ভিত্তিক ফলাফল", fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.ExtraBold, color = MutedText,
                         fontFamily = NotoSansBengali,
                         modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
                 }
@@ -164,13 +164,13 @@ private fun ScoreRing(pct: Int) {
     Box(Modifier.size(130.dp), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             val stroke = Stroke(width = 14f, cap = StrokeCap.Round)
-            // track drawn via onSurface.copy — set dynamically
+            drawArc(Color(0xFFE2E8F0), -90f, 360f, false, style = stroke)
             drawArc(color, -90f, 360f * animPct, false, style = stroke)
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("$pct%", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-            Text("স্কোর", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                color = SlateText, fontFamily = NotoSansBengali)
+            Text("স্কোর", fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali)
         }
     }
 }
@@ -192,7 +192,7 @@ private fun ResultStatBox(
         Text(icon, fontSize = 18.sp)
         Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
             color = valueColor, fontFamily = NotoSansBengali)
-        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold,
+        Text(label, fontSize = 9.sp, color = MutedText, fontWeight = FontWeight.Bold,
             fontFamily = NotoSansBengali)
     }
 }
@@ -205,11 +205,11 @@ private fun SubjectResultRow(sub: SubjectScore) {
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(sub.subject, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+            color = SlateText, fontFamily = NotoSansBengali,
             modifier = Modifier.width(90.dp))
         Box(
             Modifier.weight(1f).height(8.dp)
-                .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                .clip(RoundedCornerShape(20.dp)).background(Color(0xFFE2E8F0))
         ) {
             Box(
                 Modifier.fillMaxWidth(sub.pct / 100f).fillMaxHeight()
@@ -249,7 +249,7 @@ fun MockSelectionScreen(
                     Column {
                         Text("মক টেস্ট", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
                             fontFamily = NotoSansBengali)
-                        Text("টপিক সিলেক্ট করো", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Text("টপিক সিলেক্ট করো", fontSize = 10.sp, color = MutedText,
                             fontFamily = NotoSansBengali)
                     }
                 },
@@ -259,7 +259,7 @@ fun MockSelectionScreen(
                         color = Indigo600, fontFamily = NotoSansBengali,
                         modifier = Modifier.padding(end = 12.dp))
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
             )
         },
         bottomBar = {
@@ -267,7 +267,7 @@ fun MockSelectionScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(CardBg)
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
@@ -331,7 +331,7 @@ private fun MockSubjectAccordion(
 
     Card(
         shape  = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column {
@@ -354,9 +354,9 @@ private fun MockSubjectAccordion(
                     colors = CheckboxDefaults.colors(checkedColor = Indigo600)
                 )
                 Text(subject.name, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-                Text("${subject.subTopics.size} Topics", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(if (expanded) "▲" else "▼", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                Text("${subject.subTopics.size} Topics", fontSize = 10.sp, color = MutedText)
+                Text(if (expanded) "▲" else "▼", fontSize = 12.sp, color = MutedText)
             }
 
             // SubTopics
@@ -366,7 +366,7 @@ private fun MockSubjectAccordion(
                     val selected = mockConfig.selectedTopics.contains(key)
                     Row(
                         Modifier.fillMaxWidth()
-                            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant)
+                            .background(if (selected) Color(0xFFF5F3FF) else Color(0xFFF8FAFC))
                             .clickable { onToggleTopic(key) }
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -379,9 +379,9 @@ private fun MockSubjectAccordion(
                             modifier        = Modifier.size(20.dp)
                         )
                         Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                            color = if (selected) Indigo600 else MaterialTheme.colorScheme.onSurface,
+                            color = if (selected) Indigo600 else SlateText,
                             fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-                        Text("${st.totalQ}টি", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Text("${st.totalQ}টি", fontSize = 10.sp, color = MutedText,
                             fontFamily = NotoSansBengali)
                     }
                 }
