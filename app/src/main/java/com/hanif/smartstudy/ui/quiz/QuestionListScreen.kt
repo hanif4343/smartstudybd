@@ -304,7 +304,7 @@ private fun ResultStat(label: String, value: String, color: Color) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp, color = Color(0xFF64748B))
+        Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(
             Modifier.clip(RoundedCornerShape(8.dp))
                 .background(color.copy(alpha = 0.1f))
@@ -332,13 +332,13 @@ private fun QuestionTopBar(
             Column {
                 Text(subTopic.ifBlank { subject }, fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF1E293B), fontFamily = NotoSansBengali, maxLines = 1)
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 1)
                 if (mode != StudyMode.STUDY) {
                     Text("$subject  ·  ${answered}/${total} উত্তর", fontSize = 10.sp,
-                        color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                 } else {
                     Text(subject, fontSize = 10.sp,
-                        color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                 }
             }
         },
@@ -355,6 +355,6 @@ private fun QuestionTopBar(
                 }
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
     )
 }
