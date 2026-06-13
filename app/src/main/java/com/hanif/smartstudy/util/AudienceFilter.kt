@@ -29,12 +29,13 @@ object AudienceFilter {
 
     // ── Single item check ────────────────────────────────────
 
-    fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = ""): Boolean {
-        // Admin override mode
-        if (adminOverrideTag.isNotBlank() && user?.isAdmin() == true) {
+    fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = "Job"): Boolean {
+        // Admin override mode — "Job Seeker (Default)" (খালি tag) মানেই "Job", আলাদা কিছু না
+        if (user?.isAdmin() == true) {
+            val effectiveTag = adminOverrideTag.ifBlank { "Job" }
             val tag = audienceTags?.trim() ?: ""
-            return if (tag.isBlank()) adminOverrideTag.equals("Job", ignoreCase = true)
-                   else tag.equals(adminOverrideTag.trim(), ignoreCase = true)
+            return if (tag.isBlank()) effectiveTag.equals("Job", ignoreCase = true)
+                   else tag.equals(effectiveTag.trim(), ignoreCase = true)
         }
         val tag = audienceTags?.trim() ?: ""
         val cl  = user?.classLevel?.trim() ?: ""
