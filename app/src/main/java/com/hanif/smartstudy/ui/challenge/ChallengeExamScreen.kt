@@ -35,7 +35,7 @@ fun ChallengeExamScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
     val myPhone   = state.myPhone
     val currentQ  = questions.getOrNull(state.currentQIndex)
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.fillMaxSize()) {
 
             // ── Top bar ──
@@ -69,7 +69,7 @@ fun ChallengeExamScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                 progress = { (state.currentQIndex + 1).toFloat() / questions.size.coerceAtLeast(1) },
                 modifier = Modifier.fillMaxWidth().height(3.dp),
                 color    = Color(0xFF10B981),
-                trackColor = Color(0xFFE2E8F0)
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
 
             // ── Question content ──
@@ -118,7 +118,7 @@ fun ChallengeExamScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${state.currentQIndex + 1}/${questions.size}",
                         fontSize = 18.sp, fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                     Text("${state.answers.size} উত্তর", fontSize = 10.sp,
                         color = Color(0xFF10B981), fontFamily = NotoSansBengali,
                         fontWeight = FontWeight.Bold)
@@ -204,13 +204,13 @@ private fun LifelineBar(state: ChallengeUiState, vm: ChallengeViewModel) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFFF1F5F9))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment     = Alignment.CenterVertically
     ) {
         Text("🎯 লাইফলাইন:", fontSize = 11.sp,
-            color = Color(0xFF64748B), fontFamily = NotoSansBengali,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
             fontWeight = FontWeight.Bold)
 
         // 50-50
@@ -249,7 +249,7 @@ private fun LifelineChip(
 ) {
     val bg    = when {
         active -> Color(0xFF3B82F6)
-        used   -> Color(0xFFE2E8F0)
+        used   -> MaterialTheme.colorScheme.surfaceVariant
         else   -> Color(0xFF4F46E5)
     }
     val text  = if (used && !active) Color(0xFF94A3B8) else Color.White
@@ -300,16 +300,16 @@ private fun ChallengeQuestionCard(
         CardDefaults.cardElevation(2.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFEEF2FF))
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                     .padding(horizontal = 8.dp, vertical = 4.dp)) {
                     Text("#${index + 1}", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF4F46E5))
                 }
-                Text(question.subTopic, fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                Text(question.subTopic, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
             }
             Text(question.question.replace(Regex("<[^>]+>"), ""),
                 fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                color = Color(0xFF1E293B), fontFamily = NotoSansBengali, lineHeight = 20.sp)
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, lineHeight = 20.sp)
 
             listOf(question.optionA, question.optionB, question.optionC, question.optionD)
                 .filterIndexed { i, opt -> opt.isNotBlank() }
@@ -322,12 +322,12 @@ private fun ChallengeQuestionCard(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF1F5F9).copy(0.4f))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.4f))
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Box(Modifier.size(26.dp).clip(CircleShape).background(Color(0xFFE2E8F0)),
+                            Box(Modifier.size(26.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
                                 contentAlignment = Alignment.Center) {
                                 Text(listOf("ক","খ","গ","ঘ")[i], fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold, color = Color(0xFFCBD5E1))
@@ -339,22 +339,22 @@ private fun ChallengeQuestionCard(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC))
-                                .border(1.5.dp, if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface)
+                                .border(1.5.dp, if (isSelected) Color(0xFF4F46E5) else MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
                                 .clickable { onSelect(optNum) }
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Box(Modifier.size(26.dp).clip(CircleShape)
-                                .background(if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)),
+                                .background(if (isSelected) Color(0xFF4F46E5) else MaterialTheme.colorScheme.surfaceVariant),
                                 contentAlignment = Alignment.Center) {
                                 Text(listOf("ক","খ","গ","ঘ")[i], fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = if (isSelected) Color.White else Color(0xFF64748B))
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(opt, fontSize = 13.sp, fontFamily = NotoSansBengali,
-                                color = if (isSelected) Color(0xFF1E1B4B) else Color(0xFF1E293B),
+                                color = if (isSelected) Color(0xFF1E1B4B) else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 modifier = Modifier.weight(1f))
                         }
@@ -367,7 +367,7 @@ private fun ChallengeQuestionCard(
 @Composable
 private fun SubmitStatRow(label: String, value: String, color: Color) {
     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-        Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp, color = Color(0xFF64748B))
+        Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(0.1f))
             .padding(horizontal = 10.dp, vertical = 3.dp)) {
             Text(value, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
