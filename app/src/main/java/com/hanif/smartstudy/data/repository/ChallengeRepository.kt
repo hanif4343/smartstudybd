@@ -327,14 +327,10 @@ class ChallengeRepository {
             db.getReference("Notifications/$phoneEncoded/$notifKey")
                 .setValue(com.google.gson.Gson().fromJson(notifObj, Map::class.java)).await()
 
-            // FCM push via GAS — try lowercase users/ first (SmartStudyFirebaseService saves here),
-            // then fallback to capital Users/ (legacy path)
-            val tokenSnap1 = db.getReference("users/$phoneEncoded/fcmToken").get().await()
-            val tokenSnap2 = if (tokenSnap1.getValue(String::class.java).isNullOrBlank())
-                db.getReference("Users/$phoneEncoded/fcmToken").get().await() else null
-            val fcmToken = tokenSnap1.getValue(String::class.java)?.takeIf { it.isNotBlank() }
-                ?: tokenSnap2?.getValue(String::class.java)
-            if (!fcmToken.isNullOrBlank() && BuildConfig.GAS_URL.isNotBlank()) {
+            // FCM push via GAS — GAS নিজে (admin access দিয়ে) recipient-এর fcmToken
+            // phone দিয়ে lookup করবে, তাই client-side fcmToken read লাগবে না
+            // (অন্য ইউজারের fcmToken client-side read করতে গেলে Firebase rules block করত)
+            if (BuildConfig.GAS_URL.isNotBlank()) {
                 val client = okhttp3.OkHttpClient.Builder()
                     .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
@@ -342,7 +338,7 @@ class ChallengeRepository {
                 val gasUrl = "${BuildConfig.GAS_URL}" +
                     "?action=sendNotification" +
                     "&secret=${java.net.URLEncoder.encode(BuildConfig.SECRET_KEY, "UTF-8")}" +
-                    "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
+                    "&phone=${java.net.URLEncoder.encode(toPhone, "UTF-8")}" +
                     "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
                     "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
                     "&type=challenge_invite" +
