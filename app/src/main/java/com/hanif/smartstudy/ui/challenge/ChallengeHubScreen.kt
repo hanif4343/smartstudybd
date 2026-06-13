@@ -106,7 +106,7 @@ private fun ChallengeHubScreen(state: ChallengeUiState, vm: ChallengeViewModel) 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(bottom = 24.dp)
     ) {
@@ -131,12 +131,12 @@ private fun ChallengeHubScreen(state: ChallengeUiState, vm: ChallengeViewModel) 
             // ── Pending Invites ──
             if (state.pendingInvites.isNotEmpty()) {
                 Text("📨 আমন্ত্রণ", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                 state.pendingInvites.forEach { invite ->
                     InviteCard(invite = invite, onAccept = { vm.respondToInvite(invite.challengeId, true) },
                         onDecline = { vm.respondToInvite(invite.challengeId, false) })
                 }
-                HorizontalDivider(color = Color(0xFFE2E8F0))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
 
             // ── Create button ──
@@ -179,12 +179,12 @@ private fun InviteCard(invite: ChallengeInvite, onAccept: () -> Unit, onDecline:
                             if (invite.isGhostMode) "${invite.creatorName} Ghost চ্যালেঞ্জ পাঠিয়েছে!"
                             else "${invite.creatorName} চ্যালেঞ্জ পাঠিয়েছে!",
                             fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF1E293B), fontFamily = NotoSansBengali
+                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali
                         )
                         if (invite.isGhostMode) Text("👻", fontSize = 12.sp)
                     }
                     Text("${invite.subject} • ${invite.questionCount}টি প্রশ্ন • ${invite.timeLimitSec/60} মিনিট",
-                        fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                     if (invite.isGhostMode) Text("সে আগেই পরীক্ষা দিয়েছে — তুমি দিলে রেজাল্ট দেখবে!",
                         fontSize = 10.sp, color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
                     if (invite.wagerXp > 0) {
@@ -219,7 +219,7 @@ private fun InviteCard(invite: ChallengeInvite, onAccept: () -> Unit, onDecline:
 @Composable
 private fun HowItWorksCard() {
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp),
-        CardDefaults.cardColors(Color(0xFFEEF2FF)),
+        CardDefaults.cardColors(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
         border = BorderStroke(1.dp, Color(0xFFC7D2FE))) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("কীভাবে কাজ করে?", fontSize = 13.sp,
