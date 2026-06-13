@@ -96,7 +96,7 @@ fun shimmerBrush(): Brush {
         label         = "shimmerX"
     )
     return Brush.linearGradient(
-        colors = listOf(Color(0xFFE2E8F0), Color(0xFFF8FAFC), Color(0xFFE2E8F0)),
+        colors = listOf(Color(0xFF334155), Color(0xFF1E293B), Color(0xFF334155)),
         start  = Offset(x - 200f, 0f),
         end    = Offset(x, 0f)
     )
@@ -185,9 +185,9 @@ fun ErrorState(
         ) { Text("⚠️", fontSize = 32.sp) }
         Text("সমস্যা হয়েছে", fontSize = 16.sp,
             fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
-            color = Color(0xFF1E293B))
+            color = MaterialTheme.colorScheme.onSurface)
         Text(message, fontSize = 12.sp, fontFamily = NotoSansBengali,
-            color = Color(0xFF64748B), textAlign = TextAlign.Center, lineHeight = 18.sp)
+            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, lineHeight = 18.sp)
         if (onRetry != null) {
             Button(
                 onClick = onRetry, shape = RoundedCornerShape(12.dp),
@@ -219,7 +219,7 @@ fun EmptyState(
     ) {
         Text(emoji, fontSize = 48.sp)
         Text(title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali, color = Color(0xFF1E293B))
+            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface)
         if (subtitle.isNotBlank()) {
             Text(subtitle, fontSize = 12.sp, fontFamily = NotoSansBengali,
                 color = Color(0xFF94A3B8), textAlign = TextAlign.Center)
