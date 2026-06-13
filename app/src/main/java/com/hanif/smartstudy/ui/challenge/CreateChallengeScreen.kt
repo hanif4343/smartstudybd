@@ -338,7 +338,7 @@ private fun SearchResultCard(user: User, canAdd: Boolean, onAdd: () -> Unit) {
     val btnColor = if (canAdd) Color(0xFF10B981) else Color(0xFF94A3B8)  // সবুজ বা ধূসর
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(if (canAdd) GreenOk.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant)
+            .background(if (canAdd) Color(0xFF10B981).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp,
                 if (canAdd) Color(0xFFA7F3D0) else Color(0xFFCBD5E1),
                 RoundedCornerShape(12.dp))
