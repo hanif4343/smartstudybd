@@ -6,6 +6,7 @@ import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.model.ChallengeStatus
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
@@ -299,6 +300,11 @@ class ChallengeRepository {
             )).await()
 
         // ── Push notification (sound + deep link to Challenge tab/Accept) ──
+        sendChallengePush(toPhone, invite)
+    }
+
+    // ── সাধারণ + ঘোস্ট দুই ক্ষেত্রেই ব্যবহৃত: instant FCM push (creator name সহ) ──
+    private suspend fun sendChallengePush(toPhone: String, invite: ChallengeInvite) {
         try {
             val title = "⚔️ নতুন চ্যালেঞ্জ!"
             val body  = "${invite.creatorName} আপনাকে \"${invite.subject}\" বিষয়ে চ্যালেঞ্জ করেছে। Accept করুন!"
@@ -335,6 +341,7 @@ class ChallengeRepository {
                     .build()
                 val gasUrl = "${BuildConfig.GAS_URL}" +
                     "?action=sendNotification" +
+                    "&secret=${java.net.URLEncoder.encode(BuildConfig.SECRET_KEY, "UTF-8")}" +
                     "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
                     "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
                     "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
@@ -454,6 +461,11 @@ class ChallengeRepository {
                 "createdAt"     to invite.createdAt,
                 "isGhostMode"   to true
             ))
+
+        // ── Instant push notification (creator name সহ) ──
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            sendChallengePush(toPhone, invite)
+        }
     }
 
     // ────────────────────────────────────────────────────────
