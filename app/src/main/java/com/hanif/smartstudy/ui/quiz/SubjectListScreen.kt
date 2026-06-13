@@ -180,7 +180,7 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
             // Icon circle
             Box(
                 Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFEEF2FF)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) { Text(subjectIcon(subject.name), fontSize = 22.sp) }
 
@@ -193,7 +193,7 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
                 // Progress bar
                 Box(
                     Modifier.fillMaxWidth().height(5.dp)
-                        .clip(RoundedCornerShape(20.dp)).background(Color(0xFFE2E8F0))
+                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     Box(
                         Modifier.fillMaxWidth(subject.progressPct / 100f).fillMaxHeight()
