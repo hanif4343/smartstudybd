@@ -88,7 +88,7 @@ fun TimerBar(
             )
         }
         Box(
-            Modifier.fillMaxWidth().height(5.dp).background(Color(0xFFE2E8F0))
+            Modifier.fillMaxWidth().height(5.dp).background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Box(
                 Modifier
@@ -104,7 +104,7 @@ fun TimerBar(
 fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) {
     val pct     = if (total > 0) current.toFloat() / total else 0f
     val animPct by animateFloatAsState(pct, tween(300), label = "readProg")
-    Box(modifier.fillMaxWidth().height(4.dp).background(Color(0xFFE2E8F0))) {
+    Box(modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
         Box(
             Modifier.fillMaxWidth(animPct).fillMaxHeight()
                 .background(Brush.horizontalGradient(listOf(Indigo600, Color(0xFF818CF8))))
@@ -129,7 +129,7 @@ fun QuestionCard(
     Card(
         modifier  = modifier.fillMaxWidth(),
         shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = CardBg),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -141,7 +141,7 @@ fun QuestionCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier.clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFFEEF2FF))
+                            .background(Indigo600.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text("#${index + 1}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
@@ -150,7 +150,7 @@ fun QuestionCard(
                     if (item.isWritten()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFFFF7ED))
+                                .background(OrangeTech.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text("Written", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = OrangeTech)
@@ -159,7 +159,7 @@ fun QuestionCard(
                     if (item.isWeakTopic) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFFFF1F2))
+                                .background(RedWrong.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text("🔁 Review", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = RedWrong)
@@ -168,7 +168,7 @@ fun QuestionCard(
                     if (item.year.isNotBlank()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFF0FDF4))
+                                .background(GreenOk.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(item.year, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk)
@@ -218,7 +218,7 @@ fun QuestionCard(
                 // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
                 RichContentText(
                     text      = displayQuestion,
-                    textColor = Color(0xFF1E293B),
+                    textColor = MaterialTheme.colorScheme.onSurface,
                     fontSize  = 15
                 )
             } else {
@@ -294,7 +294,7 @@ fun QuestionText(text: String, modifier: Modifier = Modifier) {
             text       = text,
             fontSize   = 15.sp,
             fontWeight = FontWeight.Bold,
-            color      = SlateText,
+            color      = MaterialTheme.colorScheme.onSurface,
             fontFamily = NotoSansBengali,
             lineHeight = 22.sp,
             modifier   = modifier
@@ -340,30 +340,35 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
 
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (n, text) ->
             val isSelected  = answered?.option == n
             val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
             val bg = when {
-                answered == null        -> CardBg
+                answered == null        -> surfaceColor
                 isSelected && answered.isCorrect  -> Color(0xFFF0FDF4)
                 isSelected && !answered.isCorrect -> Color(0xFFFFF1F2)
                 !isSelected && isCorrectOpt && answered != null -> Color(0xFFF0FDF4)
-                else -> SlateLight
+                else -> surfaceVariantColor
             }
             val border = when {
-                answered == null        -> Color(0xFFE2E8F0)
+                answered == null        -> onSurfaceColor.copy(alpha = 0.2f)
                 isSelected && answered.isCorrect  -> GreenOk
                 isSelected && !answered.isCorrect -> RedWrong
                 !isSelected && isCorrectOpt && answered != null -> GreenOk
-                else -> Color(0xFFE2E8F0)
+                else -> onSurfaceColor.copy(alpha = 0.2f)
             }
             val textColor = when {
-                answered == null -> SlateText
+                answered == null -> onSurfaceColor
                 isSelected && answered.isCorrect  -> Color(0xFF166534)
                 isSelected && !answered.isCorrect -> Color(0xFF9F1239)
                 !isSelected && isCorrectOpt && answered != null -> Color(0xFF166534)
-                else -> MutedText
+                else -> onSurfaceVariantColor
             }
             val icon = when {
                 answered == null -> listOf("A","B","C","D").getOrNull(n - 1) ?: "?"
@@ -426,7 +431,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
                 if (submitted.userText.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text("তোমার উত্তর: ${submitted.userText}", fontSize = 12.sp,
-                        color = MutedText, fontFamily = NotoSansBengali, lineHeight = 16.sp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, lineHeight = 16.sp)
                 }
             }
         }
@@ -691,7 +696,7 @@ private fun UserTechniqueCard(
                     Text(
                         if (isOwn) "🙋 আমার" else "👤 ${technique.userName}",
                         fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                        color = if (isOwn) GreenOk else MutedText,
+                        color = if (isOwn) GreenOk else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali
                     )
                     if (isOwn) {
@@ -699,13 +704,13 @@ private fun UserTechniqueCard(
                             Modifier.clip(RoundedCornerShape(6.dp))
                                 .background(
                                     if (technique.isPublic) Indigo600.copy(alpha = 0.12f)
-                                    else Color(0xFFF1F5F9)
+                                    else MaterialTheme.colorScheme.surfaceVariant
                                 )
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 if (technique.isPublic) "🌐 পাবলিক" else "🔒 প্রাইভেট",
-                                fontSize = 8.sp, color = if (technique.isPublic) Indigo600 else MutedText,
+                                fontSize = 8.sp, color = if (technique.isPublic) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold
                             )
                         }
@@ -733,7 +738,7 @@ private fun UserTechniqueCard(
                 }
             }
             Spacer(Modifier.height(3.dp))
-            Text(technique.text, fontSize = 12.sp, color = Color(0xFF1E293B),
+            Text(technique.text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = NotoSansBengali, lineHeight = 18.sp)
         }
     }
@@ -930,22 +935,22 @@ fun ReportDialog(
                     Text(
                         questionText.take(80) + if (questionText.length > 80) "..." else "",
                         fontFamily = NotoSansBengali, fontSize = 11.sp,
-                        color = MutedText, lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(SlateLight)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(8.dp)
                     )
                 }
                 Text("সমস্যার ধরন:", fontFamily = NotoSansBengali,
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateText)
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 issues.forEach { issue ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (selected == issue) Color(0xFFEEF2FF) else SlateLight)
+                            .background(if (selected == issue) Indigo600.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant)
                             .border(
                                 1.dp,
                                 if (selected == issue) Indigo600 else Color.Transparent,
@@ -962,7 +967,7 @@ fun ReportDialog(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(issue, fontFamily = NotoSansBengali, fontSize = 13.sp,
-                            color = if (selected == issue) Indigo600 else SlateText,
+                            color = if (selected == issue) Indigo600 else MaterialTheme.colorScheme.onSurface,
                             fontWeight = if (selected == issue) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
@@ -976,7 +981,7 @@ fun ReportDialog(
                     shape         = RoundedCornerShape(10.dp),
                     colors        = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = Indigo600,
-                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
@@ -996,7 +1001,7 @@ fun ReportDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("বাতিল", fontFamily = NotoSansBengali, color = MutedText)
+                Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         shape = RoundedCornerShape(20.dp)
@@ -1088,7 +1093,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                 }
 
                 // Tabs
-                TabRow(selectedTabIndex = activeTab, containerColor = Color(0xFFF8F9FF), contentColor = adminIndigo) {
+                TabRow(selectedTabIndex = activeTab, containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = adminIndigo) {
                     listOf("📝 প্রশ্ন", "🔄 Options", "💡 উত্তর/ব্যাখ্যা").forEachIndexed { i, label ->
                         Tab(selected = activeTab == i, onClick = { activeTab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold) })
@@ -1122,7 +1127,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                         Modifier.fillMaxWidth(),
                                         shape  = RoundedCornerShape(10.dp),
                                         colors = CardDefaults.cardColors(
-                                            containerColor = if (isAns) Color(0xFFF0FDF4) else Color(0xFFF8FAFC)
+                                            containerColor = if (isAns) Color(0xFFF0FDF4) else MaterialTheme.colorScheme.surfaceVariant
                                         ),
                                         border = if (isAns) androidx.compose.foundation.BorderStroke(1.5.dp, GreenOk) else null
                                     ) {
@@ -1138,7 +1143,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                             Spacer(Modifier.width(8.dp))
                                             Text(text, Modifier.weight(1f), fontSize = 12.sp,
                                                 fontFamily = NotoSansBengali,
-                                                color = if (isAns) Color(0xFF166534) else SlateText,
+                                                color = if (isAns) Color(0xFF166534) else MaterialTheme.colorScheme.onSurface,
                                                 fontWeight = if (isAns) FontWeight.Bold else FontWeight.Normal)
                                             if (isAns) Icon(Icons.Default.CheckCircle, null,
                                                 tint = GreenOk, modifier = Modifier.size(16.dp))
@@ -1181,7 +1186,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                     })
                                 }
                             } else {
-                                Text("Written প্রশ্ন — option নেই", fontFamily = NotoSansBengali, color = MutedText)
+                                Text("Written প্রশ্ন — option নেই", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         2 -> {
@@ -1275,7 +1280,7 @@ private fun AdminTextField(label: String, value: String, onChange: (String) -> U
         modifier = Modifier.fillMaxWidth(), minLines = minLines,
         shape = RoundedCornerShape(10.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = MaterialTheme.colorScheme.outline),
         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
         placeholder = if (hint.isNotBlank()) {
             { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1)) }
@@ -1287,12 +1292,12 @@ private fun AdminTextField(label: String, value: String, onChange: (String) -> U
 private fun AdminInfoRow(label: String, value: String) {
     if (value.isBlank()) return
     Row(
-        Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedText, fontFamily = NotoSansBengali)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateText, fontFamily = NotoSansBengali)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
     }
 }
 
