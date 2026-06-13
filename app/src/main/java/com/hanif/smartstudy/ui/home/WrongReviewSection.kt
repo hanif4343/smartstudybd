@@ -28,8 +28,8 @@ private val WR_RedMain   = Color(0xFFDC2626)
 private val WR_RedLight  = Color(0xFFFFF1F2)
 private val WR_RedBorder = Color(0xFFFECACA)
 private val WR_Green     = Color(0xFF10B981)
-private val WR_TextMain  = Color(0xFF1E293B)
-private val WR_TextGray  = Color(0xFF64748B)
+// WR_TextMain → MaterialTheme.colorScheme.onSurface
+// WR_TextGray → MaterialTheme.colorScheme.onSurfaceVariant
 
 @Composable
 fun WrongReviewSection(
@@ -106,7 +106,7 @@ fun WrongReviewSection(
                     Text(
                         "... আরো ${wrongItems.size - 3}টি ভুল প্রশ্ন আছে",
                         fontSize   = 11.sp,
-                        color      = WR_TextGray,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali,
                         modifier   = Modifier.padding(start = 4.dp)
                     )
@@ -187,7 +187,7 @@ fun WrongReviewSection(
                     Text(
                         "✖ অনুশীলন বন্ধ করুন",
                         fontSize   = 13.sp,
-                        color      = WR_TextGray,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali
                     )
                 }
@@ -228,7 +228,7 @@ private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
                 Text(
                     if (practiceMode) "অনুশীলন চলছে..." else "সর্বশেষ ৩টি দেখানো হচ্ছে",
                     fontSize   = 10.sp,
-                    color      = WR_TextGray,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali
                 )
             }
@@ -252,7 +252,7 @@ private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
                 Text(
                     "ভুল",
                     fontSize   = 9.sp,
-                    color      = WR_TextGray,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
                     fontFamily = NotoSansBengali
                 )
@@ -286,7 +286,7 @@ private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
                 if (displayQ.length > 60) displayQ.take(60) + "…" else displayQ,
                 fontSize   = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                color      = WR_TextMain,
+                color      = MaterialTheme.colorScheme.onSurface,
                 fontFamily = NotoSansBengali,
                 lineHeight = 16.sp
             )
@@ -372,7 +372,7 @@ private fun WRPracticeItem(
                 when {
                     isCorrect  -> Color(0xFF22C55E)
                     isAnswered -> WR_RedMain.copy(alpha = 0.4f)
-                    else       -> Color(0xFFE2E8F0)
+                    else       -> Color(0xFF94A3B8)
                 }
             ),
             elevation = CardDefaults.cardElevation(2.dp)
@@ -427,7 +427,7 @@ private fun WRPracticeItem(
                             Text(
                                 q.subTopic.take(20),
                                 fontSize   = 9.sp,
-                                color      = WR_TextGray,
+                                color      = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali
                             )
                         }
