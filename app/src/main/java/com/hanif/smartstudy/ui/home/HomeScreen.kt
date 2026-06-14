@@ -517,12 +517,14 @@ fun DailyRoutineCard(
     vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel()
 ) {
     val routine by vm.state.collectAsState()
+    val subjectOptions by vm.subjectOptions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
     if (showAddDialog) {
         AddRoutineItemDialog(
-            onAdd = { title, subject, minutes ->
-                vm.addItem(title, subject, minutes)
+            subjectOptions = subjectOptions,
+            onAdd = { title, subject, subTopic, minutes ->
+                vm.addItem(title, subject, subTopic, minutes)
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false }
@@ -608,8 +610,9 @@ private fun RoutineItemRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             if (item.subject.isNotBlank()) {
+                val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
                 Text(
-                    "${item.subject} • ${item.minutes} মিনিট",
+                    "$subjLabel • ${item.minutes} মিনিট",
                     fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali
                 )
@@ -621,15 +624,23 @@ private fun RoutineItemRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddRoutineItemDialog(
-    onAdd: (String, String, Int) -> Unit,
+    subjectOptions: List<com.hanif.smartstudy.data.model.RoutineSubjectOption>,
+    onAdd: (String, String, String, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var title   by remember { mutableStateOf("") }
-    var subject by remember { mutableStateOf("") }
-    var minutes by remember { mutableStateOf(20) }
+    var title    by remember { mutableStateOf("") }
+    var subject  by remember { mutableStateOf("") }
+    var subTopic by remember { mutableStateOf("") }
+    var minutes  by remember { mutableStateOf(20) }
+    var subjectMenuExpanded  by remember { mutableStateOf(false) }
+    var subTopicMenuExpanded by remember { mutableStateOf(false) }
     val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
+
+    // নির্বাচিত Subject-এর অধীনে SubTopic লিস্ট (ইউজারের audience অনুযায়ী)
+    val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -641,11 +652,93 @@ private fun AddRoutineItemDialog(
                     label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
-                    value = subject, onValueChange = { subject = it },
-                    label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
+
+                // ── বিষয় (ঐচ্ছিক) — ইউজারের audience অনুযায়ী আসল Subject লিস্ট থেকে dropdown ──
+                ExposedDropdownMenuBox(
+                    expanded = subjectMenuExpanded,
+                    onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = subject,
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = subjectOptions.isNotEmpty(),
+                        label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                        placeholder = {
+                            Text(
+                                if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
+                                fontFamily = NotoSansBengali, fontSize = 12.sp
+                            )
+                        },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = subjectMenuExpanded,
+                        onDismissRequest = { subjectMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            onClick = {
+                                subject = ""
+                                subTopic = ""
+                                subjectMenuExpanded = false
+                            }
+                        )
+                        subjectOptions.forEach { opt ->
+                            DropdownMenuItem(
+                                text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                onClick = {
+                                    subject = opt.subject
+                                    subTopic = ""   // বিষয় বদলালে আগের SubTopic রিসেট
+                                    subjectMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // ── SubTopic (ঐচ্ছিক) — নির্বাচিত Subject-এর অধীনে থাকা SubTopic থেকে dropdown ──
+                if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = subTopicMenuExpanded,
+                        onExpandedChange = { subTopicMenuExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = subTopic,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = subTopicMenuExpanded,
+                            onDismissRequest = { subTopicMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                onClick = {
+                                    subTopic = ""
+                                    subTopicMenuExpanded = false
+                                }
+                            )
+                            subTopicsForSubject.forEach { st ->
+                                DropdownMenuItem(
+                                    text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                    onClick = {
+                                        subTopic = st
+                                        subTopicMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     minuteOptions.take(3).forEach { m ->
@@ -661,7 +754,7 @@ private fun AddRoutineItemDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { if (title.isNotBlank()) onAdd(title, subject, minutes) },
+                onClick = { if (title.isNotBlank()) onAdd(title, subject, subTopic, minutes) },
                 enabled = title.isNotBlank()
             ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
         },
