@@ -65,12 +65,13 @@ class RoutineCache(private val context: Context) {
         context.dataStore.edit { it[KEY_ROUTINE_JSON] = gson.toJson(routine) }
     }
 
-    suspend fun addItem(title: String, subject: String, minutes: Int) {
+    suspend fun addItem(title: String, subject: String, subTopic: String, minutes: Int) {
         val routine = getTodayRoutine()
         val newItem = RoutineItem(
             id      = "r_${System.currentTimeMillis()}",
             title   = title,
             subject = subject,
+            subTopic = subTopic,
             minutes = minutes,
             done    = false
         )
