@@ -67,20 +67,20 @@ object AudienceFilter {
     // তাই প্রতিটাকে আলাদা @JvmName দিতে হবে।
 
     @JvmName("filterQuizForUser")
-    fun List<QuizItem>.filterForUser(user: User?)  = filter { userCanSee(it.audienceTags, user) }
+    fun List<QuizItem>.filterForUser(user: User?)  = filterNotNull().filter { userCanSee(it.audienceTags, user) }
 
     @JvmName("filterQBankForUser")
-    fun List<QBankItem>.filterForUser(user: User?) = filter { userCanSee(it.audienceTags, user) }
+    fun List<QBankItem>.filterForUser(user: User?) = filterNotNull().filter { userCanSee(it.audienceTags, user) }
 
     @JvmName("filterStudyForUser")
-    fun List<StudyItem>.filterForUser(user: User?) = filter { userCanSee(it.audienceTags, user) }
+    fun List<StudyItem>.filterForUser(user: User?) = filterNotNull().filter { userCanSee(it.audienceTags, user) }
 
     // ── AppContent filtered view ─────────────────────────────
 
     fun AppContent.forUser(user: User?, adminOverrideTag: String = "") = copy(
-        quiz   = quiz.filter   { userCanSee(it.audienceTags, user, adminOverrideTag) },
-        qbank  = qbank.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) },
-        study  = study.filter  { userCanSee(it.audienceTags, user, adminOverrideTag) }
+        quiz   = quiz.filterNotNull()   .filter { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        qbank  = qbank.filterNotNull()  .filter { userCanSee(it.audienceTags, user, adminOverrideTag) },
+        study  = study.filterNotNull()  .filter { userCanSee(it.audienceTags, user, adminOverrideTag) }
     )
 
     // ── Challenge opponent compatibility ─────────────────────
