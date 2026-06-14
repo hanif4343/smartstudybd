@@ -53,19 +53,13 @@ val CLASS_GROUPS = listOf(
         "Class 6","Class 7","Class 8","Class 9","Class 10"
     )),
     ClassGroup("উচ্চ মাধ্যমিক", "🎓", listOf(
-        "HSC-1st","HSC Final"
+        "Class 11","Class 12"
     )),
     ClassGroup("অনার্স", "🏛️", listOf(
-        "Honours-1st","Honours-2nd","Honours-3rd","Honours-Final"
-    )),
-    ClassGroup("ডিগ্রি", "📜", listOf(
-        "Degree-1st","Degree-2nd","Degree-Final"
+        "Honours 1","Honours 2","Honours 3","Honours 4"
     )),
     ClassGroup("মাস্টার্স", "🔬", listOf(
-        "Masters-1st","Masters-Final"
-    )),
-    ClassGroup("চাকরি", "💼", listOf(
-        "Job Seeker"
+        "Masters 1","Masters 2"
     ))
 )
 
@@ -219,7 +213,7 @@ fun SignupForm(
     var confirmPass by remember { mutableStateOf("") }
     var showPw by remember { mutableStateOf(false) }
     var userType by remember { mutableStateOf("Student") }
-    var classLevel by remember { mutableStateOf("HSC-1st") }
+    var classLevel by remember { mutableStateOf("Class 10") }
     var showClassPicker by remember { mutableStateOf(false) }
 
     var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -227,7 +221,7 @@ fun SignupForm(
         ActivityResultContracts.GetContent()
     ) { uri -> selectedPhotoUri = uri }
 
-    val userTypes = listOf("Student", "Job Seeker", "General")
+    val userTypes = listOf("Student" to "Student", "Job" to "Job Seeker", "General" to "General")
 
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
@@ -307,47 +301,53 @@ fun SignupForm(
         // আপনি কে?
         Text("আপনি কে?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Slate800, fontFamily = NotoSansBengali)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            userTypes.forEach { t ->
-                FilterChip(t == userType, { userType = t }, label = { Text(t, fontSize = 12.sp, fontFamily = NotoSansBengali) })
+            userTypes.forEach { (value, label) ->
+                FilterChip(value == userType, {
+                    userType = value
+                    if (value == "Job") classLevel = ""
+                    else if (classLevel.isBlank()) classLevel = "Class 10"
+                }, label = { Text(label, fontSize = 12.sp, fontFamily = NotoSansBengali) })
             }
         }
 
-        // শ্রেণী / স্তর picker
-        Text("শ্রেণী / স্তর", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Slate800, fontFamily = NotoSansBengali)
+        // শ্রেণী / স্তর picker — Job Seeker দের জন্য প্রয়োজন নেই
+        if (userType != "Job") {
+            Text("শ্রেণী / স্তর", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Slate800, fontFamily = NotoSansBengali)
 
-        // Selected class display button
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .border(2.dp, Indigo600, RoundedCornerShape(14.dp))
-                .clickable { showClassPicker = !showClassPicker }
-                .background(Indigo600.copy(alpha = 0.06f))
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Selected class display button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(2.dp, Indigo600, RoundedCornerShape(14.dp))
+                    .clickable { showClassPicker = !showClassPicker }
+                    .background(Indigo600.copy(alpha = 0.06f))
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
-                Column {
-                    Text("নির্বাচিত শ্রেণী", fontSize = 11.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
-                    Text(classLevel, fontSize = 15.sp, color = Slate800, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("নির্বাচিত শ্রেণী", fontSize = 11.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
+                        Text(classLevel.ifBlank { "Class 10" }, fontSize = 15.sp, color = Slate800, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    }
+                    Icon(
+                        if (showClassPicker) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Indigo600
+                    )
                 }
-                Icon(
-                    if (showClassPicker) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = Indigo600
+            }
+
+            // Class picker panel
+            if (showClassPicker) {
+                ClassLevelPicker(
+                    selected = classLevel,
+                    onSelect = { classLevel = it; showClassPicker = false }
                 )
             }
-        }
-
-        // Class picker panel
-        if (showClassPicker) {
-            ClassLevelPicker(
-                selected = classLevel,
-                onSelect = { classLevel = it; showClassPicker = false }
-            )
         }
 
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)

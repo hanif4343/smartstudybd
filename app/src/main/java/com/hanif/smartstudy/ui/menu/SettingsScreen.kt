@@ -141,7 +141,7 @@ fun SettingsScreen(
             }
 
             // ── Reminder ──
-            SettingsCard("🔔 পড়ার রিমাইন্ডার") {
+            SettingsCard("🔔 স্মার্ট নোটিফিকেশন") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
                     // Morning reminder
@@ -160,7 +160,75 @@ fun SettingsScreen(
                         timeStr = "${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')}"
                     )
 
-                    HorizontalDivider(color = androidx.compose.ui.graphics.Color(0xFFF1F5F9))
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                    // Midday progress check
+                    var showMiddayPicker by remember { mutableStateOf(false) }
+                    val middayTimeState = rememberTimePickerState(
+                        initialHour   = state.middayHour,
+                        initialMinute = state.middayMinute
+                    )
+                    ReminderRow(
+                        icon    = "☀️",
+                        label   = "দুপুরের প্রোগ্রেস চেক",
+                        subLabel = if (state.isMiddayOn)
+                            "প্রতিদিন ${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')} এ"
+                        else "বন্ধ আছে",
+                        isOn    = state.isMiddayOn,
+                        onToggle = { on ->
+                            if (on) showMiddayPicker = true
+                            else vm.setMiddayReminder(false)
+                        },
+                        onEdit  = { showMiddayPicker = true },
+                        timeStr = "${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')}"
+                    )
+                    if (showMiddayPicker) {
+                        ReminderTimeDialog(
+                            title     = "দুপুরের প্রোগ্রেস চেক সময়",
+                            timeState = middayTimeState,
+                            onSave    = {
+                                vm.setMiddayReminder(true, middayTimeState.hour, middayTimeState.minute)
+                                showMiddayPicker = false
+                            },
+                            onDismiss = { showMiddayPicker = false }
+                        )
+                    }
+
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                    // Evening urgency check
+                    var showEveningPicker by remember { mutableStateOf(false) }
+                    val eveningTimeState = rememberTimePickerState(
+                        initialHour   = state.eveningHour,
+                        initialMinute = state.eveningMinute
+                    )
+                    ReminderRow(
+                        icon    = "🌆",
+                        label   = "সন্ধ্যার আর্জেন্ট রিমাইন্ডার",
+                        subLabel = if (state.isEveningOn)
+                            "প্রতিদিন ${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')} এ"
+                        else "বন্ধ আছে",
+                        isOn    = state.isEveningOn,
+                        onToggle = { on ->
+                            if (on) showEveningPicker = true
+                            else vm.setEveningReminder(false)
+                        },
+                        onEdit  = { showEveningPicker = true },
+                        timeStr = "${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')}"
+                    )
+                    if (showEveningPicker) {
+                        ReminderTimeDialog(
+                            title     = "সন্ধ্যার রিমাইন্ডার সময়",
+                            timeState = eveningTimeState,
+                            onSave    = {
+                                vm.setEveningReminder(true, eveningTimeState.hour, eveningTimeState.minute)
+                                showEveningPicker = false
+                            },
+                            onDismiss = { showEveningPicker = false }
+                        )
+                    }
+
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
 
                     // Night reminder
                     var showNightPicker by remember { mutableStateOf(false) }
@@ -185,27 +253,14 @@ fun SettingsScreen(
                     )
 
                     if (showNightPicker) {
-                        AlertDialog(
-                            onDismissRequest = { showNightPicker = false },
-                            title = { Text("রাতের পড়ার রিমাইন্ডার সময়", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                            text  = {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                    TimePicker(state = nightTimeState)
-                                }
+                        ReminderTimeDialog(
+                            title     = "রাতের পড়ার রিমাইন্ডার সময়",
+                            timeState = nightTimeState,
+                            onSave    = {
+                                vm.setNightReminder(true, nightTimeState.hour, nightTimeState.minute)
+                                showNightPicker = false
                             },
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    vm.setNightReminder(true, nightTimeState.hour, nightTimeState.minute)
-                                    showNightPicker = false
-                                }) {
-                                    Text("সংরক্ষণ", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.primary)
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showNightPicker = false }) {
-                                    Text("বাতিল", fontFamily = NotoSansBengali)
-                                }
-                            }
+                            onDismiss = { showNightPicker = false }
                         )
                     }
                 }
@@ -214,6 +269,37 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
         }
     }
+}
+
+// ── Reusable reminder time picker dialog ──────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReminderTimeDialog(
+    title: String,
+    timeState: TimePickerState,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+        text  = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                TimePicker(state = timeState)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSave) {
+                Text("সংরক্ষণ", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("বাতিল", fontFamily = NotoSansBengali)
+            }
+        }
+    )
 }
 
 // ── Reminder row ─────────────────────────────────────────────

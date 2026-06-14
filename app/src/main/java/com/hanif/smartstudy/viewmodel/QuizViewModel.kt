@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanif.smartstudy.data.local.ContentCache
+import com.hanif.smartstudy.data.local.TestHistoryCache
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
@@ -46,6 +47,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val repo    = ContentRepository(app)
     private val cache   = ContentCache(app)
     private val session = SessionManager(app)
+    private val historyCache = TestHistoryCache(app)
 
     private val _state = MutableStateFlow(QuizUiState())
     val state: StateFlow<QuizUiState> = _state.asStateFlow()
@@ -295,6 +297,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val xp = correct * 5 + (correct - wrong).coerceAtLeast(0) * 2
         val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap)
         _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
+
+        // ── "এখন টেস্ট দাও" (Mock Test) রেজাল্ট হিস্ট্রিতে জমা রাখো ──
+        if (_state.value.navPath.subject == "Mock Test" && result.total > 0) {
+            viewModelScope.launch {
+                val cfg = _state.value.mockConfig
+                val topicLabels = if (cfg.selectedTopics.isEmpty()) {
+                    listOf("সব বিষয় (র‍্যান্ডম)")
+                } else {
+                    cfg.selectedTopics.map { key ->
+                        val parts = key.split("||")
+                        val subj  = parts.getOrNull(0) ?: ""
+                        val sub   = parts.getOrNull(1)
+                        if (!sub.isNullOrBlank()) "$subj - $sub" else subj
+                    }
+                }
+                historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels))
+            }
+        }
 
         viewModelScope.launch {
             cache.markTodayActivity()

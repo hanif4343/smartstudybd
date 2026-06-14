@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -30,7 +31,8 @@ import com.hanif.smartstudy.viewmodel.MenuViewModel
 fun ProfileScreen(
     state  : MenuUiState,
     vm     : MenuViewModel,
-    onBack : () -> Unit
+    onBack : () -> Unit,
+    onOpenTestHistory: () -> Unit = {}
 ) {
     val user = state.user
     var name by remember { mutableStateOf(user?.name ?: "") }
@@ -173,6 +175,35 @@ fun ProfileScreen(
                     ProfileInfoRow("📚 শ্রেণি",     user?.classLevel ?: "-")
                     ProfileInfoRow("⭐ XP",          "${user?.xp ?: 0}")
                     ProfileInfoRow("🔑 ভূমিকা",     user?.role ?: "User")
+                }
+            }
+
+            // ── টেস্ট হিস্ট্রি ──
+            Card(
+                shape   = RoundedCornerShape(14.dp),
+                colors  = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.clickable(onClick = onOpenTestHistory)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("📝", fontSize = 22.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("টেস্ট হিস্ট্রি", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "যেকোনো সময়ের টেস্টের রেজাল্ট দেখো",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null,
+                        modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = 180f),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(0.4f))
                 }
             }
         }
