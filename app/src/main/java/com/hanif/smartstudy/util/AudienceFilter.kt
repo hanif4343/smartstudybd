@@ -29,22 +29,36 @@ object AudienceFilter {
 
     // ── Single item check ────────────────────────────────────
 
+    /**
+     * নিয়ম:
+     *  content tag ফাঁকা   → শুধু Job Seeker দেখবে (userType="Job", classLevel ফাঁকা)
+     *  content tag = "Job"  → শুধু Job Seeker দেখবে
+     *  content tag = "Masters 1" ইত্যাদি → ওই classLevel এর student দেখবে
+     *
+     *  Job Seeker সংজ্ঞা: userType="Job" OR (Student কিন্তু classLevel ফাঁকা — unusual)
+     */
     fun userCanSee(audienceTags: String?, user: User?, adminOverrideTag: String = "Job"): Boolean {
-        // Admin override mode — "Job Seeker (Default)" (খালি tag) মানেই "Job", আলাদা কিছু না
+        // Admin override mode
         if (user?.isAdmin() == true) {
             val effectiveTag = adminOverrideTag.ifBlank { "Job" }
             val tag = audienceTags?.trim() ?: ""
-            return if (tag.isBlank()) effectiveTag.equals("Job", ignoreCase = true)
+            return if (tag.isBlank() || tag.equals("Job", ignoreCase = true))
+                       effectiveTag.equals("Job", ignoreCase = true)
                    else tag.equals(effectiveTag.trim(), ignoreCase = true)
         }
+
         val tag = audienceTags?.trim() ?: ""
         val cl  = user?.classLevel?.trim() ?: ""
         val ut  = user?.userType?.trim()   ?: ""
 
-        return if (tag.isBlank()) {
-            ut.equals("Job", ignoreCase = true) || cl.isBlank()
+        val isJobSeeker = ut.equals("Job", ignoreCase = true) || cl.isBlank()
+
+        return if (tag.isBlank() || tag.equals("Job", ignoreCase = true)) {
+            // ফাঁকা বা "Job" tag → শুধু Job Seeker দেখবে
+            isJobSeeker
         } else {
-            tag.equals(cl, ignoreCase = true) || tag.equals(ut, ignoreCase = true)
+            // নির্দিষ্ট tag (Masters 1, Class 10, Honours 2 etc.) → ঠিক সেই classLevel এর student
+            tag.equals(cl, ignoreCase = true)
         }
     }
 
@@ -81,9 +95,9 @@ object AudienceFilter {
         val cl = user?.classLevel?.trim() ?: ""
         val ut = user?.userType?.trim()   ?: ""
         return when {
-            cl.isNotBlank()                     -> cl
+            cl.isNotBlank()                     -> cl   // Student — classLevel = group key
             ut.equals("Job", ignoreCase = true) -> "Job"
-            else                                -> "Job"
+            else                                -> "Job" // default = Job group
         }
     }
 
