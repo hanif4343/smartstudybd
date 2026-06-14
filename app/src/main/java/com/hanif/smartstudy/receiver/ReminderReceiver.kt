@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import com.hanif.smartstudy.MainActivity
 import com.hanif.smartstudy.R
 import com.hanif.smartstudy.util.SessionManager
+import kotlinx.coroutines.runBlocking
 import java.util.Calendar
 
 class ReminderReceiver : BroadcastReceiver() {
@@ -21,10 +22,14 @@ class ReminderReceiver : BroadcastReceiver() {
         const val REQ_MORNING      = 2001
         const val REQ_NIGHT        = 2002
         const val REQ_EXAM_EVE     = 2025
+        const val REQ_MIDDAY       = 2003
+        const val REQ_EVENING      = 2004
         const val EXTRA_TYPE       = "reminder_type"
         const val TYPE_MORNING     = "morning"
         const val TYPE_NIGHT       = "night"
         const val TYPE_EXAM_EVE    = "exam_eve"
+        const val TYPE_MIDDAY      = "midday"
+        const val TYPE_EVENING     = "evening"
 
         fun scheduleMorning(context: Context, hour: Int, minute: Int) {
             schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING)
@@ -36,6 +41,16 @@ class ReminderReceiver : BroadcastReceiver() {
             SessionManager(context).setReminderNight(true, hour, minute)
         }
 
+        fun scheduleMidday(context: Context, hour: Int, minute: Int) {
+            schedule(context, hour, minute, REQ_MIDDAY, TYPE_MIDDAY)
+            SessionManager(context).setReminderMidday(true, hour, minute)
+        }
+
+        fun scheduleEvening(context: Context, hour: Int, minute: Int) {
+            schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING)
+            SessionManager(context).setReminderEvening(true, hour, minute)
+        }
+
         fun cancelMorning(context: Context) {
             cancel(context, REQ_MORNING, TYPE_MORNING)
             SessionManager(context).setReminderMorning(false, 7, 0)
@@ -44,6 +59,16 @@ class ReminderReceiver : BroadcastReceiver() {
         fun cancelNight(context: Context) {
             cancel(context, REQ_NIGHT, TYPE_NIGHT)
             SessionManager(context).setReminderNight(false, 21, 0)
+        }
+
+        fun cancelMidday(context: Context) {
+            cancel(context, REQ_MIDDAY, TYPE_MIDDAY)
+            SessionManager(context).setReminderMidday(false, 14, 0)
+        }
+
+        fun cancelEvening(context: Context) {
+            cancel(context, REQ_EVENING, TYPE_EVENING)
+            SessionManager(context).setReminderEvening(false, 19, 0)
         }
 
         private fun schedule(context: Context, hour: Int, minute: Int, reqCode: Int, type: String) {
@@ -99,7 +124,13 @@ class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val type   = intent.getStringExtra(EXTRA_TYPE) ?: TYPE_MORNING
-        val hour   = intent.getIntExtra("hour", if (type == TYPE_MORNING) 7 else 21)
+        val defaultHour = when (type) {
+            TYPE_MORNING -> 7
+            TYPE_MIDDAY  -> 14
+            TYPE_EVENING -> 19
+            else         -> 21
+        }
+        val hour   = intent.getIntExtra("hour", defaultHour)
         val minute = intent.getIntExtra("minute", 0)
 
         // exam eve — custom title/body সহ একবারই fire হয়, repeat নয়
@@ -117,12 +148,30 @@ class ReminderReceiver : BroadcastReceiver() {
         when (type) {
             TYPE_MORNING -> if (session.isMorningReminderOn()) schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING)
             TYPE_NIGHT   -> if (session.isNightReminderOn())   schedule(context, hour, minute, REQ_NIGHT,   TYPE_NIGHT)
+            TYPE_MIDDAY  -> if (session.isMiddayReminderOn())  schedule(context, hour, minute, REQ_MIDDAY,  TYPE_MIDDAY)
+            TYPE_EVENING -> if (session.isEveningReminderOn()) schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING)
         }
     }
 
     private fun showNotification(context: Context, type: String) {
         createChannel(context)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // আজকের প্রোগ্রেস চেক করো (মিডডে/ইভেনিং এর জন্য)
+        val progressPct: Int by lazy {
+            try {
+                val session = SessionManager(context)
+                val cache   = com.hanif.smartstudy.data.local.ContentCache(context)
+                val goal    = session.getDailyGoal().coerceAtLeast(1)
+                val done    = runBlocking { cache.getTodayStudyMinutes() }
+                ((done * 100) / goal).coerceIn(0, 100)
+            } catch (e: Exception) { 0 }
+        }
+
+        // যদি আজকের রুটিন ইতিমধ্যে ১০০% শেষ হয়ে থাকে, midday/evening নোটিফিকেশন স্কিপ করো
+        if ((type == TYPE_MIDDAY || type == TYPE_EVENING) && progressPct >= 100) {
+            return
+        }
 
         val (title, messages) = when (type) {
             TYPE_MORNING -> Pair(
@@ -131,6 +180,29 @@ class ReminderReceiver : BroadcastReceiver() {
                     "আজকের লক্ষ্য পূরণ করতে এখনই শুরু করো! 🎯",
                     "প্রতিদিন একটু একটু পড়লে বড় পরীক্ষায় জয়ী হবে! 💪",
                     "উঠে পড়ো, স্মার্ট স্টাডি অপেক্ষা করছে! ⭐"
+                )
+            )
+            TYPE_MIDDAY -> if (progressPct <= 0) Pair(
+                "⚠️ আজকের পড়া এখনো শুরু হয়নি!",
+                listOf(
+                    "দিনের অর্ধেক সময় পার হয়ে যাচ্ছে, পিছিয়ে পড়ার আগেই শুরু করো! 🏃",
+                    "এখনো ০% সম্পন্ন — এখনই কয়েকটা প্রশ্ন সমাধান করে ফেলো! ⏳",
+                    "আজকের রুটিন এখনো বাকি, দেরি না করে শুরু করো! 📖"
+                )
+            ) else Pair(
+                "👍 ভালো চলছে! আরেকটু এগিয়ে যাও",
+                listOf(
+                    "আজকের লক্ষ্যের $progressPct% সম্পন্ন — বাকিটাও শেষ করো! 💪",
+                    "দারুণ চলছে! একটু সময় দিয়ে আজকের রুটিন কমপ্লিট করো। 🎯",
+                    "$progressPct% শেষ — শেষটুকু আজই সেরে নাও! ⭐"
+                )
+            )
+            TYPE_EVENING -> Pair(
+                "🌆 দিনের ৭০% সময় পার হয়ে গেছে",
+                listOf(
+                    "আজকের রুটিন এখনো ${100 - progressPct}% বাকি — এখনই শেষ করো! ⚠️",
+                    "সন্ধ্যা হয়ে গেছে, আজকের পড়া বাকি আছে। দ্রুত শেষ করো! 🔥",
+                    "Streak ধরে রাখতে আজকের লক্ষ্য পূরণ করো এখনই! 🏆"
                 )
             )
             else -> Pair(
@@ -161,7 +233,13 @@ class ReminderReceiver : BroadcastReceiver() {
             .setVibrate(longArrayOf(0, 200, 100, 200))
             .build()
 
-        nm.notify(if (type == TYPE_MORNING) REQ_MORNING else REQ_NIGHT, notif)
+        val notifId = when (type) {
+            TYPE_MORNING -> REQ_MORNING
+            TYPE_MIDDAY  -> REQ_MIDDAY
+            TYPE_EVENING -> REQ_EVENING
+            else         -> REQ_NIGHT
+        }
+        nm.notify(notifId, notif)
     }
 
     private fun showCustomNotification(context: Context, title: String, body: String, notifId: Int) {
