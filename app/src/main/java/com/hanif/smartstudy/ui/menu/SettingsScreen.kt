@@ -273,6 +273,7 @@ fun SettingsScreen(
 
 // ── Reusable reminder time picker dialog ──────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReminderTimeDialog(
     title: String,
