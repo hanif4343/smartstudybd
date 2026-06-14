@@ -59,14 +59,14 @@ class ContentCache(private val context: Context) {
             val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
             val qbankJson = prefs[KEY_QBANK_JSON] ?: "[]"
 
-            val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem>>() {}.type
-            val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem>>() {}.type
-            val qbankType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QBankItem>>() {}.type
+            val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem?>>() {}.type
+            val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem?>>() {}.type
+            val qbankType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QBankItem?>>() {}.type
 
             AppContent(
-                study     = gson.fromJson(studyJson, studyType) ?: emptyList(),
-                quiz      = gson.fromJson(quizJson,  quizType)  ?: emptyList(),
-                qbank     = gson.fromJson(qbankJson, qbankType) ?: emptyList(),
+                study     = (gson.fromJson<List<com.hanif.smartstudy.data.model.StudyItem?>>(studyJson, studyType) ?: emptyList()).filterNotNull(),
+                quiz      = (gson.fromJson<List<com.hanif.smartstudy.data.model.QuizItem?>>(quizJson,  quizType)  ?: emptyList()).filterNotNull(),
+                qbank     = (gson.fromJson<List<com.hanif.smartstudy.data.model.QBankItem?>>(qbankJson, qbankType) ?: emptyList()).filterNotNull(),
                 fetchedAt = fetchedAt
             )
         } catch (e: Exception) { null }
