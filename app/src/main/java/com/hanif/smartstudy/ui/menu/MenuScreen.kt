@@ -63,6 +63,8 @@ fun MenuScreen(
             "admin"       -> MenuNav.ADMIN
             "leaderboard" -> MenuNav.LEADERBOARD
             "profile"     -> MenuNav.PROFILE
+            "studybuddy"  -> MenuNav.STUDY_BUDDY
+            "testhistory" -> MenuNav.TEST_HISTORY
             else          -> MenuNav.MAIN
         }
     }
@@ -91,13 +93,15 @@ fun MenuScreen(
         when (nav) {
             MenuNav.MAIN        -> MainMenuScreen(state, vm, onLogout, onNavigate = { screen = it },
                                     onSearchClick = onSearchClick, onTypingClick = onTypingClick)
-            MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN })
+            MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN }, onOpenTestHistory = { screen = MenuNav.TEST_HISTORY })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.SETTINGS    -> SettingsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.BOOKMARKS   -> BookmarksMenuScreen(onBack = { screen = MenuNav.MAIN })
             MenuNav.LEADERBOARD -> LeaderboardScreen(state, onBack = { screen = MenuNav.MAIN })
             MenuNav.ADMIN       -> AdminPage(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.PRIVACY     -> PrivacyPolicyScreen(onBack = { screen = MenuNav.MAIN })
+            MenuNav.STUDY_BUDDY -> StudyBuddyScreen(onBack = { screen = MenuNav.MAIN })
+            MenuNav.TEST_HISTORY -> TestHistoryScreen(onBack = { screen = MenuNav.PROFILE })
         }
     }
 
@@ -121,7 +125,7 @@ fun MenuScreen(
     }
 }
 
-enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY }
+enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY }
 
 // ─────────────────────────────────────────────────────────────
 //  Main Menu Screen
@@ -198,6 +202,7 @@ fun MainMenuScreen(
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
+                MenuRow("🤝 Study Buddy",  "একসাথে পড়ো, একে অপরকে তাগাদা দাও", Icons.Default.Diversity1) { onNavigate(MenuNav.STUDY_BUDDY) }
             }
 
             MenuGroup("🛠 Tools") {
