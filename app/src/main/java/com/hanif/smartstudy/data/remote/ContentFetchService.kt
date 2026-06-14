@@ -85,8 +85,9 @@ object ContentFetchService {
                 val trimmed = body.trim()
                 val items: List<T> = when {
                     trimmed.startsWith("[") -> {
-                        val type = object : TypeToken<List<T>>() {}.type
-                        gson.fromJson<List<T>>(trimmed, type) ?: emptyList()
+                        val type = object : TypeToken<List<T?>>() {}.type
+                        val raw: List<T?> = gson.fromJson<List<T?>>(trimmed, type) ?: emptyList()
+                        raw.filterNotNull()
                     }
                     trimmed.startsWith("{") -> {
                         val obj = gson.fromJson(trimmed, JsonObject::class.java)
