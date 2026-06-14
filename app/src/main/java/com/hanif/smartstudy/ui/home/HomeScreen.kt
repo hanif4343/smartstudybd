@@ -8,7 +8,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
+import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -166,6 +169,9 @@ fun HomeScreen(
 
             // Daily Goal
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
+
+            // ── Daily Routine Checklist — হোম স্ক্রিন চেকলিস্ট ──
+            DailyRoutineCard()
 
             // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
@@ -504,6 +510,165 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
         Text(value, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = valueColor, fontFamily = NotoSansBengali, lineHeight = 16.sp)
         Text(label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(0.5f), fontFamily = NotoSansBengali)
     }
+}
+
+@Composable
+fun DailyRoutineCard(
+    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel()
+) {
+    val routine by vm.state.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    if (showAddDialog) {
+        AddRoutineItemDialog(
+            onAdd = { title, subject, minutes ->
+                vm.addItem(title, subject, minutes)
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column {
+                    Text("✅ আজকের রুটিন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                    Text(
+                        if (routine.items.isEmpty()) "এখনো কোনো রুটিন যুক্ত করা হয়নি"
+                        else "${routine.doneCount}/${routine.totalCount} সম্পন্ন",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StudyBuddyQuickButton()
+                    IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Add, null, tint = PrimaryIndigo)
+                    }
+                }
+            }
+
+            if (routine.items.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress   = { routine.progressPct / 100f },
+                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color      = if (routine.isComplete) GreenMint else PrimaryIndigo,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+
+                if (routine.isComplete) {
+                    Text(
+                        "🎉 আজকের রুটিন সম্পন্ন হয়েছে! দারুণ কাজ করেছো!",
+                        fontSize = 11.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold,
+                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                routine.items.forEach { item ->
+                    RoutineItemRow(
+                        item     = item,
+                        onToggle = { vm.toggleItem(item.id) },
+                        onRemove = { vm.removeItem(item.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutineItemRow(
+    item     : com.hanif.smartstudy.data.model.RoutineItem,
+    onToggle : () -> Unit,
+    onRemove : () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = item.done,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(checkedColor = GreenMint)
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.title,
+                fontSize = 13.sp,
+                fontFamily = NotoSansBengali,
+                fontWeight = if (item.done) FontWeight.Normal else FontWeight.Medium,
+                color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            if (item.subject.isNotBlank()) {
+                Text(
+                    "${item.subject} • ${item.minutes} মিনিট",
+                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali
+                )
+            }
+        }
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun AddRoutineItemDialog(
+    onAdd: (String, String, Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title   by remember { mutableStateOf("") }
+    var subject by remember { mutableStateOf("") }
+    var minutes by remember { mutableStateOf(20) }
+    val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("➕ রুটিনে নতুন টপিক যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title, onValueChange = { title = it },
+                    label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = subject, onValueChange = { subject = it },
+                    label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    minuteOptions.take(3).forEach { m ->
+                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    minuteOptions.drop(3).forEach { m ->
+                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (title.isNotBlank()) onAdd(title, subject, minutes) },
+                enabled = title.isNotBlank()
+            ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    )
 }
 
 @Composable
