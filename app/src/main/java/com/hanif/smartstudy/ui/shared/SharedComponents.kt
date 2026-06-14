@@ -255,7 +255,7 @@ fun QuestionCard(
                 else -> item.answerState !is AnswerState.Unanswered
             }
             // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
-            val showAnswerText = showAnswerBox && !item.isMcq()
+            val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy())
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
@@ -1016,8 +1016,9 @@ fun ReportDialog(
 fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
     val sheet = when {
         item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
-        item.isMcq() -> "Quiz"
-        else         -> "Study"
+        item.isStudy() -> "Study"
+        item.isMcq()   -> "Quiz"
+        else           -> "Study"
     }
 
     var editQuestion    by remember { mutableStateOf(item.question) }
