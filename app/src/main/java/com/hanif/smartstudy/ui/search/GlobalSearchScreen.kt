@@ -73,6 +73,7 @@ fun GlobalSearchScreen(
         when (selectedMode) {
             "MCQ"     -> results.filter { it.isMcq() }
             "Written" -> results.filter { it.isWritten() }
+            "Study"   -> results.filter { it.isStudy() }
             else      -> results
         }
     }
@@ -115,7 +116,7 @@ fun GlobalSearchScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val modes = listOf("সব" to results.size, "MCQ" to results.count { it.isMcq() }, "Written" to results.count { it.isWritten() })
+                    val modes = listOf("সব" to results.size, "MCQ" to results.count { it.isMcq() }, "Written" to results.count { it.isWritten() }, "Study" to results.count { it.isStudy() })
                     items(modes) { (label, count) ->
                         FilterChip(
                             selected = selectedMode == label, onClick = { selectedMode = label },
@@ -177,8 +178,12 @@ private fun SearchResultCard(q: QuestionItem, query: String, onClick: (QuestionI
                 if (q.subTopic.isNotBlank()) Text(q.subTopic, fontSize = 9.sp, color = Indigo600, fontWeight = FontWeight.Bold,
                     fontFamily = NotoSansBengali, modifier = Modifier.background(Indigo600.copy(alpha = 0.12f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
                 Spacer(Modifier.weight(1f))
-                val (typeColor, typeBg) = if (q.isMcq()) Color(0xFF059669) to Color(0xFFD1FAE5) else Color(0xFF7C3AED) to Color(0xFFEDE9FE)
-                Text(if (q.isMcq()) "MCQ" else "Written", fontSize = 9.sp, color = typeColor, fontWeight = FontWeight.ExtraBold,
+                val (typeColor, typeBg) = when {
+                    q.isStudy()   -> Color(0xFF2563EB) to Color(0xFFDBEAFE)
+                    q.isMcq()     -> Color(0xFF059669) to Color(0xFFD1FAE5)
+                    else          -> Color(0xFF7C3AED) to Color(0xFFEDE9FE)
+                }
+                Text(when { q.isStudy() -> "Study"; q.isMcq() -> "MCQ"; else -> "Written" }, fontSize = 9.sp, color = typeColor, fontWeight = FontWeight.ExtraBold,
                     fontFamily = NotoSansBengali, modifier = Modifier.background(typeBg, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
             }
             Text(highlightText(q.question, query), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 2)
