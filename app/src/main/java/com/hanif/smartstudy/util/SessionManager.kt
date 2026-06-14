@@ -41,7 +41,15 @@ class SessionManager(private val context: Context) {
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
         val KEY_NIGHT_MIN        = intPreferencesKey("night_min")
-        
+
+        val KEY_MIDDAY_ON        = booleanPreferencesKey("midday_on")
+        val KEY_MIDDAY_HOUR      = intPreferencesKey("midday_hour")
+        val KEY_MIDDAY_MIN       = intPreferencesKey("midday_min")
+
+        val KEY_EVENING_ON       = booleanPreferencesKey("evening_on")
+        val KEY_EVENING_HOUR     = intPreferencesKey("evening_hour")
+        val KEY_EVENING_MIN      = intPreferencesKey("evening_min")
+
         val KEY_LAST_NOTIF_CHECK = longPreferencesKey("last_notif_check")
 
         // XP history (JSON list of daily XP)
@@ -183,6 +191,42 @@ class SessionManager(private val context: Context) {
     }
     fun getNightMinute(): Int = runBlocking {
         context.dataStore.data.first()[KEY_NIGHT_MIN] ?: 0
+    }
+
+    // ── Midday progress check ──
+    fun setReminderMidday(on: Boolean, hour: Int, minute: Int) = runBlocking {
+        context.dataStore.edit {
+            it[KEY_MIDDAY_ON] = on
+            it[KEY_MIDDAY_HOUR] = hour
+            it[KEY_MIDDAY_MIN] = minute
+        }
+    }
+    fun isMiddayReminderOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_MIDDAY_ON] ?: false
+    }
+    fun getMiddayHour(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_MIDDAY_HOUR] ?: 14
+    }
+    fun getMiddayMinute(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_MIDDAY_MIN] ?: 0
+    }
+
+    // ── Evening urgency check ──
+    fun setReminderEvening(on: Boolean, hour: Int, minute: Int) = runBlocking {
+        context.dataStore.edit {
+            it[KEY_EVENING_ON] = on
+            it[KEY_EVENING_HOUR] = hour
+            it[KEY_EVENING_MIN] = minute
+        }
+    }
+    fun isEveningReminderOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_EVENING_ON] ?: false
+    }
+    fun getEveningHour(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_EVENING_HOUR] ?: 19
+    }
+    fun getEveningMinute(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_EVENING_MIN] ?: 0
     }
 
     // ── Notification polling ──
