@@ -100,12 +100,12 @@ object ContentFetchService {
                             .mapNotNull { (key, v) ->
                                 try {
                                     if (v.isJsonObject) {
-                                        // Firebase push key (যেমন -NxAbc123) টা "id" হিসেবে inject করো
-                                        // এটা ছাড়া admin edit এ correct Firebase path পাওয়া যায় না
+                                        // Firebase path key (numeric index বা push key যেমন -NxAbc123)
+                                        // সবসময় "id" হিসেবে override করো — এটাই admin edit-এ rowKey হিসেবে ব্যবহার হয়।
+                                        // পুরনো questions-এ "id: 1092" numeric field থাকলেও Firebase path
+                                        // (যেমন "137") দিয়ে replace করতে হবে, নইলে PATCH ভুল path-এ যাবে।
                                         val obj2 = v.asJsonObject.deepCopy()
-                                        if (!obj2.has("id") || obj2.get("id").asString.isNullOrBlank()) {
-                                            obj2.addProperty("id", key)
-                                        }
+                                        obj2.addProperty("id", key)
                                         gson.fromJson(obj2, T::class.java)
                                     } else null
                                 } catch (e: Exception) { null }
