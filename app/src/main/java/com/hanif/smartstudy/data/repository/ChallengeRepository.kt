@@ -336,13 +336,14 @@ class ChallengeRepository {
                     .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
                 val gasUrl = "${BuildConfig.GAS_URL}" +
-                    "?action=sendNotification" +
+                    "?action=sendChallengeNotification" +
                     "&secret=${java.net.URLEncoder.encode(BuildConfig.SECRET_KEY, "UTF-8")}" +
-                    "&phone=${java.net.URLEncoder.encode(toPhone, "UTF-8")}" +
-                    "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
-                    "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
-                    "&type=challenge_invite" +
-                    "&url=challenge" +
+                    "&toPhone=${java.net.URLEncoder.encode(toPhone, "UTF-8")}" +
+                    "&fromName=${java.net.URLEncoder.encode(invite.creatorName ?: "", "UTF-8")}" +
+                    "&fromPhone=${java.net.URLEncoder.encode(invite.creatorPhone ?: "", "UTF-8")}" +
+                    "&subject=${java.net.URLEncoder.encode(invite.subject, "UTF-8")}" +
+                    "&questionCount=${invite.questionCount}" +
+                    "&wagerXp=${invite.wagerXp}" +
                     "&challengeId=${java.net.URLEncoder.encode(invite.challengeId, "UTF-8")}"
                 client.newCall(okhttp3.Request.Builder().url(gasUrl).get().build()).execute().close()
             }
