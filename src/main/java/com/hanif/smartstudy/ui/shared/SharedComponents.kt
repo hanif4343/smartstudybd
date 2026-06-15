@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -87,7 +88,7 @@ fun TimerBar(
             )
         }
         Box(
-            Modifier.fillMaxWidth().height(5.dp).background(Color(0xFFE2E8F0))
+            Modifier.fillMaxWidth().height(5.dp).background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Box(
                 Modifier
@@ -103,7 +104,7 @@ fun TimerBar(
 fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) {
     val pct     = if (total > 0) current.toFloat() / total else 0f
     val animPct by animateFloatAsState(pct, tween(300), label = "readProg")
-    Box(modifier.fillMaxWidth().height(4.dp).background(Color(0xFFE2E8F0))) {
+    Box(modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
         Box(
             Modifier.fillMaxWidth(animPct).fillMaxHeight()
                 .background(Brush.horizontalGradient(listOf(Indigo600, Color(0xFF818CF8))))
@@ -128,7 +129,7 @@ fun QuestionCard(
     Card(
         modifier  = modifier.fillMaxWidth(),
         shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = CardBg),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -140,7 +141,7 @@ fun QuestionCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier.clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFFEEF2FF))
+                            .background(Indigo600.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text("#${index + 1}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
@@ -149,7 +150,7 @@ fun QuestionCard(
                     if (item.isWritten()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFFFF7ED))
+                                .background(OrangeTech.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text("Written", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = OrangeTech)
@@ -158,7 +159,7 @@ fun QuestionCard(
                     if (item.isWeakTopic) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFFFF1F2))
+                                .background(RedWrong.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text("🔁 Review", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = RedWrong)
@@ -167,7 +168,7 @@ fun QuestionCard(
                     if (item.year.isNotBlank()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFF0FDF4))
+                                .background(GreenOk.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(item.year, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk)
@@ -217,7 +218,7 @@ fun QuestionCard(
                 // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
                 RichContentText(
                     text      = displayQuestion,
-                    textColor = Color(0xFF1E293B),
+                    textColor = MaterialTheme.colorScheme.onSurface,
                     fontSize  = 15
                 )
             } else {
@@ -254,7 +255,7 @@ fun QuestionCard(
                 else -> item.answerState !is AnswerState.Unanswered
             }
             // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
-            val showAnswerText = showAnswerBox && !item.isMcq()
+            val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy())
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
@@ -293,7 +294,7 @@ fun QuestionText(text: String, modifier: Modifier = Modifier) {
             text       = text,
             fontSize   = 15.sp,
             fontWeight = FontWeight.Bold,
-            color      = SlateText,
+            color      = MaterialTheme.colorScheme.onSurface,
             fontFamily = NotoSansBengali,
             lineHeight = 22.sp,
             modifier   = modifier
@@ -339,30 +340,35 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
 
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (n, text) ->
             val isSelected  = answered?.option == n
             val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
             val bg = when {
-                answered == null        -> CardBg
+                answered == null        -> surfaceColor
                 isSelected && answered.isCorrect  -> Color(0xFFF0FDF4)
                 isSelected && !answered.isCorrect -> Color(0xFFFFF1F2)
                 !isSelected && isCorrectOpt && answered != null -> Color(0xFFF0FDF4)
-                else -> SlateLight
+                else -> surfaceVariantColor
             }
             val border = when {
-                answered == null        -> Color(0xFFE2E8F0)
+                answered == null        -> onSurfaceColor.copy(alpha = 0.2f)
                 isSelected && answered.isCorrect  -> GreenOk
                 isSelected && !answered.isCorrect -> RedWrong
                 !isSelected && isCorrectOpt && answered != null -> GreenOk
-                else -> Color(0xFFE2E8F0)
+                else -> onSurfaceColor.copy(alpha = 0.2f)
             }
             val textColor = when {
-                answered == null -> SlateText
+                answered == null -> onSurfaceColor
                 isSelected && answered.isCorrect  -> Color(0xFF166534)
                 isSelected && !answered.isCorrect -> Color(0xFF9F1239)
                 !isSelected && isCorrectOpt && answered != null -> Color(0xFF166534)
-                else -> MutedText
+                else -> onSurfaceVariantColor
             }
             val icon = when {
                 answered == null -> listOf("A","B","C","D").getOrNull(n - 1) ?: "?"
@@ -425,7 +431,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
                 if (submitted.userText.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text("তোমার উত্তর: ${submitted.userText}", fontSize = 12.sp,
-                        color = MutedText, fontFamily = NotoSansBengali, lineHeight = 16.sp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, lineHeight = 16.sp)
                 }
             }
         }
@@ -690,7 +696,7 @@ private fun UserTechniqueCard(
                     Text(
                         if (isOwn) "🙋 আমার" else "👤 ${technique.userName}",
                         fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                        color = if (isOwn) GreenOk else MutedText,
+                        color = if (isOwn) GreenOk else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali
                     )
                     if (isOwn) {
@@ -698,13 +704,13 @@ private fun UserTechniqueCard(
                             Modifier.clip(RoundedCornerShape(6.dp))
                                 .background(
                                     if (technique.isPublic) Indigo600.copy(alpha = 0.12f)
-                                    else Color(0xFFF1F5F9)
+                                    else MaterialTheme.colorScheme.surfaceVariant
                                 )
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 if (technique.isPublic) "🌐 পাবলিক" else "🔒 প্রাইভেট",
-                                fontSize = 8.sp, color = if (technique.isPublic) Indigo600 else MutedText,
+                                fontSize = 8.sp, color = if (technique.isPublic) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold
                             )
                         }
@@ -732,7 +738,7 @@ private fun UserTechniqueCard(
                 }
             }
             Spacer(Modifier.height(3.dp))
-            Text(technique.text, fontSize = 12.sp, color = Color(0xFF1E293B),
+            Text(technique.text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = NotoSansBengali, lineHeight = 18.sp)
         }
     }
@@ -929,22 +935,22 @@ fun ReportDialog(
                     Text(
                         questionText.take(80) + if (questionText.length > 80) "..." else "",
                         fontFamily = NotoSansBengali, fontSize = 11.sp,
-                        color = MutedText, lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(SlateLight)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(8.dp)
                     )
                 }
                 Text("সমস্যার ধরন:", fontFamily = NotoSansBengali,
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateText)
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 issues.forEach { issue ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (selected == issue) Color(0xFFEEF2FF) else SlateLight)
+                            .background(if (selected == issue) Indigo600.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant)
                             .border(
                                 1.dp,
                                 if (selected == issue) Indigo600 else Color.Transparent,
@@ -961,7 +967,7 @@ fun ReportDialog(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(issue, fontFamily = NotoSansBengali, fontSize = 13.sp,
-                            color = if (selected == issue) Indigo600 else SlateText,
+                            color = if (selected == issue) Indigo600 else MaterialTheme.colorScheme.onSurface,
                             fontWeight = if (selected == issue) FontWeight.Bold else FontWeight.Normal)
                     }
                 }
@@ -975,7 +981,7 @@ fun ReportDialog(
                     shape         = RoundedCornerShape(10.dp),
                     colors        = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = Indigo600,
-                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
@@ -995,7 +1001,7 @@ fun ReportDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("বাতিল", fontFamily = NotoSansBengali, color = MutedText)
+                Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         shape = RoundedCornerShape(20.dp)
@@ -1010,8 +1016,9 @@ fun ReportDialog(
 fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
     val sheet = when {
         item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
-        item.isMcq() -> "Quiz"
-        else         -> "Study"
+        item.isStudy() -> "Study"
+        item.isMcq()   -> "Quiz"
+        else           -> "Study"
     }
 
     var editQuestion    by remember { mutableStateOf(item.question) }
@@ -1046,6 +1053,36 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
     val scope     = rememberCoroutineScope()
     val adminIndigo = Color(0xFF4F46E5)
 
+    val onSave: () -> Unit = {
+        scope.launch {
+            isSaving = true
+            saveMsg  = null
+            try {
+                val fields = mutableMapOf<String, String>()
+                if (editQuestion    != item.question)    fields["question"]     = editQuestion
+                if (editExplanation != item.explanation) fields["explanation"]  = editExplanation
+                if (editTechnique   != item.technique)   fields["technique"]    = editTechnique
+                if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
+                if (editAnswer      != item.answer)      { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
+                val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
+                val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
+                if (newOpts != origOpts) {
+                    if (editOptionA.isNotBlank()) fields["option1"] = editOptionA
+                    if (editOptionB.isNotBlank()) fields["option2"] = editOptionB
+                    if (editOptionC.isNotBlank()) fields["option3"] = editOptionC
+                    if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
+                    fields["correct"] = editAnswer
+                }
+                if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
+                saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
+                    is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
+                    is GasResult.Error   -> "❌ ${r.message}"
+                }
+            } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
+            isSaving = false
+        }
+    }
+
     Dialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         properties = androidx.compose.ui.window.DialogProperties(
@@ -1074,20 +1111,50 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("✏️ Admin Edit", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-                        Surface(shape = RoundedCornerShape(6.dp), color = Color.White.copy(0.2f)) {
-                            Text(sheet, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                color = Color.White, fontFamily = NotoSansBengali)
+
+                        // ── Save button — top corner, সবসময় visible (keyboard এর নিচে পড়ে না) ──
+                        Button(
+                            onClick  = onSave,
+                            enabled  = !isSaving,
+                            shape    = RoundedCornerShape(10.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(Modifier.size(14.dp), Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Save, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("সংরক্ষণ", fontFamily = NotoSansBengali,
+                                    fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = Color.White)
+                            }
                         }
                         Spacer(Modifier.width(8.dp))
+
                         IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(30.dp)) {
                             Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
 
+                // Save message — header এর ঠিক নিচে, keyboard এর উপরে সবসময় দেখা যাবে
+                saveMsg?.let { msg ->
+                    val ok = msg.startsWith("✅")
+                    LaunchedEffect(msg) {
+                        kotlinx.coroutines.delay(2500)
+                        saveMsg = null
+                        if (ok) onDismiss()
+                    }
+                    Surface(color = if (ok) Color(0xFFF0FDF4) else Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
+                        Text(msg, Modifier.padding(12.dp), fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
+                    }
+                }
+
                 // Tabs
-                TabRow(selectedTabIndex = activeTab, containerColor = Color(0xFFF8F9FF), contentColor = adminIndigo) {
+                TabRow(selectedTabIndex = activeTab, containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = adminIndigo) {
                     listOf("📝 প্রশ্ন", "🔄 Options", "💡 উত্তর/ব্যাখ্যা").forEachIndexed { i, label ->
                         Tab(selected = activeTab == i, onClick = { activeTab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold) })
@@ -1121,7 +1188,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                         Modifier.fillMaxWidth(),
                                         shape  = RoundedCornerShape(10.dp),
                                         colors = CardDefaults.cardColors(
-                                            containerColor = if (isAns) Color(0xFFF0FDF4) else Color(0xFFF8FAFC)
+                                            containerColor = if (isAns) Color(0xFFF0FDF4) else MaterialTheme.colorScheme.surfaceVariant
                                         ),
                                         border = if (isAns) androidx.compose.foundation.BorderStroke(1.5.dp, GreenOk) else null
                                     ) {
@@ -1137,7 +1204,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                             Spacer(Modifier.width(8.dp))
                                             Text(text, Modifier.weight(1f), fontSize = 12.sp,
                                                 fontFamily = NotoSansBengali,
-                                                color = if (isAns) Color(0xFF166534) else SlateText,
+                                                color = if (isAns) Color(0xFF166534) else MaterialTheme.colorScheme.onSurface,
                                                 fontWeight = if (isAns) FontWeight.Bold else FontWeight.Normal)
                                             if (isAns) Icon(Icons.Default.CheckCircle, null,
                                                 tint = GreenOk, modifier = Modifier.size(16.dp))
@@ -1180,7 +1247,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                                     })
                                 }
                             } else {
-                                Text("Written প্রশ্ন — option নেই", fontFamily = NotoSansBengali, color = MutedText)
+                                Text("Written প্রশ্ন — option নেই", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         2 -> {
@@ -1191,72 +1258,12 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                     }
                 }
 
-                // Save message
-                saveMsg?.let { msg ->
-                    val ok = msg.startsWith("✅")
-                    LaunchedEffect(msg) {
-                        kotlinx.coroutines.delay(2500)
-                        saveMsg = null
-                        if (ok) onDismiss()
-                    }
-                    Surface(color = if (ok) Color(0xFFF0FDF4) else Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
-                        Text(msg, Modifier.padding(12.dp), fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
-                            color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
-                    }
-                }
-
-                // Bottom bar
+                // Bottom bar — শুধু বাতিল; Save উপরে corner-এ (keyboard এর নিচে পড়ে না)
                 Surface(color = Color.White, modifier = Modifier.fillMaxWidth(), shadowElevation = 6.dp) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp)) {
                         OutlinedButton(onClick = { if (!isSaving) onDismiss() },
-                            modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                             Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    isSaving = true
-                                    saveMsg  = null
-                                    try {
-                                        val fields = mutableMapOf<String, String>()
-                                        if (editQuestion    != item.question)    fields["question"]     = editQuestion
-                                        if (editExplanation != item.explanation) fields["explanation"]  = editExplanation
-                                        if (editTechnique   != item.technique)   fields["technique"]    = editTechnique
-                                        if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
-                                        if (editAnswer      != item.answer)      { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
-                                        val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
-                                        val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
-                                        if (newOpts != origOpts) {
-                                            if (editOptionA.isNotBlank()) fields["option1"] = editOptionA
-                                            if (editOptionB.isNotBlank()) fields["option2"] = editOptionB
-                                            if (editOptionC.isNotBlank()) fields["option3"] = editOptionC
-                                            if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
-                                            fields["correct"] = editAnswer
-                                        }
-                                        if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
-                                        saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
-                                            is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
-                                            is GasResult.Error   -> "❌ ${r.message}"
-                                        }
-                                    } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
-                                    isSaving = false
-                                }
-                            },
-                            enabled  = !isSaving,
-                            modifier = Modifier.weight(2f),
-                            shape    = RoundedCornerShape(12.dp),
-                            colors   = ButtonDefaults.buttonColors(containerColor = adminIndigo)
-                        ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(Modifier.size(16.dp), Color.White, strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            } else {
-                                Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text("💾 Firebase এ সংরক্ষণ", fontFamily = NotoSansBengali,
-                                fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -1274,7 +1281,7 @@ private fun AdminTextField(label: String, value: String, onChange: (String) -> U
         modifier = Modifier.fillMaxWidth(), minLines = minLines,
         shape = RoundedCornerShape(10.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = MaterialTheme.colorScheme.outline),
         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
         placeholder = if (hint.isNotBlank()) {
             { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1)) }
@@ -1286,12 +1293,12 @@ private fun AdminTextField(label: String, value: String, onChange: (String) -> U
 private fun AdminInfoRow(label: String, value: String) {
     if (value.isBlank()) return
     Row(
-        Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedText, fontFamily = NotoSansBengali)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateText, fontFamily = NotoSansBengali)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
     }
 }
 
@@ -1349,15 +1356,10 @@ fun AdminDraggableItem(
 }
 
 /**
- * AdminReorderableQuestionList — Admin mode এ question list drag-reorder সহ।
+ * AdminReorderableQuestionList — Admin mode এ question drag-reorder।
+ * Long-press on handle → drag → release → Firebase save।
  *
- * ব্যবহার:
- *   AdminReorderableQuestionList(
- *       questions   = questions,
- *       isAdmin     = currentUser?.isAdmin() == true,
- *       onReorder   = { from, to -> viewModel.adminReorderQuestions(from, to) },
- *       itemContent = { idx, q, dragModifier -> QuestionCard(..., modifier = dragModifier) }
- *   )
+ * FIX: real-time swap + scroll conflict নেই।
  */
 @Composable
 fun AdminReorderableQuestionList(
@@ -1368,59 +1370,207 @@ fun AdminReorderableQuestionList(
     itemContent: @Composable (index: Int, item: QuestionItem, dragModifier: Modifier) -> Unit
 ) {
     if (!isAdmin) {
-        // Non-admin: simple list, no drag
-        questions.forEachIndexed { idx, q ->
-            itemContent(idx, q, Modifier)
-        }
+        questions.forEachIndexed { idx, q -> itemContent(idx, q, Modifier) }
         return
     }
 
+    val localItems = remember(questions) { questions.toMutableStateList() }
     var draggingIdx  by remember { mutableStateOf(-1) }
     var dragOffsetY  by remember { mutableStateOf(0f) }
-    var itemHeightPx by remember { mutableStateOf(0f) }
+    val itemHeights  = remember { mutableStateMapOf<Int, Float>() }
 
     Column(modifier = modifier) {
-        questions.forEachIndexed { idx, q ->
+        localItems.forEachIndexed { idx, q ->
             val isDragging = draggingIdx == idx
+            val steps = if (isDragging && itemHeights.isNotEmpty()) {
+                val avgH = itemHeights.values.average().toFloat().takeIf { it > 0f } ?: 1f
+                (dragOffsetY / avgH).toInt()
+            } else 0
+            val targetIdx = if (draggingIdx >= 0)
+                (draggingIdx + steps).coerceIn(0, localItems.lastIndex) else -1
 
-            // Drag handle + item row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
                         if (isDragging) {
-                            translationY  = dragOffsetY
-                            scaleX        = 1.02f
-                            scaleY        = 1.02f
-                            alpha         = 0.93f
-                            shadowElevation = 16f
+                            translationY    = dragOffsetY
+                            scaleX          = 1.02f
+                            scaleY          = 1.02f
+                            alpha           = 0.94f
+                            shadowElevation = 20f
+                        }
+                    }
+                    .zIndex(if (isDragging) 10f else 0f),
+                verticalAlignment = Alignment.Top
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .padding(top = 16.dp)
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { _ ->
+                                    draggingIdx = idx
+                                    dragOffsetY = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetY += dragAmount.y
+                                    val avgH = itemHeights.values.average()
+                                        .toFloat().takeIf { it > 0f } ?: return@detectDragGesturesAfterLongPress
+                                    val s    = (dragOffsetY / avgH).toInt()
+                                    val newTo = (draggingIdx + s).coerceIn(0, localItems.lastIndex)
+                                    if (newTo != draggingIdx) {
+                                        val moved = localItems.removeAt(draggingIdx)
+                                        localItems.add(newTo, moved)
+                                        dragOffsetY -= s * avgH
+                                        draggingIdx = newTo
+                                    }
+                                },
+                                onDragEnd = {
+                                    val finalIdx = draggingIdx
+                                    val originalFrom = questions.indexOfFirst { it.id == localItems.getOrNull(finalIdx)?.id }
+                                    if (originalFrom >= 0 && originalFrom != finalIdx)
+                                        onReorder(originalFrom, finalIdx)
+                                    draggingIdx = -1; dragOffsetY = 0f
+                                },
+                                onDragCancel = { draggingIdx = -1; dragOffsetY = 0f }
+                            )
+                        },
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        repeat(3) {
+                            Box(
+                                Modifier.width(16.dp).height(2.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(if (isDragging) Color(0xFF4F46E5) else Color(0xFFB0BEC5))
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onGloballyPositioned { c -> itemHeights[idx] = c.size.height.toFloat() }
+                ) {
+                    itemContent(idx, q, Modifier)
+                }
+            }
+
+            if (draggingIdx >= 0 && draggingIdx != idx && targetIdx == idx) {
+                Box(
+                    Modifier.fillMaxWidth().height(2.dp).padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(2.dp)).background(Color(0xFF4F46E5))
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * AdminReorderableList<T> — Generic drag-reorder।
+ * Subject / SubTopic list এ use হয়।
+ *
+ * FIX: আগের version এ LazyColumn scroll এর সাথে drag conflict করত।
+ * এখন item এর position track করে itemOffsets দিয়ে — scroll এর বাইরে।
+ * Handle টা পুরো Row এর বাম পাশে, long-press এ drag শুরু।
+ */
+@Composable
+fun <T> AdminReorderableList(
+    items      : List<T>,
+    isAdmin    : Boolean,
+    keyOf      : (T) -> String,
+    onReorder  : (from: Int, to: Int) -> Unit,
+    modifier   : Modifier = Modifier,
+    itemContent: @Composable (index: Int, item: T) -> Unit
+) {
+    if (!isAdmin) {
+        Column(modifier) {
+            items.forEachIndexed { idx, item -> itemContent(idx, item) }
+        }
+        return
+    }
+
+    // mutable list — drag হলে immediately reorder করি (visual feedback)
+    val localItems = remember(items) { items.toMutableStateList() }
+
+    // drag state
+    var draggingIdx  by remember { mutableStateOf(-1) }
+    var dragOffsetY  by remember { mutableStateOf(0f) }
+    // প্রতিটা item এর height track করি
+    val itemHeights  = remember { mutableStateMapOf<Int, Float>() }
+
+    Column(modifier = modifier) {
+        localItems.forEachIndexed { idx, item ->
+            val isDragging = draggingIdx == idx
+
+            // dragging item কত steps move হয়েছে
+            val steps = if (isDragging && itemHeights.isNotEmpty()) {
+                val avgH = itemHeights.values.average().toFloat().takeIf { it > 0f } ?: 1f
+                (dragOffsetY / avgH).toInt()
+            } else 0
+            val targetIdx = if (draggingIdx >= 0)
+                (draggingIdx + steps).coerceIn(0, localItems.lastIndex) else -1
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        if (isDragging) {
+                            translationY    = dragOffsetY
+                            scaleX          = 1.02f
+                            scaleY          = 1.02f
+                            alpha           = 0.94f
+                            shadowElevation = 20f
                         }
                     }
                     .zIndex(if (isDragging) 10f else 0f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── Drag handle (long-press এখানে শুরু) ──
+                // ── Drag Handle ──
+                // pointerInput এখানে — handle touch করলেই drag, scroll এ যাবে না
                 Box(
                     modifier = Modifier
-                        .width(32.dp)
+                        .width(36.dp)
                         .fillMaxHeight()
-                        .pointerInput(idx) {
+                        .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
-                                onDragStart = {
-                                    draggingIdx  = idx
-                                    dragOffsetY  = 0f
+                                onDragStart = { _ ->
+                                    draggingIdx = idx
+                                    dragOffsetY = 0f
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
                                     dragOffsetY += dragAmount.y
+                                    // Real-time swap: threshold পার হলে swap করো
+                                    val avgH = itemHeights.values.average()
+                                        .toFloat().takeIf { it > 0f } ?: return@detectDragGesturesAfterLongPress
+                                    val s    = (dragOffsetY / avgH).toInt()
+                                    val newTo = (draggingIdx + s).coerceIn(0, localItems.lastIndex)
+                                    if (newTo != draggingIdx) {
+                                        val moved = localItems.removeAt(draggingIdx)
+                                        localItems.add(newTo, moved)
+                                        // offset reset — নতুন position থেকে শুরু
+                                        dragOffsetY -= s * avgH
+                                        draggingIdx = newTo
+                                    }
                                 },
                                 onDragEnd = {
-                                    val fromIdx = draggingIdx
-                                    if (fromIdx >= 0 && itemHeightPx > 0f) {
-                                        // কতটা drag হয়েছে সেটা থেকে toIdx বের করো
-                                        val steps   = (dragOffsetY / itemHeightPx).toInt()
-                                        val toIdx   = (fromIdx + steps).coerceIn(0, questions.lastIndex)
-                                        if (fromIdx != toIdx) onReorder(fromIdx, toIdx)
+                                    val finalIdx = draggingIdx
+                                    // original list এর index খুঁজে বের করো
+                                    val originalFrom = items.indexOfFirst { keyOf(it) == keyOf(localItems[finalIdx]) }
+                                    if (originalFrom >= 0 && originalFrom != finalIdx) {
+                                        onReorder(originalFrom, finalIdx)
+                                    } else if (finalIdx >= 0) {
+                                        // local reorder ই হয়েছে — ViewModel কে জানাও
+                                        onReorder(finalIdx, finalIdx)
                                     }
                                     draggingIdx = -1
                                     dragOffsetY = 0f
@@ -1433,49 +1583,46 @@ fun AdminReorderableQuestionList(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Handle icon — admin কে বোঝায় drag করা যাবে
+                    // ≡ হ্যান্ডেল আইকন
                     Column(
-                        verticalArrangement   = Arrangement.spacedBy(3.dp),
-                        horizontalAlignment   = Alignment.CenterHorizontally,
-                        modifier              = Modifier.padding(vertical = 8.dp)
+                        verticalArrangement = Arrangement.spacedBy(3.5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 8.dp)
                     ) {
                         repeat(3) {
                             Box(
                                 Modifier
-                                    .width(14.dp)
+                                    .width(16.dp)
                                     .height(2.dp)
                                     .clip(RoundedCornerShape(2.dp))
-                                    .background(if (isDragging) Color(0xFF4F46E5) else Color(0xFFCBD5E1))
+                                    .background(
+                                        if (isDragging) Color(0xFF4F46E5)
+                                        else Color(0xFFB0BEC5)
+                                    )
                             )
                         }
                     }
                 }
 
-                // ── Actual question item ──
+                // ── Item content ──
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .onGloballyPositioned { coords ->
-                            itemHeightPx = coords.size.height.toFloat()
+                            itemHeights[idx] = coords.size.height.toFloat()
                         }
                 ) {
-                    itemContent(idx, q, Modifier)
+                    itemContent(idx, item)
                 }
             }
 
-            // Drag-over indicator — target position দেখাতে
-            val steps   = if (itemHeightPx > 0f) (dragOffsetY / itemHeightPx).toInt() else 0
-            val toIdx   = (draggingIdx + steps).coerceIn(0, questions.lastIndex)
-            val showSep = draggingIdx >= 0 && draggingIdx != idx && (
-                (steps > 0 && idx == toIdx) ||
-                (steps < 0 && idx == toIdx)
-            )
-            if (showSep) {
+            // Drop indicator — target position এ নীল রেখা
+            if (draggingIdx >= 0 && draggingIdx != idx && targetIdx == idx) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(3.dp)
-                        .padding(horizontal = 12.dp)
+                        .height(2.dp)
+                        .padding(horizontal = 8.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(Color(0xFF4F46E5))
                 )
@@ -1484,111 +1631,6 @@ fun AdminReorderableQuestionList(
     }
 }
 
-/**
- * AdminReorderableList<T> — Generic version for subjects/subtopics।
- * যেকোনো list এ use করা যাবে।
- */
-@Composable
-fun <T> AdminReorderableList(
-    items     : List<T>,
-    isAdmin   : Boolean,
-    keyOf     : (T) -> String,
-    onReorder : (from: Int, to: Int) -> Unit,
-    modifier  : Modifier = Modifier,
-    itemContent: @Composable (index: Int, item: T) -> Unit
-) {
-    if (!isAdmin) {
-        Column(modifier) {
-            items.forEachIndexed { idx, item -> itemContent(idx, item) }
-        }
-        return
-    }
-
-    var draggingIdx  by remember { mutableStateOf(-1) }
-    var dragOffsetY  by remember { mutableStateOf(0f) }
-    var itemHeightPx by remember { mutableStateOf(0f) }
-
-    Column(modifier = modifier) {
-        items.forEachIndexed { idx, item ->
-            val isDragging = draggingIdx == idx
-            val steps      = if (itemHeightPx > 0f) (dragOffsetY / itemHeightPx).toInt() else 0
-            val toIdx      = if (draggingIdx >= 0) (draggingIdx + steps).coerceIn(0, items.lastIndex) else -1
-
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        if (isDragging) {
-                            translationY    = dragOffsetY
-                            scaleX          = 1.02f
-                            scaleY          = 1.02f
-                            alpha           = 0.93f
-                            shadowElevation = 16f
-                        }
-                    }
-                    .zIndex(if (isDragging) 10f else 0f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Drag handle
-                Box(
-                    Modifier
-                        .width(32.dp)
-                        .pointerInput(idx) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { draggingIdx = idx; dragOffsetY = 0f },
-                                onDrag = { change, amt ->
-                                    change.consume()
-                                    dragOffsetY += amt.y
-                                },
-                                onDragEnd = {
-                                    val from = draggingIdx
-                                    if (from >= 0 && itemHeightPx > 0f) {
-                                        val s  = (dragOffsetY / itemHeightPx).toInt()
-                                        val to = (from + s).coerceIn(0, items.lastIndex)
-                                        if (from != to) onReorder(from, to)
-                                    }
-                                    draggingIdx = -1; dragOffsetY = 0f
-                                },
-                                onDragCancel = { draggingIdx = -1; dragOffsetY = 0f }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(vertical = 10.dp)
-                    ) {
-                        repeat(3) {
-                            Box(
-                                Modifier.width(14.dp).height(2.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(if (isDragging) Color(0xFF4F46E5) else Color(0xFFCBD5E1))
-                            )
-                        }
-                    }
-                }
-
-                Box(
-                    Modifier.weight(1f).onGloballyPositioned { c ->
-                        itemHeightPx = c.size.height.toFloat()
-                    }
-                ) {
-                    itemContent(idx, item)
-                }
-            }
-
-            // Drop indicator line
-            val showSep = draggingIdx >= 0 && draggingIdx != idx && toIdx == idx
-            if (showSep) {
-                Box(
-                    Modifier.fillMaxWidth().height(3.dp).padding(horizontal = 12.dp)
-                        .clip(RoundedCornerShape(2.dp)).background(Color(0xFF4F46E5))
-                )
-            }
-        }
-    }
-}
 
 /**
  * AdminOptionReorderRow — MCQ options drag-reorder।
