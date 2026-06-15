@@ -43,7 +43,8 @@ fun QuestionListScreen(
     onSubmit    : () -> Unit,
     currentUser : com.hanif.smartstudy.data.model.User? = null,
     highlightQuestionId : String? = null,
-    onHighlightConsumed : () -> Unit = {}
+    onHighlightConsumed : () -> Unit = {},
+    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
     var reportIdx by remember { mutableStateOf(-1) }
@@ -138,7 +139,8 @@ fun QuestionListScreen(
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
                                     onReport    = { reportIdx = idx },
                                     currentUser = currentUser,
-                                    onAdminRefresh = { viewModel.adminRefreshContent() }
+                                    onAdminRefresh = { viewModel.adminRefreshContent() },
+                                    onAdminEdit = onAdminEdit
                                 )
                             }
                         } else {
@@ -152,7 +154,8 @@ fun QuestionListScreen(
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
                             onReport    = { reportIdx = idx },
                             currentUser = currentUser,
-                            onAdminRefresh = { viewModel.adminRefreshContent() }
+                            onAdminRefresh = { viewModel.adminRefreshContent() },
+                            onAdminEdit = onAdminEdit
                         )
                         }
                     }
