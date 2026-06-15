@@ -193,6 +193,40 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * রুটিন থেকে "এখন টেস্ট দাও" — নির্দিষ্ট subject/subTopic এর উপর সরাসরি
+     * Mock Test শুরু করো। subTopic ফাঁকা থাকলে ওই subject এর সব subTopic
+     * সিলেক্ট হবে।
+     */
+    fun startInstantTestFor(subject: String, subTopic: String, limit: Int = 10) {
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubjects(content, _state.value.mode, forMock = true)
+
+            val subjectEntry = _state.value.subjects.find { it.name == subject }
+            val keys = if (subTopic.isNotBlank()) {
+                listOf("$subject||$subTopic")
+            } else if (subjectEntry?.subTopics?.isNotEmpty() == true) {
+                subjectEntry.subTopics.map { "$subject||${it.name}" }
+            } else {
+                // এই বিষয়ে কোনো SubTopic নেই — সরাসরি subject-ভিত্তিক প্রশ্ন (subTopic ফাঁকা)
+                listOf("$subject||")
+            }
+
+            _state.update {
+                it.copy(
+                    isMockZone = true,
+                    navPath    = NavPath(),
+                    mockConfig = it.mockConfig.copy(
+                        selectedTopics = keys,
+                        questionLimit  = limit
+                    )
+                )
+            }
+            startMock()
+        }
+    }
+
     fun toggleMockTopic(key: String) {
         val current = _state.value.mockConfig.selectedTopics.toMutableList()
         if (current.contains(key)) current.remove(key) else current.add(key)
