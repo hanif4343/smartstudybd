@@ -2,6 +2,7 @@ package com.hanif.smartstudy.data.remote
 
 import android.util.Log
 import com.google.gson.JsonObject
+import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.CaseInsensitiveGson
@@ -84,21 +85,9 @@ object ContentFetchService {
                 val trimmed = body.trim()
                 val items: List<T> = when {
                     trimmed.startsWith("[") -> {
-                        // Firebase RTDB array response — index টা "id" হিসেবে inject করো,
-                        // নাহলে adminUpdateQuestionField() blank rowKey দিয়ে ভুল path
-                        // (sheet root) এ PATCH করে এবং edit Firebase এ জমা হয় না।
-                        val arr = com.google.gson.JsonParser.parseString(trimmed).asJsonArray
-                        arr.mapIndexedNotNull { idx, el ->
-                            try {
-                                if (el != null && el.isJsonObject) {
-                                    val obj2 = el.asJsonObject.deepCopy()
-                                    if (!obj2.has("id") || obj2.get("id").isJsonNull || obj2.get("id").asString.isNullOrBlank()) {
-                                        obj2.addProperty("id", idx.toString())
-                                    }
-                                    gson.fromJson(obj2, T::class.java)
-                                } else null
-                            } catch (e: Exception) { null }
-                        }
+                        val type = object : TypeToken<List<T?>>() {}.type
+                        val raw: List<T?> = gson.fromJson<List<T?>>(trimmed, type) ?: emptyList()
+                        raw.filterNotNull()
                     }
                     trimmed.startsWith("{") -> {
                         val obj = gson.fromJson(trimmed, JsonObject::class.java)
