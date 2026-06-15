@@ -121,6 +121,8 @@ data class MenuUiState(
     val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
     val isSyncingEdits    : Boolean          = false,
     val syncEditsMsg      : String?          = null,
+    // edit হলে increment হয় — MainScreen এ observe করে quiz/study/qbank refresh হয়
+    val contentEditVersion: Int              = 0,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -604,9 +606,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 when (val r = com.hanif.smartstudy.data.remote.GasApiService
                         .adminUpdateQuestionField(sheet, rowKey, fields)) {
                     is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                        // DataStore cache + in-memory cache দুটোই clear করো
                         cache.clearCache()
+                        com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                        com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. Cache cleared.")
                         _state.update { it.copy(isEditingQuestion = false,
-                            editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত") }
+                            editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
+                            contentEditVersion = _state.value.contentEditVersion + 1) }
                     }
                     is com.hanif.smartstudy.data.remote.GasResult.Error -> {
                         // Online কিন্তু fail — queue এ রাখো
