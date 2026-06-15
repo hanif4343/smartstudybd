@@ -114,6 +114,15 @@ fun MainScreen(
         }
     }
 
+    // Admin question edit হলে সব ViewModel fresh reload করো
+    LaunchedEffect(menuState.contentEditVersion) {
+        if (menuState.contentEditVersion > 0) {
+            quizViewModel.adminRefreshContent()
+            qbankViewModel.adminRefreshContent()
+            studyViewModel.adminRefreshContent()
+        }
+    }
+
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
             DeepLinkAction.Type.QUIZ       -> {
