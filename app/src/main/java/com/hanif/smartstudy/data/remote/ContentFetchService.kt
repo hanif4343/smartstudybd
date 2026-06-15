@@ -2,7 +2,6 @@ package com.hanif.smartstudy.data.remote
 
 import android.util.Log
 import com.google.gson.JsonObject
-import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.CaseInsensitiveGson
@@ -85,9 +84,19 @@ object ContentFetchService {
                 val trimmed = body.trim()
                 val items: List<T> = when {
                     trimmed.startsWith("[") -> {
-                        val type = object : TypeToken<List<T?>>() {}.type
-                        val raw: List<T?> = gson.fromJson<List<T?>>(trimmed, type) ?: emptyList()
-                        raw.filterNotNull()
+                        // Quiz/Study/QBank Firebase এ JSON array হিসেবে আছে (GAS syncToFirebase: jsonData.push(...))
+                        // — admin app এর toArr() এর মতো array index টাই "id" / _fbKey হিসেবে ব্যবহার করো।
+                        // নইলে item.id খালি/ভুল থাকে আর admin edit ভুল path এ PATCH করে — Firebase এ জমা হয় না।
+                        val arr = com.google.gson.JsonParser.parseString(trimmed).asJsonArray
+                        arr.mapIndexedNotNull { idx, el ->
+                            try {
+                                if (el != null && el.isJsonObject) {
+                                    val obj2 = el.asJsonObject.deepCopy()
+                                    obj2.addProperty("id", idx.toString())
+                                    gson.fromJson(obj2, T::class.java)
+                                } else null
+                            } catch (e: Exception) { null }
+                        }
                     }
                     trimmed.startsWith("{") -> {
                         val obj = gson.fromJson(trimmed, JsonObject::class.java)
