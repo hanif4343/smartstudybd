@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
@@ -116,7 +117,10 @@ fun HomeScreen(
     viewModel     : HomeViewModel = viewModel(),
     quizViewModel : QuizViewModel? = null,
     onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {}
+    onTypingClick : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val ctx   = LocalContext.current
@@ -171,7 +175,11 @@ fun HomeScreen(
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
 
             // ── Daily Routine Checklist — হোম স্ক্রিন চেকলিস্ট ──
-            DailyRoutineCard()
+            DailyRoutineCard(
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
 
             // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
@@ -514,7 +522,10 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 
 @Composable
 fun DailyRoutineCard(
-    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel()
+    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val routine by vm.state.collectAsState()
     val subjectOptions by vm.subjectOptions.collectAsState()
@@ -574,7 +585,10 @@ fun DailyRoutineCard(
                     RoutineItemRow(
                         item     = item,
                         onToggle = { vm.toggleItem(item.id) },
-                        onRemove = { vm.removeItem(item.id) }
+                        onRemove = { vm.removeItem(item.id) },
+                        onOpenStudy       = onOpenStudy,
+                        onOpenInstantTest = onOpenInstantTest,
+                        onOpenWeeklyTest  = onOpenWeeklyTest
                     )
                 }
             }
@@ -586,8 +600,14 @@ fun DailyRoutineCard(
 private fun RoutineItemRow(
     item     : com.hanif.smartstudy.data.model.RoutineItem,
     onToggle : () -> Unit,
-    onRemove : () -> Unit
+    onRemove : () -> Unit,
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
+    var showActionMenu by remember { mutableStateOf(false) }
+    val hasSubject = item.subject.isNotBlank()
+
     Row(
         Modifier
             .fillMaxWidth()
@@ -599,7 +619,11 @@ private fun RoutineItemRow(
             onCheckedChange = { onToggle() },
             colors = CheckboxDefaults.colors(checkedColor = GreenMint)
         )
-        Column(Modifier.weight(1f)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .then(if (hasSubject) Modifier.clickable { showActionMenu = true } else Modifier)
+        ) {
             Text(
                 item.title,
                 fontSize = 13.sp,
@@ -609,7 +633,7 @@ private fun RoutineItemRow(
                 textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            if (item.subject.isNotBlank()) {
+            if (hasSubject) {
                 val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
                 Text(
                     "$subjLabel • ${item.minutes} মিনিট",
@@ -618,6 +642,38 @@ private fun RoutineItemRow(
                 )
             }
         }
+
+        if (hasSubject) {
+            Box {
+                IconButton(onClick = { showActionMenu = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
+                }
+                DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("📖 পড়া শুরু করো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenStudy(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📝 এখন টেস্ট দাও (Instant)", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenInstantTest(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("⚔️ সাপ্তাহিক চ্যালেঞ্জে যাও", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenWeeklyTest()
+                        }
+                    )
+                }
+            }
+        }
+
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
             Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
         }
