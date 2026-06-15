@@ -124,6 +124,7 @@ fun QuestionCard(
     onReport       : () -> Unit,
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
+    onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     modifier       : Modifier = Modifier
 ) {
     Card(
@@ -197,7 +198,7 @@ fun QuestionCard(
                             AdminQuestionEditDialog(item = item, onDismiss = {
                                 showEdit = false
                                 onAdminRefresh?.invoke()
-                            })
+                            }, onAdminEdit = onAdminEdit)
                         }
                     }
                 }
@@ -1013,7 +1014,11 @@ fun ReportDialog(
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
+fun AdminQuestionEditDialog(
+    item        : QuestionItem,
+    onDismiss   : () -> Unit,
+    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
+) {
     val sheet = when {
         item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
         item.isStudy() -> "Study"
@@ -1053,7 +1058,8 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
     val scope     = rememberCoroutineScope()
     val adminIndigo = Color(0xFF4F46E5)
 
-    val onSave: () -> Unit = {
+    // Shared save action
+    val doSave: () -> Unit = {
         scope.launch {
             isSaving = true
             saveMsg  = null
@@ -1074,9 +1080,17 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                     fields["correct"] = editAnswer
                 }
                 if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
-                saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
-                    is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
-                    is GasResult.Error   -> "❌ ${r.message}"
+
+                if (onAdminEdit != null) {
+                    // Use ViewModel path (offline-aware, isAdmin-checked)
+                    onAdminEdit(sheet, item.id, fields, item.question.take(60))
+                    saveMsg = "✅ সংরক্ষিত হচ্ছে..."
+                } else {
+                    // Fallback: direct Firebase call
+                    saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
+                        is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
+                        is GasResult.Error   -> "❌ ${r.message}"
+                    }
                 }
             } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
             isSaving = false
@@ -1098,7 +1112,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
         ) {
             Column(Modifier.fillMaxSize()) {
 
-                // Header
+                // Header — save button lives here so keyboard never covers it
                 Box(
                     Modifier.fillMaxWidth()
                         .background(androidx.compose.ui.graphics.Brush.horizontalGradient(
@@ -1111,45 +1125,35 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("✏️ Admin Edit", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-
-                        // ── Save button — top corner, সবসময় visible (keyboard এর নিচে পড়ে না) ──
-                        Button(
-                            onClick  = onSave,
+                        // Save button in header
+                        Surface(
+                            onClick  = { if (!isSaving) doSave() },
                             enabled  = !isSaving,
                             shape    = RoundedCornerShape(10.dp),
-                            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(34.dp)
+                            color    = Color.White.copy(alpha = if (isSaving) 0.5f else 0.92f)
                         ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(Modifier.size(14.dp), Color.White, strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Save, null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("সংরক্ষণ", fontFamily = NotoSansBengali,
-                                    fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = Color.White)
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isSaving) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), adminIndigo, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Save, null,
+                                        tint = adminIndigo, modifier = Modifier.size(14.dp))
+                                }
+                                Text(
+                                    if (isSaving) "সংরক্ষণ..." else "💾 সংরক্ষণ",
+                                    fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = adminIndigo, fontFamily = NotoSansBengali
+                                )
                             }
                         }
-                        Spacer(Modifier.width(8.dp))
-
+                        Spacer(Modifier.width(6.dp))
                         IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(30.dp)) {
                             Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
-                    }
-                }
-
-                // Save message — header এর ঠিক নিচে, keyboard এর উপরে সবসময় দেখা যাবে
-                saveMsg?.let { msg ->
-                    val ok = msg.startsWith("✅")
-                    LaunchedEffect(msg) {
-                        kotlinx.coroutines.delay(2500)
-                        saveMsg = null
-                        if (ok) onDismiss()
-                    }
-                    Surface(color = if (ok) Color(0xFFF0FDF4) else Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
-                        Text(msg, Modifier.padding(12.dp), fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
-                            color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
                     }
                 }
 
@@ -1258,13 +1262,29 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                     }
                 }
 
-                // Bottom bar — শুধু বাতিল; Save উপরে corner-এ (keyboard এর নিচে পড়ে না)
+                // Save message
+                saveMsg?.let { msg ->
+                    val ok = msg.startsWith("✅")
+                    LaunchedEffect(msg) {
+                        kotlinx.coroutines.delay(2500)
+                        saveMsg = null
+                        if (ok) onDismiss()
+                    }
+                    Surface(color = if (ok) Color(0xFFF0FDF4) else Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
+                        Text(msg, Modifier.padding(12.dp), fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
+                    }
+                }
+
+                // Bottom bar — বাতিল only (save is in header)
                 Surface(color = Color.White, modifier = Modifier.fillMaxWidth(), shadowElevation = 6.dp) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp)) {
-                        OutlinedButton(onClick = { if (!isSaving) onDismiss() },
-                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                            Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        }
+                    OutlinedButton(
+                        onClick  = { if (!isSaving) onDismiss() },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        shape    = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                     }
                 }
             }
