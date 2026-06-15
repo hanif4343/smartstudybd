@@ -228,19 +228,28 @@ fun MainScreen(
                     mode      = StudyMode.QUIZ,
                     viewModel = quizViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.QBANK -> CoreScreen(
                     mode      = StudyMode.QBANK,
                     viewModel = qbankViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.STUDY -> CoreScreen(
                     mode      = StudyMode.STUDY,
                     viewModel = studyViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
                 BottomTab.MENU  -> MenuScreen(
