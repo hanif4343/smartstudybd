@@ -210,7 +210,19 @@ fun MainScreen(
                 BottomTab.HOME  -> HomeScreen(
                     quizViewModel = quizViewModel,
                     onSearchClick = { showSearch = true },
-                    onTypingClick = { showTyping = true }
+                    onTypingClick = { showTyping = true },
+                    onOpenStudy = { subject, subTopic ->
+                        currentTab = BottomTab.STUDY
+                        studyViewModel.navigateToSubject(subject)
+                        if (subTopic.isNotBlank()) studyViewModel.navigateToSubTopic(subTopic)
+                    },
+                    onOpenInstantTest = { subject, subTopic ->
+                        currentTab = BottomTab.QUIZ
+                        quizViewModel.startInstantTestFor(subject, subTopic)
+                    },
+                    onOpenWeeklyTest = {
+                        currentTab = BottomTab.CHALLENGE
+                    }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
