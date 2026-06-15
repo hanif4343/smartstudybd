@@ -18,7 +18,7 @@ class ContentCache(private val context: Context) {
 
     companion object {
         // version bump করলে পুরানো cache auto-invalidate হয়
-        private const val CACHE_VERSION = 4  // StudyItem fields যোগের পর bump করো
+        private const val CACHE_VERSION = 5  // Firebase path key as id fix — পুরনো numeric id cache clear করো
         val KEY_CACHE_VERSION = intPreferencesKey("cache_version")
         val KEY_STUDY_JSON    = stringPreferencesKey("cache_study_json")
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
