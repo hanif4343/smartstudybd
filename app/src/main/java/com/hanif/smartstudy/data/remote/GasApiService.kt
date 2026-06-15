@@ -324,6 +324,10 @@ object GasApiService {
         rowKey : String,
         fields : Map<String, String>
     ): GasResult<Unit> = withContext(Dispatchers.IO) {
+        if (rowKey.isBlank()) {
+            android.util.Log.e("AdminEdit", "Blank rowKey for sheet=$sheet — refusing to PATCH sheet root")
+            return@withContext GasResult.Error("প্রশ্নের ID পাওয়া যায়নি — আবার লোড করে চেষ্টা করুন")
+        }
         try {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
