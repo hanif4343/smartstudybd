@@ -329,15 +329,26 @@ object GasApiService {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
             android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
+            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "PATCH → $sheet/$rowKey | fields=$fields | url_preview=${url.take(80)}")
             val obj  = JsonObject().apply { fields.forEach { (k, v) -> addProperty(k, v) } }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
             val respBody = resp.body?.string() ?: ""
             val code = resp.code
             android.util.Log.d("AdminEdit", "Response: $code | $respBody")
+            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "Response: $code | body=${respBody.take(200)}")
             resp.close()
             if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: $code — $respBody")
+            else {
+                com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "FAILED: $code — $respBody")
+                GasResult.Error("Firebase error: $code — $respBody")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
+            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "Exception: ${e.message ?: "unknown"}")
+            GasResult.Error(e.message ?: "Network error")
+        }
+    }
         } catch (e: Exception) {
             android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
             GasResult.Error(e.message ?: "Network error")
