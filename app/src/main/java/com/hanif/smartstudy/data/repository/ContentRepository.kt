@@ -31,6 +31,7 @@ class ContentRepository(private val context: Context) {
         @Volatile private var _memCache: AppContent? = null
         private val mutex = Mutex()
         fun getMemCache(): AppContent? = _memCache
+        fun clearMemCache() { _memCache = null }
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
@@ -98,8 +99,6 @@ class ContentRepository(private val context: Context) {
             }
         }
     }
-
-    fun clearMemCache() { _memCache = null }
 
     fun getXpInfo(): XpInfo {
         val user = session.getCurrentUser()
