@@ -475,17 +475,15 @@ object GasApiService {
                 if (!fcmToken.isNullOrBlank()) {
                     try {
                         val gasUrl = "${BuildConfig.GAS_URL}" +
-                            "?action=sendNotification" +
+                            "?action=personalNotify" +
                             "&secret=${BuildConfig.SECRET_KEY}" +
-                            "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
-                            "&title=${java.net.URLEncoder.encode("SmartStudyBD", "UTF-8")}" +
+                            "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
+                            "&title=${java.net.URLEncoder.encode("✅ রিপোর্ট সমাধান হয়েছে!", "UTF-8")}" +
                             "&body=${java.net.URLEncoder.encode(notifMsg, "UTF-8")}" +
-                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}" +
-                            "&type=admin_report" +
+                            "&type=report_resolved" +
                             "&url=reports" +
                             "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
-                            "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}" +
-                            "&sound=default"
+                            "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}"
                         client.newCall(Request.Builder().url(gasUrl).get().build())
                             .execute().close()
                         Log.d("GAS", "Report notification sent to $userPhone")
