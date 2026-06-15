@@ -349,11 +349,6 @@ object GasApiService {
             GasResult.Error(e.message ?: "Network error")
         }
     }
-        } catch (e: Exception) {
-            android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
-            GasResult.Error(e.message ?: "Network error")
-        }
-    }
 
     /** Admin: Options swap করো — Firebase এ option1-4 + correct একসাথে update */
     suspend fun adminSwapOptions(
