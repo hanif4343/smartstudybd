@@ -586,7 +586,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Admin: Edit Question (offline-aware) ──────────────────
     fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>, questionPreview: String = "") {
-        if (!_state.value.isAdmin) return
+        com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "adminEditQuestion called: sheet=$sheet rowKey='$rowKey' fields=$fields isAdmin=${_state.value.isAdmin}")
+        if (!_state.value.isAdmin) {
+            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "BLOCKED: user is not admin!")
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
             val cm = getApplication<android.app.Application>()
