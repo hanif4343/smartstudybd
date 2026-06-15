@@ -153,6 +153,7 @@ object GasApiService {
                     addProperty("issue",      issue)
                     addProperty("userName",   userName)
                     addProperty("userPhone",  userPhone)
+                    addProperty("tab",        tab)
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("status",     "pending")
                 }
