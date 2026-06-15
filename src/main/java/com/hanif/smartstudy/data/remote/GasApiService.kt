@@ -153,7 +153,6 @@ object GasApiService {
                     addProperty("issue",      issue)
                     addProperty("userName",   userName)
                     addProperty("userPhone",  userPhone)
-                    addProperty("tab",        tab)          // ← tab now saved
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("status",     "pending")
                 }
@@ -325,16 +324,27 @@ object GasApiService {
         rowKey : String,
         fields : Map<String, String>
     ): GasResult<Unit> = withContext(Dispatchers.IO) {
+        if (rowKey.isBlank()) {
+            android.util.Log.e("AdminEdit", "Blank rowKey for sheet=$sheet — refusing to PATCH sheet root")
+            return@withContext GasResult.Error("প্রশ্নের ID পাওয়া যায়নি — আবার লোড করে চেষ্টা করুন")
+        }
         try {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
+            android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
             val obj  = JsonObject().apply { fields.forEach { (k, v) -> addProperty(k, v) } }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+            val respBody = resp.body?.string() ?: ""
+            val code = resp.code
+            android.util.Log.d("AdminEdit", "Response: $code | $respBody")
             resp.close()
             if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+            else GasResult.Error("Firebase error: $code — $respBody")
+        } catch (e: Exception) {
+            android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
+            GasResult.Error(e.message ?: "Network error")
+        }
     }
 
     /** Admin: Options swap করো — Firebase এ option1-4 + correct একসাথে update */
@@ -373,62 +383,6 @@ object GasApiService {
             } catch (e: Exception) { GasResult.Error(e.message ?: "Add failed") }
         }
 
-    /**
-     * Admin: Drag-reorder — একটা item এর sortOrder Firebase এ PATCH করো।
-     * sheet = "Quiz" | "Study" | "QBank" | "Subjects" | "SubTopics"
-     * rowKey = Firebase push key (question id, subject key ইত্যাদি)
-     * newOrder = নতুন position (0-based integer)
-     */
-    suspend fun adminUpdateSortOrder(
-        sheet    : String,
-        rowKey   : String,
-        newOrder : Int
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
-            val obj  = JsonObject().apply {
-                addProperty("sortOrder", newOrder)
-                addProperty("sortUpdatedAt", System.currentTimeMillis())
-            }
-            val body = obj.toString().toRequestBody("application/json".toMediaType())
-            val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
-            resp.close()
-            if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
-    }
-
-    /**
-     * Admin: Multiple items এর sortOrder একসাথে batch update করো।
-     * orderedKeys = list of Firebase keys in the desired order (index = sortOrder)
-     */
-    suspend fun adminBatchUpdateSortOrder(
-        sheet       : String,
-        orderedKeys : List<String>
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            // Firebase multi-location update (/sheet.json PATCH with all keys)
-            val patchObj = JsonObject()
-            orderedKeys.forEachIndexed { index, key ->
-                val fieldObj = JsonObject().apply {
-                    addProperty("sortOrder", index)
-                    addProperty("sortUpdatedAt", System.currentTimeMillis())
-                }
-                patchObj.add("$key/sortOrder", com.google.gson.JsonPrimitive(index))
-                patchObj.add("$key/sortUpdatedAt", com.google.gson.JsonPrimitive(System.currentTimeMillis()))
-            }
-            val url  = "$base/$sheet.json$auth"
-            val body = patchObj.toString().toRequestBody("application/json".toMediaType())
-            val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
-            resp.close()
-            if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase PATCH error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Batch order failed") }
-    }
-
     /** Admin: Firebase /Reports থেকে pending reports fetch করো */
     suspend fun fetchPendingReports(): GasResult<List<ReportedQuestion>> =
         withContext(Dispatchers.IO) {
@@ -466,7 +420,10 @@ object GasApiService {
         reportKey  : String,
         status     : String,      // "resolved" | "dismissed"
         userPhone  : String,      // reporter এর phone
-        questionSnippet: String = ""
+        questionSnippet: String = "",
+        userName   : String = "",
+        questionId : String = "",
+        tab        : String = ""
     ): GasResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val auth     = authQuery()
@@ -503,15 +460,16 @@ object GasApiService {
                 } else null
 
                 // ── ৩. FCM notification পাঠাও ──
+                val displayName = userName.ifBlank { "ব্যবহারকারী" }
+                val notifMsg = if (status == "resolved")
+                    "প্রিয় $displayName, আপনার রিপোর্ট করা প্রশ্নটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
+                else
+                    "প্রিয় $displayName, আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
+
+                val snippet = if (questionSnippet.isNotBlank())
+                    questionSnippet.take(60) + "..." else ""
+
                 if (!fcmToken.isNullOrBlank()) {
-                    val notifMsg = if (status == "resolved")
-                        "আপনার রিপোর্টটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
-                    else
-                        "আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
-
-                    val snippet = if (questionSnippet.isNotBlank())
-                        questionSnippet.take(60) + "..." else ""
-
                     try {
                         val gasUrl = "${BuildConfig.GAS_URL}" +
                             "?action=sendNotification" +
@@ -519,13 +477,41 @@ object GasApiService {
                             "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
                             "&title=${java.net.URLEncoder.encode("SmartStudyBD", "UTF-8")}" +
                             "&body=${java.net.URLEncoder.encode(notifMsg, "UTF-8")}" +
-                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}"
+                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}" +
+                            "&type=admin_report" +
+                            "&url=reports" +
+                            "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
+                            "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}" +
+                            "&sound=default"
                         client.newCall(Request.Builder().url(gasUrl).get().build())
                             .execute().close()
                         Log.d("GAS", "Report notification sent to $userPhone")
                     } catch (e: Exception) {
                         Log.e("GAS", "FCM send failed: ${e.message}")
                     }
+                }
+
+                // ── ৪. Notifications/{phone} এ fallback entry লিখো (poll worker এর জন্য) ──
+                try {
+                    val notifKey = "notif_${System.currentTimeMillis()}"
+                    val notifObj = JsonObject().apply {
+                        addProperty("title", "SmartStudyBD")
+                        addProperty("body", notifMsg)
+                        addProperty("type", "admin_report")
+                        addProperty("url", "reports")
+                        addProperty("questionId", questionId)
+                        addProperty("tab", tab)
+                        addProperty("read", false)
+                        addProperty("time", System.currentTimeMillis())
+                    }
+                    val notifUrl = "$base/Notifications/$phoneEncoded/$notifKey.json$auth"
+                    client.newCall(
+                        Request.Builder().url(notifUrl)
+                            .put(notifObj.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().close()
+                } catch (e: Exception) {
+                    Log.e("GAS", "Notifications fallback write failed: ${e.message}")
                 }
             }
 
