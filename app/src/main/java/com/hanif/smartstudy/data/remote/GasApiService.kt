@@ -140,12 +140,22 @@ object GasApiService {
         issue     : String,
         userName  : String = "",
         userPhone : String = "",
-        tab       : String = ""
+        tab       : String = "",
+        qsheet    : String = ""
     ) {
         withContext(Dispatchers.IO) {
             try {
                 val auth        = authQuery()
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
+
+                // tab থেকে Firebase sheet name বের করো (qsheet না থাকলে)
+                val resolvedSheet = qsheet.ifBlank {
+                    when (tab.lowercase()) {
+                        "qbank" -> "QBank"
+                        "study" -> "Study"
+                        else    -> "Quiz"
+                    }
+                }
 
                 val jsonObj = JsonObject().apply {
                     addProperty("questionId", questionId)
@@ -154,6 +164,7 @@ object GasApiService {
                     addProperty("userName",   userName)
                     addProperty("userPhone",  userPhone)
                     addProperty("tab",        tab)
+                    addProperty("qsheet",     resolvedSheet)
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("status",     "pending")
                 }
