@@ -175,12 +175,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(isMockZone = false, navPath = NavPath(), isQuizActive = false,
                         result = null, showResult = false, timerSec = 0)
             }
-            _state.value.showResult -> _state.update {
-                it.copy(showResult = false, isQuizActive = false, result = null,
-                        navPath = NavPath(path.subject), timerSec = 0)
+            _state.value.showResult -> {
+                _state.update {
+                    it.copy(showResult = false, isQuizActive = false, result = null,
+                            navPath = NavPath(path.subject), timerSec = 0)
+                }
+                // উত্তর দেওয়ার পর progress আপডেট হয়েছে — subTopic list রিফ্রেশ করো
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
             }
-            path.subTopic != null -> _state.update { it.copy(navPath = NavPath(path.subject)) }
-            path.subject  != null -> _state.update { it.copy(navPath = NavPath()) }
+            path.subTopic != null -> {
+                _state.update { it.copy(navPath = NavPath(path.subject)) }
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
+            }
+            path.subject  != null -> {
+                _state.update { it.copy(navPath = NavPath()) }
+                viewModelScope.launch {
+                    val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                    rebuildSubjects(content, _state.value.mode)
+                }
+            }
             else -> {}
         }
     }
