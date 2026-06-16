@@ -84,12 +84,28 @@ object UserSyncService {
         "value"   to name
     ))
 
-    // ── FCM token save ──
-    suspend fun saveFcmToken(phone: String, token: String): Boolean = gasPost(mapOf(
-        "action"   to "saveFcmToken",
-        "phone"    to phone,
-        "fcmToken" to token
-    ))
+    // ── FCM token save — সরাসরি Firebase এ লেখো (GAS এর "saveFcmToken" action
+    //    আসলে নেই; doPost শুধু params.type চেক করে, action না — তাই আগে token
+    //    Firebase এ কখনোই পৌঁছাচ্ছিল না, এবং report-resolved push পাঠানোর সময়
+    //    GAS এর getFCMTokenByPhone() কোনো token খুঁজে পেত না) ──
+    suspend fun saveFcmToken(phone: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val safePhone = phone.replace("+", "").trim()
+            if (safePhone.isBlank() || token.isBlank()) return@withContext false
+            val auth = authQuery()
+            val body = JSONObject(mapOf("fcmToken" to token, "lastSeen" to System.currentTimeMillis()))
+                .toString().toRequestBody("application/json".toMediaType())
+            val req  = Request.Builder()
+                .url("$FB_URL/users/$safePhone.json$auth")
+                .patch(body).build()
+            val resp = client.newCall(req).execute()
+            resp.close()
+            resp.isSuccessful
+        } catch (e: Exception) {
+            Log.e(TAG, "saveFcmToken: ${e.message}")
+            false
+        }
+    }
 
     // ── Report app activity (active/inactive) ──
     suspend fun reportActivity(phone: String, isActive: Boolean): Boolean = gasPost(mapOf(
