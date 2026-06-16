@@ -275,6 +275,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
@@ -295,6 +296,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
@@ -507,6 +509,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun loadProgressMap(): Set<String> = prefs.getStringSet("progress", emptySet()) ?: emptySet()
+
+    // প্রশ্ন উত্তর দেওয়া হলে "done" সেট এ যোগ করো — নইলে progressPct সবসময় ০% থেকে যায়
+    private fun markProgress(qId: String, mode: StudyMode) {
+        if (qId.isBlank()) return
+        val key   = "${mode.name}:$qId"
+        val saved = prefs.getStringSet("progress", mutableSetOf())!!.toMutableSet()
+        if (saved.add(key)) prefs.edit().putStringSet("progress", saved).apply()
+    }
 
     private fun saveWeakTopic(subject: String, subTopic: String) {
         if (subTopic.isBlank()) return
