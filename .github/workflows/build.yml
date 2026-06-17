@@ -9,6 +9,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY are read directly by
+    # app/build.gradle via System.getenv(...) — they are never sed-substituted
+    # into a file, so the private key's embedded newlines can't break anything.
+    env:
+      FCM_PROJECT_ID:   ${{ secrets.FCM_PROJECT_ID }}
+      FCM_CLIENT_EMAIL: ${{ secrets.FCM_CLIENT_EMAIL }}
+      FCM_PRIVATE_KEY:  ${{ secrets.FCM_PRIVATE_KEY }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,11 +104,9 @@ jobs:
       # ── Inject secrets ──
       - name: Inject API keys
         run: |
-          sed -i 's|%%GAS_URL%%|${{ secrets.GAS_URL }}|g'               app/build.gradle
           sed -i 's|%%FIREBASE_URL%%|${{ secrets.FIREBASE_URL }}|g'     app/build.gradle
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
-          sed -i 's|%%SECRET_KEY%%|${{ secrets.SECRET_KEY }}|g'         app/build.gradle
           sed -i 's|%%FIREBASE_DB_SECRET%%|${{ secrets.FIREBASE_DB_SECRET }}|g' app/build.gradle
 
       # ── Auto versionCode ──
