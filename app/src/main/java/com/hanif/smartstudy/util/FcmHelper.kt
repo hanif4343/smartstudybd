@@ -53,29 +53,3 @@ object FcmHelper {
             }
     }
 }
-
-/**
- * App active/inactive এর রিপোর্ট Firebase এ পাঠায়।
- * MainActivity onResume/onPause থেকে call হয়।
- */
-object ActivityReporter {
-
-    private const val TAG = "ActivityReporter"
-    private val scope = CoroutineScope(Dispatchers.IO)
-
-    fun reportActive(app: Application) {
-        val phone = SessionManager(app).getCurrentUser()?.phone ?: return
-        scope.launch {
-            UserSyncService.reportActivity(phone, isActive = true)
-            Log.d(TAG, "$phone → active")
-        }
-    }
-
-    fun reportInactive(app: Application) {
-        val phone = SessionManager(app).getCurrentUser()?.phone ?: return
-        scope.launch {
-            UserSyncService.reportActivity(phone, isActive = false)
-            Log.d(TAG, "$phone → inactive")
-        }
-    }
-}
