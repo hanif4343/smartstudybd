@@ -5,6 +5,9 @@
     "users": {
       ".indexOn": ["Phone", "phone"]
     },
+    "Users": {
+      ".indexOn": ["Phone", "phone"]
+    },
     "Challenges": {
       "$challengeId": {
         ".read": true,
@@ -18,7 +21,20 @@
       }
     },
     "Reports": {
-      ".write": true
+      ".write": true,
+      "$reportId": {
+        ".validate": "newData.hasChildren(['questionId','issue','timestamp','status'])",
+        "questionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "question":   { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "issue":      { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "userName":   { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "userPhone":  { ".validate": "newData.isString() && newData.val().length <= 20 && newData.val().matches(/^[+0-9]*$/)" },
+        "tab":        { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "qsheet":     { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "timestamp":  { ".validate": "newData.isNumber()" },
+        "status":     { ".validate": "newData.isString() && newData.val().length <= 20" },
+        "$other":     { ".validate": false }
+      }
     },
     "MatchHistory": {
       "$myPhone": {
@@ -29,3 +45,4 @@
     }
   }
 }
+
