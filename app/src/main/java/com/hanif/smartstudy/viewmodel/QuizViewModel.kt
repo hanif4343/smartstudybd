@@ -415,7 +415,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             try {
-                com.hanif.smartstudy.data.remote.GasApiService.reportQuestion(
+                com.hanif.smartstudy.data.remote.FirebaseDataService.reportQuestion(
                     questionId = q.id,
                     question   = q.question,
                     issue      = issue,
