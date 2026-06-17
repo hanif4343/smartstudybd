@@ -260,21 +260,15 @@ class BuddyRepository {
             )
             db.getReference("Notifications/$phoneEncoded/$notifKey").setValue(notifMap).await()
 
-            // FCM push via GAS (server-side fcmToken lookup by phone)
-            if (BuildConfig.GAS_URL.isNotBlank()) {
-                val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                val gasUrl = "${BuildConfig.GAS_URL}" +
-                    "?action=sendNotification" +
-                    "&secret=${java.net.URLEncoder.encode(BuildConfig.SECRET_KEY, "UTF-8")}" +
-                    "&phone=${java.net.URLEncoder.encode(toPhone, "UTF-8")}" +
-                    "&title=${java.net.URLEncoder.encode(title, "UTF-8")}" +
-                    "&body=${java.net.URLEncoder.encode(body, "UTF-8")}" +
-                    "&type=$notifType" +
-                    "&url=menu/studybuddy"
-                client.newCall(okhttp3.Request.Builder().url(gasUrl).get().build()).execute().close()
+            // FCM push — সরাসরি token lookup + FCM v1 send (GAS নেই)
+            val fcmToken = com.hanif.smartstudy.data.remote.FcmAdminService.fetchTokenForPhone(toPhone)
+            if (!fcmToken.isNullOrBlank()) {
+                com.hanif.smartstudy.data.remote.FcmAdminService.sendToToken(
+                    token = fcmToken,
+                    title = title,
+                    body  = body,
+                    data  = mapOf("type" to notifType, "url" to "menu/studybuddy")
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "sendBuddyPush failed: ${e.message}")
