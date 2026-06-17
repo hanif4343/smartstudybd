@@ -1,0 +1,41 @@
+name: Set Admin Claim
+
+# এই workflow GitHub এর Actions ট্যাব থেকে manually trigger করতে হয় (phone/PC
+# দুটো থেকেই করা যায়, GitHub mobile app বা mobile browser থেকেও)।
+# Actions → "Set Admin Claim" → "Run workflow" → ফোন নম্বর দিয়ে Run করো।
+
+on:
+  workflow_dispatch:
+    inputs:
+      phone:
+        description: 'ফোন নম্বর (01xxxxxxxxx অথবা +8801xxxxxxxxx, যেকোনো ফরম্যাটে দিলেও হবে)'
+        required: true
+        type: string
+      remove:
+        description: 'Admin ক্ষমতা বাতিল করতে চাইলে "true" লিখো (ফাঁকা রাখলে admin বানানো হবে)'
+        required: false
+        default: 'false'
+        type: string
+
+jobs:
+  set-claim:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_ADMIN_PROJECT_ID:   ${{ secrets.FIREBASE_ADMIN_PROJECT_ID }}
+      FIREBASE_ADMIN_CLIENT_EMAIL: ${{ secrets.FIREBASE_ADMIN_CLIENT_EMAIL }}
+      FIREBASE_ADMIN_PRIVATE_KEY:  ${{ secrets.FIREBASE_ADMIN_PRIVATE_KEY }}
+      TARGET_PHONE: ${{ github.event.inputs.phone }}
+      REMOVE_ADMIN: ${{ github.event.inputs.remove }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install firebase-admin
+        run: npm install firebase-admin@12
+
+      - name: Set custom claim
+        run: node scripts/set-admin-claim.js
