@@ -309,9 +309,6 @@ class ChallengeRepository {
             val title = "⚔️ নতুন চ্যালেঞ্জ!"
             val body  = "${invite.creatorName} আপনাকে \"${invite.subject}\" বিষয়ে চ্যালেঞ্জ করেছে। Accept করুন!"
             val phoneEncoded = toPhone.firebaseKey()
-            val auth = if (BuildConfig.FIREBASE_DB_SECRET.isNotBlank())
-                "?auth=${BuildConfig.FIREBASE_DB_SECRET}" else ""
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
 
             // Notifications fallback (poll worker picks this up)
             val notifKey = "notif_${System.currentTimeMillis()}"
@@ -327,25 +324,19 @@ class ChallengeRepository {
             db.getReference("Notifications/$phoneEncoded/$notifKey")
                 .setValue(com.google.gson.Gson().fromJson(notifObj, Map::class.java)).await()
 
-            // FCM push via GAS — GAS নিজে (admin access দিয়ে) recipient-এর fcmToken
-            // phone দিয়ে lookup করবে, তাই client-side fcmToken read লাগবে না
-            // (অন্য ইউজারের fcmToken client-side read করতে গেলে Firebase rules block করত)
-            if (BuildConfig.GAS_URL.isNotBlank()) {
-                val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                val gasUrl = "${BuildConfig.GAS_URL}" +
-                    "?action=sendChallengeNotification" +
-                    "&secret=${java.net.URLEncoder.encode(BuildConfig.SECRET_KEY, "UTF-8")}" +
-                    "&toPhone=${java.net.URLEncoder.encode(toPhone, "UTF-8")}" +
-                    "&fromName=${java.net.URLEncoder.encode(invite.creatorName ?: "", "UTF-8")}" +
-                    "&fromPhone=${java.net.URLEncoder.encode(invite.creatorPhone ?: "", "UTF-8")}" +
-                    "&subject=${java.net.URLEncoder.encode(invite.subject, "UTF-8")}" +
-                    "&questionCount=${invite.questionCount}" +
-                    "&wagerXp=${invite.wagerXp}" +
-                    "&challengeId=${java.net.URLEncoder.encode(invite.challengeId, "UTF-8")}"
-                client.newCall(okhttp3.Request.Builder().url(gasUrl).get().build()).execute().close()
+            // FCM push — সরাসরি token lookup + FCM v1 send (GAS নেই)
+            val fcmToken = com.hanif.smartstudy.data.remote.FcmAdminService.fetchTokenForPhone(toPhone)
+            if (!fcmToken.isNullOrBlank()) {
+                com.hanif.smartstudy.data.remote.FcmAdminService.sendToToken(
+                    token = fcmToken,
+                    title = title,
+                    body  = body,
+                    data  = mapOf(
+                        "type"        to "challenge_invite",
+                        "url"         to "challenge",
+                        "challengeId" to invite.challengeId
+                    )
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "writeInviteNotification push failed: ${e.message}")
