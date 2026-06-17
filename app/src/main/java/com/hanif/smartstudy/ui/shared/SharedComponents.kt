@@ -32,9 +32,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
-import com.hanif.smartstudy.data.remote.GasApiService
+import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.components.RichContentText
-import com.hanif.smartstudy.data.remote.GasResult
+import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -540,9 +540,9 @@ fun UserTechniqueSection(
 
     LaunchedEffect(questionId) {
         isLoading = true
-        // ফিক্সড: GasResult.Success টাইপ সেফটি ফিক্সড
-        val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-        if (res is GasResult.Success<*>) {
+        // ফিক্সড: ApiResult.Success টাইপ সেফটি ফিক্সড
+        val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+        if (res is ApiResult.Success<*>) {
             @Suppress("UNCHECKED_CAST")
             techniques = res.data as List<UserTechnique>
         }
@@ -551,8 +551,8 @@ fun UserTechniqueSection(
 
     fun refresh() {
         scope.launch {
-            val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-            if (res is GasResult.Success<*>) {
+            val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+            if (res is ApiResult.Success<*>) {
                 @Suppress("UNCHECKED_CAST")
                 techniques = res.data as List<UserTechnique>
             }
@@ -622,7 +622,7 @@ fun UserTechniqueSection(
                     onEdit      = { editTarget = t; showAddDialog = true },
                     onDelete    = {
                         scope.launch {
-                            GasApiService.deleteTechnique(questionId, t.id)
+                            FirebaseDataService.deleteTechnique(questionId, t.id)
                             refresh()
                             feedbackMsg = "টেকনিক মুছে ফেলা হয়েছে"
                         }
@@ -640,7 +640,7 @@ fun UserTechniqueSection(
                 scope.launch {
                     val target = editTarget
                     if (target == null) {
-                        GasApiService.saveTechnique(
+                        FirebaseDataService.saveTechnique(
                             questionId = questionId,
                             userId     = currentUser.phone ?: "",
                             userName   = currentUser.displayName(),
@@ -651,7 +651,7 @@ fun UserTechniqueSection(
                             "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
                         else "✅ প্রাইভেট টেকনিক সেভ হয়েছে।"
                     } else {
-                        GasApiService.updateTechnique(questionId, target.id, text, isPublic)
+                        FirebaseDataService.updateTechnique(questionId, target.id, text, isPublic)
                         feedbackMsg = "✅ আপডেট হয়েছে!"
                     }
                     refresh()
@@ -1087,9 +1087,9 @@ fun AdminQuestionEditDialog(
                     saveMsg = "✅ সংরক্ষিত হচ্ছে..."
                 } else {
                     // Fallback: direct Firebase call
-                    saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
-                        is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
-                        is GasResult.Error   -> "❌ ${r.message}"
+                    saveMsg = when (val r = FirebaseDataService.adminUpdateQuestionField(sheet, item.id, fields)) {
+                        is ApiResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
+                        is ApiResult.Error   -> "❌ ${r.message}"
                     }
                 }
             } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
