@@ -54,12 +54,11 @@ object ImgBBService {
 }
 
 // ─────────────────────────────────────────────────────────
-// User Sync Service — GAS endpoint দিয়ে Firebase update
+// User Sync Service — সরাসরি Firebase REST API (কোনো GAS dependency নেই)
 // ─────────────────────────────────────────────────────────
 object UserSyncService {
 
     private val TAG     = "UserSync"
-    private val GAS_URL get() = BuildConfig.GAS_URL
     private val FB_URL  get() = BuildConfig.FIREBASE_URL.trimEnd('/')
 
     private suspend fun authQuery(): String {
@@ -68,26 +67,7 @@ object UserSyncService {
     }
     private val gson    = Gson()
 
-    // ── Profile picture update ──
-    suspend fun updatePicture(phone: String, url: String): Boolean = gasPost(mapOf(
-        "action"  to "updateUser",
-        "phone"   to phone,
-        "field"   to "Picture",
-        "value"   to url
-    ))
-
-    // ── Name update ──
-    suspend fun updateName(phone: String, name: String): Boolean = gasPost(mapOf(
-        "action"  to "updateUser",
-        "phone"   to phone,
-        "field"   to "Name",
-        "value"   to name
-    ))
-
-    // ── FCM token save — সরাসরি Firebase এ লেখো (GAS এর "saveFcmToken" action
-    //    আসলে নেই; doPost শুধু params.type চেক করে, action না — তাই আগে token
-    //    Firebase এ কখনোই পৌঁছাচ্ছিল না, এবং report-resolved push পাঠানোর সময়
-    //    GAS এর getFCMTokenByPhone() কোনো token খুঁজে পেত না) ──
+    // ── FCM token save — সরাসরি Firebase এ লেখো ──
     suspend fun saveFcmToken(phone: String, token: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val safePhone = phone.replace("+", "").trim()
@@ -106,14 +86,6 @@ object UserSyncService {
             false
         }
     }
-
-    // ── Report app activity (active/inactive) ──
-    suspend fun reportActivity(phone: String, isActive: Boolean): Boolean = gasPost(mapOf(
-        "action"   to "reportActivity",
-        "phone"    to phone,
-        "isActive" to isActive.toString(),
-        "ts"       to System.currentTimeMillis().toString()
-    ))
 
     // ── Fetch active users (Admin) ──
     // Activity/presence ডাটা আছে "users" (lowercase) node এ, phone-key দিয়ে
@@ -254,15 +226,6 @@ object UserSyncService {
             null
         }
 
-    // ── Admin FCM broadcast / targeted notification ──
-    suspend fun sendAdminNotification(title: String, body: String, targetPhone: String?): Boolean =
-        gasPost(mapOf(
-            "action"      to "adminNotify",
-            "title"       to title,
-            "body"        to body,
-            "targetPhone" to (targetPhone ?: "ALL")
-        ))
-
     // ── Leaderboard fetch ──
     suspend fun fetchLeaderboard(): List<LeaderboardEntry> = withContext(Dispatchers.IO) {
         try {
@@ -338,21 +301,6 @@ object UserSyncService {
         }
     }
 
-
-    private suspend fun gasPost(params: Map<String, String>): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val builder = FormBody.Builder()
-                params.forEach { (k, v) -> builder.add(k, v) }
-                builder.add("secret", BuildConfig.SECRET_KEY)
-                val req  = Request.Builder().url(GAS_URL).post(builder.build()).build()
-                val resp = client.newCall(req).execute()
-                resp.isSuccessful
-            } catch (e: Exception) {
-                Log.e(TAG, "gasPost: ${e.message}")
-                false
-            }
-        }
 }
 
 data class LeaderboardEntry(
