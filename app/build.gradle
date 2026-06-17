@@ -3,6 +3,26 @@ apply plugin: 'kotlin-android'
 apply plugin: 'com.google.gms.google-services'
 apply plugin: 'com.google.firebase.crashlytics'
 
+// ── FCM service-account secrets (FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY)
+//    are read from environment variables (set by the GitHub Actions workflow) instead
+//    of the old %%PLACEHOLDER%% + sed approach. The private key contains embedded
+//    newlines (either real ones, or escaped "\n" — either is fine), and a raw sed
+//    substitution into a single-line Groovy string would break the build the moment
+//    it hit one of those. Reading via System.getenv() and re-escaping it ourselves
+//    into a safe Java string literal avoids that entirely, regardless of how the
+//    secret was pasted into GitHub. ──
+def envOrEmpty = { String name -> (System.getenv(name) ?: "") }
+def toJavaStringLiteral = { String raw ->
+    def escaped = raw
+        .replace('\\', '\\\\')
+        .replace('"', '\\"')
+        .replace('\r', '')
+        .replace('\n', '\\n')
+        .replace('\t', '\\t')
+    "\"" + escaped + "\""
+}
+def secretField = { String envName -> toJavaStringLiteral(envOrEmpty(envName)) }
+
 android {
     namespace 'com.hanif.smartstudy'
     compileSdk 34
@@ -14,12 +34,15 @@ android {
         versionCode 3
         versionName "1.3"
 
-        buildConfigField "String", "GAS_URL",        "\"%%GAS_URL%%\""
         buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
-        buildConfigField "String", "SECRET_KEY",      "\"%%SECRET_KEY%%\""
         buildConfigField "String", "FIREBASE_DB_SECRET", "\"%%FIREBASE_DB_SECRET%%\""
+
+        // ── FCM HTTP v1 service account — সরাসরি app থেকে push পাঠানোর জন্য (GAS নেই) ──
+        buildConfigField "String", "FCM_PROJECT_ID",   secretField("FCM_PROJECT_ID")
+        buildConfigField "String", "FCM_CLIENT_EMAIL", secretField("FCM_CLIENT_EMAIL")
+        buildConfigField "String", "FCM_PRIVATE_KEY",  secretField("FCM_PRIVATE_KEY")
     }
 
     signingConfigs {
