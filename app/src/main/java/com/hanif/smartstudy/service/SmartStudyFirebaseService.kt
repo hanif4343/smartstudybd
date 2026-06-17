@@ -91,7 +91,7 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
             val phone   = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
             if (sessionMinutes <= 0) return
 
-            // REST PATCH - lastActive update (increment handled server-side via GAS if needed)
+            // REST PATCH - lastActive update (সরাসরি Firebase, কোনো server-side GAS নেই)
             fbPatchAsync("users/$phone", mapOf(
                 "lastActive" to System.currentTimeMillis()
             ))
