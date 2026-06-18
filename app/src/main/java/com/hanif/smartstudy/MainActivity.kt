@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
 
     // Google Sign-In
     private lateinit var googleSignInClient: GoogleSignInClient
-    private var googleSignInCallback: ((email: String, name: String, photoUrl: String) -> Unit)? = null
+    private var googleSignInCallback: ((email: String, name: String, photoUrl: String, idToken: String) -> Unit)? = null
     private var googleSignInErrorCallback: ((msg: String) -> Unit)? = null
 
     private val googleSignInLauncher = registerForActivityResult(
@@ -63,8 +63,9 @@ class MainActivity : ComponentActivity() {
             val email    = account.email    ?: ""
             val name     = account.displayName ?: ""
             val photoUrl = account.photoUrl?.toString() ?: ""
+            val idToken  = account.idToken ?: ""
             Log.d("GoogleSignIn", "Success: $email")
-            googleSignInCallback?.invoke(email, name, photoUrl)
+            googleSignInCallback?.invoke(email, name, photoUrl, idToken)
         } catch (e: ApiException) {
             Log.e("GoogleSignIn", "Failed statusCode=${e.statusCode} msg=${e.message}")
             val reason = when (e.statusCode) {
@@ -83,7 +84,7 @@ class MainActivity : ComponentActivity() {
 
     // AuthScreen থেকে call হবে
     fun startGoogleSignIn(
-        onSuccess: (email: String, name: String, photoUrl: String) -> Unit,
+        onSuccess: (email: String, name: String, photoUrl: String, idToken: String) -> Unit,
         onError: (msg: String) -> Unit
     ) {
         googleSignInCallback      = onSuccess
