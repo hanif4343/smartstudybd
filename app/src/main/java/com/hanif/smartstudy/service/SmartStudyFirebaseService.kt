@@ -36,15 +36,15 @@ class SmartStudyFirebaseService : FirebaseMessagingService() {
         private val http   = OkHttpClient()
         private val JSON_MT = "application/json; charset=utf-8".toMediaType()
         private val fbUrl   get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-        private val fbAuth  get() = BuildConfig.FIREBASE_DB_SECRET
 
         private fun fbPatchAsync(path: String, data: Map<String, Any?>) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    val auth = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
                     val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL })
                         .toString().toRequestBody(JSON_MT)
                     val req = Request.Builder()
-                        .url("$fbUrl/$path.json?auth=$fbAuth")
+                        .url("$fbUrl/$path.json?auth=$auth")
                         .patch(body).build()
                     http.newCall(req).execute().close()
                 } catch (e: Exception) {
