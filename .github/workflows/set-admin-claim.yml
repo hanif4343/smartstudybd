@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       phone:
-        description: 'ফোন নম্বর (01788196143) অথবা hsarder43@gmail.com (Google account এর জন্য)'
+        description: 'ফোন নম্বর (01XXXXXXXXX) অথবা email (Google account এর জন্য)'
         required: true
         type: string
       remove:
