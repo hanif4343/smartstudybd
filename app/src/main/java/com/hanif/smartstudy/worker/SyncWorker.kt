@@ -104,7 +104,7 @@ class SyncWorker(
             val safePhone  = phone.replace("+", "").trim()
             if (safePhone.isBlank()) return false
 
-            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
             val url    = "$base/QuizAnswers/$safePhone.json?auth=$secret"
 
@@ -137,7 +137,7 @@ class SyncWorker(
             val safePhone = phone.replace("+", "").trim()
             if (safePhone.isBlank() || delta == 0) return true
 
-            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
             val getUrl = "$base/Users/$safePhone.json?auth=$secret"
 
@@ -174,7 +174,7 @@ class SyncWorker(
             val safePhone = phone.replace("+", "").trim()
             if (safePhone.isBlank()) return false
 
-            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
             val url    = "$base/StudyLog/$safePhone.json?auth=$secret"
 
@@ -206,7 +206,7 @@ class SyncWorker(
             val fields     = payload["fields"] as? Map<String, String> ?: return false
             if (questionId.isBlank() || fields.isEmpty()) return false
 
-            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
             val url    = "$base/$sheet/$questionId.json?auth=$secret"
 
