@@ -135,13 +135,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val http    = OkHttpClient()
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
     private val fbUrl   get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-    private val fbAuth  get() = BuildConfig.FIREBASE_DB_SECRET
+    private suspend fun fbAuth(): String = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
 
     private suspend fun fbPatch(path: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .patch(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbPatch $path failed: ${r.code}")
@@ -152,7 +152,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .put(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbSet $path failed: ${r.code}")
@@ -163,7 +163,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .post(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbPost $path failed: ${r.code}")
@@ -172,7 +172,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun fbGet(path: String): JSONObject? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .get().build()
         http.newCall(req).execute().use { r ->
             val txt = r.body?.string() ?: return@withContext null
