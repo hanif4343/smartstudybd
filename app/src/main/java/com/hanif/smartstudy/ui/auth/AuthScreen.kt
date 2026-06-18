@@ -1,7 +1,7 @@
 package com.hanif.smartstudy.ui.auth
 
+import android.content.Intent
 import android.net.Uri
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -65,6 +65,7 @@ val CLASS_GROUPS = listOf(
 
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
+    var showLogin by remember { mutableStateOf(true) }
     var googleEmail by remember { mutableStateOf("") }
     var googleName by remember { mutableStateOf("") }
     var googlePhotoUrl by remember { mutableStateOf("") }
@@ -79,6 +80,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             googleName = s.name
             googlePhotoUrl = s.photoUrl
             isGoogleSignup = true
+            showLogin = false
             vm.resetState()
         }
     }
@@ -106,150 +108,153 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             Text("Smart Study", color = White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
             Text("পড়ো, শেখো, এগিয়ে যাও", color = White.copy(alpha = 0.75f), fontSize = 13.sp, fontFamily = NotoSansBengali)
             Spacer(Modifier.height(28.dp))
+            Row(
+                modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                    .background(White.copy(alpha = 0.15f)).padding(4.dp)
+            ) {
+                TabBtn("লগইন", showLogin) { showLogin = true; isGoogleSignup = false }
+                TabBtn("সাইনআপ", !showLogin) { showLogin = false }
+            }
+            Spacer(Modifier.height(20.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = White),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                if (isGoogleSignup) {
-                    SignupForm(
-                        onLoginSuccess = onLoginSuccess,
-                        vm = vm,
-                        prefillName = googleName,
-                        prefillEmail = googleEmail,
-                        prefillPhotoUrl = googlePhotoUrl,
-                        isGoogleSignup = true
-                    )
-                } else {
-                    PhoneAuthFlow(onLoginSuccess, vm)
-                }
+                if (showLogin) LoginForm(onLoginSuccess, vm)
+                else SignupForm(
+                    onLoginSuccess = onLoginSuccess,
+                    vm = vm,
+                    prefillName = googleName,
+                    prefillEmail = googleEmail,
+                    prefillPhotoUrl = googlePhotoUrl,
+                    isGoogleSignup = isGoogleSignup
+                )
             }
         }
     }
 }
 
-// ─────────── PHONE OTP — একই flow নতুন আর পুরনো ইউজার দুজনের জন্যই ───────────
 @Composable
-fun PhoneAuthFlow(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
-    val state by vm.authState.collectAsStateWithLifecycle()
-    var otpStepActive by remember { mutableStateOf(false) }
-    var profilePhone by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(state) {
-        when (val s = state) {
-            is AuthState.OtpSent      -> otpStepActive = true
-            is AuthState.NeedsProfile -> profilePhone = s.localPhone
-            is AuthState.Success      -> { vm.resetState(); onLoginSuccess() }
-            else -> {}
-        }
-    }
-
-    when {
-        profilePhone != null -> SignupForm(
-            onLoginSuccess = onLoginSuccess,
-            vm = vm,
-            verifiedPhone = profilePhone ?: "",
-            isGoogleSignup = false
-        )
-        otpStepActive -> OtpEntryStep(vm) {
-            otpStepActive = false
-            vm.resetState()
-        }
-        else -> PhoneEntryStep(vm)
+private fun TabBtn(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.clip(RoundedCornerShape(12.dp))
+            .background(if (active) White else Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 36.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (active) Indigo600 else White, fontWeight = FontWeight.Bold, fontSize = 14.sp, fontFamily = NotoSansBengali)
     }
 }
 
+// ─────────── LOGIN ───────────
 @Composable
-private fun PhoneEntryStep(vm: AuthViewModel) {
+fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
     val state by vm.authState.collectAsStateWithLifecycle()
     val fm = LocalFocusManager.current
     val ctx = LocalContext.current
     var phone by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPw by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state) {
+        if (state is AuthState.Success) {
+            vm.resetState(); onLoginSuccess()
+        }
+    }
 
     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("স্বাগতম! 👋", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
-        Text("ফোন নম্বর দিয়ে লগইন/সাইনআপ করুন", fontSize = 13.sp, color = Color.Gray, fontFamily = NotoSansBengali)
-        SSField(
-            phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone,
-            keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done,
-            onIme = {
-                fm.clearFocus()
-                (ctx as? ComponentActivity)?.let { vm.sendOtp(phone, it) }
-            }
-        )
+        Text("অ্যাকাউন্টে লগইন করুন", fontSize = 13.sp, color = Color.Gray, fontFamily = NotoSansBengali)
+        SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        SSField(password, { password = it }, "পাসওয়ার্ড", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Done, onIme = { fm.clearFocus(); vm.login(phone, password) })
+
+        // Forgot Password
+        var showForgotDialog by remember { mutableStateOf(false) }
+        if (showForgotDialog) {
+            AlertDialog(
+                onDismissRequest = { showForgotDialog = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp),
+                title = {
+                    Text(
+                        "🔐 পাসওয়ার্ড রিসেট",
+                        fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 17.sp,
+                        color = Slate800
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "পাসওয়ার্ড রিসেট করতে আমাদের Facebook পেজে মেসেজ করুন।",
+                            fontFamily = NotoSansBengali,
+                            fontSize = 14.sp,
+                            color = Color(0xFF374151)
+                        )
+                        Text(
+                            "মেসেজে আপনার নাম ও রেজিস্ট্রেশনকৃত ফোন নম্বর জানান — অ্যাডমিন দ্রুত পাসওয়ার্ড পরিবর্তন করে দেবেন।",
+                            fontFamily = NotoSansBengali,
+                            fontSize = 13.sp,
+                            color = Color(0xFF6B7280)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showForgotDialog = false
+                            val fbPageUrl = "https://www.facebook.com/share/1EqyxeFfXg/"
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fbPageUrl)))
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1877F2))
+                    ) {
+                        Text("📘 Facebook পেজে যান", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showForgotDialog = false }) {
+                        Text("বাতিল", fontFamily = NotoSansBengali, color = Color.Gray)
+                    }
+                }
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Text(
+                text = "পাসওয়ার্ড ভুলে গেছেন?",
+                fontSize = 13.sp,
+                color = Indigo600,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = NotoSansBengali,
+                modifier = Modifier.clickable { showForgotDialog = true }
+            )
+        }
+
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
 
         Button(
-            onClick = {
-                fm.clearFocus()
-                (ctx as? ComponentActivity)?.let { vm.sendOtp(phone, it) }
-            },
+            onClick = { fm.clearFocus(); vm.login(phone, password) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Indigo600),
             enabled = state !is AuthState.Loading
         ) {
             if (state is AuthState.Loading) CircularProgressIndicator(color = White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-            else Text("OTP পাঠান", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
+            else Text("লগইন করুন", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Divider(modifier = Modifier.weight(1f), color = Color(0xFFE2E8F0))
-            Text("  অথবা  ", fontSize = 12.sp, color = Color.Gray, fontFamily = NotoSansBengali)
-            Divider(modifier = Modifier.weight(1f), color = Color(0xFFE2E8F0))
-        }
-
         GoogleSignInButton(isLoading = state is AuthState.Loading) {
             val activity = ctx as? MainActivity ?: return@GoogleSignInButton
             activity.startGoogleSignIn(
-                onSuccess = { email, name2, photoUrl -> vm.googleSignIn(email, name2, photoUrl) },
+                onSuccess = { email, name, photoUrl, idToken -> vm.googleSignIn(email, name, photoUrl, idToken) },
                 onError = { msg -> vm.setError(msg) }
             )
-        }
-        Spacer(Modifier.height(4.dp))
-    }
-}
-
-@Composable
-private fun OtpEntryStep(vm: AuthViewModel, onChangeNumber: () -> Unit) {
-    val state by vm.authState.collectAsStateWithLifecycle()
-    val fm = LocalFocusManager.current
-    val ctx = LocalContext.current
-    var code by remember { mutableStateOf("") }
-    val phoneShown = (state as? AuthState.OtpSent)?.e164Phone ?: ""
-
-    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("কোড লিখুন 🔐", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
-        Text(
-            if (phoneShown.isNotBlank()) "$phoneShown নম্বরে ৬-সংখ্যার কোড পাঠানো হয়েছে" else "SMS এ পাঠানো কোডটি লিখুন",
-            fontSize = 13.sp, color = Color.Gray, fontFamily = NotoSansBengali
-        )
-        SSField(
-            code, { code = it.filter(Char::isDigit).take(6) }, "৬-সংখ্যার কোড", Icons.Default.Lock,
-            keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done,
-            onIme = { fm.clearFocus(); vm.verifyOtp(code) }
-        )
-        if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
-
-        Button(
-            onClick = { fm.clearFocus(); vm.verifyOtp(code) },
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Green500),
-            enabled = state !is AuthState.Loading
-        ) {
-            if (state is AuthState.Loading) CircularProgressIndicator(color = White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-            else Text("যাচাই করুন", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            TextButton(onClick = onChangeNumber) {
-                Text("নম্বর পরিবর্তন", fontSize = 12.sp, color = Indigo600, fontFamily = NotoSansBengali)
-            }
-            TextButton(onClick = { (ctx as? ComponentActivity)?.let { vm.resendOtp(it) } }) {
-                Text("আবার পাঠান", fontSize = 12.sp, color = Indigo600, fontFamily = NotoSansBengali)
-            }
         }
         Spacer(Modifier.height(4.dp))
     }
@@ -263,14 +268,16 @@ fun SignupForm(
     prefillName : String = "",
     prefillEmail : String = "",
     prefillPhotoUrl : String = "",
-    verifiedPhone : String = "",
     isGoogleSignup : Boolean = false
 ) {
     val state by vm.authState.collectAsStateWithLifecycle()
     val fm = LocalFocusManager.current
     val ctx = LocalContext.current
     var name by remember(prefillName) { mutableStateOf(prefillName) }
-    var phone by remember { mutableStateOf(verifiedPhone) }
+    var phone by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPass by remember { mutableStateOf("") }
+    var showPw by remember { mutableStateOf(false) }
     var userType by remember { mutableStateOf("Student") }
     var classLevel by remember { mutableStateOf("") }
     var showClassPicker by remember { mutableStateOf(false) }
@@ -350,20 +357,11 @@ fun SignupForm(
             }
         }
         SSField(name, { name = it }, "পুরো নাম", Icons.Default.Person, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
 
-        if (verifiedPhone.isNotBlank()) {
-            // ফোন OTP দিয়ে আগেই verify হয়ে গেছে — এখানে শুধু দেখানো, এডিট করা যাবে না
-            Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFE8F5E9)).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("✅", fontSize = 16.sp)
-                Text("ভেরিফায়েড নম্বর: $verifiedPhone", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32), fontFamily = NotoSansBengali)
-            }
-        } else {
-            SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+        if (!isGoogleSignup) {
+            SSField(password, { password = it }, "পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
+            SSField(confirmPass, { confirmPass = it }, "পাসওয়ার্ড নিশ্চিত করুন", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Done, onIme = { fm.clearFocus() })
         }
 
         // আপনি কে?
@@ -441,7 +439,7 @@ fun SignupForm(
                 if (isGoogleSignup) {
                     vm.googleSignup(name, prefillEmail, phone, prefillPhotoUrl, userType, classLevel, selectedPhotoUri)
                 } else {
-                    vm.completeProfile(verifiedPhone, name, userType, classLevel)
+                    vm.signup(name, phone, password, confirmPass, userType, classLevel)
                 }
             },
             modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -453,6 +451,15 @@ fun SignupForm(
             else Text("অ্যাকাউন্ট তৈরি করুন", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = White, fontFamily = NotoSansBengali)
         }
 
+        if (!isGoogleSignup) {
+            GoogleSignInButton(isLoading = state is AuthState.Loading) {
+                val activity = ctx as? MainActivity ?: return@GoogleSignInButton
+                activity.startGoogleSignIn(
+                    onSuccess = { email, name2, photoUrl, idToken -> vm.googleSignIn(email, name2, photoUrl, idToken) },
+                    onError = { msg -> vm.setError(msg) }
+                )
+            }
+        }
         Spacer(Modifier.height(4.dp))
     }
 }
