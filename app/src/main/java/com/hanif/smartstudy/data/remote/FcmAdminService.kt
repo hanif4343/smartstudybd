@@ -190,7 +190,7 @@ object FcmAdminService {
     suspend fun fetchTokenForPhone(phone: String): String? = withContext(Dispatchers.IO) {
         try {
             val key = com.hanif.smartstudy.util.PhoneValidator.sanitize(phone) ?: return@withContext null
-            val auth = if (BuildConfig.FIREBASE_DB_SECRET.isNotBlank()) "?auth=${BuildConfig.FIREBASE_DB_SECRET}" else ""
+            val token = FirebaseTokenProvider.getToken(); val auth = if (token.isNotBlank()) "?auth=$token" else ""
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/users/$key.json$auth"
             val body = client.newCall(Request.Builder().url(url).get().build()).execute().body?.string()
             if (body.isNullOrBlank() || body == "null") return@withContext null
@@ -204,7 +204,7 @@ object FcmAdminService {
     // ── Role == "Admin" এমন সব ইউজারের phone বের করো (Users node, capital) ──
     suspend fun fetchAdminPhones(): List<String> = withContext(Dispatchers.IO) {
         try {
-            val auth = if (BuildConfig.FIREBASE_DB_SECRET.isNotBlank()) "?auth=${BuildConfig.FIREBASE_DB_SECRET}" else ""
+            val token = FirebaseTokenProvider.getToken(); val auth = if (token.isNotBlank()) "?auth=$token" else ""
             val base = BuildConfig.FIREBASE_URL.trimEnd('/')
             val profileBody = client.newCall(Request.Builder().url("$base/Users.json$auth").get().build())
                 .execute().body?.string()
@@ -234,7 +234,7 @@ object FcmAdminService {
             val adminPhones = fetchAdminPhones()
             if (adminPhones.isEmpty()) return@withContext emptyList()
 
-            val auth = if (BuildConfig.FIREBASE_DB_SECRET.isNotBlank()) "?auth=${BuildConfig.FIREBASE_DB_SECRET}" else ""
+            val token = FirebaseTokenProvider.getToken(); val auth = if (token.isNotBlank()) "?auth=$token" else ""
             val base = BuildConfig.FIREBASE_URL.trimEnd('/')
             val presenceBody = client.newCall(Request.Builder().url("$base/users.json$auth").get().build())
                 .execute().body?.string()
