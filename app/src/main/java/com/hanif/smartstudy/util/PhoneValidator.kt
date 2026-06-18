@@ -54,4 +54,13 @@ object PhoneValidator {
         if (!BD_MOBILE.matches(tenDigit)) return null
         return "0$tenDigit"
     }
+
+    // ── Firebase Auth এর জন্য synthetic email ──
+    // Firebase Email/Password Auth (Spark/ফ্রি প্ল্যানে কাজ করে, কোনো SMS cost নেই,
+    // Phone Auth এর মতো Blaze লাগে না) email ছাড়া কাজ করে না — তাই ফোন নম্বরকে একটা
+    // ভেতরের, ইউজারের কাছে অদৃশ্য email এ রূপান্তর করা হয়। ইউজার শুধু ফোন+পাসওয়ার্ড দেখে।
+    const val AUTH_EMAIL_DOMAIN = "smartstudybd.app"
+
+    /** "01XXXXXXXXX" → "01XXXXXXXXX@smartstudybd.app" — Firebase Auth এর identifier হিসেবে */
+    fun toSyntheticEmail(localPhone: String): String = "$localPhone@$AUTH_EMAIL_DOMAIN"
 }
