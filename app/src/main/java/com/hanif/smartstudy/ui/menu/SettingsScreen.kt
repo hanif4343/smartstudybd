@@ -31,29 +31,19 @@ fun SettingsScreen(
         initialHour   = state.reminderHour,
         initialMinute = state.reminderMinute
     )
+    var morningRepeatDaily by remember { mutableStateOf(state.isMorningRepeat) }
 
     if (showTimePicker) {
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text("পড়ার রিমাইন্ডার সময়", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-            text  = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    TimePicker(state = timeState)
-                }
+        ReminderTimeDialog(
+            title        = "সকালের রিমাইন্ডার সময়",
+            timeState    = timeState,
+            repeatDaily  = morningRepeatDaily,
+            onRepeatChange = { morningRepeatDaily = it },
+            onSave       = {
+                vm.setMorningReminder(true, timeState.hour, timeState.minute, morningRepeatDaily)
+                showTimePicker = false
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.setMorningReminder(true, timeState.hour, timeState.minute)
-                    showTimePicker = false
-                }) {
-                    Text("সংরক্ষণ", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.primary)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) {
-                    Text("বাতিল", fontFamily = NotoSansBengali)
-                }
-            }
+            onDismiss    = { showTimePicker = false }
         )
     }
 
@@ -149,14 +139,14 @@ fun SettingsScreen(
                         icon    = "🌅",
                         label   = "সকালের রিমাইন্ডার",
                         subLabel = if (state.isMorningOn)
-                            "প্রতিদিন ${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')} এ"
+                            "${if (state.isMorningRepeat) "প্রতিদিন" else "একবার"} ${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')} এ"
                         else "বন্ধ আছে",
                         isOn    = state.isMorningOn,
                         onToggle = { on ->
-                            if (on) showTimePicker = true
+                            if (on) { morningRepeatDaily = state.isMorningRepeat; showTimePicker = true }
                             else vm.setMorningReminder(false)
                         },
-                        onEdit  = { showTimePicker = true },
+                        onEdit  = { morningRepeatDaily = state.isMorningRepeat; showTimePicker = true },
                         timeStr = "${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')}"
                     )
 
@@ -168,26 +158,29 @@ fun SettingsScreen(
                         initialHour   = state.middayHour,
                         initialMinute = state.middayMinute
                     )
+                    var middayRepeatDaily by remember { mutableStateOf(state.isMiddayRepeat) }
                     ReminderRow(
                         icon    = "☀️",
                         label   = "দুপুরের প্রোগ্রেস চেক",
                         subLabel = if (state.isMiddayOn)
-                            "প্রতিদিন ${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')} এ"
+                            "${if (state.isMiddayRepeat) "প্রতিদিন" else "একবার"} ${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')} এ"
                         else "বন্ধ আছে",
                         isOn    = state.isMiddayOn,
                         onToggle = { on ->
-                            if (on) showMiddayPicker = true
+                            if (on) { middayRepeatDaily = state.isMiddayRepeat; showMiddayPicker = true }
                             else vm.setMiddayReminder(false)
                         },
-                        onEdit  = { showMiddayPicker = true },
+                        onEdit  = { middayRepeatDaily = state.isMiddayRepeat; showMiddayPicker = true },
                         timeStr = "${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')}"
                     )
                     if (showMiddayPicker) {
                         ReminderTimeDialog(
-                            title     = "দুপুরের প্রোগ্রেস চেক সময়",
-                            timeState = middayTimeState,
+                            title       = "দুপুরের প্রোগ্রেস চেক সময়",
+                            timeState   = middayTimeState,
+                            repeatDaily = middayRepeatDaily,
+                            onRepeatChange = { middayRepeatDaily = it },
                             onSave    = {
-                                vm.setMiddayReminder(true, middayTimeState.hour, middayTimeState.minute)
+                                vm.setMiddayReminder(true, middayTimeState.hour, middayTimeState.minute, middayRepeatDaily)
                                 showMiddayPicker = false
                             },
                             onDismiss = { showMiddayPicker = false }
@@ -202,26 +195,29 @@ fun SettingsScreen(
                         initialHour   = state.eveningHour,
                         initialMinute = state.eveningMinute
                     )
+                    var eveningRepeatDaily by remember { mutableStateOf(state.isEveningRepeat) }
                     ReminderRow(
                         icon    = "🌆",
                         label   = "সন্ধ্যার আর্জেন্ট রিমাইন্ডার",
                         subLabel = if (state.isEveningOn)
-                            "প্রতিদিন ${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')} এ"
+                            "${if (state.isEveningRepeat) "প্রতিদিন" else "একবার"} ${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')} এ"
                         else "বন্ধ আছে",
                         isOn    = state.isEveningOn,
                         onToggle = { on ->
-                            if (on) showEveningPicker = true
+                            if (on) { eveningRepeatDaily = state.isEveningRepeat; showEveningPicker = true }
                             else vm.setEveningReminder(false)
                         },
-                        onEdit  = { showEveningPicker = true },
+                        onEdit  = { eveningRepeatDaily = state.isEveningRepeat; showEveningPicker = true },
                         timeStr = "${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')}"
                     )
                     if (showEveningPicker) {
                         ReminderTimeDialog(
-                            title     = "সন্ধ্যার রিমাইন্ডার সময়",
-                            timeState = eveningTimeState,
+                            title       = "সন্ধ্যার রিমাইন্ডার সময়",
+                            timeState   = eveningTimeState,
+                            repeatDaily = eveningRepeatDaily,
+                            onRepeatChange = { eveningRepeatDaily = it },
                             onSave    = {
-                                vm.setEveningReminder(true, eveningTimeState.hour, eveningTimeState.minute)
+                                vm.setEveningReminder(true, eveningTimeState.hour, eveningTimeState.minute, eveningRepeatDaily)
                                 showEveningPicker = false
                             },
                             onDismiss = { showEveningPicker = false }
@@ -236,28 +232,31 @@ fun SettingsScreen(
                         initialHour   = state.nightHour,
                         initialMinute = state.nightMinute
                     )
+                    var nightRepeatDaily by remember { mutableStateOf(state.isNightRepeat) }
 
                     ReminderRow(
                         icon    = "🌙",
                         label   = "রাতের রিমাইন্ডার",
                         subLabel = if (state.isNightOn)
-                            "প্রতিদিন ${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')} এ"
+                            "${if (state.isNightRepeat) "প্রতিদিন" else "একবার"} ${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')} এ"
                         else "বন্ধ আছে",
                         isOn    = state.isNightOn,
                         onToggle = { on ->
-                            if (on) showNightPicker = true
+                            if (on) { nightRepeatDaily = state.isNightRepeat; showNightPicker = true }
                             else vm.setNightReminder(false)
                         },
-                        onEdit  = { showNightPicker = true },
+                        onEdit  = { nightRepeatDaily = state.isNightRepeat; showNightPicker = true },
                         timeStr = "${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')}"
                     )
 
                     if (showNightPicker) {
                         ReminderTimeDialog(
-                            title     = "রাতের পড়ার রিমাইন্ডার সময়",
-                            timeState = nightTimeState,
+                            title       = "রাতের পড়ার রিমাইন্ডার সময়",
+                            timeState   = nightTimeState,
+                            repeatDaily = nightRepeatDaily,
+                            onRepeatChange = { nightRepeatDaily = it },
                             onSave    = {
-                                vm.setNightReminder(true, nightTimeState.hour, nightTimeState.minute)
+                                vm.setNightReminder(true, nightTimeState.hour, nightTimeState.minute, nightRepeatDaily)
                                 showNightPicker = false
                             },
                             onDismiss = { showNightPicker = false }
@@ -278,6 +277,8 @@ fun SettingsScreen(
 private fun ReminderTimeDialog(
     title: String,
     timeState: TimePickerState,
+    repeatDaily: Boolean,
+    onRepeatChange: (Boolean) -> Unit,
     onSave: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -287,6 +288,8 @@ private fun ReminderTimeDialog(
         text  = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 TimePicker(state = timeState)
+                Spacer(Modifier.height(12.dp))
+                RepeatModeSelector(repeatDaily = repeatDaily, onChange = onRepeatChange)
             }
         },
         confirmButton = {
@@ -300,6 +303,67 @@ private fun ReminderTimeDialog(
             }
         }
     )
+}
+
+// ── Once / Daily repeat-mode selector ──────────────────────────
+
+@Composable
+private fun RepeatModeSelector(
+    repeatDaily: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            "পুনরাবৃত্তি",
+            fontFamily = NotoSansBengali, fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            RepeatModeOption(
+                label    = "একবার",
+                selected = !repeatDaily,
+                onClick  = { onChange(false) }
+            )
+            RepeatModeOption(
+                label    = "প্রতিদিন",
+                selected = repeatDaily,
+                onClick  = { onChange(true) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RepeatModeOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape   = RoundedCornerShape(8.dp),
+        color   = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+    ) {
+        Text(
+            label,
+            fontFamily = NotoSansBengali,
+            fontSize   = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color      = if (selected) MaterialTheme.colorScheme.onPrimary
+                         else MaterialTheme.colorScheme.onSurface.copy(0.7f),
+            modifier   = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+        )
+    }
 }
 
 // ── Reminder row ─────────────────────────────────────────────
