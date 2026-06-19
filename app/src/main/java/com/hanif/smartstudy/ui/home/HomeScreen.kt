@@ -112,9 +112,9 @@ fun HomeScreen(
     quizViewModel      : QuizViewModel? = null,
     onSearchClick      : () -> Unit = {},
     onTypingClick      : () -> Unit = {},
-    onOpenStudy        : (Any?, Any?) -> Unit = { _, _ -> }, // MainScreen এর এরর ফিক্স করার জন্য
-    onOpenInstantTest  : (Any?, Any?) -> Unit = { _, _ -> }, // MainScreen এর এরর ফিক্স করার জন্য
-    onOpenWeeklyTest   : () -> Unit = {}                        // MainScreen এর এরর ফিক্স করার জন্য
+    onOpenStudy        : (String, String?) -> Unit = { _, _ -> }, // টাইপ ফিক্স করা হলো (String)
+    onOpenInstantTest  : (String, String?) -> Unit = { _, _ -> }, // টাইপ ফিক্স করা হলো (String)
+    onOpenWeeklyTest   : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val homeContext = LocalContext.current
@@ -504,7 +504,7 @@ fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
                 Icon(Icons.Default.Edit, null, tint = TextMuted, modifier = Modifier.size(16.dp)) }
         }
     }
-    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showGoalDialog = false })
+    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showDialog = false })
 }
 
 @Composable
