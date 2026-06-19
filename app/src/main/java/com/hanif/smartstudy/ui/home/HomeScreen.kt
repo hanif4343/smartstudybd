@@ -59,7 +59,6 @@ object ExamNotificationHelper {
 
     private const val EXAM_NOTIF_REQ = 2025
 
-    // পরীক্ষার তারিখের আগের রাত ২২:০০ তে alarm set করে
     fun scheduleExamEveReminder(ctx: Context, dateStr: String, examName: String) {
         try {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -73,7 +72,6 @@ object ExamNotificationHelper {
                 set(Calendar.SECOND, 0)
             }
 
-            // আগের সময় চলে গেলে set করার দরকার নেই
             if (cal.timeInMillis <= System.currentTimeMillis()) return
 
             val intent = Intent(ctx, ReminderReceiver::class.java).apply {
@@ -110,15 +108,17 @@ object ExamNotificationHelper {
 
 @Composable
 fun HomeScreen(
-    viewModel     : HomeViewModel = viewModel(),
-    quizViewModel : QuizViewModel? = null,
-    onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {}
+    viewModel          : HomeViewModel = viewModel(),
+    quizViewModel      : QuizViewModel? = null,
+    onSearchClick      : () -> Unit = {},
+    onTypingClick      : () -> Unit = {},
+    onOpenStudy        : (Any?, Any?) -> Unit = { _, _ -> }, // MainScreen এর এরর ফিক্স করার জন্য
+    onOpenInstantTest  : (Any?, Any?) -> Unit = { _, _ -> }, // MainScreen এর এরর ফিক্স করার জন্য
+    onOpenWeeklyTest   : () -> Unit = {}                        // MainScreen এর এরর ফিক্স করার জন্য
 ) {
     val state by viewModel.uiState.collectAsState()
     val homeContext = LocalContext.current
 
-    // XP ও user data — যেকোনো screen থেকে ফিরলে auto-refresh
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -130,7 +130,6 @@ fun HomeScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    // Wrong questions থেকে review data — mutableStateOf দিয়ে refresh করা যাবে
     var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
     LaunchedEffect(state) {
         wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
@@ -153,32 +152,25 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── AD SLOT 1: Banner ──
             AdBannerPlaceholder()
 
-            // Quick Stats
             QuickStatsRow(stats = state.studyStats)
 
-            // ── AD SLOT 2: Native In-Feed ──
             AdNativePlaceholder()
 
-            // Daily Goal
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
 
-            // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
 
-            // ── Wrong Question Review Section ──
             if (wrongItems.isNotEmpty()) {
                 WrongReviewCard(
                     wrongItems = wrongItems,
                     onStart = {
-                        // রিভিউর অ্যাকশন এখানে দিন
+                        // রিভিউর অ্যাকশন
                     }
                 )
             }
 
-            // Exam Countdown — শেষ হলে auto-hide, না থাকলে set বাটন
             val examExpired = state.examCountdown.isSet &&
                 state.examCountdown.days   == 0L &&
                 state.examCountdown.hours  == 0L &&
@@ -193,13 +185,10 @@ fun HomeScreen(
                 !state.examCountdown.isSet ->
                     SetExamCard(onSet = { date, name ->
                         viewModel.setExamDate(date, name)
-                        // মেইন কনটেক্সট ব্যবহার করে নোটিফিকেশন সিডিউল
                         ExamNotificationHelper.scheduleExamEveReminder(homeContext, date, name)
                     })
-                // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
 
-            // Loading / Error
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = PrimaryIndigo, modifier = Modifier.size(32.dp))
@@ -251,7 +240,6 @@ fun WrongReviewCard(
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-            // Header
             Row(
                 Modifier.fillMaxWidth(),
                 Arrangement.SpaceBetween,
@@ -271,27 +259,20 @@ fun WrongReviewCard(
                             color = TextMuted, fontFamily = NotoSansBengali)
                     }
                 }
-                // Stats pills
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     StatPill(wrongCount.toString(), "ভুল", Color(0xFFDC2626), Color(0xFFFEF2F2))
                 }
             }
 
-            // Preview questions (২টা)
             previewItems.forEach { (q, count) ->
                 WrongQuestionPreview(q = q, wrongCount = count)
             }
 
-            // CTA button
             Button(
                 onClick = onStart,
                 modifier = Modifier.fillMaxWidth(),
                 shape    = RoundedCornerShape(12.dp),
-                colors   = ButtonDefaults.buttonColors(
-                    containerColor = Brush.horizontalGradient(
-                        listOf(Color(0xFFDC2626), Color(0xFFEF4444))
-                    ).let { Color(0xFFDC2626) }
-                )
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
             ) {
                 Text("🎯 ", fontSize = 14.sp)
                 Text(
@@ -587,7 +568,6 @@ fun ExamCountdownCard(countdown: ExamCountdown, onClear: () -> Unit = {}) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("📅", fontSize = 24.sp)
-                    // Clear বাটন
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
