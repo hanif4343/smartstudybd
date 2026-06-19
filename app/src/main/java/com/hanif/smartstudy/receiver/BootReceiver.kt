@@ -14,19 +14,19 @@ class BootReceiver : BroadcastReceiver() {
 
         // Morning reminder reschedule
         if (session.isMorningReminderOn()) {
-            ReminderReceiver.scheduleMorning(context, session.getMorningHour(), session.getMorningMinute())
+            ReminderReceiver.scheduleMorning(context, session.getMorningHour(), session.getMorningMinute(), session.isMorningRepeatDaily())
         }
         // Night reminder reschedule
         if (session.isNightReminderOn()) {
-            ReminderReceiver.scheduleNight(context, session.getNightHour(), session.getNightMinute())
+            ReminderReceiver.scheduleNight(context, session.getNightHour(), session.getNightMinute(), session.isNightRepeatDaily())
         }
         // Midday progress check reschedule
         if (session.isMiddayReminderOn()) {
-            ReminderReceiver.scheduleMidday(context, session.getMiddayHour(), session.getMiddayMinute())
+            ReminderReceiver.scheduleMidday(context, session.getMiddayHour(), session.getMiddayMinute(), session.isMiddayRepeatDaily())
         }
         // Evening urgency check reschedule
         if (session.isEveningReminderOn()) {
-            ReminderReceiver.scheduleEvening(context, session.getEveningHour(), session.getEveningMinute())
+            ReminderReceiver.scheduleEvening(context, session.getEveningHour(), session.getEveningMinute(), session.isEveningRepeatDaily())
         }
     }
 }
