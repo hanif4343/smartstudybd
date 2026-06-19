@@ -174,18 +174,18 @@ fun HomeScreen(
 
             WeeklyStreakCard(streak = state.streakInfo)
 
-            // ── Wrong Question Review Section ──
+            // ── Wrong Question Review Section (wrongReviewManager ডট কানেক্টেড) ──
             if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
                 WrongReviewSection(
                     wrongItems      = wrongItems,
                     onAnswerMcq     = { qId, opt -> 
-                        quizViewModel?.answerWrongMcq(qId, opt)
+                        quizViewModel?.wrongReviewManager?.answerWrongMcq(qId, opt)
                     },
                     onAnswerWritten = { qId, text -> 
-                        quizViewModel?.answerWrongWritten(qId, text) ?: 0
+                        quizViewModel?.wrongReviewManager?.answerWrongWritten(qId, text) ?: 0
                     },
                     onRemoveCorrect = { qId -> 
-                        quizViewModel?.removeCorrectWrong(qId)
+                        quizViewModel?.wrongReviewManager?.removeCorrectWrong(qId)
                     }
                 )
             }
