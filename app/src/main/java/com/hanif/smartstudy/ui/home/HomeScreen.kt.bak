@@ -153,15 +153,13 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── AD SLOT 1: Banner — Hero 아래, 콘텐츠 시작 전 ──
-            // AdMob policy: ✅ content와 content 사이, 자연스러운 위치
+            // ── AD SLOT 1: Banner ──
             AdBannerPlaceholder()
 
             // Quick Stats
             QuickStatsRow(stats = state.studyStats)
 
-            // ── AD SLOT 2: Native In-Feed — stats 아래, streak 전 ──
-            // AdMob policy: ✅ native/in-feed는 content와 구분되게
+            // ── AD SLOT 2: Native In-Feed ──
             AdNativePlaceholder()
 
             // Daily Goal
@@ -175,7 +173,7 @@ fun HomeScreen(
                 WrongReviewCard(
                     wrongItems = wrongItems,
                     onStart = {
-                        // এখানে আপনার রিভিউ স্ক্রিন বা অ্যাকশন হ্যান্ডেল করুন
+                        // রিভিউর জন্য এখানে ক্লিক অ্যাকশন হ্যান্ডেল করতে পারেন
                     }
                 )
             }
@@ -195,7 +193,7 @@ fun HomeScreen(
                 !state.examCountdown.isSet ->
                     SetExamCard(onSet = { d, n ->
                         viewModel.setExamDate(d, n)
-                        // পরীক্ষার আগের রাতে নোটিফিকেশন schedule করো
+                        // মেইন কনটেক্সট (homeContext) ব্যবহার করে নোটিফিকেশন সিডিউল
                         ExamNotificationHelper.scheduleExamEveReminder(homeContext, d, n)
                     })
                 // expired → কিছুই দেখাবে না (auto-hide ✅)
@@ -227,8 +225,6 @@ fun AdBannerPlaceholder() {
 
 @Composable
 fun AdNativePlaceholder() {
-    // Native Ad — Banner দিয়ে replace করা হচ্ছে (Native ad XML layout ছাড়া কাজ করে না)
-    // একটু বেশি জায়গায় banner দেখাও
     com.hanif.smartstudy.ui.ads.AdBannerView(
         adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
     )
