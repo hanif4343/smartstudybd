@@ -174,18 +174,18 @@ fun HomeScreen(
 
             WeeklyStreakCard(streak = state.streakInfo)
 
-            // ── Wrong Question Review Section (নিখুঁত কাস্টিং সহ) ──
+            // ── Wrong Question Review Section (নিখুঁত মেথড ম্যাপ সহ) ──
             if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
                 WrongReviewSection(
                     wrongItems      = wrongItems,
                     onAnswerMcq     = { qId, opt -> 
-                        (quizViewModel as? QuizViewModel)?.answerWrongQuestionMcq(qId, opt)
+                        quizViewModel?.answerWrongMcq(qId, opt)
                     },
                     onAnswerWritten = { qId, text -> 
-                        (quizViewModel as? QuizViewModel)?.answerWrongQuestionWritten(qId, text) ?: 0
+                        quizViewModel?.answerWrongWritten(qId, text) ?: 0
                     },
                     onRemoveCorrect = { qId -> 
-                        (quizViewModel as? QuizViewModel)?.removeCorrectFromWrong(qId)
+                        quizViewModel?.removeCorrectWrong(qId)
                     }
                 )
             }
@@ -361,7 +361,7 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 
 @Composable
 fun DailyRoutineCard(
-    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
+    val vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {}
