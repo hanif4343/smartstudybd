@@ -173,7 +173,7 @@ fun HomeScreen(
                 WrongReviewCard(
                     wrongItems = wrongItems,
                     onStart = {
-                        // রিভিউর জন্য এখানে ক্লিক অ্যাকশন হ্যান্ডেল করতে পারেন
+                        // রিভিউর অ্যাকশন এখানে দিন
                     }
                 )
             }
@@ -191,10 +191,10 @@ fun HomeScreen(
                         onClear   = { viewModel.clearExamDate() }
                     )
                 !state.examCountdown.isSet ->
-                    SetExamCard(onSet = { d, n ->
-                        viewModel.setExamDate(d, n)
-                        // মেইন কনটেক্সট (homeContext) ব্যবহার করে নোটিফিকেশন সিডিউল
-                        ExamNotificationHelper.scheduleExamEveReminder(homeContext, d, n)
+                    SetExamCard(onSet = { date, name ->
+                        viewModel.setExamDate(date, name)
+                        // মেইন কনটেক্সট ব্যবহার করে নোটিফিকেশন সিডিউল
+                        ExamNotificationHelper.scheduleExamEveReminder(homeContext, date, name)
                     })
                 // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
