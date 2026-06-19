@@ -61,15 +61,19 @@ data class MenuUiState(
     val isMorningOn     : Boolean            = false,
     val morningHour     : Int                = 7,
     val morningMinute   : Int                = 0,
+    val isMorningRepeat : Boolean            = true,
     val isNightOn       : Boolean            = false,
     val nightHour       : Int                = 21,
     val nightMinute     : Int                = 0,
+    val isNightRepeat   : Boolean            = true,
     val isMiddayOn      : Boolean            = false,
     val middayHour      : Int                = 14,
     val middayMinute    : Int                = 0,
+    val isMiddayRepeat  : Boolean            = true,
     val isEveningOn     : Boolean            = false,
     val eveningHour     : Int                = 19,
     val eveningMinute   : Int                = 0,
+    val isEveningRepeat : Boolean            = true,
     val correctCount    : Int                = 0,
     val wrongCount      : Int                = 0,
     val accuracyPct     : Int                = 0,
@@ -198,15 +202,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val morningOn  = session.isMorningReminderOn()
             val morningH   = session.getMorningHour()
             val morningM   = session.getMorningMinute()
+            val morningRep = session.isMorningRepeatDaily()
             val nightOn    = session.isNightReminderOn()
             val nightH     = session.getNightHour()
             val nightM     = session.getNightMinute()
+            val nightRep   = session.isNightRepeatDaily()
             val middayOn   = session.isMiddayReminderOn()
             val middayH    = session.getMiddayHour()
             val middayM    = session.getMiddayMinute()
+            val middayRep  = session.isMiddayRepeatDaily()
             val eveningOn  = session.isEveningReminderOn()
             val eveningH   = session.getEveningHour()
             val eveningM   = session.getEveningMinute()
+            val eveningRep = session.isEveningRepeatDaily()
             val correct    = cache.getCorrectCount()
             val wrong      = cache.getWrongCount()
             val total      = correct + wrong
@@ -243,15 +251,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isMorningOn    = morningOn,
                     morningHour    = morningH,
                     morningMinute  = morningM,
+                    isMorningRepeat = morningRep,
                     isNightOn      = nightOn,
                     nightHour      = nightH,
                     nightMinute    = nightM,
+                    isNightRepeat  = nightRep,
                     isMiddayOn     = middayOn,
                     middayHour     = middayH,
                     middayMinute   = middayM,
+                    isMiddayRepeat = middayRep,
                     isEveningOn    = eveningOn,
                     eveningHour    = eveningH,
                     eveningMinute  = eveningM,
+                    isEveningRepeat = eveningRep,
                     correctCount   = correct,
                     wrongCount     = wrong,
                     totalCorrect   = correct,
@@ -382,34 +394,34 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute) {
+    fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute, repeatDaily: Boolean = _state.value.isMorningRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute) }
-            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute)
+            _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute, isMorningRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelMorning(ctx)
         }
     }
 
-    fun setNightReminder(on: Boolean, hour: Int = _state.value.nightHour, minute: Int = _state.value.nightMinute) {
+    fun setNightReminder(on: Boolean, hour: Int = _state.value.nightHour, minute: Int = _state.value.nightMinute, repeatDaily: Boolean = _state.value.isNightRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isNightOn = on, nightHour = hour, nightMinute = minute) }
-            if (on) ReminderReceiver.scheduleNight(ctx, hour, minute)
+            _state.update { it.copy(isNightOn = on, nightHour = hour, nightMinute = minute, isNightRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleNight(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelNight(ctx)
         }
     }
 
-    fun setMiddayReminder(on: Boolean, hour: Int = _state.value.middayHour, minute: Int = _state.value.middayMinute) {
+    fun setMiddayReminder(on: Boolean, hour: Int = _state.value.middayHour, minute: Int = _state.value.middayMinute, repeatDaily: Boolean = _state.value.isMiddayRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isMiddayOn = on, middayHour = hour, middayMinute = minute) }
-            if (on) ReminderReceiver.scheduleMidday(ctx, hour, minute)
+            _state.update { it.copy(isMiddayOn = on, middayHour = hour, middayMinute = minute, isMiddayRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleMidday(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelMidday(ctx)
         }
     }
 
-    fun setEveningReminder(on: Boolean, hour: Int = _state.value.eveningHour, minute: Int = _state.value.eveningMinute) {
+    fun setEveningReminder(on: Boolean, hour: Int = _state.value.eveningHour, minute: Int = _state.value.eveningMinute, repeatDaily: Boolean = _state.value.isEveningRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isEveningOn = on, eveningHour = hour, eveningMinute = minute) }
-            if (on) ReminderReceiver.scheduleEvening(ctx, hour, minute)
+            _state.update { it.copy(isEveningOn = on, eveningHour = hour, eveningMinute = minute, isEveningRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleEvening(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelEvening(ctx)
         }
     }
