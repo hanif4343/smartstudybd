@@ -58,6 +58,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val _pendingStreak = MutableStateFlow(0)
     val pendingStreak: StateFlow<Int> = _pendingStreak.asStateFlow()
 
+    // Sound + Vibration এর জন্য — true=সঠিক, false=ভুল, null=কোনো event নেই
+    private val _feedbackEvent = MutableStateFlow<Boolean?>(null)
+    val feedbackEvent: StateFlow<Boolean?> = _feedbackEvent.asStateFlow()
+    fun clearFeedback() { _feedbackEvent.value = null }
+
     fun consumeAchievement() { _pendingAchievement.value = null }
     fun consumeStreak()      { _pendingStreak.value = 0 }
 
@@ -298,6 +303,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
@@ -319,6 +325,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
