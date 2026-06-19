@@ -143,6 +143,43 @@ fun HomeScreen(
         wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
     }
 
+    // ── HomeScreen এ Wrong-Review section এর Sound + Vibration ──
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val homeFeedback by (quizViewModel?.feedbackEvent ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+    LaunchedEffect(homeFeedback) {
+        val isCorrect = homeFeedback ?: return@LaunchedEffect
+        if (isCorrect) {
+            com.hanif.smartstudy.util.SoundManager.playCorrect()
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    val vm = ctx.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                    vm.defaultVibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 60), -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    val vib = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        vib.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 60), -1))
+                    } else { @Suppress("DEPRECATION"); vib.vibrate(longArrayOf(0, 60), -1) }
+                }
+            } catch (_: Exception) {}
+        } else {
+            com.hanif.smartstudy.util.SoundManager.playWrong()
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    val vm = ctx.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                    vm.defaultVibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    val vib = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        vib.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1))
+                    } else { @Suppress("DEPRECATION"); vib.vibrate(longArrayOf(0, 80, 60, 80), -1) }
+                }
+            } catch (_: Exception) {}
+        }
+        quizViewModel?.clearFeedback()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
