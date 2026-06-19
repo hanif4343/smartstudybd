@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.ui.home
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -8,17 +9,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
+import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -26,6 +34,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
@@ -42,15 +51,16 @@ import com.hanif.smartstudy.receiver.ReminderReceiver
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val PrimaryIndigo = Color(0xFF4F46E5)
 private val DeepIndigo    = Color(0xFF1E1B4B)
 private val Amber         = Color(0xFFF59E0B)
 private val GreenMint     = Color(0xFF10B981)
-private val CardBg        = Color(0xFFFFFFFF)
-private val SlateBg       = Color(0xFFF8FAFC)
-private val TextPrimary   = Color(0xFF1E293B)
-private val TextMuted     = Color(0xFF64748B)
+
+private val WR_RedMain   = Color(0xFFDC2626)
+private val WR_RedLight  = Color(0xFFFFF1F2)
+private val WR_RedBorder = Color(0xFFFECACA)
 
 // ═══════════════════════════════════════════════════════════
 // Exam Eve Notification — পরীক্ষার আগের রাত ১০টায় রিমাইন্ডার
@@ -108,16 +118,16 @@ object ExamNotificationHelper {
 
 @Composable
 fun HomeScreen(
-    viewModel          : HomeViewModel = viewModel(),
-    quizViewModel      : QuizViewModel? = null,
-    onSearchClick      : () -> Unit = {},
-    onTypingClick      : () -> Unit = {},
-    onOpenStudy        : (String, String) -> Unit = { _, _ -> }, // MainScreen এর রিকোয়েস্ট অনুযায়ী টাইপ পরিবর্তন
-    onOpenInstantTest  : (String, String) -> Unit = { _, _ -> }, // MainScreen এর রিকোয়েস্ট অনুযায়ী টাইপ পরিবর্তন
-    onOpenWeeklyTest   : () -> Unit = {}
+    viewModel     : HomeViewModel = viewModel(),
+    quizViewModel : QuizViewModel? = null,
+    onSearchClick : () -> Unit = {},
+    onTypingClick : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
-    val homeContext = LocalContext.current
+    val ctx   = LocalContext.current
 
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -138,7 +148,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SlateBg)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(bottom = 88.dp)
     ) {
@@ -160,14 +170,21 @@ fun HomeScreen(
 
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
 
+            DailyRoutineCard(
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
+
             WeeklyStreakCard(streak = state.streakInfo)
 
-            if (wrongItems.isNotEmpty()) {
-                WrongReviewCard(
-                    wrongItems = wrongItems,
-                    onStart = {
-                        // রিভিউর অ্যাকশন
-                    }
+            // ── Wrong Question Review Section (এখানে সংশোধিত ল্যাম্বডা সহ কল) ──
+            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
+                WrongReviewSection(
+                    wrongItems      = wrongItems,
+                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerWrongQuestionMcq(qId, opt) },
+                    onAnswerWritten = { qId, text -> quizViewModel?.answerWrongQuestionWritten(qId, text) ?: 0 },
+                    onRemoveCorrect = { qId -> quizViewModel?.removeCorrectFromWrong(qId) }
                 )
             }
 
@@ -183,9 +200,9 @@ fun HomeScreen(
                         onClear   = { viewModel.clearExamDate() }
                     )
                 !state.examCountdown.isSet ->
-                    SetExamCard(onSet = { date, name ->
-                        viewModel.setExamDate(date, name)
-                        ExamNotificationHelper.scheduleExamEveReminder(homeContext, date, name)
+                    SetExamCard(onSet = { d, n ->
+                        viewModel.setExamDate(d, n)
+                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
                     })
             }
 
@@ -220,75 +237,150 @@ fun AdNativePlaceholder() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// WRONG QUESTION REVIEW CARD
+// WRONG QUESTION REVIEW SECTION
 // ═══════════════════════════════════════════════════════════
 
 @Composable
-fun WrongReviewCard(
-    wrongItems : List<Pair<QuestionItem, Int>>,
-    onStart    : () -> Unit
+fun WrongReviewSection(
+    wrongItems      : List<Pair<QuestionItem, Int>>,
+    onAnswerMcq     : (questionId: String, selectedOption: Int) -> Unit,
+    onAnswerWritten : (questionId: String, userText: String) -> Int,
+    onRemoveCorrect : (questionId: String) -> Unit
 ) {
-    val wrongCount   = wrongItems.size
-    val previewItems = wrongItems.take(2)
+    var practiceMode  by remember { mutableStateOf(false) }
+    var showCongrats  by remember { mutableStateOf(false) }
+
+    val localAnswers = remember { mutableStateMapOf<String, AnswerState>() }
+    var totalAtStart by remember { mutableStateOf(0) }
+    val correctIds = remember { mutableStateListOf<String>() }
+    val practiceSnapshot = remember { mutableStateListOf<Pair<QuestionItem, Int>>() }
+    val activeItems = practiceSnapshot.filter { it.first.id !in correctIds }
+
+    LaunchedEffect(correctIds.size, totalAtStart) {
+        if (practiceMode && totalAtStart > 0 && correctIds.size >= totalAtStart) {
+            showCongrats = true
+            delay(3000)
+            showCongrats = false
+            practiceMode = false
+            correctIds.clear()
+            localAnswers.clear()
+            practiceSnapshot.clear()
+            totalAtStart = 0
+        }
+    }
+
+    if (showCongrats) {
+        CongratsOverlay()
+        return
+    }
+
+    if (wrongItems.isEmpty() && !practiceMode) return
 
     Card(
         modifier  = Modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(16.dp),
+        shape     = RoundedCornerShape(18.dp),
         colors    = CardDefaults.cardColors(containerColor = Color.White),
-        border    = BorderStroke(1.5.dp, Color(0xFFEF4444).copy(alpha = 0.2f)),
-        elevation = CardDefaults.cardElevation(2.dp)
+        border    = BorderStroke(1.5.dp, WR_RedMain.copy(alpha = 0.25f)),
+        elevation = CardDefaults.cardElevation(3.dp)
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            modifier            = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            WRHeader(
+                totalCount   = if (practiceMode) totalAtStart else wrongItems.size,
+                activeCount  = activeItems.size,
+                practiceMode = practiceMode
+            )
 
-            Row(
-                Modifier.fillMaxWidth(),
-                Arrangement.SpaceBetween,
-                Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Brush.linearGradient(listOf(Color(0xFFDC2626), Color(0xFFF97316)))),
-                        contentAlignment = Alignment.Center
-                    ) { Text("🔁", fontSize = 18.sp) }
-                    Column {
-                        Text("ভুল প্রশ্ন Review", fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold, color = Color(0xFFDC2626),
-                            fontFamily = NotoSansBengali)
-                        Text("আবার চেষ্টা করো", fontSize = 10.sp,
-                            color = TextMuted, fontFamily = NotoSansBengali)
-                    }
+            if (!practiceMode) {
+                wrongItems.take(3).forEach { (q, count) ->
+                    WRPreviewItem(q = q, wrongCount = count)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatPill(wrongCount.toString(), "ভুল", Color(0xFFDC2626), Color(0xFFFEF2F2))
+                if (wrongItems.size > 3) {
+                    Text(
+                        "... আরো ${wrongItems.size - 3}টি ভুল প্রশ্ন আছে",
+                        fontSize   = 11.sp,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali,
+                        modifier   = Modifier.padding(start = 4.dp)
+                    )
                 }
-            }
 
-            previewItems.forEach { (q, count) ->
-                WrongQuestionPreview(q = q, wrongCount = count)
-            }
-
-            Button(
-                onClick = onStart,
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(12.dp),
-                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-            ) {
-                Text("🎯 ", fontSize = 14.sp)
-                Text(
-                    if (wrongCount > 2) "সব ${wrongCount}টি প্রশ্ন অনুশীলন করুন"
-                    else "${wrongCount}টি ভুল প্রশ্ন অনুশীলন করুন",
-                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                    fontFamily = NotoSansBengali
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier.clip(RoundedCornerShape(8.dp))
-                        .background(Color.White.copy(0.25f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                Button(
+                    onClick = {
+                        practiceSnapshot.clear()
+                        practiceSnapshot.addAll(wrongItems)
+                        correctIds.clear()
+                        localAnswers.clear()
+                        totalAtStart = wrongItems.size
+                        practiceMode = true
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = WR_RedMain)
                 ) {
-                    Text("$wrongCount", fontSize = 11.sp,
-                        color = Color.White, fontWeight = FontWeight.ExtraBold)
+                    Text("🎯 ", fontSize = 16.sp)
+                    Text(
+                        "সব ${wrongItems.size}টি প্রশ্ন অনুশীলন করুন",
+                        fontSize   = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color      = Color.White,
+                        fontFamily = NotoSansBengali
+                    )
+                }
+
+            } else {
+                activeItems.forEach { (q, wrongCount) ->
+                    val localState = localAnswers[q.id] ?: AnswerState.Unanswered
+                    WRPracticeItem(
+                        q               = q.copy(answerState = localState),
+                        wrongCount      = wrongCount,
+                        onMcqAnswer     = { selectedOpt ->
+                            val optText = when (selectedOpt) {
+                                1 -> q.optionA; 2 -> q.optionB
+                                3 -> q.optionC; 4 -> q.optionD; else -> ""
+                            }
+                            val isCorrect = optText.trim().equals(q.answer.trim(), ignoreCase = true)
+                            localAnswers[q.id] = AnswerState.McqSelected(selectedOpt, isCorrect)
+                            onAnswerMcq(q.id, selectedOpt)
+                            if (isCorrect) {
+                                onRemoveCorrect(q.id)
+                            }
+                        },
+                        onWrittenAnswer = { text ->
+                            val pct = onAnswerWritten(q.id, text)
+                            val isCorrect = pct >= 70
+                            localAnswers[q.id] = AnswerState.WrittenSubmitted(text, pct, isCorrect)
+                            if (isCorrect) onRemoveCorrect(q.id)
+                            pct
+                        },
+                        onHide = {
+                            if (q.id !in correctIds) {
+                                correctIds.add(q.id)
+                            }
+                        }
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        practiceMode = false
+                        correctIds.clear()
+                        localAnswers.clear()
+                        practiceSnapshot.clear()
+                        totalAtStart = 0
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(12.dp),
+                    border   = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        "✖ অনুশীলন বন্ধ করুন",
+                        fontSize   = 13.sp,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali
+                    )
                 }
             }
         }
@@ -296,9 +388,71 @@ fun WrongReviewCard(
 }
 
 @Composable
-private fun WrongQuestionPreview(q: QuestionItem, wrongCount: Int) {
+private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier         = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFDC2626), Color(0xFFF97316)))),
+                contentAlignment = Alignment.Center
+            ) { Text("🔁", fontSize = 20.sp) }
+            Column {
+                Text(
+                    "ভুল প্রশ্ন Review",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color      = WR_RedMain,
+                    fontFamily = NotoSansBengali
+                )
+                Text(
+                    if (practiceMode) "অনুশীলন চলছে..." else "সর্বশেষ ৩টি দেখানো হচ্ছে",
+                    fontSize   = 10.sp,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali
+                )
+            }
+        }
+        Box(
+            modifier         = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(WR_RedLight)
+                .border(1.dp, WR_RedBorder, RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (practiceMode) "$activeCount" else "$totalCount",
+                    fontSize   = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color      = WR_RedMain,
+                    fontFamily = NotoSansBengali
+                )
+                Text(
+                    "ভুল",
+                    fontSize   = 9.sp,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = NotoSansBengali
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
     val badgeColor = when {
-        wrongCount >= 3 -> Color(0xFFDC2626)
+        wrongCount >= 3 -> WR_RedMain
         wrongCount == 2 -> Color(0xFFF97316)
         else            -> Color(0xFFF59E0B)
     }
@@ -306,57 +460,257 @@ private fun WrongQuestionPreview(q: QuestionItem, wrongCount: Int) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFFFF1F2))
-            .border(1.dp, Color(0xFFFECACA), RoundedCornerShape(10.dp))
+            .background(WR_RedLight)
+            .border(1.dp, WR_RedBorder, RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Box(
-            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFFFEF2F2)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(if (q.optionA.isNotBlank()) "🔘" else "✍️", fontSize = 14.sp)
-        }
+        Text(if (q.isMcq()) "🔘" else "✍️", fontSize = 16.sp)
         Column(Modifier.weight(1f)) {
+            val displayQ = q.question.replace(Regex("<[^>]+>"), "")
             Text(
-                q.question.replace(Regex("<[^>]+>"), "").take(55) +
-                    if (q.question.length > 55) "…" else "",
-                fontSize   = 12.sp, fontWeight = FontWeight.Bold,
-                color      = TextPrimary, fontFamily = NotoSansBengali, lineHeight = 16.sp
+                if (displayQ.length > 60) displayQ.take(60) + "…" else displayQ,
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = MaterialTheme.colorScheme.onSurface,
+                fontFamily = NotoSansBengali,
+                lineHeight = 16.sp
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 3.dp)) {
-                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFE0F2FE))
-                    .padding(horizontal = 5.dp, vertical = 1.dp)) {
-                    Text(q.subTopic.take(20), fontSize = 9.sp, color = Color(0xFF0284C7),
-                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                }
+            if (q.subTopic.isNotBlank()) {
+                Text(
+                    q.subTopic.take(25),
+                    fontSize   = 9.sp,
+                    color      = Color(0xFF0284C7),
+                    fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold,
+                    modifier   = Modifier.padding(top = 2.dp)
+                )
             }
         }
         Box(
-            Modifier.clip(RoundedCornerShape(10.dp))
+            modifier         = Modifier
+                .clip(RoundedCornerShape(8.dp))
                 .background(badgeColor)
-                .padding(horizontal = 7.dp, vertical = 2.dp)
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Text("×$wrongCount", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.ExtraBold)
+            Text("×$wrongCount", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
 
 @Composable
-private fun StatPill(value: String, label: String, textColor: Color, bgColor: Color) {
-    Column(
-        modifier            = Modifier.clip(RoundedCornerShape(10.dp))
-            .background(bgColor)
-            .border(1.dp, textColor.copy(0.3f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+private fun WRPracticeItem(
+    q               : QuestionItem,
+    wrongCount      : Int,
+    onMcqAnswer     : (Int) -> Unit,
+    onWrittenAnswer : (String) -> Int,
+    onHide          : () -> Unit
+) {
+    val isAnswered = q.answerState !is AnswerState.Unanswered
+    val isCorrect  = when (val s = q.answerState) {
+        is AnswerState.McqSelected      -> s.isCorrect
+        is AnswerState.WrittenSubmitted -> s.isCorrect
+        else                            -> false
+    }
+
+    var visible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(isCorrect) {
+        if (isCorrect && visible) {
+            delay(1200L)
+            visible = false
+            delay(520L)
+            onHide()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        exit    = fadeOut(animationSpec = tween(400, easing = LinearEasing)) +
+                  shrinkVertically(animationSpec = tween(520, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
     ) {
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-            color = textColor, fontFamily = NotoSansBengali, lineHeight = 15.sp)
-        Text(label, fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold,
-            fontFamily = NotoSansBengali)
+        val badgeColor = when {
+            wrongCount >= 3 -> WR_RedMain
+            wrongCount == 2 -> Color(0xFFF97316)
+            else            -> Color(0xFFF59E0B)
+        }
+
+        Card(
+            modifier  = Modifier.fillMaxWidth(),
+            shape     = RoundedCornerShape(14.dp),
+            colors    = CardDefaults.cardColors(
+                containerColor = when {
+                    isCorrect  -> Color(0xFFF0FDF4)
+                    isAnswered -> Color(0xFFFFF1F2)
+                    else       -> Color(0xFFFAFAFA)
+                }
+            ),
+            border    = BorderStroke(
+                1.5.dp,
+                when {
+                    isCorrect  -> Color(0xFF22C55E)
+                    isAnswered -> WR_RedMain.copy(alpha = 0.4f)
+                    else       -> Color(0xFF94A3B8)
+                }
+            ),
+            elevation = CardDefaults.cardElevation(2.dp)
+        ) {
+            Column(
+                modifier            = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(badgeColor)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                "×$wrongCount ভুল",
+                                fontSize   = 9.sp,
+                                color      = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (q.isMcq()) Color(0xFFEFF6FF) else Color(0xFFFAF5FF))
+                                .border(1.dp, if (q.isMcq()) Color(0xFFBFDBFE) else Color(0xFFDDD6FE), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                if (q.isMcq()) "MCQ" else "Written",
+                                fontSize   = 9.sp,
+                                color      = if (q.isMcq()) Color(0xFF1D4ED8) else Color(0xFF7C3AED),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (q.subTopic.isNotBlank()) {
+                            Text(
+                                q.subTopic.take(20),
+                                fontSize   = 9.sp,
+                                color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+                    }
+                }
+
+                QuestionText(text = q.question)
+
+                if (q.imageUrl.isNotBlank()) ZoomableImage(url = q.imageUrl)
+
+                if (q.isMcq()) {
+                    McqOptions(item = q, onAnswer = onMcqAnswer)
+                } else {
+                    WrittenInput(item = q, onSubmit = onWrittenAnswer)
+                }
+
+                if (isAnswered) {
+                    if (q.answer.isNotBlank()) AnswerBox(text = q.answer)
+                    if (q.explanation.isNotBlank() && q.explanation != q.answer) {
+                        ExplanationBox(text = q.explanation)
+                    }
+                    if (q.technique.isNotBlank()) TechniqueBox(text = q.technique)
+                }
+
+                if (isCorrect) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFDCFCE7))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("✅", fontSize = 18.sp)
+                        Text(
+                            "সঠিক উত্তর দিয়েছেন!",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF166534),
+                            fontFamily = NotoSansBengali
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CongratsOverlay() {
+    val pulse = rememberInfiniteTransition(label = "pulse")
+    val scale by pulse.animateFloat(
+        initialValue  = 0.97f,
+        targetValue   = 1.03f,
+        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label         = "scale"
+    )
+    val starAlpha by pulse.animateFloat(
+        initialValue  = 0.5f,
+        targetValue   = 1f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label         = "alpha"
+    )
+
+    Card(
+        modifier  = Modifier.fillMaxWidth().scale(scale),
+        shape     = RoundedCornerShape(20.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color(0xFF1E1B4B)),
+        elevation = CardDefaults.cardElevation(8.dp)
+    ) {
+        Column(
+            modifier            = Modifier.fillMaxWidth().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("🏆", fontSize = 60.sp)
+            Text(
+                "অভিনন্দন!",
+                fontSize   = 28.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color      = Color(0xFFFBBF24),
+                fontFamily = NotoSansBengali,
+                textAlign  = TextAlign.Center
+            )
+            Text(
+                "আপনি সব ভুল প্রশ্ন\nঅনুশীলনের মাধ্যমে সঠিক করেছেন! 🎉",
+                fontSize   = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color      = Color.White.copy(alpha = 0.9f),
+                fontFamily = NotoSansBengali,
+                textAlign  = TextAlign.Center,
+                lineHeight = 22.sp
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier              = Modifier.alpha(starAlpha)
+            ) {
+                listOf("⭐", "🌟", "✨", "🌟", "⭐").forEach { Text(it, fontSize = 22.sp) }
+            }
+            Text(
+                "কিছুক্ষণ পর এই সেকশন বন্ধ হয়ে যাবে...",
+                fontSize   = 10.sp,
+                color      = Color.White.copy(alpha = 0.4f),
+                fontFamily = NotoSansBengali,
+                textAlign  = TextAlign.Center
+            )
+        }
     }
 }
 
@@ -482,29 +836,326 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 }
 
 @Composable
+fun DailyRoutineCard(
+    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
+) {
+    val routine by vm.state.collectAsState()
+    val subjectOptions by vm.subjectOptions.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    if (showAddDialog) {
+        AddRoutineItemDialog(
+            subjectOptions = subjectOptions,
+            onAdd = { title, subject, subTopic, minutes ->
+                vm.addItem(title, subject, subTopic, minutes)
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column {
+                    Text("✅ আজকের রুটিন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                    Text(
+                        if (routine.items.isEmpty()) "এখনো কোনো রুটিন যুক্ত করা হয়নি"
+                        else "${routine.doneCount}/${routine.totalCount} সম্পন্ন",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StudyBuddyQuickButton()
+                    IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Add, null, tint = PrimaryIndigo)
+                    }
+                }
+            }
+
+            if (routine.items.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress   = { routine.progressPct / 100f },
+                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color      = if (routine.isComplete) GreenMint else PrimaryIndigo,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+
+                if (routine.isComplete) {
+                    Text(
+                        "🎉 আজকের রুটিন সম্পন্ন হয়েছে! দারুণ কাজ করেছো!",
+                        fontSize = 11.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold,
+                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                routine.items.forEach { item ->
+                    RoutineItemRow(
+                        item     = item,
+                        onToggle = { vm.toggleItem(item.id) },
+                        onRemove = { vm.removeItem(item.id) },
+                        onOpenStudy       = onOpenStudy,
+                        onOpenInstantTest = onOpenInstantTest,
+                        onOpenWeeklyTest  = onOpenWeeklyTest
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutineItemRow(
+    item     : com.hanif.smartstudy.data.model.RoutineItem,
+    onToggle : () -> Unit,
+    onRemove : () -> Unit,
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
+) {
+    var showActionMenu by remember { mutableStateOf(false) }
+    val hasSubject = item.subject.isNotBlank()
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = item.done,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(checkedColor = GreenMint)
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .then(if (hasSubject) Modifier.clickable { showActionMenu = true } else Modifier)
+        ) {
+            Text(
+                item.title,
+                fontSize = 13.sp,
+                fontFamily = NotoSansBengali,
+                fontWeight = if (item.done) FontWeight.Normal else FontWeight.Medium,
+                color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            if (hasSubject) {
+                val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
+                Text(
+                    "$subjLabel • ${item.minutes} মিনিট",
+                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali
+                )
+            }
+        }
+
+        if (hasSubject) {
+            Box {
+                IconButton(onClick = { showActionMenu = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
+                }
+                DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("📖 পড়া শুরু করো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenStudy(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📝 এখন টেস্ট দাও (Instant)", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenInstantTest(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("⚔️ সাপ্তাহিক চ্যালেঞ্জে যাও", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenWeeklyTest()
+                        }
+                    )
+                }
+            }
+        }
+
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddRoutineItemDialog(
+    subjectOptions: List<com.hanif.smartstudy.data.model.RoutineSubjectOption>,
+    onAdd: (String, String, String, Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title    by remember { mutableStateOf("") }
+    var subject  by remember { mutableStateOf("") }
+    var subTopic by remember { mutableStateOf("") }
+    var minutes  by remember { mutableStateOf(20) }
+    var subjectMenuExpanded  by remember { mutableStateOf(false) }
+    var subTopicMenuExpanded by remember { mutableStateOf(false) }
+    val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
+
+    val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("➕ রুটিনে নতুন টপিক যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title, onValueChange = { title = it },
+                    label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+
+                ExposedDropdownMenuBox(
+                    expanded = subjectMenuExpanded,
+                    onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = subject,
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = subjectOptions.isNotEmpty(),
+                        label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                        placeholder = {
+                            Text(
+                                if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
+                                fontFamily = NotoSansBengali, fontSize = 12.sp
+                            )
+                        },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = subjectMenuExpanded,
+                        onDismissRequest = { subjectMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            onClick = {
+                                subject = ""
+                                subTopic = ""
+                                subjectMenuExpanded = false
+                            }
+                        )
+                        subjectOptions.forEach { opt ->
+                            DropdownMenuItem(
+                                text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                onClick = {
+                                    subject = opt.subject
+                                    subTopic = ""
+                                    subjectMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = subTopicMenuExpanded,
+                        onExpandedChange = { subTopicMenuExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = subTopic,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = subTopicMenuExpanded,
+                            onDismissRequest = { subTopicMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                onClick = {
+                                    subTopic = ""
+                                    subTopicMenuExpanded = false
+                                }
+                            )
+                            subTopicsForSubject.forEach { st ->
+                                DropdownMenuItem(
+                                    text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                                    onClick = {
+                                        subTopic = st
+                                        subTopicMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    minuteOptions.take(3).forEach { m ->
+                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    minuteOptions.drop(3).forEach { m ->
+                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (title.isNotBlank()) onAdd(title, subject, subTopic, minutes) },
+                enabled = title.isNotBlank()
+            ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    )
+}
+
+@Composable
 fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
     var showGoalDialog by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(CardBg), CardDefaults.cardElevation(2.dp)) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(progress = { goal.progressPct / 100f }, modifier = Modifier.size(60.dp),
-                    color = PrimaryIndigo, strokeWidth = 6.dp, trackColor = Color(0xFFE2E8F0))
+                    color = PrimaryIndigo, strokeWidth = 6.dp, trackColor = MaterialTheme.colorScheme.surfaceVariant)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${goal.doneMinutes}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
-                    Text("মি", fontSize = 7.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    Text("${goal.doneMinutes}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                    Text("মি", fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
-                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = TextMuted, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
+                Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
                 if (goal.progressPct >= 100f) Text("🎉 লক্ষ্য পূরণ হয়েছে!", fontSize = 10.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
             }
             IconButton(onClick = { showGoalDialog = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Edit, null, tint = TextMuted, modifier = Modifier.size(16.dp)) }
+                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
         }
     }
-    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showGoalDialog = false }) // Unresolved Reference ফিক্সড (showGoalDialog)
+    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showDialog = false })
 }
 
 @Composable
@@ -515,7 +1166,7 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
         title = { Text("দৈনিক লক্ষ্য নির্ধারণ", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
         text = {
             Column {
-                Text("পড়ার লক্ষ্য বেছে নিন:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = TextMuted, modifier = Modifier.padding(bottom = 10.dp))
+                Text("পড়ার লক্ষ্য বেছে নিন:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     options.chunked(3).forEach { row ->
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -526,15 +1177,15 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
             }
         },
         confirmButton = { TextButton({ onSet(selected) }) { Text("সেট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) } },
-        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = TextMuted) } })
+        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) } })
 }
 
 @Composable
 fun WeeklyStreakCard(streak: StreakInfo) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(CardBg), CardDefaults.cardElevation(1.dp)) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
+                Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                 Badge(containerColor = Color(0xFFFFFBEB), contentColor = Amber) {
                     Text("🔥 ${streak.streakDays} দিন", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
             }
@@ -548,7 +1199,7 @@ fun WeeklyStreakCard(streak: StreakInfo) {
 
 @Composable
 private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
-    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFFF1F5F9), Color(0xFFF1F5F9))) }
+    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF94A3B8))) }
     val textColor = when { day.isToday -> Color.White; day.isDone -> Color(0xFF166534); else -> Color(0xFFCBD5E1) }
     val icon = when { day.isToday -> if (day.isDone) "🔥" else "📍"; day.isDone -> "✓"; else -> "" }
     Column(modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 8.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -582,7 +1233,7 @@ fun ExamCountdownCard(countdown: ExamCountdown, onClear: () -> Unit = {}) {
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CountdownBox(countdown.days.toString(), "দিন", Modifier.weight(1f))
-                CountdownBox(countdown.hours.toString().padStart(2,'0'), "ঘণ্টা", Modifier.weight(1f))
+                CountdownBox(countdown.hours.toString().padStart(2,'0'), "ঘণ্টا", Modifier.weight(1f))
                 CountdownBox(countdown.minutes.toString().padStart(2,'0'), "মিনিট", Modifier.weight(1f))
                 CountdownBox(countdown.seconds.toString().padStart(2,'0'), "সেকেন্ড", Modifier.weight(1f))
             }
@@ -607,7 +1258,7 @@ private fun SetExamCard(onSet: (String, String) -> Unit) {
             Text("📅", fontSize = 28.sp); Spacer(Modifier.width(10.dp))
             Column {
                 Text("পরীক্ষার তারিখ সেট করুন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo, fontFamily = NotoSansBengali)
-                Text("কাউন্টডাউন চালু করতে ট্যাপ করুন", fontSize = 10.sp, color = TextMuted, fontFamily = NotoSansBengali)
+                Text("কাউন্টডাউন চালু করতে ট্যাপ করুন", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
             }
         }
     }
