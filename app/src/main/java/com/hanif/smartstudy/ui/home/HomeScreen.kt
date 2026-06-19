@@ -1,820 +1,717 @@
-package com.hanif.smartstudy.ui.home
+package com.hanif.smartstudy.viewmodel
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material3.*
-import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.Lifecycle
-import coil.compose.AsyncImage
+import android.app.Application
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.hanif.smartstudy.data.local.ContentCache
+import com.hanif.smartstudy.data.local.TestHistoryCache
 import com.hanif.smartstudy.data.model.*
-import com.hanif.smartstudy.ui.shared.*
-import com.hanif.smartstudy.ui.theme.NotoSansBengali
-import com.hanif.smartstudy.viewmodel.HomeUiState
-import com.hanif.smartstudy.viewmodel.HomeViewModel
-import com.hanif.smartstudy.viewmodel.QuizViewModel
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import android.app.AlarmManager
-import android.app.PendingIntent
-import android.content.Context
-import android.content.Intent
-import android.os.Build
-import com.hanif.smartstudy.receiver.ReminderReceiver
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
-import kotlinx.coroutines.delay
+import com.hanif.smartstudy.data.repository.ContentRepository
+import com.hanif.smartstudy.data.repository.DataState
+import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.AudienceFilter.filterForUser
+import com.hanif.smartstudy.util.AudienceFilter.forUser
+import kotlinx.coroutines.*
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
-private val PrimaryIndigo = Color(0xFF4F46E5)
-private val DeepIndigo    = Color(0xFF1E1B4B)
-private val Amber         = Color(0xFFF59E0B)
-private val GreenMint     = Color(0xFF10B981)
+data class QuizUiState(
+    val mode          : StudyMode        = StudyMode.QUIZ,
+    val navPath       : NavPath          = NavPath(),
+    val subjects      : List<SubjectEntry>   = emptyList(),
+    val subTopics     : List<SubTopicEntry>  = emptyList(),
+    val questions     : List<QuestionItem>   = emptyList(),
+    val isLoading     : Boolean          = true,
+    val error         : String?          = null,
+    val isQuizActive  : Boolean          = false,
+    val timerSec      : Int              = 0,
+    val totalTimeSec  : Int              = 0,
+    val answeredCount : Int              = 0,
+    val result        : QuizResult?      = null,
+    val showResult    : Boolean          = false,
+    val isMockZone    : Boolean          = false,
+    val mockConfig    : MockTestConfig   = MockTestConfig(),
+    val readingIndex  : Int              = 0,
+    val bookmarkedIds : Set<String>      = emptySet(),
+    val weakTopics    : List<WeakTopic>  = emptyList(),
+    val contentLoaded : Boolean          = false,
+    val highlightQuestionId : String?    = null
+)
 
-// ═══════════════════════════════════════════════════════════
-// Exam Eve Notification — পরীক্ষার আগের রাত ১০টায় রিমাইন্ডার
-// ═══════════════════════════════════════════════════════════
-object ExamNotificationHelper {
+class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
-    private const val EXAM_NOTIF_REQ = 2025
+    private val repo    = ContentRepository(app)
+    private val cache   = ContentCache(app)
+    private val session = SessionManager(app)
+    private val historyCache = TestHistoryCache(app)
 
-    fun scheduleExamEveReminder(ctx: Context, dateStr: String, examName: String) {
-        try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val examDate = sdf.parse(dateStr) ?: return
+    private val _state = MutableStateFlow(QuizUiState())
+    val state: StateFlow<QuizUiState> = _state.asStateFlow()
 
-            val cal = Calendar.getInstance().apply {
-                time = examDate
-                add(Calendar.DAY_OF_YEAR, -1)   // আগের দিন
-                set(Calendar.HOUR_OF_DAY, 22)    // রাত ১০টা
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-            }
+    private val _pendingAchievement = MutableStateFlow<Achievement?>(null)
+    val pendingAchievement: StateFlow<Achievement?> = _pendingAchievement.asStateFlow()
 
-            if (cal.timeInMillis <= System.currentTimeMillis()) return
+    private val _pendingStreak = MutableStateFlow(0)
+    val pendingStreak: StateFlow<Int> = _pendingStreak.asStateFlow()
 
-            val intent = Intent(ctx, ReminderReceiver::class.java).apply {
-                putExtra(ReminderReceiver.EXTRA_TYPE, ReminderReceiver.TYPE_EXAM_EVE)
-                putExtra("title", "📅 আগামীকাল পরীক্ষা!")
-                putExtra("body", "\"$examName\" কাল। শেষবারের মতো রিভিশন করে নাও!")
-                putExtra("notif_id", EXAM_NOTIF_REQ)
-            }
-            val pi = PendingIntent.getBroadcast(
-                ctx, EXAM_NOTIF_REQ, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    // Sound + Vibration এর জন্য — true=সঠিক, false=ভুল, null=কোনো event নেই
+    private val _feedbackEvent = MutableStateFlow<Boolean?>(null)
+    val feedbackEvent: StateFlow<Boolean?> = _feedbackEvent.asStateFlow()
+    fun clearFeedback() { _feedbackEvent.value = null }
+
+    fun consumeAchievement() { _pendingAchievement.value = null }
+    fun consumeStreak()      { _pendingStreak.value = 0 }
+
+    private var timerJob: Job? = null
+    private var loadJob: Job? = null   // cancellable load job
+    private val prefs = app.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
+
+    // init এ কিছু করি না — setMode() call আসার জন্য অপেক্ষা
+    // MainScreen থেকে LaunchedEffect(Unit) { vm.setMode(...) } call হবে
+
+    // ── setMode: সব কিছুর শুরু ──
+    fun setMode(newMode: StudyMode) {
+        Log.d("QuizVM", "setMode($newMode) called, current=${_state.value.mode}")
+
+        // আগের load cancel করো
+        loadJob?.cancel()
+
+        _state.update {
+            it.copy(
+                mode         = newMode,
+                navPath      = NavPath(),
+                isQuizActive = false,
+                result       = null,
+                showResult   = false,
+                isMockZone   = false,
+                timerSec     = 0,
+                subjects     = emptyList(),
+                subTopics    = emptyList(),
+                isLoading    = true,
+                error        = null
             )
-            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+        }
+
+        loadJob = viewModelScope.launch {
+            val bookmarks  = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
+            val weakTopics = loadWeakTopics()
+            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics) }
+
+            // 30 সেকেন্ড timeout
+            val result = withTimeoutOrNull(30_000L) { repo.getContent() }
+                ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
+
+            val content = (result as? DataState.Success)?.data ?: AppContent()
+            val errMsg  = (result as? DataState.Error)?.message
+
+            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
+
+            val debugMsg = when {
+                content.isEmpty() -> "❌ Data empty! err=$errMsg quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
+                else -> "✅ quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
+            }
+            Log.d("QuizVM_DEBUG", debugMsg)
+
+            _state.update {
+                it.copy(
+                    contentLoaded = !content.isEmpty(),
+                    error         = if (content.isEmpty()) (errMsg ?: "Data empty") else null
+                )
+            }
+            rebuildSubjects(content, newMode)
+        }
+    }
+
+    fun navigateToSubject(subject: String) {
+        _state.update { it.copy(navPath = NavPath(subject)) }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubTopics(content, subject, _state.value.mode)
+        }
+    }
+
+    fun navigateToSubTopic(subTopic: String) {
+        val subject = _state.value.navPath.subject ?: return
+        _state.update { it.copy(navPath = NavPath(subject, subTopic)) }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            loadQuestions(content, subject, subTopic, _state.value.mode)
+        }
+    }
+
+    /** নোটিফিকেশন থেকে এসে নির্দিষ্ট প্রশ্নে সরাসরি navigate করো */
+    fun navigateToQuestion(questionId: String) {
+        if (questionId.isBlank()) return
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val pool = when (_state.value.mode) {
+                StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it) }
+                StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+                StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
+            }
+            val target = pool.find { it.id == questionId } ?: return@launch
+            _state.update {
+                it.copy(navPath = NavPath(target.subject, target.subTopic), highlightQuestionId = questionId)
+            }
+            loadQuestions(content, target.subject, target.subTopic, _state.value.mode)
+        }
+    }
+
+    fun consumeHighlight() {
+        _state.update { it.copy(highlightQuestionId = null) }
+    }
+
+    fun adminRefreshContent() {
+        viewModelScope.launch {
+            cache.clearCache()
+            setMode(_state.value.mode)
+        }
+    }
+
+    fun navigateBack() {
+        val path = _state.value.navPath
+        timerJob?.cancel()
+        when {
+            _state.value.isMockZone -> _state.update {
+                it.copy(isMockZone = false, navPath = NavPath(), isQuizActive = false,
+                        result = null, showResult = false, timerSec = 0)
+            }
+            _state.value.showResult -> {
+                _state.update {
+                    it.copy(showResult = false, isQuizActive = false, result = null,
+                            navPath = NavPath(path.subject), timerSec = 0)
+                }
+                // উত্তর দেওয়ার পর progress আপডেট হয়েছে — subTopic list রিফ্রেশ করো
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
+            }
+            path.subTopic != null -> {
+                _state.update { it.copy(navPath = NavPath(path.subject)) }
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
+            }
+            path.subject  != null -> {
+                _state.update { it.copy(navPath = NavPath()) }
+                viewModelScope.launch {
+                    val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                    rebuildSubjects(content, _state.value.mode)
+                }
+            }
+            else -> {}
+        }
+    }
+
+    fun openMockZone() {
+        _state.update { it.copy(isMockZone = true, navPath = NavPath()) }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubjects(content, _state.value.mode, forMock = true)
+        }
+    }
+
+    /**
+     * রুটিন থেকে "এখন টেস্ট দাও" — নির্দিষ্ট subject/subTopic এর উপর সরাসরি
+     * Mock Test শুরু করো। subTopic ফাঁকা থাকলে ওই subject এর সব subTopic
+     * সিলেক্ট হবে।
+     */
+    fun startInstantTestFor(subject: String, subTopic: String, limit: Int = 10) {
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubjects(content, _state.value.mode, forMock = true)
+
+            val subjectEntry = _state.value.subjects.find { it.name == subject }
+            val keys = if (subTopic.isNotBlank()) {
+                listOf("$subject||$subTopic")
+            } else if (subjectEntry?.subTopics?.isNotEmpty() == true) {
+                subjectEntry.subTopics.map { "$subject||${it.name}" }
             } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                // এই বিষয়ে কোনো SubTopic নেই — সরাসরি subject-ভিত্তিক প্রশ্ন (subTopic ফাঁকা)
+                listOf("$subject||")
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+            _state.update {
+                it.copy(
+                    isMockZone = true,
+                    navPath    = NavPath(),
+                    mockConfig = it.mockConfig.copy(
+                        selectedTopics = keys,
+                        questionLimit  = limit
+                    )
+                )
+            }
+            startMock()
         }
     }
 
-    fun cancelExamEveReminder(ctx: Context) {
-        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val pi = PendingIntent.getBroadcast(
-            ctx, EXAM_NOTIF_REQ,
-            Intent(ctx, ReminderReceiver::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        am.cancel(pi)
+    fun toggleMockTopic(key: String) {
+        val current = _state.value.mockConfig.selectedTopics.toMutableList()
+        if (current.contains(key)) current.remove(key) else current.add(key)
+        _state.update { it.copy(mockConfig = it.mockConfig.copy(selectedTopics = current)) }
     }
-}
 
-@Composable
-fun HomeScreen(
-    viewModel     : HomeViewModel = viewModel(),
-    quizViewModel : QuizViewModel? = null,
-    onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {},
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
-) {
-    val state by viewModel.uiState.collectAsState()
-    val ctx   = LocalContext.current
+    fun setMockLimit(n: Int) {
+        _state.update { it.copy(mockConfig = it.mockConfig.copy(questionLimit = n)) }
+    }
 
-    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refresh()
+    fun startMock() {
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val cfg     = _state.value.mockConfig
+            val mode    = _state.value.mode
+            val pool    = when (mode) {
+                StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it) }
+                StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+                StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
+            }
+            val filtered = if (cfg.selectedTopics.isEmpty()) pool
+            else pool.filter { q ->
+                cfg.selectedTopics.any { key ->
+                    val parts = key.split("||")
+                    q.subject == parts.getOrNull(0) && q.subTopic == parts.getOrNull(1)
+                }
+            }
+            val questions = filtered.shuffled().take(cfg.questionLimit)
+                .map { it.copy(isWeakTopic = isWeak(it.subTopic)) }
+            _state.update {
+                it.copy(isMockZone = false, questions = questions, isQuizActive = true,
+                        showResult = false, result = null, answeredCount = 0,
+                        navPath = NavPath("Mock Test"))
+            }
+            startTimer(questions.size)
+        }
+    }
+
+    fun answerMcq(questionIndex: Int, selectedOption: Int) {
+        val questions = _state.value.questions.toMutableList()
+        val q = questions.getOrNull(questionIndex) ?: return
+        if (q.answerState !is AnswerState.Unanswered) return
+        val selectedText = when (selectedOption) {
+            1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
+        }
+        val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
+        questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
+        _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
+        markProgress(q.id, _state.value.mode)
+        viewModelScope.launch {
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+                saveWrongQId(q.id, _state.value.mode)     // ভুল হলে save
+            }
+            repo.submitQuizAnswer(q.id, isCorrect)
+        }
+    }
+
+    fun answerWritten(questionIndex: Int, userText: String): Int {
+        val questions = _state.value.questions.toMutableList()
+        val q = questions.getOrNull(questionIndex) ?: return 0
+        val matchPct = fuzzyMatch(userText, q.answer)
+        val isCorrect = matchPct >= 70
+        questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
+        _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
+        markProgress(q.id, _state.value.mode)
+        viewModelScope.launch {
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQIdByMode(q.id, _state.value.mode)
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+                saveWrongQId(q.id, _state.value.mode)
             }
         }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        return matchPct
     }
 
-    var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
-    LaunchedEffect(state) {
-        wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
+    // ── HomeScreen-এর WrongReviewSection-এর জন্য নতুন ৩টি মেথড সংযোজন ──
+    fun answerWrongQuestionMcq(questionId: String, selectedOption: Int) {
+        val content = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache() ?: return
+        val ids = prefs.getStringSet("wrong_q_ids", emptySet()) ?: return
+        
+        // ভুল আইডির তালিকায় ম্যাচিং এন্ট্রিটি খুঁজে বের করা
+        val matchEntry = ids.find { it.endsWith(":$questionId") } ?: return
+        val parts = matchEntry.split(":", limit = 2)
+        val sheet = parts.getOrElse(0) { "quiz" }
+        
+        val pool = when (sheet) {
+            "qbank" -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+            "study" -> content.study.map { QuestionItem.fromStudyItem(it) }
+            else    -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+        }
+        val q = pool.find { it.id == questionId } ?: return
+        val selectedText = when (selectedOption) {
+            1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
+        }
+        val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
+        _feedbackEvent.value = isCorrect
+        
+        viewModelScope.launch {
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQId(questionId)
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+            }
+        }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 88.dp)
-    ) {
-        HomeHero(state = state, onNameEdit = { viewModel.updateUserName(it) }, onRefresh = { viewModel.refresh() })
+    fun answerWrongQuestionWritten(questionId: String, userText: String): Int {
+        val content = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache() ?: return 0
+        val ids = prefs.getStringSet("wrong_q_ids", emptySet()) ?: return 0
+        
+        val matchEntry = ids.find { it.endsWith(":$questionId") } ?: return 0
+        val parts = matchEntry.split(":", limit = 2)
+        val sheet = parts.getOrElse(0) { "quiz" }
+        
+        val pool = when (sheet) {
+            "qbank" -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+            "study" -> content.study.map { QuestionItem.fromStudyItem(it) }
+            else    -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+        }
+        val q = pool.find { it.id == questionId } ?: return 0
+        val matchPct = fuzzyMatch(userText, q.answer)
+        val isCorrect = matchPct >= 70
+        _feedbackEvent.value = isCorrect
+        
+        viewModelScope.launch {
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQId(questionId)
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+            }
+        }
+        return matchPct
+    }
 
-        if (state.isOffline) OfflineBanner()
+    fun removeCorrectFromWrong(questionId: String) {
+        removeWrongQId(questionId)
+    }
+    // ─────────────────────────────────────────────────────────────
 
-        Column(
-            modifier            = Modifier.padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Spacer(Modifier.height(4.dp))
+    fun submitQuiz() {
+        timerJob?.cancel()
+        val questions  = _state.value.questions
+        val totalTime  = _state.value.totalTimeSec
+        val elapsed    = totalTime - _state.value.timerSec
+        var correct = 0; var wrong = 0; var skipped = 0
+        val subjectMap = mutableMapOf<String, SubjectScore>()
 
-            AdBannerPlaceholder()
+        questions.forEach { q ->
+            when (val a = q.answerState) {
+                is AnswerState.McqSelected      -> { if (a.isCorrect) correct++ else wrong++ }
+                is AnswerState.WrittenSubmitted -> { if (a.isCorrect) correct++ else wrong++ }
+                else -> skipped++
+            }
+            val subj = q.subject.ifBlank { "অন্যান্য" }
+            val prev = subjectMap[subj] ?: SubjectScore(subj, 0, 0)
+            val isC  = q.answerState.let { it is AnswerState.McqSelected && it.isCorrect || it is AnswerState.WrittenSubmitted && it.isCorrect }
+            subjectMap[subj] = prev.copy(correct = prev.correct + (if (isC) 1 else 0), total = prev.total + 1)
+        }
 
-            QuickStatsRow(stats = state.studyStats)
+        val xp = correct * 5 + (correct - wrong).coerceAtLeast(0) * 2
+        val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap)
+        _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
 
-            AdNativePlaceholder()
+        // ── "এখন টেস্ট দাও" (Mock Test) রেজাল্ট হিস্ট্রিতে জমা রাখো ──
+        if (_state.value.navPath.subject == "Mock Test" && result.total > 0) {
+            viewModelScope.launch {
+                val cfg = _state.value.mockConfig
+                val topicLabels = if (cfg.selectedTopics.isEmpty()) {
+                    listOf("সব বিষয় (র‍্যান্ডম)")
+                } else {
+                    cfg.selectedTopics.map { key ->
+                        val parts = key.split("||")
+                        val subj  = parts.getOrNull(0) ?: ""
+                        val sub   = parts.getOrNull(1)
+                        if (!sub.isNullOrBlank()) "$subj - $sub" else subj
+                    }
+                }
+                historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels))
+            }
+        }
 
-            DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
+        viewModelScope.launch {
+            cache.markTodayActivity()
+            val user = session.getCurrentUser()
+            if (user != null) session.saveUser(user.copy(xp = (user.xp + xp).coerceAtMost(999999)))
+            session.recordDailyXp(xp)
+            val streak = session.updateStreak()
+            _pendingStreak.value = streak
 
-            DailyRoutineCard(
-                onOpenStudy       = onOpenStudy,
-                onOpenInstantTest = onOpenInstantTest,
-                onOpenWeeklyTest  = onOpenWeeklyTest
+            checkAndUnlock("first_quiz")
+            if (result.wrong == 0 && result.skipped == 0 && result.total > 0) checkAndUnlock("perfect_score")
+            listOf(3 to "streak_3", 7 to "streak_7", 30 to "streak_30").forEach { (days, id) -> if (streak >= days) checkAndUnlock(id) }
+            val bCount = _state.value.bookmarkedIds.size
+            if (bCount >= 10) checkAndUnlock("bookmarked_10")
+            val totalXp = (user?.xp ?: 0) + xp
+            listOf(100 to "xp_100", 500 to "xp_500", 1000 to "xp_1000").forEach { (t, id) -> if (totalXp >= t) checkAndUnlock(id) }
+        }
+    }
+
+    private suspend fun checkAndUnlock(id: String) {
+        if (!session.hasAchievement(id)) {
+            session.unlockAchievement(id)
+            _pendingAchievement.value = Achievements.findById(id)
+        }
+    }
+
+    fun reportQuestion(questionIndex: Int, issue: String) {
+        val q    = _state.value.questions.getOrNull(questionIndex) ?: return
+        val user = session.getCurrentUser()
+        val tab  = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "quiz"
+            StudyMode.QBANK -> "qbank"
+            StudyMode.STUDY -> "study"
+        }
+        val qsheet = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        viewModelScope.launch {
+            try {
+                com.hanif.smartstudy.data.remote.FirebaseDataService.reportQuestion(
+                    questionId = q.id,
+                    question   = q.question,
+                    issue      = issue,
+                    userName   = user?.displayName() ?: "",
+                    userPhone  = user?.phone ?: "",
+                    tab        = tab,
+                    qsheet     = qsheet
+                )
+                Log.d("QuizVM", "Reported question ${q.id} [$tab/$qsheet]: $issue")
+            } catch (e: Exception) {
+                Log.e("QuizVM", "Report failed: ${e.message}")
+            }
+        }
+    }
+
+    fun toggleBookmark(questionId: String) {
+        val current = _state.value.bookmarkedIds.toMutableSet()
+        if (current.contains(questionId)) current.remove(questionId) else current.add(questionId)
+        prefs.edit().putStringSet("bookmarks", current).apply()
+        // questions list এও isBookmarked update করো — UI immediately reflect করবে
+        val updatedQuestions = _state.value.questions.map { q ->
+            if (q.id == questionId) q.copy(isBookmarked = current.contains(questionId)) else q
+        }
+        _state.update { it.copy(bookmarkedIds = current, questions = updatedQuestions) }
+    }
+
+    fun updateReadingIndex(index: Int) {
+        _state.update { it.copy(readingIndex = index) }
+    }
+
+    fun startTimer(questionCount: Int) {
+        val totalSec = questionCount * 60
+        timerJob?.cancel()
+        _state.update { it.copy(timerSec = totalSec, totalTimeSec = totalSec, isQuizActive = true) }
+        timerJob = viewModelScope.launch {
+            while (isActive && _state.value.timerSec > 0) {
+                delay(1000)
+                _state.update { it.copy(timerSec = (it.timerSec - 1).coerceAtLeast(0)) }
+            }
+            if (_state.value.timerSec <= 0 && _state.value.isQuizActive) submitQuiz()
+        }
+    }
+
+    private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val items = when (mode) {
+            StudyMode.QUIZ  -> filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.map { QuestionItem.fromStudyItem(it) }
+        }
+        Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
+
+        val progressMap = loadProgressMap()
+        val subjects = items
+            .filter { it.subject.isNotBlank() }
+            .groupBy { it.subject }
+            .map { (subj, qs) ->
+                SubjectEntry(
+                    name      = subj,
+                    totalQ    = qs.size,
+                    doneQ     = qs.count { progressMap.contains("${mode.name}:${it.id}") },
+                    subTopics = qs.filter { it.subTopic.isNotBlank() }
+                                  .groupBy { it.subTopic }
+                                  .map { (st, stQs) ->
+                                      SubTopicEntry(
+                                          name    = st,
+                                          subject = subj,
+                                          totalQ  = stQs.size,
+                                          doneQ   = stQs.count { progressMap.contains("${mode.name}:${it.id}") },
+                                          isWeak  = isWeak(st)
+                                      )
+                                  }
+                )
+            }
+        Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode")
+        _state.update { it.copy(subjects = subjects, isLoading = false) }
+    }
+
+    private suspend fun rebuildSubTopics(content: AppContent, subject: String, mode: StudyMode) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val items = when (mode) {
+            StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject }.map { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject }.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
+        }
+        val progressMap = loadProgressMap()
+        val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
+            SubTopicEntry(name = st, subject = subject, totalQ = qs.size,
+                          doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
+        }
+        _state.update { it.copy(subTopics = subTopics) }
+    }
+
+    private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
+        val bookmarks = _state.value.bookmarkedIds
+        val user      = session.getCurrentUser()
+        val adminTag  = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered  = content.forUser(user, adminTag)
+        val items = when (mode) {
+            StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
+        }.map { it.copy(isBookmarked = bookmarks.contains(it.id), isWeakTopic = isWeak(it.subTopic)) }
+
+        _state.update {
+            it.copy(questions = items, isQuizActive = mode != StudyMode.STUDY,
+                    showResult = false, result = null, answeredCount = 0, timerSec = 0)
+        }
+        if (mode != StudyMode.STUDY) startTimer(items.size)
+    }
+
+    private fun loadProgressMap(): Set<String> = prefs.getStringSet("progress", emptySet()) ?: emptySet()
+
+    // প্রশ্ন উত্তর দেওয়া হলে "done" সেট এ যোগ করো — নইলে progressPct সবসময় ০% থেকে যায়
+    private fun markProgress(qId: String, mode: StudyMode) {
+        if (qId.isBlank()) return
+        val key   = "${mode.name}:$qId"
+        val saved = prefs.getStringSet("progress", mutableSetOf())!!.toMutableSet()
+        if (saved.add(key)) prefs.edit().putStringSet("progress", saved).apply()
+    }
+
+    private fun saveWeakTopic(subject: String, subTopic: String) {
+        if (subTopic.isBlank()) return
+        val key = "weak_$subTopic"
+        prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply()
+    }
+
+    private fun saveWrongQId(qId: String, mode: StudyMode) {
+        val sheet  = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
+        val entry  = "$sheet:$qId"
+        val ids    = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        ids.add(entry)
+        val counts = prefs.getStringSet("wrong_q_count", mutableSetOf())!!.toMutableSet()
+        // count format: "sheet:id=N"
+        val existing = counts.find { it.startsWith("$entry=") }
+        val newCount = (existing?.split("=")?.getOrNull(1)?.toIntOrNull() ?: 0) + 1
+        if (existing != null) counts.remove(existing)
+        counts.add("$entry=$newCount")
+        prefs.edit().putStringSet("wrong_q_ids", ids).putStringSet("wrong_q_count", counts).apply()
+    }
+
+    /** HomeScreen WrongReviewSection থেকে call হয় — সঠিক হলে remove */
+    fun removeWrongQId(qId: String) {
+        listOf("quiz", "qbank", "study").forEach { sheet ->
+            val entry = "$sheet:$qId"
+            val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+            if (ids.remove(entry)) { prefs.edit().putStringSet("wrong_q_ids", ids).apply(); return }
+        }
+    }
+
+
+    private fun removeWrongQIdByMode(qId: String, mode: StudyMode) {
+        val sheet = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
+        val entry = "$sheet:$qId"
+        val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        ids.remove(entry)
+        prefs.edit().putStringSet("wrong_q_ids", ids).apply()
+    }
+
+    fun getWrongQuestions(): List<Pair<QuestionItem, Int>> {
+        val content   = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache() ?: return emptyList()
+        val ids       = prefs.getStringSet("wrong_q_ids", emptySet()) ?: return emptyList()
+        val counts    = prefs.getStringSet("wrong_q_count", emptySet()) ?: emptySet()
+        val countMap  = counts.associate {
+            val p = it.split("="); p.getOrElse(0){""} to (p.getOrElse(1){"1"}.toIntOrNull() ?: 1)
+        }
+        return ids.mapNotNull { entry ->
+            val parts  = entry.split(":", limit = 2)
+            val sheet  = parts.getOrElse(0) { "quiz" }
+            val qId    = parts.getOrElse(1) { "" }
+            val pool   = when (sheet) {
+                "qbank" -> content.qbank.map { QuestionItem.fromQBankItem(it) }
+                "study" -> content.study.map { QuestionItem.fromStudyItem(it) }
+                else    -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
+            }
+            val q = pool.find { it.id == qId } ?: return@mapNotNull null
+            q to (countMap[entry] ?: 1)
+        }.sortedByDescending { it.second }
+    }
+
+    fun startWrongReview() {
+        val wrongItems = getWrongQuestions().map { (q, _) -> q }
+        if (wrongItems.isEmpty()) return
+        _state.update {
+            it.copy(
+                questions     = wrongItems,
+                isQuizActive  = true,
+                showResult    = false,
+                result        = null,
+                answeredCount = 0,
+                navPath       = NavPath("ভুল প্রশ্ন Review")
             )
-
-            WeeklyStreakCard(streak = state.streakInfo)
-
-            // ── Wrong Question Review Section (আলাদা ফাইলের WrongReviewSection কে সঠিক প্যারামিটারে কল) ──
-            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
-                WrongReviewSection(
-                    wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerWrongQuestionMcq(qId, opt) },
-                    onAnswerWritten = { qId, text -> quizViewModel?.answerWrongQuestionWritten(qId, text) ?: 0 },
-                    onRemoveCorrect = { qId -> quizViewModel?.removeCorrectFromWrong(qId) }
-                )
-            }
-
-            val examExpired = state.examCountdown.isSet &&
-                state.examCountdown.days   == 0L &&
-                state.examCountdown.hours  == 0L &&
-                state.examCountdown.minutes == 0L &&
-                state.examCountdown.seconds == 0L
-            when {
-                state.examCountdown.isSet && !examExpired ->
-                    ExamCountdownCard(
-                        countdown = state.examCountdown,
-                        onClear   = { viewModel.clearExamDate() }
-                    )
-                !state.examCountdown.isSet ->
-                    SetExamCard(onSet = { d, n ->
-                        viewModel.setExamDate(d, n)
-                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
-                    })
-            }
-
-            if (state.isLoading) {
-                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = PrimaryIndigo, modifier = Modifier.size(32.dp))
-                }
-            }
-            state.error?.let { ErrorBanner(it) }
-
-            Spacer(Modifier.height(8.dp))
         }
+        startTimer(wrongItems.size)
+    }
+
+    private fun isWeak(subTopic: String) = prefs.getInt("weak_$subTopic", 0) >= 2
+
+    private fun loadWeakTopics(): List<WeakTopic> =
+        prefs.all.entries
+            .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
+            .map { WeakTopic(it.key.removePrefix("weak_"), "", it.value as Int) }
+            .sortedByDescending { it.wrongCount }
+
+    private fun fuzzyMatch(userText: String, correctText: String): Int {
+        if (userText.isBlank()) return 0
+        val uWords = userText.lowercase().split(Regex("[\\s,।.]+")).filter { it.length > 1 }.toSet()
+        val cWords = correctText.lowercase().split(Regex("[\\s,।.]+")).filter { it.length > 1 }.toSet()
+        if (cWords.isEmpty()) return 0
+        return minOf(100, (uWords.intersect(cWords).size * 100) / cWords.size)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        timerJob?.cancel()
+        loadJob?.cancel()
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// REAL ADMOB ADS
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-fun AdBannerPlaceholder() {
-    com.hanif.smartstudy.ui.ads.AdBannerView(
-        adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
-    )
-}
-
-@Composable
-fun AdNativePlaceholder() {
-    com.hanif.smartstudy.ui.ads.AdBannerView(
-        adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
-    )
-}
-
-// ═══════════════════════════════════════════════════════════
-// EXISTING COMPONENTS
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-private fun HomeHero(state: HomeUiState, onNameEdit: (String) -> Unit, onRefresh: () -> Unit) {
-    var editingName by remember { mutableStateOf(false) }
-    var nameInput   by remember { mutableStateOf(state.user?.name ?: "") }
-    LaunchedEffect(state.user?.name) { nameInput = state.user?.name ?: "" }
-
-    Box(
-        modifier = Modifier.fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color(0xFF312E81), Color(0xFF4F46E5), Color(0xFF6366F1))))
-            .padding(top = 16.dp, bottom = 20.dp, start = 14.dp, end = 14.dp)
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()) {
-                Box(Modifier.size(56.dp).clip(CircleShape)
-                    .background(Color.White.copy(0.2f))
-                    .border(2.dp, Color.White.copy(0.5f), CircleShape),
-                    contentAlignment = Alignment.Center) {
-                    val pic = state.user?.picture
-                    if (!pic.isNullOrEmpty()) {
-                        AsyncImage(model = pic, contentDescription = null,
-                            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else { Text("👤", fontSize = 26.sp) }
-                }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("স্বাগতম! 👋", fontSize = 10.sp, color = Color.White.copy(0.6f),
-                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    if (editingName) {
-                        OutlinedTextField(value = nameInput, onValueChange = { nameInput = it },
-                            singleLine = true, modifier = Modifier.fillMaxWidth().height(40.dp),
-                            textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.White.copy(0.6f), unfocusedBorderColor = Color.White.copy(0.3f), cursorColor = Color.White),
-                            trailingIcon = { IconButton(onClick = { onNameEdit(nameInput.trim()); editingName = false }) { Text("✓", color = Color.White, fontSize = 16.sp) } })
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(state.user?.displayName() ?: "নাম লিখুন", fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold, color = Color.White,
-                                fontFamily = NotoSansBengali, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
-                            Spacer(Modifier.width(4.dp))
-                            IconButton(onClick = { editingName = true }, modifier = Modifier.size(22.dp)) {
-                                Icon(Icons.Default.Edit, null, tint = Color.White.copy(0.6f), modifier = Modifier.size(14.dp)) }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 3.dp)) {
-                            state.user?.role?.let {
-                                val isAdmin = it.lowercase() == "admin"
-                                Badge(containerColor = if (isAdmin) Amber else Color.White.copy(0.15f),
-                                    contentColor = if (isAdmin) Color(0xFF78350F) else Color.White.copy(0.85f)) {
-                                    Text(it, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 4.dp)) }
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.background(Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFD97706))), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("⭐", fontSize = 14.sp)
-                        Text(state.xpInfo.xp.toString(), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, fontFamily = NotoSansBengali) }
-                    Text("XP", fontSize = 8.sp, color = Color.White.copy(0.8f), fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(6.dp))
-                IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Refresh, null, tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp)) }
-            }
-            Spacer(Modifier.height(12.dp))
-            val xp = state.xpInfo
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("${xp.currentLevel.emoji} Lv.${xp.currentLevel.level} · ${xp.currentLevel.name}",
-                    color = Color.White.copy(0.9f), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                xp.nextLevel?.let { Text("${it.minXP - xp.xp} XP → ${it.name}", color = Color.White.copy(0.55f), fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-            }
-            Spacer(Modifier.height(6.dp))
-            LinearProgressBar(pct = xp.progressPct / 100f)
-        }
-    }
-}
-
-@Composable
-private fun LinearProgressBar(pct: Float) {
-    val animPct by animateFloatAsState(pct, tween(800, easing = FastOutSlowInEasing), label = "xpBar")
-    Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(20.dp)).background(Color.White.copy(0.2f))) {
-        Box(Modifier.fillMaxWidth(animPct).fillMaxHeight().clip(RoundedCornerShape(20.dp))
-            .background(Brush.horizontalGradient(listOf(Amber, Color(0xFFD97706)))))
-    }
-}
-
-@Composable
-fun QuickStatsRow(stats: StudyStats) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = DeepIndigo)) {
-        Column(Modifier.padding(12.dp)) {
-            Text("📊 আজকের পরিসংখ্যান", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatMini("✅", stats.correctCount.toString(), "সঠিক", Color(0xFF4ADE80), Modifier.weight(1f))
-                StatMini("❌", stats.wrongCount.toString(), "ভুল", Color(0xFFF87171), Modifier.weight(1f))
-                StatMini("🎯", "${stats.accuracyPct}%", "নির্ভুল", Color(0xFFA78BFA), Modifier.weight(1f))
-                StatMini("⏱️", "${stats.todayMinutes}মি", "আজ", Color(0xFFFBBF24), Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatMini(icon: String, value: String, label: String, valueColor: Color, modifier: Modifier = Modifier) {
-    Column(modifier.background(Color.White.copy(0.08f), RoundedCornerShape(10.dp)).padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(icon, fontSize = 16.sp)
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = valueColor, fontFamily = NotoSansBengali, lineHeight = 16.sp)
-        Text(label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(0.5f), fontFamily = NotoSansBengali)
-    }
-}
-
-@Composable
-fun DailyRoutineCard(
-    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
-) {
-    val routine by vm.state.collectAsState()
-    val subjectOptions by vm.subjectOptions.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
-
-    if (showAddDialog) {
-        AddRoutineItemDialog(
-            subjectOptions = subjectOptions,
-            onAdd = { title, subject, subTopic, minutes ->
-                vm.addItem(title, subject, subTopic, minutes)
-                showAddDialog = false
-            },
-            onDismiss = { showAddDialog = false }
-        )
-    }
-
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Column {
-                    Text("✅ আজকের রুটিন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                    Text(
-                        if (routine.items.isEmpty()) "এখনো কোনো রুটিন যুক্ত করা হয়নি"
-                        else "${routine.doneCount}/${routine.totalCount} সম্পন্ন",
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StudyBuddyQuickButton()
-                    IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Add, null, tint = PrimaryIndigo)
-                    }
-                }
-            }
-
-            if (routine.items.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress   = { routine.progressPct / 100f },
-                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color      = if (routine.isComplete) GreenMint else PrimaryIndigo,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-
-                if (routine.isComplete) {
-                    Text(
-                        "🎉 আজকের রুটিন সম্পন্ন হয়েছে! দারুণ কাজ করেছো!",
-                        fontSize = 11.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold,
-                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-
-                routine.items.forEach { item ->
-                    RoutineItemRow(
-                        item     = item,
-                        onToggle = { vm.toggleItem(item.id) },
-                        onRemove = { vm.removeItem(item.id) },
-                        onOpenStudy       = onOpenStudy,
-                        onOpenInstantTest = onOpenInstantTest,
-                        onOpenWeeklyTest  = onOpenWeeklyTest
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RoutineItemRow(
-    item     : com.hanif.smartstudy.data.model.RoutineItem,
-    onToggle : () -> Unit,
-    onRemove : () -> Unit,
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
-) {
-    var showActionMenu by remember { mutableStateOf(false) }
-    val hasSubject = item.subject.isNotBlank()
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(
-            checked = item.done,
-            onCheckedChange = { onToggle() },
-            colors = CheckboxDefaults.colors(checkedColor = GreenMint)
-        )
-        Column(
-            Modifier
-                .weight(1f)
-                .then(if (hasSubject) Modifier.clickable { showActionMenu = true } else Modifier)
-        ) {
-            Text(
-                item.title,
-                fontSize = 13.sp,
-                fontFamily = NotoSansBengali,
-                fontWeight = if (item.done) FontWeight.Normal else FontWeight.Medium,
-                color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            if (hasSubject) {
-                val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
-                Text(
-                    "$subjLabel • ${item.minutes} মিনিট",
-                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = NotoSansBengali
-                )
-            }
-        }
-
-        if (hasSubject) {
-            Box {
-                IconButton(onClick = { showActionMenu = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
-                }
-                DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("📖 পড়া শুরু করো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenStudy(item.subject, item.subTopic)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("📝 এখন টেস্ট দাও (Instant)", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenInstantTest(item.subject, item.subTopic)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("⚔️ সাপ্তাহিক চ্যালেঞ্জে যাও", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenWeeklyTest()
-                        }
-                    )
-                }
-            }
-        }
-
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddRoutineItemDialog(
-    subjectOptions: List<com.hanif.smartstudy.data.model.RoutineSubjectOption>,
-    onAdd: (String, String, String, Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var title    by remember { mutableStateOf("") }
-    var subject  by remember { mutableStateOf("") }
-    var subTopic by remember { mutableStateOf("") }
-    var minutes  by remember { mutableStateOf(20) }
-    var subjectMenuExpanded  by remember { mutableStateOf(false) }
-    var subTopicMenuExpanded by remember { mutableStateOf(false) }
-    val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
-
-    val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("➕ রুটিনে নতুন টপিক যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title, onValueChange = { title = it },
-                    label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded = subjectMenuExpanded,
-                    onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = subject,
-                        onValueChange = {},
-                        readOnly = true,
-                        enabled = subjectOptions.isNotEmpty(),
-                        label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                        placeholder = {
-                            Text(
-                                if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
-                                fontFamily = NotoSansBengali, fontSize = 12.sp
-                            )
-                        },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = subjectMenuExpanded,
-                        onDismissRequest = { subjectMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            onClick = {
-                                subject = ""
-                                subTopic = ""
-                                subjectMenuExpanded = false
-                            }
-                        )
-                        subjectOptions.forEach { opt ->
-                            DropdownMenuItem(
-                                text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subject = opt.subject
-                                    subTopic = ""
-                                    subjectMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = subTopicMenuExpanded,
-                        onExpandedChange = { subTopicMenuExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = subTopic,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().menuAnchor()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = subTopicMenuExpanded,
-                            onDismissRequest = { subTopicMenuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subTopic = ""
-                                    subTopicMenuExpanded = false
-                                }
-                            )
-                            subTopicsForSubject.forEach { st ->
-                                DropdownMenuItem(
-                                    text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                    onClick = {
-                                        subTopic = st
-                                        subTopicMenuExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.take(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.drop(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (title.isNotBlank()) onAdd(title, subject, subTopic, minutes) },
-                enabled = title.isNotBlank()
-            ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-    )
-}
-
-@Composable
-fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
-    var showGoalDialog by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(progress = { goal.progressPct / 100f }, modifier = Modifier.size(60.dp),
-                    color = PrimaryIndigo, strokeWidth = 6.dp, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${goal.doneMinutes}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                    Text("মি", fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
-                if (goal.progressPct >= 100f) Text("🎉 লক্ষ্য পূরণ হয়েছে!", fontSize = 10.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
-            }
-            IconButton(onClick = { showGoalDialog = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
-        }
-    }
-    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, onSet = { onSetGoal(it); showGoalDialog = false }, onDismiss = { showGoalDialog = false })
-}
-
-@Composable
-private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> Unit) {
-    val options = listOf(10, 20, 30, 45, 60, 90)
-    var selected by remember { mutableStateOf(current) }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("দৈনিক লক্ষ্য নির্ধারণ", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Column {
-                Text("পড়ার লক্ষ্য বেছে নিন:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    options.chunked(3).forEach { row ->
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.forEach { opt -> FilterChip(selected == opt, { selected = opt }, { Text("${opt}মি", fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold) }) }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton({ onSet(selected) }) { Text("সেট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) } },
-        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) } })
-}
-
-@Composable
-fun WeeklyStreakCard(streak: StreakInfo) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(1.dp)) {
-        Column(Modifier.padding(12.dp)) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                Badge(containerColor = Color(0xFFFFFBEB), contentColor = Amber) {
-                    Text("🔥 ${streak.streakDays} দিন", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                streak.weekDays.forEach { day -> StreakDot(day, Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
-    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF94A3B8))) }
-    val textColor = when { day.isToday -> Color.White; day.isDone -> Color(0xFF166534); else -> Color(0xFFCBD5E1) }
-    val icon = when { day.isToday -> if (day.isDone) "🔥" else "📍"; day.isDone -> "✓"; else -> "" }
-    Column(modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 8.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(icon, fontSize = 12.sp, lineHeight = 14.sp)
-        Text(day.labelBn, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, color = textColor, fontFamily = NotoSansBengali)
-    }
-}
-
-@Composable
-fun ExamCountdownCard(countdown: ExamCountdown, onClear: () -> Unit = {}) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(DeepIndigo)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Column {
-                    Text("পরীক্ষার কাউন্টডাউন ⏳", fontSize = 10.sp, color = Color.White.copy(0.55f), fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                    Text(countdown.examName, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, fontFamily = NotoSansBengali)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("📅", fontSize = 24.sp)
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(0.12f))
-                            .clickable { onClear() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text("✕", fontSize = 12.sp, color = Color.White.copy(0.7f), fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CountdownBox(countdown.days.toString(), "দিন", Modifier.weight(1f))
-                CountdownBox(countdown.hours.toString().padStart(2,'0'), "ঘণ্টا", Modifier.weight(1f))
-                CountdownBox(countdown.minutes.toString().padStart(2,'0'), "মিনিট", Modifier.weight(1f))
-                CountdownBox(countdown.seconds.toString().padStart(2,'0'), "সেকেন্ড", Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun CountdownBox(value: String, label: String, modifier: Modifier = Modifier) {
-    Column(modifier.background(Color.White.copy(0.1f), RoundedCornerShape(10.dp)).border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(10.dp)).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, fontFamily = NotoSansBengali)
-        Text(label, fontSize = 9.sp, color = Color.White.copy(0.5f), fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-    }
-}
-
-@Composable
-private fun SetExamCard(onSet: (String, String) -> Unit) {
-    var showDialog by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth().clickable { showDialog = true }, RoundedCornerShape(14.dp),
-        CardDefaults.cardColors(Color(0xFFF0F4FF)), border = BorderStroke(1.dp, Color(0xFFBFDBFE))) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("📅", fontSize = 28.sp); Spacer(Modifier.width(10.dp))
-            Column {
-                Text("পরীক্ষার তারিখ সেট করুন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo, fontFamily = NotoSansBengali)
-                Text("কাউন্টডাউন চালু করতে ট্যাপ করুন", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-            }
-        }
-    }
-    if (showDialog) ExamDateDialog(onSet = { d, n -> onSet(d, n); showDialog = false }, onDismiss = { showDialog = false })
-}
-
-@Composable
-private fun ExamDateDialog(onSet: (String, String) -> Unit, onDismiss: () -> Unit) {
-    var examName by remember { mutableStateOf("") }
-    var examDate by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("পরীক্ষার তথ্য", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(examName, { examName = it }, label = { Text("পরীক্ষার নাম", fontFamily = NotoSansBengali) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(examDate, { examDate = it }, label = { Text("তারিখ (YYYY-MM-DD)", fontFamily = NotoSansBengali) }, singleLine = true, placeholder = { Text("2025-12-31") }, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = { TextButton({ if (examName.isNotBlank() && examDate.isNotBlank()) onSet(examDate, examName) }, enabled = examName.isNotBlank() && examDate.isNotBlank()) { Text("সেট করুন", fontFamily = NotoSansBengali, color = PrimaryIndigo, fontWeight = FontWeight.ExtraBold) } },
-        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } })
-}
-
-@Composable
-private fun OfflineBanner() {
-    Row(Modifier.fillMaxWidth().background(Color(0xFFFEF3C7)).padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("📶", fontSize = 14.sp)
-        Text("অফলাইন মোড — cached data দেখাচ্ছে", fontSize = 11.sp, color = Color(0xFF92400E),
-            fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-    }
-}
-
-@Composable
-private fun ErrorBanner(message: String) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(12.dp), CardDefaults.cardColors(Color(0xFFFFF1F2))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("⚠️", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
-            Text(message, fontSize = 11.sp, color = Color(0xFF9F1239), fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
+private suspend fun ContentCache.markTodayActivity() { updateStreak() }
