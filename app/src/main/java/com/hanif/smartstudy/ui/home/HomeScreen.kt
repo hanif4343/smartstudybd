@@ -8,11 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
-import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,10 +47,10 @@ private val PrimaryIndigo = Color(0xFF4F46E5)
 private val DeepIndigo    = Color(0xFF1E1B4B)
 private val Amber         = Color(0xFFF59E0B)
 private val GreenMint     = Color(0xFF10B981)
-// CardBg → MaterialTheme.colorScheme.surface
-// SlateBg → MaterialTheme.colorScheme.background
-// TextPrimary → MaterialTheme.colorScheme.onSurface
-// TextMuted → MaterialTheme.colorScheme.onSurfaceVariant
+private val CardBg        = Color(0xFFFFFFFF)
+private val SlateBg       = Color(0xFFF8FAFC)
+private val TextPrimary   = Color(0xFF1E293B)
+private val TextMuted     = Color(0xFF64748B)
 
 // ═══════════════════════════════════════════════════════════
 // Exam Eve Notification — পরীক্ষার আগের রাত ১০টায় রিমাইন্ডার
@@ -117,13 +113,10 @@ fun HomeScreen(
     viewModel     : HomeViewModel = viewModel(),
     quizViewModel : QuizViewModel? = null,
     onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {},
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
+    onTypingClick : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
-    val ctx   = LocalContext.current
+    val homeContext = LocalContext.current
 
     // XP ও user data — যেকোনো screen থেকে ফিরলে auto-refresh
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
@@ -143,47 +136,10 @@ fun HomeScreen(
         wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
     }
 
-    // ── HomeScreen এ Wrong-Review section এর Sound + Vibration ──
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val homeFeedback by (quizViewModel?.feedbackEvent ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
-    LaunchedEffect(homeFeedback) {
-        val isCorrect = homeFeedback ?: return@LaunchedEffect
-        if (isCorrect) {
-            com.hanif.smartstudy.util.SoundManager.playCorrect()
-            try {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    val vm = ctx.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
-                    vm.defaultVibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 60), -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    val vib = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        vib.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 60), -1))
-                    } else { @Suppress("DEPRECATION"); vib.vibrate(longArrayOf(0, 60), -1) }
-                }
-            } catch (_: Exception) {}
-        } else {
-            com.hanif.smartstudy.util.SoundManager.playWrong()
-            try {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    val vm = ctx.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
-                    vm.defaultVibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    val vib = ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        vib.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 80, 60, 80), -1))
-                    } else { @Suppress("DEPRECATION"); vib.vibrate(longArrayOf(0, 80, 60, 80), -1) }
-                }
-            } catch (_: Exception) {}
-        }
-        quizViewModel?.clearFeedback()
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(SlateBg)
             .verticalScroll(rememberScrollState())
             .padding(bottom = 88.dp)
     ) {
@@ -197,39 +153,28 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── AD SLOT 1: Banner — Hero 아래, 콘텐츠 시작 전 ──
-            // AdMob policy: ✅ content와 content 사이, 자연스러운 위치
+            // ── AD SLOT 1: Banner ──
             AdBannerPlaceholder()
 
             // Quick Stats
             QuickStatsRow(stats = state.studyStats)
 
-            // ── AD SLOT 2: Native In-Feed — stats 아래, streak 전 ──
-            // AdMob policy: ✅ native/in-feed는 content와 구분되게
+            // ── AD SLOT 2: Native In-Feed ──
             AdNativePlaceholder()
 
             // Daily Goal
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
-
-            // ── Daily Routine Checklist — হোম স্ক্রিন চেকলিস্ট ──
-            DailyRoutineCard(
-                onOpenStudy       = onOpenStudy,
-                onOpenInstantTest = onOpenInstantTest,
-                onOpenWeeklyTest  = onOpenWeeklyTest
-            )
 
             // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
 
             // ── Wrong Question Review Section ──
             if (wrongItems.isNotEmpty()) {
-                WrongReviewSection(
-                    wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerMcq(
-                        wrongItems.indexOfFirst { it.first.id == qId }, opt) },
-                    onAnswerWritten = { qId, text -> quizViewModel?.answerWritten(
-                        wrongItems.indexOfFirst { it.first.id == qId }, text) ?: 0 },
-                    onRemoveCorrect = { qId -> quizViewModel?.removeWrongQId(qId) }
+                WrongReviewCard(
+                    wrongItems = wrongItems,
+                    onStart = {
+                        // রিভিউর অ্যাকশন এখানে দিন
+                    }
                 )
             }
 
@@ -246,10 +191,10 @@ fun HomeScreen(
                         onClear   = { viewModel.clearExamDate() }
                     )
                 !state.examCountdown.isSet ->
-                    SetExamCard(onSet = { d, n ->
-                        viewModel.setExamDate(d, n)
-                        // পরীক্ষার আগের রাতে নোটিফিকেশন schedule করো
-                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
+                    SetExamCard(onSet = { date, name ->
+                        viewModel.setExamDate(date, name)
+                        // মেইন কনটেক্সট ব্যবহার করে নোটিফিকেশন সিডিউল
+                        ExamNotificationHelper.scheduleExamEveReminder(homeContext, date, name)
                     })
                 // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
@@ -280,8 +225,6 @@ fun AdBannerPlaceholder() {
 
 @Composable
 fun AdNativePlaceholder() {
-    // Native Ad — Banner দিয়ে replace করা হচ্ছে (Native ad XML layout ছাড়া কাজ করে না)
-    // একটু বেশি জায়গায় banner দেখাও
     com.hanif.smartstudy.ui.ads.AdBannerView(
         adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
     )
@@ -325,7 +268,7 @@ fun WrongReviewCard(
                             fontWeight = FontWeight.ExtraBold, color = Color(0xFFDC2626),
                             fontFamily = NotoSansBengali)
                         Text("আবার চেষ্টা করো", fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                            color = TextMuted, fontFamily = NotoSansBengali)
                     }
                 }
                 // Stats pills
@@ -400,7 +343,7 @@ private fun WrongQuestionPreview(q: QuestionItem, wrongCount: Int) {
                 q.question.replace(Regex("<[^>]+>"), "").take(55) +
                     if (q.question.length > 55) "…" else "",
                 fontSize   = 12.sp, fontWeight = FontWeight.Bold,
-                color      = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, lineHeight = 16.sp
+                color      = TextPrimary, fontFamily = NotoSansBengali, lineHeight = 16.sp
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 3.dp)) {
                 Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFE0F2FE))
@@ -431,7 +374,7 @@ private fun StatPill(value: String, label: String, textColor: Color, bgColor: Co
     ) {
         Text(value, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
             color = textColor, fontFamily = NotoSansBengali, lineHeight = 15.sp)
-        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold,
+        Text(label, fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold,
             fontFamily = NotoSansBengali)
     }
 }
@@ -558,326 +501,26 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 }
 
 @Composable
-fun DailyRoutineCard(
-    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
-) {
-    val routine by vm.state.collectAsState()
-    val subjectOptions by vm.subjectOptions.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
-
-    if (showAddDialog) {
-        AddRoutineItemDialog(
-            subjectOptions = subjectOptions,
-            onAdd = { title, subject, subTopic, minutes ->
-                vm.addItem(title, subject, subTopic, minutes)
-                showAddDialog = false
-            },
-            onDismiss = { showAddDialog = false }
-        )
-    }
-
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Column {
-                    Text("✅ আজকের রুটিন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                    Text(
-                        if (routine.items.isEmpty()) "এখনো কোনো রুটিন যুক্ত করা হয়নি"
-                        else "${routine.doneCount}/${routine.totalCount} সম্পন্ন",
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StudyBuddyQuickButton()
-                    IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Add, null, tint = PrimaryIndigo)
-                    }
-                }
-            }
-
-            if (routine.items.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress   = { routine.progressPct / 100f },
-                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color      = if (routine.isComplete) GreenMint else PrimaryIndigo,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-
-                if (routine.isComplete) {
-                    Text(
-                        "🎉 আজকের রুটিন সম্পন্ন হয়েছে! দারুণ কাজ করেছো!",
-                        fontSize = 11.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold,
-                        fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-
-                routine.items.forEach { item ->
-                    RoutineItemRow(
-                        item     = item,
-                        onToggle = { vm.toggleItem(item.id) },
-                        onRemove = { vm.removeItem(item.id) },
-                        onOpenStudy       = onOpenStudy,
-                        onOpenInstantTest = onOpenInstantTest,
-                        onOpenWeeklyTest  = onOpenWeeklyTest
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RoutineItemRow(
-    item     : com.hanif.smartstudy.data.model.RoutineItem,
-    onToggle : () -> Unit,
-    onRemove : () -> Unit,
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
-) {
-    var showActionMenu by remember { mutableStateOf(false) }
-    val hasSubject = item.subject.isNotBlank()
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(
-            checked = item.done,
-            onCheckedChange = { onToggle() },
-            colors = CheckboxDefaults.colors(checkedColor = GreenMint)
-        )
-        Column(
-            Modifier
-                .weight(1f)
-                .then(if (hasSubject) Modifier.clickable { showActionMenu = true } else Modifier)
-        ) {
-            Text(
-                item.title,
-                fontSize = 13.sp,
-                fontFamily = NotoSansBengali,
-                fontWeight = if (item.done) FontWeight.Normal else FontWeight.Medium,
-                color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            if (hasSubject) {
-                val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
-                Text(
-                    "$subjLabel • ${item.minutes} মিনিট",
-                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = NotoSansBengali
-                )
-            }
-        }
-
-        if (hasSubject) {
-            Box {
-                IconButton(onClick = { showActionMenu = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
-                }
-                DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("📖 পড়া শুরু করো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenStudy(item.subject, item.subTopic)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("📝 এখন টেস্ট দাও (Instant)", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenInstantTest(item.subject, item.subTopic)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("⚔️ সাপ্তাহিক চ্যালেঞ্জে যাও", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        onClick = {
-                            showActionMenu = false
-                            onOpenWeeklyTest()
-                        }
-                    )
-                }
-            }
-        }
-
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddRoutineItemDialog(
-    subjectOptions: List<com.hanif.smartstudy.data.model.RoutineSubjectOption>,
-    onAdd: (String, String, String, Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var title    by remember { mutableStateOf("") }
-    var subject  by remember { mutableStateOf("") }
-    var subTopic by remember { mutableStateOf("") }
-    var minutes  by remember { mutableStateOf(20) }
-    var subjectMenuExpanded  by remember { mutableStateOf(false) }
-    var subTopicMenuExpanded by remember { mutableStateOf(false) }
-    val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
-
-    // নির্বাচিত Subject-এর অধীনে SubTopic লিস্ট (ইউজারের audience অনুযায়ী)
-    val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("➕ রুটিনে নতুন টপিক যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title, onValueChange = { title = it },
-                    label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-
-                // ── বিষয় (ঐচ্ছিক) — ইউজারের audience অনুযায়ী আসল Subject লিস্ট থেকে dropdown ──
-                ExposedDropdownMenuBox(
-                    expanded = subjectMenuExpanded,
-                    onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = subject,
-                        onValueChange = {},
-                        readOnly = true,
-                        enabled = subjectOptions.isNotEmpty(),
-                        label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                        placeholder = {
-                            Text(
-                                if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
-                                fontFamily = NotoSansBengali, fontSize = 12.sp
-                            )
-                        },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = subjectMenuExpanded,
-                        onDismissRequest = { subjectMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            onClick = {
-                                subject = ""
-                                subTopic = ""
-                                subjectMenuExpanded = false
-                            }
-                        )
-                        subjectOptions.forEach { opt ->
-                            DropdownMenuItem(
-                                text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subject = opt.subject
-                                    subTopic = ""   // বিষয় বদলালে আগের SubTopic রিসেট
-                                    subjectMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // ── SubTopic (ঐচ্ছিক) — নির্বাচিত Subject-এর অধীনে থাকা SubTopic থেকে dropdown ──
-                if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = subTopicMenuExpanded,
-                        onExpandedChange = { subTopicMenuExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = subTopic,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().menuAnchor()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = subTopicMenuExpanded,
-                            onDismissRequest = { subTopicMenuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subTopic = ""
-                                    subTopicMenuExpanded = false
-                                }
-                            )
-                            subTopicsForSubject.forEach { st ->
-                                DropdownMenuItem(
-                                    text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                    onClick = {
-                                        subTopic = st
-                                        subTopicMenuExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.take(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.drop(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (title.isNotBlank()) onAdd(title, subject, subTopic, minutes) },
-                enabled = title.isNotBlank()
-            ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-    )
-}
-
-@Composable
 fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
     var showGoalDialog by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(2.dp)) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(CardBg), CardDefaults.cardElevation(2.dp)) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(progress = { goal.progressPct / 100f }, modifier = Modifier.size(60.dp),
-                    color = PrimaryIndigo, strokeWidth = 6.dp, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                    color = PrimaryIndigo, strokeWidth = 6.dp, trackColor = Color(0xFFE2E8F0))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("${goal.doneMinutes}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                    Text("মি", fontSize = 7.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                    Text("${goal.doneMinutes}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
+                    Text("মি", fontSize = 7.sp, color = TextMuted, fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
+                Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
+                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = TextMuted, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
                 if (goal.progressPct >= 100f) Text("🎉 লক্ষ্য পূরণ হয়েছে!", fontSize = 10.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
             }
             IconButton(onClick = { showGoalDialog = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
+                Icon(Icons.Default.Edit, null, tint = TextMuted, modifier = Modifier.size(16.dp)) }
         }
     }
     if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showGoalDialog = false })
@@ -891,7 +534,7 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
         title = { Text("দৈনিক লক্ষ্য নির্ধারণ", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
         text = {
             Column {
-                Text("পড়ার লক্ষ্য বেছে নিন:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
+                Text("পড়ার লক্ষ্য বেছে নিন:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = TextMuted, modifier = Modifier.padding(bottom = 10.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     options.chunked(3).forEach { row ->
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -902,15 +545,15 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
             }
         },
         confirmButton = { TextButton({ onSet(selected) }) { Text("সেট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) } },
-        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) } })
+        dismissButton = { TextButton(onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = TextMuted) } })
 }
 
 @Composable
 fun WeeklyStreakCard(streak: StreakInfo) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(1.dp)) {
+    Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(CardBg), CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary, fontFamily = NotoSansBengali)
                 Badge(containerColor = Color(0xFFFFFBEB), contentColor = Amber) {
                     Text("🔥 ${streak.streakDays} দিন", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
             }
@@ -924,7 +567,7 @@ fun WeeklyStreakCard(streak: StreakInfo) {
 
 @Composable
 private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
-    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF94A3B8))) }
+    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFFF1F5F9), Color(0xFFF1F5F9))) }
     val textColor = when { day.isToday -> Color.White; day.isDone -> Color(0xFF166534); else -> Color(0xFFCBD5E1) }
     val icon = when { day.isToday -> if (day.isDone) "🔥" else "📍"; day.isDone -> "✓"; else -> "" }
     Column(modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 8.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -984,7 +627,7 @@ private fun SetExamCard(onSet: (String, String) -> Unit) {
             Text("📅", fontSize = 28.sp); Spacer(Modifier.width(10.dp))
             Column {
                 Text("পরীক্ষার তারিখ সেট করুন", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo, fontFamily = NotoSansBengali)
-                Text("কাউন্টডাউন চালু করতে ট্যাপ করুন", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                Text("কাউন্টডাউন চালু করতে ট্যাপ করুন", fontSize = 10.sp, color = TextMuted, fontFamily = NotoSansBengali)
             }
         }
     }
