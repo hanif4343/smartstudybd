@@ -1,5 +1,10 @@
 package com.hanif.smartstudy.ui.quiz
 
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -29,6 +34,25 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
+// ── Vibration helper (API 26+ VibrationEffect, পুরনো device এ fallback) ──
+private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vm.defaultVibrator.vibrate(VibrationEffect.createWaveform(pattern, repeat))
+        } else {
+            @Suppress("DEPRECATION")
+            val vib = ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vib.vibrate(VibrationEffect.createWaveform(pattern, repeat))
+            } else {
+                @Suppress("DEPRECATION")
+                vib.vibrate(pattern, repeat)
+            }
+        }
+    } catch (_: Exception) { }
+}
+
 @Composable
 fun QuestionListScreen(
     viewModel   : QuizViewModel,
@@ -50,6 +74,23 @@ fun QuestionListScreen(
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
     var activeHighlightId by remember { mutableStateOf<String?>(null) }
+
+    // ── Sound + Vibration feedback ──
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val feedbackEvent by viewModel.feedbackEvent.collectAsState()
+    LaunchedEffect(feedbackEvent) {
+        val isCorrect = feedbackEvent ?: return@LaunchedEffect
+        if (isCorrect) {
+            com.hanif.smartstudy.util.SoundManager.playCorrect()
+            // সঠিক উত্তর: একটা ছোট confirmation vibration
+            vibrate(ctx, longArrayOf(0, 60), -1)
+        } else {
+            com.hanif.smartstudy.util.SoundManager.playWrong()
+            // ভুল উত্তর: দুটো ছোট jolt
+            vibrate(ctx, longArrayOf(0, 80, 60, 80), -1)
+        }
+        viewModel.clearFeedback()
+    }
 
     LaunchedEffect(highlightQuestionId, questions) {
         val targetId = highlightQuestionId ?: return@LaunchedEffect
