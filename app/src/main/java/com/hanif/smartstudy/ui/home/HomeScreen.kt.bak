@@ -116,7 +116,7 @@ fun HomeScreen(
     onTypingClick : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
-    val ctx   = LocalContext.current
+    val homeContext = LocalContext.current
 
     // XP ও user data — যেকোনো screen থেকে ফিরলে auto-refresh
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
@@ -172,13 +172,11 @@ fun HomeScreen(
 
             // ── Wrong Question Review Section ──
             if (wrongItems.isNotEmpty()) {
-                WrongReviewSection(
-                    wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerMcq(
-                        wrongItems.indexOfFirst { it.first.id == qId }, opt) },
-                    onAnswerWritten = { qId, text -> quizViewModel?.answerWritten(
-                        wrongItems.indexOfFirst { it.first.id == qId }, text) ?: 0 },
-                    onRemoveCorrect = { qId -> quizViewModel?.removeWrongQId(qId) }
+                WrongReviewCard(
+                    wrongItems = wrongItems,
+                    onStart = {
+                        // এখানে আপনার রিভিউ স্ক্রিন বা অ্যাকশন হ্যান্ডেল করুন
+                    }
                 )
             }
 
@@ -198,7 +196,7 @@ fun HomeScreen(
                     SetExamCard(onSet = { d, n ->
                         viewModel.setExamDate(d, n)
                         // পরীক্ষার আগের রাতে নোটিফিকেশন schedule করো
-                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
+                        ExamNotificationHelper.scheduleExamEveReminder(homeContext, d, n)
                     })
                 // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
