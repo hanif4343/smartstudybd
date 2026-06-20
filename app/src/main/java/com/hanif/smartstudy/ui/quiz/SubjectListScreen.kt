@@ -197,7 +197,7 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
                 ) {
                     Box(
                         Modifier.fillMaxWidth(subject.progressPct / 100f).fillMaxHeight()
-                            .background(Brush.horizontalGradient(listOf(Indigo600, Color(0xFF818CF8))))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF22C55E), Color(0xFF4ADE80))))
                     )
                 }
                 Spacer(Modifier.height(2.dp))
@@ -335,7 +335,7 @@ private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
                 ) {
                     Box(
                         Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
-                            .background(Indigo600)
+                            .background(Color(0xFF22C55E))
                     )
                 }
             }
@@ -368,7 +368,7 @@ private fun QBankTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
             ) {
                 Box(
                     Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
-                        .background(Color(0xFF0891B2))
+                        .background(Color(0xFF22C55E))
                 )
             }
         }

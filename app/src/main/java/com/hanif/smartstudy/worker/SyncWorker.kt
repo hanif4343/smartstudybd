@@ -11,7 +11,6 @@ import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.ContentResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,7 +19,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * SyncWorker:
- * 1. Pending offline queue sync করে Firebase/GAS-এ
+ * 1. Pending offline queue সরাসরি Firebase এ sync করে (কোনো GAS নেই)
  * 2. Content (Study/Quiz/QBank) refresh করে cache-এ
  */
 class SyncWorker(
@@ -80,49 +79,121 @@ class SyncWorker(
     }
 
     private suspend fun syncAction(action: com.hanif.smartstudy.data.local.PendingAction): Boolean {
-        return try {
-            val gasUrl = BuildConfig.GAS_URL
-            val payload = gson.fromJson(action.payload, Map::class.java)
-
-            val formBody = when (action.type) {
-                "quiz_answer" -> FormBody.Builder()
-                    .add("action",     "quizAnswer")
-                    .add("phone",      payload["phone"]?.toString() ?: "")
-                    .add("questionId", payload["questionId"]?.toString() ?: "")
-                    .add("isCorrect",  payload["isCorrect"]?.toString() ?: "false")
-                    .add("secret",     BuildConfig.SECRET_KEY)
-                    .build()
-
-                "xp_update" -> FormBody.Builder()
-                    .add("action",  "updateXP")
-                    .add("phone",   payload["phone"]?.toString() ?: "")
-                    .add("xpDelta", payload["xpDelta"]?.toString() ?: "0")
-                    .add("secret",  BuildConfig.SECRET_KEY)
-                    .build()
-
-                "study_progress" -> FormBody.Builder()
-                    .add("action",  "studyProgress")
-                    .add("phone",   payload["phone"]?.toString() ?: "")
-                    .add("minutes", payload["minutes"]?.toString() ?: "0")
-                    .add("topic",   payload["topic"]?.toString() ?: "")
-                    .add("secret",  BuildConfig.SECRET_KEY)
-                    .build()
-
-                "admin_edit_question" -> {
-                    // Firebase REST PATCH — GAS দিয়ে নয়, সরাসরি Firebase এ
-                    return syncAdminEdit(payload)
-                }
-
-                else -> return false
-            }
-
-            val req  = Request.Builder().url(gasUrl).post(formBody).build()
-            val resp = client.newCall(req).execute()
-            val body = resp.body?.string() ?: ""
-            Log.d(TAG, "Sync ${action.type}: $body")
-            resp.isSuccessful
+        val payload = try {
+            gson.fromJson(action.payload, Map::class.java)
         } catch (e: Exception) {
-            Log.e(TAG, "syncAction error: ${e.message}")
+            Log.e(TAG, "syncAction payload parse error: ${e.message}")
+            return false
+        }
+        return when (action.type) {
+            "quiz_answer"        -> syncQuizAnswer(payload)
+            "xp_update"          -> syncXpUpdate(payload)
+            "study_progress"     -> syncStudyProgress(payload)
+            "admin_edit_question" -> syncAdminEdit(payload)
+            else -> false
+        }
+    }
+
+    // ── Quiz answer log — সরাসরি Firebase এ (GAS এর quizAnswer action এর বদলে) ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncQuizAnswer(payload: Map<*, *>): Boolean {
+        return try {
+            val phone      = payload["phone"]?.toString() ?: return false
+            val questionId = payload["questionId"]?.toString() ?: ""
+            val isCorrect  = payload["isCorrect"]?.toString() ?: "false"
+            val safePhone  = phone.replace("+", "").trim()
+            if (safePhone.isBlank()) return false
+
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val url    = "$base/QuizAnswers/$safePhone.json?auth=$secret"
+
+            val obj = com.google.gson.JsonObject().apply {
+                addProperty("questionId", questionId)
+                addProperty("isCorrect", isCorrect)
+                addProperty("timestamp", System.currentTimeMillis())
+            }
+            val resp = client.newCall(
+                Request.Builder().url(url)
+                    .post(obj.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val ok = resp.isSuccessful
+            resp.close()
+            Log.d(TAG, "syncQuizAnswer $safePhone/$questionId → $ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "syncQuizAnswer error: ${e.message}")
+            false
+        }
+    }
+
+    // ── XP update — সরাসরি Firebase Users/{phone}/XP পড়ে+লিখে (GAS এর updateXP এর বদলে) ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncXpUpdate(payload: Map<*, *>): Boolean {
+        return try {
+            val phone = payload["phone"]?.toString() ?: return false
+            val delta = payload["xpDelta"]?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+            val safePhone = phone.replace("+", "").trim()
+            if (safePhone.isBlank() || delta == 0) return true
+
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val getUrl = "$base/Users/$safePhone.json?auth=$secret"
+
+            val curJson = client.newCall(Request.Builder().url(getUrl).get().build())
+                .execute().body?.string()
+            val currentXp = if (!curJson.isNullOrBlank() && curJson != "null") {
+                try { org.json.JSONObject(curJson).optInt("XP", 0) } catch (e: Exception) { 0 }
+            } else 0
+            val newXp = maxOf(0, currentXp + delta)
+
+            val patchObj = com.google.gson.JsonObject().apply { addProperty("XP", newXp) }
+            val resp = client.newCall(
+                Request.Builder().url(getUrl)
+                    .patch(patchObj.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val ok = resp.isSuccessful
+            resp.close()
+            Log.d(TAG, "syncXpUpdate $safePhone: $currentXp + $delta = $newXp → $ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "syncXpUpdate error: ${e.message}")
+            false
+        }
+    }
+
+    // ── Study progress log — সরাসরি Firebase এ (GAS এর studyProgress action এর বদলে) ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncStudyProgress(payload: Map<*, *>): Boolean {
+        return try {
+            val phone   = payload["phone"]?.toString() ?: return false
+            val minutes = payload["minutes"]?.toString() ?: "0"
+            val topic   = payload["topic"]?.toString() ?: ""
+            val safePhone = phone.replace("+", "").trim()
+            if (safePhone.isBlank()) return false
+
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val url    = "$base/StudyLog/$safePhone.json?auth=$secret"
+
+            val obj = com.google.gson.JsonObject().apply {
+                addProperty("minutes", minutes)
+                addProperty("topic", topic)
+                addProperty("timestamp", System.currentTimeMillis())
+            }
+            val resp = client.newCall(
+                Request.Builder().url(url)
+                    .post(obj.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val ok = resp.isSuccessful
+            resp.close()
+            Log.d(TAG, "syncStudyProgress $safePhone: ${minutes}min/$topic → $ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "syncStudyProgress error: ${e.message}")
             false
         }
     }
@@ -135,7 +206,7 @@ class SyncWorker(
             val fields     = payload["fields"] as? Map<String, String> ?: return false
             if (questionId.isBlank() || fields.isEmpty()) return false
 
-            val secret = BuildConfig.FIREBASE_DB_SECRET
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
             val url    = "$base/$sheet/$questionId.json?auth=$secret"
 
@@ -176,13 +247,13 @@ class SyncWorker(
                 .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
 
-        // ── প্রতি 6 ঘণ্টায় periodic content refresh ──
+        // ── প্রতি ১ ঘণ্টায় periodic content refresh (TTL এর সাথে মিলিয়ে) ──
         fun schedulePeriodic(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 

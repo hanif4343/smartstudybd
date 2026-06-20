@@ -32,9 +32,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
-import com.hanif.smartstudy.data.remote.GasApiService
+import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.components.RichContentText
-import com.hanif.smartstudy.data.remote.GasResult
+import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -124,6 +124,7 @@ fun QuestionCard(
     onReport       : () -> Unit,
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
+    onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     modifier       : Modifier = Modifier
 ) {
     Card(
@@ -197,7 +198,7 @@ fun QuestionCard(
                             AdminQuestionEditDialog(item = item, onDismiss = {
                                 showEdit = false
                                 onAdminRefresh?.invoke()
-                            })
+                            }, onAdminEdit = onAdminEdit)
                         }
                     }
                 }
@@ -255,7 +256,7 @@ fun QuestionCard(
                 else -> item.answerState !is AnswerState.Unanswered
             }
             // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
-            val showAnswerText = showAnswerBox && !item.isMcq()
+            val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy())
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
@@ -539,9 +540,9 @@ fun UserTechniqueSection(
 
     LaunchedEffect(questionId) {
         isLoading = true
-        // ফিক্সড: GasResult.Success টাইপ সেফটি ফিক্সড
-        val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-        if (res is GasResult.Success<*>) {
+        // ফিক্সড: ApiResult.Success টাইপ সেফটি ফিক্সড
+        val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+        if (res is ApiResult.Success<*>) {
             @Suppress("UNCHECKED_CAST")
             techniques = res.data as List<UserTechnique>
         }
@@ -550,8 +551,8 @@ fun UserTechniqueSection(
 
     fun refresh() {
         scope.launch {
-            val res = GasApiService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-            if (res is GasResult.Success<*>) {
+            val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
+            if (res is ApiResult.Success<*>) {
                 @Suppress("UNCHECKED_CAST")
                 techniques = res.data as List<UserTechnique>
             }
@@ -621,7 +622,7 @@ fun UserTechniqueSection(
                     onEdit      = { editTarget = t; showAddDialog = true },
                     onDelete    = {
                         scope.launch {
-                            GasApiService.deleteTechnique(questionId, t.id)
+                            FirebaseDataService.deleteTechnique(questionId, t.id)
                             refresh()
                             feedbackMsg = "টেকনিক মুছে ফেলা হয়েছে"
                         }
@@ -639,7 +640,7 @@ fun UserTechniqueSection(
                 scope.launch {
                     val target = editTarget
                     if (target == null) {
-                        GasApiService.saveTechnique(
+                        FirebaseDataService.saveTechnique(
                             questionId = questionId,
                             userId     = currentUser.phone ?: "",
                             userName   = currentUser.displayName(),
@@ -650,7 +651,7 @@ fun UserTechniqueSection(
                             "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
                         else "✅ প্রাইভেট টেকনিক সেভ হয়েছে।"
                     } else {
-                        GasApiService.updateTechnique(questionId, target.id, text, isPublic)
+                        FirebaseDataService.updateTechnique(questionId, target.id, text, isPublic)
                         feedbackMsg = "✅ আপডেট হয়েছে!"
                     }
                     refresh()
@@ -1013,11 +1014,16 @@ fun ReportDialog(
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
+fun AdminQuestionEditDialog(
+    item        : QuestionItem,
+    onDismiss   : () -> Unit,
+    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
+) {
     val sheet = when {
         item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
-        item.isMcq() -> "Quiz"
-        else         -> "Study"
+        item.isStudy() -> "Study"
+        item.isMcq()   -> "Quiz"
+        else           -> "Study"
     }
 
     var editQuestion    by remember { mutableStateOf(item.question) }
@@ -1052,6 +1058,45 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
     val scope     = rememberCoroutineScope()
     val adminIndigo = Color(0xFF4F46E5)
 
+    // Shared save action
+    val doSave: () -> Unit = {
+        scope.launch {
+            isSaving = true
+            saveMsg  = null
+            try {
+                val fields = mutableMapOf<String, String>()
+                if (editQuestion    != item.question)    fields["question"]     = editQuestion
+                if (editExplanation != item.explanation) fields["explanation"]  = editExplanation
+                if (editTechnique   != item.technique)   fields["technique"]    = editTechnique
+                if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
+                if (editAnswer      != item.answer)      { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
+                val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
+                val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
+                if (newOpts != origOpts) {
+                    if (editOptionA.isNotBlank()) fields["option1"] = editOptionA
+                    if (editOptionB.isNotBlank()) fields["option2"] = editOptionB
+                    if (editOptionC.isNotBlank()) fields["option3"] = editOptionC
+                    if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
+                    fields["correct"] = editAnswer
+                }
+                if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
+
+                if (onAdminEdit != null) {
+                    // Use ViewModel path (offline-aware, isAdmin-checked)
+                    onAdminEdit(sheet, item.id, fields, item.question.take(60))
+                    saveMsg = "✅ সংরক্ষিত হচ্ছে..."
+                } else {
+                    // Fallback: direct Firebase call
+                    saveMsg = when (val r = FirebaseDataService.adminUpdateQuestionField(sheet, item.id, fields)) {
+                        is ApiResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
+                        is ApiResult.Error   -> "❌ ${r.message}"
+                    }
+                }
+            } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
+            isSaving = false
+        }
+    }
+
     Dialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         properties = androidx.compose.ui.window.DialogProperties(
@@ -1067,7 +1112,7 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
         ) {
             Column(Modifier.fillMaxSize()) {
 
-                // Header
+                // Header — save button lives here so keyboard never covers it
                 Box(
                     Modifier.fillMaxWidth()
                         .background(androidx.compose.ui.graphics.Brush.horizontalGradient(
@@ -1080,12 +1125,32 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("✏️ Admin Edit", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-                        Surface(shape = RoundedCornerShape(6.dp), color = Color.White.copy(0.2f)) {
-                            Text(sheet, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                color = Color.White, fontFamily = NotoSansBengali)
+                        // Save button in header
+                        Surface(
+                            onClick  = { if (!isSaving) doSave() },
+                            enabled  = !isSaving,
+                            shape    = RoundedCornerShape(10.dp),
+                            color    = Color.White.copy(alpha = if (isSaving) 0.5f else 0.92f)
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isSaving) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), adminIndigo, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Save, null,
+                                        tint = adminIndigo, modifier = Modifier.size(14.dp))
+                                }
+                                Text(
+                                    if (isSaving) "সংরক্ষণ..." else "💾 সংরক্ষণ",
+                                    fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = adminIndigo, fontFamily = NotoSansBengali
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(6.dp))
                         IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(30.dp)) {
                             Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
@@ -1212,58 +1277,14 @@ fun AdminQuestionEditDialog(item: QuestionItem, onDismiss: () -> Unit) {
                     }
                 }
 
-                // Bottom bar
+                // Bottom bar — বাতিল only (save is in header)
                 Surface(color = Color.White, modifier = Modifier.fillMaxWidth(), shadowElevation = 6.dp) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = { if (!isSaving) onDismiss() },
-                            modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
-                            Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    isSaving = true
-                                    saveMsg  = null
-                                    try {
-                                        val fields = mutableMapOf<String, String>()
-                                        if (editQuestion    != item.question)    fields["question"]     = editQuestion
-                                        if (editExplanation != item.explanation) fields["explanation"]  = editExplanation
-                                        if (editTechnique   != item.technique)   fields["technique"]    = editTechnique
-                                        if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
-                                        if (editAnswer      != item.answer)      { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
-                                        val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
-                                        val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
-                                        if (newOpts != origOpts) {
-                                            if (editOptionA.isNotBlank()) fields["option1"] = editOptionA
-                                            if (editOptionB.isNotBlank()) fields["option2"] = editOptionB
-                                            if (editOptionC.isNotBlank()) fields["option3"] = editOptionC
-                                            if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
-                                            fields["correct"] = editAnswer
-                                        }
-                                        if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন হয়নি"; isSaving = false; return@launch }
-                                        saveMsg = when (val r = GasApiService.adminUpdateQuestionField(sheet, item.id, fields)) {
-                                            is GasResult.Success -> "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"
-                                            is GasResult.Error   -> "❌ ${r.message}"
-                                        }
-                                    } catch (e: Exception) { saveMsg = "❌ ${e.message}" }
-                                    isSaving = false
-                                }
-                            },
-                            enabled  = !isSaving,
-                            modifier = Modifier.weight(2f),
-                            shape    = RoundedCornerShape(12.dp),
-                            colors   = ButtonDefaults.buttonColors(containerColor = adminIndigo)
-                        ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(Modifier.size(16.dp), Color.White, strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            } else {
-                                Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text("💾 Firebase এ সংরক্ষণ", fontFamily = NotoSansBengali,
-                                fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
-                        }
+                    OutlinedButton(
+                        onClick  = { if (!isSaving) onDismiss() },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        shape    = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                     }
                 }
             }

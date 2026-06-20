@@ -40,6 +40,16 @@ class SmartStudyApp : Application() {
         // FCM token collect করে Firebase RTDB এ save করো
         FcmHelper.collectAndSave(this)
 
+        // Admin broadcast notification এর জন্য "all_users" topic এ subscribe করো —
+        // তাহলে broadcast পাঠানোর সময় প্রতিটা user এর token আলাদাভাবে লুকআপ
+        // করে পাঠাতে হয় না, একবারেই topic এ push করা যায়।
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                .subscribeToTopic("all_users")
+        } catch (e: Exception) {
+            Log.w("SmartStudyApp", "Topic subscribe failed: ${e.message}")
+        }
+
         // ── AdMob initialize — background thread (UI block হয় না) ──
         CoroutineScope(Dispatchers.IO).launch {
             try {

@@ -18,7 +18,7 @@ class ContentCache(private val context: Context) {
 
     companion object {
         // version bump করলে পুরানো cache auto-invalidate হয়
-        private const val CACHE_VERSION = 4  // StudyItem fields যোগের পর bump করো
+        private const val CACHE_VERSION = 5  // Firebase path key as id fix — পুরনো numeric id cache clear করো
         val KEY_CACHE_VERSION = intPreferencesKey("cache_version")
         val KEY_STUDY_JSON    = stringPreferencesKey("cache_study_json")
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
@@ -59,14 +59,14 @@ class ContentCache(private val context: Context) {
             val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
             val qbankJson = prefs[KEY_QBANK_JSON] ?: "[]"
 
-            val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem>>() {}.type
-            val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem>>() {}.type
-            val qbankType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QBankItem>>() {}.type
+            val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem?>>() {}.type
+            val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem?>>() {}.type
+            val qbankType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QBankItem?>>() {}.type
 
             AppContent(
-                study     = gson.fromJson(studyJson, studyType) ?: emptyList(),
-                quiz      = gson.fromJson(quizJson,  quizType)  ?: emptyList(),
-                qbank     = gson.fromJson(qbankJson, qbankType) ?: emptyList(),
+                study     = (gson.fromJson<List<com.hanif.smartstudy.data.model.StudyItem?>>(studyJson, studyType) ?: emptyList()).filterNotNull(),
+                quiz      = (gson.fromJson<List<com.hanif.smartstudy.data.model.QuizItem?>>(quizJson,  quizType)  ?: emptyList()).filterNotNull(),
+                qbank     = (gson.fromJson<List<com.hanif.smartstudy.data.model.QBankItem?>>(qbankJson, qbankType) ?: emptyList()).filterNotNull(),
                 fetchedAt = fetchedAt
             )
         } catch (e: Exception) { null }

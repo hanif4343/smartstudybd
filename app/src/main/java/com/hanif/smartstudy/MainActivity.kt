@@ -25,9 +25,13 @@ import com.hanif.smartstudy.ui.shared.OfflineBanner
 import com.hanif.smartstudy.ui.shared.StreakPopup
 import com.hanif.smartstudy.ui.theme.*
 import android.Manifest
+import android.app.AlarmManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -51,7 +55,7 @@ class MainActivity : ComponentActivity() {
 
     // Google Sign-In
     private lateinit var googleSignInClient: GoogleSignInClient
-    private var googleSignInCallback: ((email: String, name: String, photoUrl: String) -> Unit)? = null
+    private var googleSignInCallback: ((email: String, name: String, photoUrl: String, idToken: String) -> Unit)? = null
     private var googleSignInErrorCallback: ((msg: String) -> Unit)? = null
 
     private val googleSignInLauncher = registerForActivityResult(
@@ -63,8 +67,9 @@ class MainActivity : ComponentActivity() {
             val email    = account.email    ?: ""
             val name     = account.displayName ?: ""
             val photoUrl = account.photoUrl?.toString() ?: ""
+            val idToken  = account.idToken ?: ""
             Log.d("GoogleSignIn", "Success: $email")
-            googleSignInCallback?.invoke(email, name, photoUrl)
+            googleSignInCallback?.invoke(email, name, photoUrl, idToken)
         } catch (e: ApiException) {
             Log.e("GoogleSignIn", "Failed statusCode=${e.statusCode} msg=${e.message}")
             val reason = when (e.statusCode) {
@@ -83,7 +88,7 @@ class MainActivity : ComponentActivity() {
 
     // AuthScreen থেকে call হবে
     fun startGoogleSignIn(
-        onSuccess: (email: String, name: String, photoUrl: String) -> Unit,
+        onSuccess: (email: String, name: String, photoUrl: String, idToken: String) -> Unit,
         onError: (msg: String) -> Unit
     ) {
         googleSignInCallback      = onSuccess
@@ -120,6 +125,36 @@ class MainActivity : ComponentActivity() {
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
+            }
+        }
+
+        // রিমাইন্ডার নির্ভরযোগ্য করতে: exact-alarm permission নিশ্চিত করো (Android 12+)
+        // এটা না থাকলে SCHEDULE_EXACT_ALARM declare করা সত্ত্বেও alarm silently দেরিতে/বাদ পড়ে যেতে পারে,
+        // বিশেষ করে vivo/Xiaomi/Oppo-র মতো aggressive battery-management OEM-এ।
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = getSystemService(ALARM_SERVICE) as AlarmManager
+            if (!am.canScheduleExactAlarms()) {
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                } catch (e: Exception) {
+                    Log.e("ExactAlarm", "Could not open exact alarm settings", e)
+                }
+            }
+        }
+
+        // ব্যাটারি অপ্টিমাইজেশন থেকে app-কে বাদ রাখার অনুরোধ — vivo (FuntouchOS/OriginOS) সহ
+        // অনেক OEM background-এ app বন্ধ থাকলে নিজে থেকেই scheduled alarm cancel করে দেয়।
+        // এটা exempt না করলে রিমাইন্ডার মাঝে মাঝে বাজবে না, যদিও কোড সঠিকভাবে alarm set করেছে।
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                })
+            } catch (e: Exception) {
+                Log.e("BatteryOpt", "Could not request battery optimization exemption", e)
             }
         }
 

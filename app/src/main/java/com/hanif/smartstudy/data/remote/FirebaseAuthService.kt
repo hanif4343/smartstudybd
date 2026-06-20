@@ -3,16 +3,29 @@ package com.hanif.smartstudy.data.remote
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.hanif.smartstudy.util.PhoneValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import com.hanif.smartstudy.BuildConfig // BuildConfig ইমপোর্ট নিশ্চিত করার জন্য
 
+/**
+ * ════════════════════════════════════════════════════════════════
+ *  FirebaseAuthService
+ * ════════════════════════════════════════════════════════════════
+ * Identity verification এখন real Firebase Auth দিয়ে হয় — phone+password
+ * ব্যবহারকারীদের জন্য Email/Password provider (ফোন নম্বর থেকে বানানো একটা
+ * ভেতরের synthetic email দিয়ে, দেখো PhoneValidator.toSyntheticEmail),
+ * আর Google ব্যবহারকারীদের জন্য real Google credential bridge (দেখো
+ * AuthViewModel.googleSignIn/googleSignup) — কোনো পদ্ধতিতেই password
+ * hashing/verification এই কোডে নেই, Firebase নিজেই সেটা সামলায়।
+ *
+ * এই ফাইল শুধু Firebase Realtime Database এ profile data (Users/{phone})
+ * read/create করে — phone, name, class, role ইত্যাদি প্রোফাইল তথ্য।
+ */
 object FirebaseAuthService {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -20,12 +33,6 @@ object FirebaseAuthService {
         .build()
     private val gson = Gson()
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-
-    fun hashPassword(pass: String): String {
-        val bytes = MessageDigest.getInstance("SHA-256")
-            .digest(pass.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
 
     /** Gson সব number কে Double করে — এই function সঠিক String দেয় */
     private fun anyToString(value: Any?): String {
@@ -43,17 +50,16 @@ object FirebaseAuthService {
         }
     }
 
-    /** Firebase Database Secret দিয়ে auth query param বানাও */
-    private fun authQuery(): String {
-        val secret = BuildConfig.FIREBASE_DB_SECRET
-        return if (secret.isNotBlank()) "?auth=$secret" else ""
+    /** Real Firebase Auth ID token (sign-in করা থাকলে) দিয়ে auth query param বানাও */
+    private suspend fun authQuery(): String {
+        val token = FirebaseTokenProvider.getToken()
+        return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
     /**
-     * Users node থেকে phone দিয়ে user খোঁজে।
-     * key = phone number অথবা numeric index — দুটোই handle করে।
+     * Users node থেকে phone দিয়ে user খোঁজে (DB-key ফরম্যাট: "01XXXXXXXXX")।
      */
-    private suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
+    suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
         withContext(Dispatchers.IO) {
             try {
                 val normPhone = phone.trim()
@@ -97,36 +103,51 @@ object FirebaseAuthService {
             }
         }
 
-    // ── LOGIN ──
-    suspend fun verifyLogin(phone: String, password: String, firebaseUrl: String): AuthResult =
-        withContext(Dispatchers.IO) {
-            try {
-                val userMap = findUserByPhone(phone, firebaseUrl)
-                    ?: return@withContext AuthResult.Error("এই ফোন নম্বর দিয়ে কোনো অ্যাকাউন্ট নেই")
+    // ── Firebase Auth এ sign in/up করার পর প্রোফাইল তৈরি (password আর সংরক্ষণ করা হয় না — Firebase Auth নিজেই সেটা সামলায়) ──
+    suspend fun createProfile(
+        name: String,
+        localPhone: String,
+        userType: String,
+        classLevel: String,
+        firebaseUrl: String,
+        email: String = "",
+        picture: String = ""
+    ): AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = PhoneValidator.sanitize(localPhone)
+                ?: return@withContext AuthResult.Error("ফোন নম্বরটি সঠিক ফরম্যাটে নেই")
 
-                val savedPassword  = anyToString(userMap["Password"] ?: userMap["password"] ?: "")
-                val inputPassword  = password.trim()
-                val currentHashed  = hashPassword(inputPassword)
-
-                val passwordMatches = savedPassword == currentHashed || savedPassword == inputPassword
-
-                if (passwordMatches) {
-                    val status = (userMap["Status"] ?: userMap["status"] ?: "Active").toString().lowercase()
-                    if (status == "inactive") {
-                        AuthResult.Error("অযাকাউন্ট নিষ্ক্রিয়। Admin এর সাথে যোগাযোগ করুন।")
-                    } else {
-                        AuthResult.Success(userMap)
-                    }
-                } else {
-                    AuthResult.Error("পাসওয়ার্ড ভুল হয়েছে")
-                }
-            } catch (e: Exception) {
-                Log.e("Login", "Error: ${e.message}")
-                AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+            val existing = findUserByPhone(cleanPhone, firebaseUrl)
+            if (existing != null) {
+                return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
             }
-        }
 
-    // ── GOOGLE SIGN-IN ──
+            val userData = mapOf(
+                "Name"       to name,
+                "Phone"      to cleanPhone,
+                "Email"      to email,
+                "Picture"    to picture,
+                "UserType"   to userType,
+                "ClassLevel" to classLevel,
+                "Status"     to "Active",
+                "Role"       to "User"
+            )
+
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url = "$baseUrl/Users/$cleanPhone.json$auth"
+            val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
+            val req  = Request.Builder().url(url).put(requestBody).build()
+            val resp = client.newCall(req).execute()
+
+            if (resp.isSuccessful) AuthResult.Success(userData)
+            else AuthResult.Error("Firebase-এ অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে (HTTP ${resp.code})")
+        } catch (e: Exception) {
+            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+        }
+    }
+
+    // ── GOOGLE SIGN-IN (TRANSITIONAL — পরের ধাপে real Firebase Auth এ migrate হবে) ──
     suspend fun googleSignIn(
         email: String,
         name: String,
@@ -178,90 +199,6 @@ object FirebaseAuthService {
         } catch (e: Exception) {
             Log.e("GoogleAuth", "Error: ${e.message}")
             GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
-        }
-    }
-
-    // ── SIGNUP WITH EMAIL (Google) ──
-    suspend fun signupWithEmail(
-        name: String,
-        phone: String,
-        email: String,
-        password: String,
-        picture: String,
-        userType: String,
-        classLevel: String,
-        firebaseUrl: String
-    ): AuthResult = withContext(Dispatchers.IO) {
-        try {
-            val existing = findUserByPhone(phone, firebaseUrl)
-            if (existing != null) {
-                return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
-            }
-
-            val userData = mapOf(
-                "Name"       to name,
-                "Phone"      to phone,
-                "Email" to email,
-                "Password"   to hashPassword(password),
-                "Picture"    to picture,
-                "UserType"   to userType,
-                "ClassLevel" to classLevel,
-                "Status"     to "Active",
-                "Role"       to "User"
-            )
-
-            val auth        = authQuery()
-            val baseUrl = firebaseUrl.trimEnd('/')
-            val url         = "$baseUrl/Users/${phone}.json$auth"
-            val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
-            val req         = Request.Builder().url(url).put(requestBody).build()
-            val resp        = client.newCall(req).execute()
-
-            if (resp.isSuccessful) AuthResult.Success(userData)
-            else AuthResult.Error("Firebase-এ অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে (HTTP ${resp.code})")
-        } catch (e: Exception) {
-            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
-        }
-    }
-
-    // ── SIGNUP (Phone + Password) ──
-    suspend fun signup(
-        name: String,
-        phone: String,
-        password: String,
-        userType: String,
-        classLevel: String,
-        firebaseUrl: String
-    ): AuthResult = withContext(Dispatchers.IO) {
-        try {
-            val existing = findUserByPhone(phone, firebaseUrl)
-            if (existing != null) {
-                return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
-            }
-
-            val userData = mapOf(
-                "Name"       to name,
-                "Phone"      to phone,
-                "Email"      to "",
-                "Password"   to hashPassword(password),
-                "Picture"    to "",
-                "UserType"   to userType,
-                "ClassLevel" to classLevel,
-                "Status"     to "Active",
-                "Role"       to "User"
-            )
-
-            val auth        = authQuery()
-            val baseUrl = firebaseUrl.trimEnd('/')
-            val url         = "$baseUrl/Users/${phone}.json$auth"
-            val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
-            val req         = Request.Builder().url(url).put(requestBody).build()
-            val resp        = client.newCall(req).execute()
-
-            if (resp.isSuccessful) AuthResult.Success(userData)
-            else AuthResult.Error("Firebase-এ অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে (HTTP ${resp.code})")
-        } catch (e: Exception) {
-            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
         }
     }
 }

@@ -1,0 +1,39 @@
+name: Extract Keystore SHA Fingerprint
+
+# Phone Auth এর জন্য Firebase Console এ keystore এর SHA-1/SHA-256
+# fingerprint যুক্ত করতে হয়। এই workflow সেটা বের করে GitHub Actions
+# log এ দেখায় — কোনো PC/keytool লাগে না, phone থেকেই manually
+# "Run workflow" চাপলে চলবে, তারপর log থেকে copy করে নেওয়া যাবে।
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Decode keystore
+        run: echo -n "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > smartstudy.jks
+
+      - name: Print SHA-1 / SHA-256 fingerprints
+        run: |
+          echo "════════════════════════════════════════════════"
+          echo " এই SHA-1 আর SHA-256 মান দুটো Firebase Console এ যাবে:"
+          echo " Project Settings → Your apps → (Android app) → Add fingerprint"
+          echo "════════════════════════════════════════════════"
+          keytool -list -v \
+            -keystore smartstudy.jks \
+            -alias hanif-alias \
+            -storepass "${{ secrets.STORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            | grep -E "SHA1:|SHA256:"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f smartstudy.jks

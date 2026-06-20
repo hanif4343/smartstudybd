@@ -48,7 +48,8 @@ data class QuestionItem(
     val isWeakTopic : Boolean     = false
 ) {
     fun isWritten() = questionType.lowercase().trim() == "written"
-    fun isMcq()     = !isWritten()
+    fun isStudy()   = questionType.lowercase().trim() == "study"
+    fun isMcq()     = !isWritten() && !isStudy()
 
     companion object {
         fun fromStudyItem(s: StudyItem) = QuestionItem(
@@ -62,7 +63,7 @@ data class QuestionItem(
             // index: expRaw = getVal(i,'explanation'), ansRaw fallback
             explanation  = (s.explanation ?: s.answer) ?: "",
             technique    = s.technique ?: "",
-            questionType = s.questionType?.lowercase()?.trim() ?: "written",
+            questionType = s.questionType?.lowercase()?.trim() ?: "study",
             audienceTags = s.audienceTags ?: "",
             visualUrl    = s.visualUrl ?: ""
         )

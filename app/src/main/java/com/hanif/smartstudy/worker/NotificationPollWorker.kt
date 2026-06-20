@@ -80,7 +80,7 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val session  = SessionManager(applicationContext)
         val user     = session.getCurrentUser() ?: return@withContext Result.success()
-        val phone    = user.phone?.trim()?.replace(Regex("[.#\$\\[\\]\\s]"), "_") ?: return@withContext Result.success()
+        val phone    = com.hanif.smartstudy.util.PhoneValidator.sanitize(user.phone) ?: return@withContext Result.success()
 
         val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
         val lastCheck    = session.getLastNotifCheck()

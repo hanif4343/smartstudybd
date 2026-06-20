@@ -61,15 +61,19 @@ data class MenuUiState(
     val isMorningOn     : Boolean            = false,
     val morningHour     : Int                = 7,
     val morningMinute   : Int                = 0,
+    val isMorningRepeat : Boolean            = true,
     val isNightOn       : Boolean            = false,
     val nightHour       : Int                = 21,
     val nightMinute     : Int                = 0,
+    val isNightRepeat   : Boolean            = true,
     val isMiddayOn      : Boolean            = false,
     val middayHour      : Int                = 14,
     val middayMinute    : Int                = 0,
+    val isMiddayRepeat  : Boolean            = true,
     val isEveningOn     : Boolean            = false,
     val eveningHour     : Int                = 19,
     val eveningMinute   : Int                = 0,
+    val isEveningRepeat : Boolean            = true,
     val correctCount    : Int                = 0,
     val wrongCount      : Int                = 0,
     val accuracyPct     : Int                = 0,
@@ -117,10 +121,15 @@ data class MenuUiState(
     // Bulk Audience
     val isBulkUpdating    : Boolean          = false,
     val bulkUpdateMsg     : String?          = null,
+    // Subject/SubTopic Rename
+    val isRenaming        : Boolean          = false,
+    val renameMsg         : String?          = null,
     // Offline admin edits
     val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
     val isSyncingEdits    : Boolean          = false,
     val syncEditsMsg      : String?          = null,
+    // edit হলে increment হয় — MainScreen এ observe করে quiz/study/qbank refresh হয়
+    val contentEditVersion: Int              = 0,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -133,13 +142,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val http    = OkHttpClient()
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
     private val fbUrl   get() = BuildConfig.FIREBASE_URL.trimEnd('/')
-    private val fbAuth  get() = BuildConfig.FIREBASE_DB_SECRET
+    private suspend fun fbAuth(): String = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
 
     private suspend fun fbPatch(path: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .patch(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbPatch $path failed: ${r.code}")
@@ -150,7 +159,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .put(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbSet $path failed: ${r.code}")
@@ -161,7 +170,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         val body = JSONObject(data.mapValues { it.value ?: JSONObject.NULL }).toString()
             .toRequestBody(JSON_MT)
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .post(body).build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("fbPost $path failed: ${r.code}")
@@ -170,7 +179,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun fbGet(path: String): JSONObject? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url("$fbUrl/$path.json?auth=$fbAuth")
+            .url("$fbUrl/$path.json?auth=${fbAuth()}")
             .get().build()
         http.newCall(req).execute().use { r ->
             val txt = r.body?.string() ?: return@withContext null
@@ -196,15 +205,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val morningOn  = session.isMorningReminderOn()
             val morningH   = session.getMorningHour()
             val morningM   = session.getMorningMinute()
+            val morningRep = session.isMorningRepeatDaily()
             val nightOn    = session.isNightReminderOn()
             val nightH     = session.getNightHour()
             val nightM     = session.getNightMinute()
+            val nightRep   = session.isNightRepeatDaily()
             val middayOn   = session.isMiddayReminderOn()
             val middayH    = session.getMiddayHour()
             val middayM    = session.getMiddayMinute()
+            val middayRep  = session.isMiddayRepeatDaily()
             val eveningOn  = session.isEveningReminderOn()
             val eveningH   = session.getEveningHour()
             val eveningM   = session.getEveningMinute()
+            val eveningRep = session.isEveningRepeatDaily()
             val correct    = cache.getCorrectCount()
             val wrong      = cache.getWrongCount()
             val total      = correct + wrong
@@ -241,15 +254,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isMorningOn    = morningOn,
                     morningHour    = morningH,
                     morningMinute  = morningM,
+                    isMorningRepeat = morningRep,
                     isNightOn      = nightOn,
                     nightHour      = nightH,
                     nightMinute    = nightM,
+                    isNightRepeat  = nightRep,
                     isMiddayOn     = middayOn,
                     middayHour     = middayH,
                     middayMinute   = middayM,
+                    isMiddayRepeat = middayRep,
                     isEveningOn    = eveningOn,
                     eveningHour    = eveningH,
                     eveningMinute  = eveningM,
+                    isEveningRepeat = eveningRep,
                     correctCount   = correct,
                     wrongCount     = wrong,
                     totalCorrect   = correct,
@@ -380,34 +397,37 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute) {
+    /** Android 12+ এ exact alarm permission আছে কিনা — UI থেকে save করার আগে চেক করার জন্য */
+    fun hasExactAlarmPermission(): Boolean = ReminderReceiver.canScheduleExactAlarms(ctx)
+
+    fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute, repeatDaily: Boolean = _state.value.isMorningRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute) }
-            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute)
+            _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute, isMorningRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleMorning(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelMorning(ctx)
         }
     }
 
-    fun setNightReminder(on: Boolean, hour: Int = _state.value.nightHour, minute: Int = _state.value.nightMinute) {
+    fun setNightReminder(on: Boolean, hour: Int = _state.value.nightHour, minute: Int = _state.value.nightMinute, repeatDaily: Boolean = _state.value.isNightRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isNightOn = on, nightHour = hour, nightMinute = minute) }
-            if (on) ReminderReceiver.scheduleNight(ctx, hour, minute)
+            _state.update { it.copy(isNightOn = on, nightHour = hour, nightMinute = minute, isNightRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleNight(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelNight(ctx)
         }
     }
 
-    fun setMiddayReminder(on: Boolean, hour: Int = _state.value.middayHour, minute: Int = _state.value.middayMinute) {
+    fun setMiddayReminder(on: Boolean, hour: Int = _state.value.middayHour, minute: Int = _state.value.middayMinute, repeatDaily: Boolean = _state.value.isMiddayRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isMiddayOn = on, middayHour = hour, middayMinute = minute) }
-            if (on) ReminderReceiver.scheduleMidday(ctx, hour, minute)
+            _state.update { it.copy(isMiddayOn = on, middayHour = hour, middayMinute = minute, isMiddayRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleMidday(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelMidday(ctx)
         }
     }
 
-    fun setEveningReminder(on: Boolean, hour: Int = _state.value.eveningHour, minute: Int = _state.value.eveningMinute) {
+    fun setEveningReminder(on: Boolean, hour: Int = _state.value.eveningHour, minute: Int = _state.value.eveningMinute, repeatDaily: Boolean = _state.value.isEveningRepeat) {
         viewModelScope.launch {
-            _state.update { it.copy(isEveningOn = on, eveningHour = hour, eveningMinute = minute) }
-            if (on) ReminderReceiver.scheduleEvening(ctx, hour, minute)
+            _state.update { it.copy(isEveningOn = on, eveningHour = hour, eveningMinute = minute, isEveningRepeat = repeatDaily) }
+            if (on) ReminderReceiver.scheduleEvening(ctx, hour, minute, repeatDaily)
             else    ReminderReceiver.cancelEvening(ctx)
         }
     }
@@ -431,6 +451,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             SmartStudyFirebaseService.updatePresence(ctx, false)
             session.clearUser()
+            // FIX: content cache (disk + in-memory) ক্লিয়ার না করলে edit করা প্রশ্ন/তথ্য
+            // logout-login করার পরেও পুরনো (stale) cache থেকেই দেখানো হতো।
+            cache.clearCache()
+            com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
             _state.update { it.copy(user = null) }
         }
     }
@@ -541,7 +565,31 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     "sentAt"      to System.currentTimeMillis(),
                     "sentBy"      to (_state.value.user?.phone ?: "admin")
                 ))
-                _state.update { it.copy(isLoading = false, successMsg = "নোটিফিকেশন পাঠানো হয়েছে") }
+
+                // আসল push — সরাসরি FCM v1 (GAS নেই)
+                val cleanTarget = targetPhone?.trim().orEmpty()
+                val pushOk = if (cleanTarget.isBlank() || cleanTarget.equals("ALL", ignoreCase = true)) {
+                    // সবাইকে — "all_users" topic এ এক কলেই broadcast
+                    com.hanif.smartstudy.data.remote.FcmAdminService.sendToTopic(
+                        topic = "all_users", title = title, body = body,
+                        data  = mapOf("type" to "admin_broadcast", "url" to "home")
+                    )
+                } else {
+                    // নির্দিষ্ট একজন — তার token lookup করে সরাসরি পাঠাও
+                    val token = com.hanif.smartstudy.data.remote.FcmAdminService.fetchTokenForPhone(cleanTarget)
+                    if (token.isNullOrBlank()) false
+                    else com.hanif.smartstudy.data.remote.FcmAdminService.sendToToken(
+                        token = token, title = title, body = body,
+                        data  = mapOf("type" to "admin_notify", "url" to "home")
+                    )
+                }
+
+                _state.update {
+                    it.copy(
+                        isLoading  = false,
+                        successMsg = if (pushOk) "নোটিফিকেশন পাঠানো হয়েছে" else "সেভ হয়েছে, কিন্তু push পাঠানো যায়নি (token পাওয়া যায়নি)"
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = "পাঠানো যায়নি: ${e.message}") }
             }
@@ -586,7 +634,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Admin: Edit Question (offline-aware) ──────────────────
     fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>, questionPreview: String = "") {
-        if (!_state.value.isAdmin) return
+        com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "adminEditQuestion called: sheet=$sheet rowKey='$rowKey' fields=$fields isAdmin=${_state.value.isAdmin}")
+        if (!_state.value.isAdmin) {
+            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "BLOCKED: user is not admin!")
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
             val cm = getApplication<android.app.Application>()
@@ -597,14 +649,23 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
             if (isOnline) {
                 // Online — সরাসরি Firebase এ save
-                when (val r = com.hanif.smartstudy.data.remote.GasApiService
+                when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                         .adminUpdateQuestionField(sheet, rowKey, fields)) {
-                    is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                        cache.clearCache()
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        // পুরো cache clear করে নতুন fetch করানোর বদলে — শুধু এই
+                        // row টাই in-memory + disk cache এ সরাসরি patch করো।
+                        // এতে স্ক্রিন reload হয় না, admin যেখানে ছিল সেখানেই
+                        // থাকে আর পরিবর্তনও সাথে সাথে স্ক্রিনে দেখা যায়।
+                        // TTL (১ ঘণ্টা) শেষ হলে স্বাভাবিক নিয়মেই fresh fetch হবে
+                        // এবং অন্য সব ইউজারের কাছেও আপডেট পৌঁছাবে।
+                        com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                            .patchContentAndPersist(sheet, rowKey, fields)
+                        com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
                         _state.update { it.copy(isEditingQuestion = false,
-                            editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত") }
+                            editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
+                            contentEditVersion = _state.value.contentEditVersion + 1) }
                     }
-                    is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                         // Online কিন্তু fail — queue এ রাখো
                         val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                         q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
@@ -646,6 +707,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             var successCount = 0
             var failCount    = 0
             val gson = com.google.gson.Gson()
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
             for (action in pending) {
                 try {
                     val payload    = gson.fromJson(action.payload, Map::class.java)
@@ -653,25 +715,26 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     val questionId = payload["questionId"]?.toString() ?: continue
                     @Suppress("UNCHECKED_CAST")
                     val fields     = payload["fields"] as? Map<String, String> ?: continue
-                    when (com.hanif.smartstudy.data.remote.GasApiService
+                    when (com.hanif.smartstudy.data.remote.FirebaseDataService
                             .adminUpdateQuestionField(sheet, questionId, fields)) {
-                        is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                            repo.patchContentAndPersist(sheet, questionId, fields)
                             q.remove(action.id); successCount++
                         }
-                        is com.hanif.smartstudy.data.remote.GasResult.Error -> {
+                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                             q.incrementRetry(action.id); failCount++
                         }
                     }
                 } catch (e: Exception) { failCount++ }
             }
-            if (successCount > 0) cache.clearCache()
             loadPendingEdits()
             val msg = when {
                 failCount == 0 -> "✅ $successCount টি edit sync সফল!"
                 successCount == 0 -> "❌ সব ($failCount টি) fail হয়েছে"
                 else -> "⚠️ $successCount টি সফল, $failCount টি fail"
             }
-            _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = msg) }
+            _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = msg,
+                contentEditVersion = if (successCount > 0) it.contentEditVersion + 1 else it.contentEditVersion) }
         }
     }
 
@@ -681,13 +744,16 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                     .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
-                    cache.clearCache()
-                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট") }
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val fields = options.toMutableMap().apply { put("correct", newAnswer) }
+                    com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                        .patchContentAndPersist(sheet, rowKey, fields)
+                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
             }
         }
@@ -700,10 +766,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingReports = true) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService.fetchPendingReports()) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success ->
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.fetchPendingReports()) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success ->
                     _state.update { it.copy(reportedQuestions = r.data, isLoadingReports = false) }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isLoadingReports = false, error = "❌ ${r.message}") }
             }
         }
@@ -721,9 +787,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
-            when (com.hanif.smartstudy.data.remote.GasApiService
+            when (com.hanif.smartstudy.data.remote.FirebaseDataService
                     .resolveReportAndNotify(reportKey, status, userPhone, questionSnippet, userName, questionId, tab)) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     _state.update {
                         it.copy(
                             reportedQuestions = it.reportedQuestions.filter { r -> r.reportKey != reportKey },
@@ -731,7 +797,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                 }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(toast = "❌ Update ব্যর্থ") }
             }
         }
@@ -742,13 +808,15 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isAddingQuestion = true, addQuestionMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService.adminAddQuestion(sheet, fields)) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
                     _state.update { it.copy(isAddingQuestion = false,
-                        addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}") }
+                        addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isAddingQuestion = false,
                         addQuestionMsg = "❌ ব্যর্থ: ${r.message}") }
             }
@@ -762,14 +830,16 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isBulkUpdating = true, bulkUpdateMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.GasApiService
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                     .adminBulkAudienceUpdate(sheet, subject, subTopic, newTag)) {
-                is com.hanif.smartstudy.data.remote.GasResult.Success -> {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
                     _state.update { it.copy(isBulkUpdating = false,
-                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"") }
+                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
-                is com.hanif.smartstudy.data.remote.GasResult.Error ->
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isBulkUpdating = false,
                         bulkUpdateMsg = "❌ ${r.message}") }
             }
@@ -777,6 +847,36 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearBulkMsg() { _state.update { it.copy(bulkUpdateMsg = null) } }
+
+    // ── Admin: Rename Subject/SubTopic ────────────────────────
+    fun adminRenameSubjectOrTopic(
+        sheets         : List<String>,
+        oldSubject     : String,
+        oldSubTopic    : String,
+        newName        : String,
+        renameSubTopic : Boolean
+    ) {
+        if (!_state.value.isAdmin) return
+        if (sheets.isEmpty() || oldSubject.isBlank() || newName.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isRenaming = true, renameMsg = null) }
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                    .adminRenameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    val what = if (renameSubTopic) "অধ্যায়" else "বিষয়"
+                    _state.update { it.copy(isRenaming = false,
+                        renameMsg = "✅ ${r.data}টি প্রশ্নে $what \"$newName\" এ পরিবর্তিত হয়েছে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                    _state.update { it.copy(isRenaming = false, renameMsg = "❌ ${r.message}") }
+            }
+        }
+    }
+
+    fun clearRenameMsg() { _state.update { it.copy(renameMsg = null) } }
 
     // ── Toast clear ───────────────────────────────────────────
 

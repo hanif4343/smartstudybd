@@ -7,21 +7,18 @@ import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
-object GasApiService {
+object FirebaseDataService {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
     private val gson   = Gson()
-    private val GAS_URL get() = BuildConfig.GAS_URL
 
     /** Firebase Auth ID Token দিয়ে auth query param */
     private suspend fun authQuery(): String {
@@ -29,82 +26,29 @@ object GasApiService {
         return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
-    fun hashPassword(password: String): String {
-        val bytes = MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
-
-    suspend fun login(phone: String, password: String): GasResult<Map<String, Any>> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val body = FormBody.Builder()
-                    .add("action", "login")
-                    .add("phone", phone)
-                    .add("password", hashPassword(password))
-                    .add("secret", BuildConfig.SECRET_KEY)
-                    .build()
-                val req  = Request.Builder().url(GAS_URL).post(body).build()
-                val json = client.newCall(req).execute().body?.string()
-                    ?: return@withContext GasResult.Error("No response")
-                val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
-                if (map["status"] == "ok") GasResult.Success(map)
-                else GasResult.Error(map["message"]?.toString() ?: "Login failed")
-            } catch (e: Exception) {
-                GasResult.Error(e.message ?: "Network error")
-            }
-        }
-    }
-
-    suspend fun signup(
-        name: String, phone: String, password: String,
-        userType: String, classLevel: String
-    ): GasResult<Map<String, Any>> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val body = FormBody.Builder()
-                    .add("action", "signup")
-                    .add("name", name)
-                    .add("phone", phone)
-                    .add("password", hashPassword(password))
-                    .add("userType", userType)
-                    .add("classLevel", classLevel)
-                    .add("secret", BuildConfig.SECRET_KEY)
-                    .build()
-                val req  = Request.Builder().url(GAS_URL).post(body).build()
-                val json = client.newCall(req).execute().body?.string()
-                    ?: return@withContext GasResult.Error("No response")
-                val map: Map<String, Any> = gson.fromJson(json, object : TypeToken<Map<String, Any>>() {}.type)
-                if (map["status"] == "ok") GasResult.Success(map)
-                else GasResult.Error(map["message"]?.toString() ?: "Signup failed")
-            } catch (e: Exception) {
-                GasResult.Error(e.message ?: "Network error")
-            }
-        }
-    }
-
-    suspend fun getUserFromFirebase(phone: String): GasResult<Map<String, Any>> {
+    suspend fun getUserFromFirebase(phone: String): ApiResult<Map<String, Any>> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
                 val req  = Request.Builder()
                     .url("${BuildConfig.FIREBASE_URL.trimEnd('/')}/Users.json$auth").get().build()
                 val json = client.newCall(req).execute().body?.string()
-                    ?: return@withContext GasResult.Error("No data")
+                    ?: return@withContext ApiResult.Error("No data")
                 val all: Map<String, Map<String, Any>> = gson.fromJson(
                     json, object : TypeToken<Map<String, Map<String, Any>>>() {}.type)
                 val user = all.values.find { entry ->
                     val p = entry["Phone"]?.toString() ?: entry["phone"]?.toString() ?: ""
                     p.trim() == phone.trim()
                 }
-                if (user != null) GasResult.Success(user)
-                else GasResult.Error("ব্যবহারকারী পাওয়া যায়নি")
+                if (user != null) ApiResult.Success(user)
+                else ApiResult.Error("ব্যবহারকারী পাওয়া যায়নি")
             } catch (e: Exception) {
-                GasResult.Error(e.message ?: "Network error")
+                ApiResult.Error(e.message ?: "Network error")
             }
         }
     }
 
-    /** Admin কে FCM notification পাঠাও */
+    /** Admin কে push notification পাঠাও — সরাসরি Firebase lookup + FCM v1 send, কোনো GAS নেই */
     suspend fun notifyAdmin(
         event     : String,
         userName  : String,
@@ -115,21 +59,59 @@ object GasApiService {
     ) {
         withContext(Dispatchers.IO) {
             try {
-                val url = "${BuildConfig.GAS_URL}" +
-                    "?action=adminNotify" +
-                    "&secret=${BuildConfig.SECRET_KEY}" +
-                    "&event=${java.net.URLEncoder.encode(event, "UTF-8")}" +
-                    "&name=${java.net.URLEncoder.encode(userName, "UTF-8")}" +
-                    "&phone=${java.net.URLEncoder.encode(userPhone, "UTF-8")}" +
-                    "&extra=${java.net.URLEncoder.encode(extra.take(80), "UTF-8")}" +
-                    "&questionId=${java.net.URLEncoder.encode(questionId, "UTF-8")}" +
-                    "&tab=${java.net.URLEncoder.encode(tab, "UTF-8")}"
-                val req  = Request.Builder().url(url).get().build()
-                val resp = client.newCall(req).execute()
-                Log.d("GAS", "notifyAdmin($event): HTTP ${resp.code}")
-                resp.close()
+                val (title, body) = when (event) {
+                    "report"    -> "🚩 নতুন রিপোর্ট" to
+                        "$userName একটি প্রশ্নে সমস্যা রিপোর্ট করেছে।" + (if (extra.isNotBlank()) " ($extra)" else "")
+                    "technique" -> "💡 নতুন টেকনিক" to
+                        "$userName একটি নতুন টেকনিক জমা দিয়েছে, অনুমোদনের অপেক্ষায়।" + (if (extra.isNotBlank()) " \"$extra\"" else "")
+                    else        -> "🔔 Smart Study" to "$userName থেকে নতুন একটিভিটি: $event"
+                }
+                val data = mapOf(
+                    "type"       to "admin_$event",
+                    "url"        to "admin",
+                    "questionId" to questionId,
+                    "tab"        to tab
+                ).filterValues { it.isNotBlank() }
+
+                val adminPhones = FcmAdminService.fetchAdminPhones()
+                if (adminPhones.isEmpty()) {
+                    Log.w("FirebaseData", "notifyAdmin($event): কোনো admin user পাওয়া যায়নি")
+                    return@withContext
+                }
+
+                // Notifications fallback — push miss হলেও 15-মিনিট poll worker এ দেখা যাবে
+                val auth = authQuery()
+                val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+                adminPhones.forEach { phone ->
+                    try {
+                        val notifKey = "notif_${System.currentTimeMillis()}"
+                        val notifObj = JsonObject().apply {
+                            addProperty("title", title)
+                            addProperty("body", body)
+                            addProperty("type", "admin_$event")
+                            addProperty("url", "admin")
+                            addProperty("questionId", questionId)
+                            addProperty("tab", tab)
+                            addProperty("read", false)
+                            addProperty("time", System.currentTimeMillis())
+                        }
+                        val url = "$base/Notifications/$phone/$notifKey.json$auth"
+                        client.newCall(
+                            Request.Builder().url(url)
+                                .put(notifObj.toString().toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().close()
+                    } catch (e: Exception) {
+                        Log.e("FirebaseData", "notifyAdmin fallback write failed: ${e.message}")
+                    }
+                }
+
+                // আসল push — সরাসরি FCM HTTP v1
+                val tokens = FcmAdminService.fetchAdminTokens()
+                val sent   = FcmAdminService.sendToTokens(tokens, title, body, data)
+                Log.d("FirebaseData", "notifyAdmin($event): pushed to $sent/${tokens.size} admin device(s)")
             } catch (e: Exception) {
-                Log.e("GAS", "notifyAdmin: ${e.message}")
+                Log.e("FirebaseData", "notifyAdmin: ${e.message}")
             }
         }
     }
@@ -140,12 +122,22 @@ object GasApiService {
         issue     : String,
         userName  : String = "",
         userPhone : String = "",
-        tab       : String = ""
+        tab       : String = "",
+        qsheet    : String = ""
     ) {
         withContext(Dispatchers.IO) {
             try {
                 val auth        = authQuery()
                 val firebaseBase = BuildConfig.FIREBASE_URL.trimEnd('/')
+
+                // tab থেকে Firebase sheet name বের করো (qsheet না থাকলে)
+                val resolvedSheet = qsheet.ifBlank {
+                    when (tab.lowercase()) {
+                        "qbank" -> "QBank"
+                        "study" -> "Study"
+                        else    -> "Quiz"
+                    }
+                }
 
                 val jsonObj = JsonObject().apply {
                     addProperty("questionId", questionId)
@@ -153,7 +145,8 @@ object GasApiService {
                     addProperty("issue",      issue)
                     addProperty("userName",   userName)
                     addProperty("userPhone",  userPhone)
-                    addProperty("tab",        tab)          // ← tab now saved
+                    addProperty("tab",        tab)
+                    addProperty("qsheet",     resolvedSheet)
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("status",     "pending")
                 }
@@ -162,7 +155,7 @@ object GasApiService {
                 val body = jsonObj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).post(body).build()
                 val resp = client.newCall(req).execute()
-                Log.d("GAS", "Report saved: HTTP ${resp.code}")
+                Log.d("FirebaseData", "Report saved: HTTP ${resp.code}")
                 resp.close()
 
                 if (userName.isNotBlank() && userPhone.isNotBlank()) {
@@ -176,7 +169,7 @@ object GasApiService {
                     )
                 } else Unit
             } catch (e: Exception) {
-                Log.e("GAS", "reportQuestion: ${e.message}")
+                Log.e("FirebaseData", "reportQuestion: ${e.message}")
             }
         }
     }
@@ -186,14 +179,14 @@ object GasApiService {
     suspend fun fetchTechniquesForQuestion(
         questionId: String,
         myUserId  : String
-    ): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
+    ): ApiResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
                 val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/UserTechniques/${questionId}.json$auth"
                 val req  = Request.Builder().url(url).get().build()
                 val json = client.newCall(req).execute().body?.string() ?: "null"
-                if (json == "null") return@withContext GasResult.Success(emptyList())
+                if (json == "null") return@withContext ApiResult.Success(emptyList())
                 val raw: Map<String, Map<String, Any>> = gson.fromJson(
                     json, object : TypeToken<Map<String, Map<String, Any>>>() {}.type)
                 val list = raw.map { (k, v) ->
@@ -201,8 +194,8 @@ object GasApiService {
                 }.filter { t ->
                     t.userId == myUserId || (t.isPublic && t.isApproved())
                 }.sortedByDescending { it.timestamp }
-                GasResult.Success(list)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(list)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
@@ -212,7 +205,7 @@ object GasApiService {
         userName  : String,
         text      : String,
         isPublic  : Boolean
-    ): GasResult<String> {
+    ): ApiResult<String> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
@@ -236,8 +229,8 @@ object GasApiService {
                 if (isPublic) {
                     notifyAdmin(event = "technique", userName = userName, userPhone = userId, extra = text.take(60))
                 }
-                GasResult.Success(pushKey)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(pushKey)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
@@ -246,7 +239,7 @@ object GasApiService {
         pushKey   : String,
         text      : String,
         isPublic  : Boolean
-    ): GasResult<Unit> {
+    ): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
@@ -260,31 +253,31 @@ object GasApiService {
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).patch(body).build()
                 client.newCall(req).execute().close()
-                GasResult.Success(Unit)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(Unit)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
-    suspend fun deleteTechnique(questionId: String, pushKey: String): GasResult<Unit> {
+    suspend fun deleteTechnique(questionId: String, pushKey: String): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
                 val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/UserTechniques/$questionId/$pushKey.json$auth"
                 val req  = Request.Builder().url(url).delete().build()
                 client.newCall(req).execute().close()
-                GasResult.Success(Unit)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(Unit)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
-    suspend fun fetchPendingTechniques(): GasResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
+    suspend fun fetchPendingTechniques(): ApiResult<List<com.hanif.smartstudy.data.model.UserTechnique>> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
                 val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/UserTechniques.json$auth"
                 val req  = Request.Builder().url(url).get().build()
                 val json = client.newCall(req).execute().body?.string() ?: "null"
-                if (json == "null") return@withContext GasResult.Success(emptyList())
+                if (json == "null") return@withContext ApiResult.Success(emptyList())
                 val raw: Map<String, Map<String, Map<String, Any>>> = gson.fromJson(
                     json, object : TypeToken<Map<String, Map<String, Map<String, Any>>>>() {}.type)
                 val list = raw.flatMap { (qId, entries) ->
@@ -292,8 +285,8 @@ object GasApiService {
                         com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to qId))
                     }
                 }.filter { it.isPublic && it.isPending() }.sortedByDescending { it.timestamp }
-                GasResult.Success(list)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(list)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
@@ -301,7 +294,7 @@ object GasApiService {
         questionId: String,
         pushKey   : String,
         status    : String
-    ): GasResult<Unit> {
+    ): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
@@ -310,8 +303,8 @@ object GasApiService {
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).patch(body).build()
                 client.newCall(req).execute().close()
-                GasResult.Success(Unit)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+                ApiResult.Success(Unit)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
 
@@ -324,17 +317,30 @@ object GasApiService {
         sheet  : String,
         rowKey : String,
         fields : Map<String, String>
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
+    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
+            android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
+            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "PATCH → $sheet/$rowKey | fields=$fields | url_preview=${url.take(80)}")
             val obj  = JsonObject().apply { fields.forEach { (k, v) -> addProperty(k, v) } }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+            val respBody = resp.body?.string() ?: ""
+            val code = resp.code
+            android.util.Log.d("AdminEdit", "Response: $code | $respBody")
+            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "Response: $code | body=${respBody.take(200)}")
             resp.close()
-            if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
+            if (resp.isSuccessful) ApiResult.Success(Unit)
+            else {
+                com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "FAILED: $code — $respBody")
+                ApiResult.Error("Firebase error: $code — $respBody")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
+            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "Exception: ${e.message ?: "unknown"}")
+            ApiResult.Error(e.message ?: "Network error")
+        }
     }
 
     /** Admin: Options swap করো — Firebase এ option1-4 + correct একসাথে update */
@@ -343,14 +349,14 @@ object GasApiService {
         rowKey   : String,
         options  : Map<String, String>,
         newAnswer: String
-    ): GasResult<Unit> {
+    ): ApiResult<Unit> {
         val fields = options.toMutableMap()
         fields["correct"] = newAnswer
         return adminUpdateQuestionField(sheet, rowKey, fields)
     }
 
     /** Admin: নতুন question Firebase এ push করো */
-    suspend fun adminAddQuestion(sheet: String, fields: Map<String, String>): GasResult<String> =
+    suspend fun adminAddQuestion(sheet: String, fields: Map<String, String>): ApiResult<String> =
         withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
@@ -368,76 +374,20 @@ object GasApiService {
                         com.google.gson.JsonParser.parseString(respBody)
                             .asJsonObject.get("name")?.asString ?: ""
                     } catch (e: Exception) { "" }
-                    GasResult.Success(pushKey)
-                } else GasResult.Error("Firebase error: ${resp.code}")
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Add failed") }
+                    ApiResult.Success(pushKey)
+                } else ApiResult.Error("Firebase error: ${resp.code}")
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Add failed") }
         }
 
-    /**
-     * Admin: Drag-reorder — একটা item এর sortOrder Firebase এ PATCH করো।
-     * sheet = "Quiz" | "Study" | "QBank" | "Subjects" | "SubTopics"
-     * rowKey = Firebase push key (question id, subject key ইত্যাদি)
-     * newOrder = নতুন position (0-based integer)
-     */
-    suspend fun adminUpdateSortOrder(
-        sheet    : String,
-        rowKey   : String,
-        newOrder : Int
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
-            val obj  = JsonObject().apply {
-                addProperty("sortOrder", newOrder)
-                addProperty("sortUpdatedAt", System.currentTimeMillis())
-            }
-            val body = obj.toString().toRequestBody("application/json".toMediaType())
-            val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
-            resp.close()
-            if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Network error") }
-    }
-
-    /**
-     * Admin: Multiple items এর sortOrder একসাথে batch update করো।
-     * orderedKeys = list of Firebase keys in the desired order (index = sortOrder)
-     */
-    suspend fun adminBatchUpdateSortOrder(
-        sheet       : String,
-        orderedKeys : List<String>
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            // Firebase multi-location update (/sheet.json PATCH with all keys)
-            val patchObj = JsonObject()
-            orderedKeys.forEachIndexed { index, key ->
-                val fieldObj = JsonObject().apply {
-                    addProperty("sortOrder", index)
-                    addProperty("sortUpdatedAt", System.currentTimeMillis())
-                }
-                patchObj.add("$key/sortOrder", com.google.gson.JsonPrimitive(index))
-                patchObj.add("$key/sortUpdatedAt", com.google.gson.JsonPrimitive(System.currentTimeMillis()))
-            }
-            val url  = "$base/$sheet.json$auth"
-            val body = patchObj.toString().toRequestBody("application/json".toMediaType())
-            val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
-            resp.close()
-            if (resp.isSuccessful) GasResult.Success(Unit)
-            else GasResult.Error("Firebase PATCH error: ${resp.code}")
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Batch order failed") }
-    }
-
     /** Admin: Firebase /Reports থেকে pending reports fetch করো */
-    suspend fun fetchPendingReports(): GasResult<List<ReportedQuestion>> =
+    suspend fun fetchPendingReports(): ApiResult<List<ReportedQuestion>> =
         withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
                 val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/Reports.json$auth"
                 val json = client.newCall(Request.Builder().url(url).get().build())
                     .execute().body?.string() ?: "null"
-                if (json == "null") return@withContext GasResult.Success(emptyList())
+                if (json == "null") return@withContext ApiResult.Success(emptyList())
                 val raw: Map<String, Map<String, Any>> = gson.fromJson(
                     json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
                 )
@@ -454,8 +404,8 @@ object GasApiService {
                         timestamp  = (v["timestamp"] as? Double)?.toLong() ?: 0L
                     )
                 }.filter { it.status == "pending" }.sortedByDescending { it.timestamp }
-                GasResult.Success(list)
-            } catch (e: Exception) { GasResult.Error(e.message ?: "Fetch failed") }
+                ApiResult.Success(list)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Fetch failed") }
         }
 
     /**
@@ -466,8 +416,11 @@ object GasApiService {
         reportKey  : String,
         status     : String,      // "resolved" | "dismissed"
         userPhone  : String,      // reporter এর phone
-        questionSnippet: String = ""
-    ): GasResult<Unit> = withContext(Dispatchers.IO) {
+        questionSnippet: String = "",
+        userName   : String = "",
+        questionId : String = "",
+        tab        : String = ""
+    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val auth     = authQuery()
             val base     = BuildConfig.FIREBASE_URL.trimEnd('/')
@@ -484,53 +437,68 @@ object GasApiService {
                     .build()
             ).execute().close()
 
-            // ── ২. Reporter এর FCM token Firebase থেকে lookup ──
-            if (userPhone.isNotBlank()) {
-                val phoneEncoded = userPhone.replace("+", "").replace(" ", "")
-                val userUrl = "$base/Users/$phoneEncoded.json$auth"
-                val userJson = try {
-                    client.newCall(Request.Builder().url(userUrl).get().build())
-                        .execute().body?.string() ?: "null"
-                } catch (e: Exception) { "null" }
-
-                val fcmToken = if (userJson != "null") {
-                    try {
-                        com.google.gson.JsonParser.parseString(userJson)
-                            .asJsonObject?.get("fcmToken")?.asString
-                            ?: com.google.gson.JsonParser.parseString(userJson)
-                                .asJsonObject?.get("FCMToken")?.asString
-                    } catch (e: Exception) { null }
-                } else null
+            // ── ২. Reporter এর FCM token সরাসরি Firebase থেকে lookup ──
+            // (Reports নোডে যে কেউ লিখতে পারে, তাই userPhone কে অবশ্যই sanitize করে
+            //  নিতে হবে — না হলে ক্ষতিকর phone value দিয়ে path-injection সম্ভব)
+            val phoneEncoded = com.hanif.smartstudy.util.PhoneValidator.sanitize(userPhone)
+            if (phoneEncoded != null) {
+                val fcmToken = FcmAdminService.fetchTokenForPhone(phoneEncoded)
 
                 // ── ৩. FCM notification পাঠাও ──
+                val displayName = userName.ifBlank { "ব্যবহারকারী" }
+                val notifMsg = if (status == "resolved")
+                    "প্রিয় $displayName, আপনার রিপোর্ট করা প্রশ্নটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
+                else
+                    "প্রিয় $displayName, আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
+
+                val snippet = if (questionSnippet.isNotBlank())
+                    questionSnippet.take(60) + "..." else ""
+
                 if (!fcmToken.isNullOrBlank()) {
-                    val notifMsg = if (status == "resolved")
-                        "আপনার রিপোর্টটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
-                    else
-                        "আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
-
-                    val snippet = if (questionSnippet.isNotBlank())
-                        questionSnippet.take(60) + "..." else ""
-
                     try {
-                        val gasUrl = "${BuildConfig.GAS_URL}" +
-                            "?action=sendNotification" +
-                            "&secret=${BuildConfig.SECRET_KEY}" +
-                            "&token=${java.net.URLEncoder.encode(fcmToken, "UTF-8")}" +
-                            "&title=${java.net.URLEncoder.encode("SmartStudyBD", "UTF-8")}" +
-                            "&body=${java.net.URLEncoder.encode(notifMsg, "UTF-8")}" +
-                            "&extra=${java.net.URLEncoder.encode(snippet, "UTF-8")}"
-                        client.newCall(Request.Builder().url(gasUrl).get().build())
-                            .execute().close()
-                        Log.d("GAS", "Report notification sent to $userPhone")
+                        val ok = FcmAdminService.sendToToken(
+                            token = fcmToken,
+                            title = "✅ রিপোর্ট সমাধান হয়েছে!",
+                            body  = notifMsg,
+                            data  = mapOf(
+                                "type"       to "report_resolved",
+                                "url"        to "reports",
+                                "questionId" to questionId,
+                                "tab"        to tab
+                            ).filterValues { it.isNotBlank() }
+                        )
+                        Log.d("FirebaseData", "Report notification sent to $userPhone: $ok")
                     } catch (e: Exception) {
-                        Log.e("GAS", "FCM send failed: ${e.message}")
+                        Log.e("FirebaseData", "FCM send failed: ${e.message}")
                     }
+                }
+
+                // ── ৪. Notifications/{phone} এ fallback entry লিখো (poll worker এর জন্য) ──
+                try {
+                    val notifKey = "notif_${System.currentTimeMillis()}"
+                    val notifObj = JsonObject().apply {
+                        addProperty("title", "SmartStudyBD")
+                        addProperty("body", notifMsg)
+                        addProperty("type", "admin_report")
+                        addProperty("url", "reports")
+                        addProperty("questionId", questionId)
+                        addProperty("tab", tab)
+                        addProperty("read", false)
+                        addProperty("time", System.currentTimeMillis())
+                    }
+                    val notifUrl = "$base/Notifications/$phoneEncoded/$notifKey.json$auth"
+                    client.newCall(
+                        Request.Builder().url(notifUrl)
+                            .put(notifObj.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().close()
+                } catch (e: Exception) {
+                    Log.e("FirebaseData", "Notifications fallback write failed: ${e.message}")
                 }
             }
 
-            GasResult.Success(Unit)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Update failed") }
+            ApiResult.Success(Unit)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Update failed") }
     }
 
     /** Admin: Bulk audience tag update */
@@ -539,14 +507,14 @@ object GasApiService {
         subject  : String,
         subTopic : String,
         newTag   : String
-    ): GasResult<Int> = withContext(Dispatchers.IO) {
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
         try {
             val auth = authQuery()
             val base = BuildConfig.FIREBASE_URL.trimEnd('/')
             val json = client.newCall(
                 Request.Builder().url("$base/$sheet.json$auth").get().build()
             ).execute().body?.string() ?: "null"
-            if (json == "null") return@withContext GasResult.Error("Sheet empty")
+            if (json == "null") return@withContext ApiResult.Error("Sheet empty")
 
             val raw: Map<String, Map<String, Any>> = gson.fromJson(
                 json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
@@ -557,7 +525,7 @@ object GasApiService {
                 s.equals(subject.trim(), ignoreCase = true) &&
                 (subTopic.isBlank() || st.equals(subTopic.trim(), ignoreCase = true))
             }
-            if (matching.isEmpty()) return@withContext GasResult.Error("কোনো matching প্রশ্ন নেই")
+            if (matching.isEmpty()) return@withContext ApiResult.Error("কোনো matching প্রশ্ন নেই")
 
             var updated = 0
             matching.forEach { (key, _) ->
@@ -569,8 +537,75 @@ object GasApiService {
                 if (resp.isSuccessful) updated++
                 resp.close()
             }
-            GasResult.Success(updated)
-        } catch (e: Exception) { GasResult.Error(e.message ?: "Bulk update failed") }
+            ApiResult.Success(updated)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Bulk update failed") }
+    }
+
+    /**
+     * Admin: একটি Subject অথবা SubTopic এর নাম rename করো।
+     * - renameSubTopic = false হলে: subject নাম বদলাবে (subTopic ফাঁকা রাখলে সব sub_topic সহ পুরো subject rename হবে)
+     * - renameSubTopic = true হলে: শুধু sub_topic নাম বদলাবে (subject অপরিবর্তিত থাকবে, subject দিয়ে scope করা হয়)
+     * sheets প্যারামিটারে একটি বা একাধিক sheet ("Quiz","QBank","Study") দেওয়া যাবে।
+     * প্রতিটি sheet এ matching সব row খুঁজে বের করে শুধু subject/sub_topic ফিল্ড PATCH করা হয় —
+     * বাকি সব ফিল্ড (question, options, answer, audience ইত্যাদি) অপরিবর্তিত থাকে।
+     */
+    suspend fun adminRenameSubjectOrTopic(
+        sheets         : List<String>,
+        oldSubject     : String,
+        oldSubTopic    : String,   // ফাঁকা হলে পুরো subject rename (renameSubTopic=false এর সময়)
+        newName        : String,
+        renameSubTopic : Boolean
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+            var totalUpdated = 0
+            var anySheetHadData = false
+
+            for (sheet in sheets) {
+                val json = client.newCall(
+                    Request.Builder().url("$base/$sheet.json$auth").get().build()
+                ).execute().body?.string() ?: "null"
+                if (json == "null") continue
+
+                val raw: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
+                )
+                if (raw.isEmpty()) continue
+                anySheetHadData = true
+
+                val matching = raw.filter { (_, v) ->
+                    val s  = v["subject"]?.toString()?.trim() ?: ""
+                    val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    if (renameSubTopic) {
+                        // SubTopic rename — subject এর মধ্যেই scope, exact sub_topic match লাগবে
+                        s.equals(oldSubject.trim(), ignoreCase = true) &&
+                        st.equals(oldSubTopic.trim(), ignoreCase = true)
+                    } else {
+                        // Subject rename — পুরো subject এর সব প্রশ্ন (sub_topic যাই হোক)
+                        s.equals(oldSubject.trim(), ignoreCase = true)
+                    }
+                }
+                if (matching.isEmpty()) continue
+
+                matching.forEach { (key, _) ->
+                    val obj = JsonObject().apply {
+                        if (renameSubTopic) addProperty("sub_topic", newName.trim())
+                        else addProperty("subject", newName.trim())
+                    }
+                    val body = obj.toString().toRequestBody("application/json".toMediaType())
+                    val resp = client.newCall(
+                        Request.Builder().url("$base/$sheet/$key.json$auth").patch(body).build()
+                    ).execute()
+                    if (resp.isSuccessful) totalUpdated++
+                    resp.close()
+                }
+            }
+
+            if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
+            if (totalUpdated == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
+            ApiResult.Success(totalUpdated)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
     }
 }
 
@@ -591,7 +626,7 @@ data class ReportedQuestion(
     }
 }
 
-sealed class GasResult<out T> {
-    data class Success<T>(val data: T) : GasResult<T>()
-    data class Error(val message: String) : GasResult<Nothing>()
+sealed class ApiResult<out T> {
+    data class Success<T>(val data: T) : ApiResult<T>()
+    data class Error(val message: String) : ApiResult<Nothing>()
 }

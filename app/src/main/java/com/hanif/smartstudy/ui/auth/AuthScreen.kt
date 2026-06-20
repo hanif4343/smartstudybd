@@ -1,7 +1,7 @@
 package com.hanif.smartstudy.ui.auth
 
+import android.content.Intent
 import android.net.Uri
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -59,7 +59,7 @@ val CLASS_GROUPS = listOf(
         "Honours 1","Honours 2","Honours 3","Honours 4"
     )),
     ClassGroup("মাস্টার্স", "🔬", listOf(
-        "Masters 1","Masters 2"
+        "Masters 1","Masters 2","Masters Final"
     ))
 )
 
@@ -171,6 +171,72 @@ fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
         SSField(phone, { phone = it }, "ফোন নম্বর (01XXXXXXXXX)", Icons.Default.Phone, keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next, onIme = { fm.moveFocus(FocusDirection.Down) })
         SSField(password, { password = it }, "পাসওয়ার্ড", Icons.Default.Lock, isPass = true, showPass = showPw, onToggle = { showPw = !showPw }, imeAction = ImeAction.Done, onIme = { fm.clearFocus(); vm.login(phone, password) })
 
+        // Forgot Password
+        var showForgotDialog by remember { mutableStateOf(false) }
+        if (showForgotDialog) {
+            AlertDialog(
+                onDismissRequest = { showForgotDialog = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp),
+                title = {
+                    Text(
+                        "🔐 পাসওয়ার্ড রিসেট",
+                        fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 17.sp,
+                        color = Slate800
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "পাসওয়ার্ড রিসেট করতে আমাদের Facebook পেজে মেসেজ করুন।",
+                            fontFamily = NotoSansBengali,
+                            fontSize = 14.sp,
+                            color = Color(0xFF374151)
+                        )
+                        Text(
+                            "মেসেজে আপনার নাম ও রেজিস্ট্রেশনকৃত ফোন নম্বর জানান — অ্যাডমিন দ্রুত পাসওয়ার্ড পরিবর্তন করে দেবেন।",
+                            fontFamily = NotoSansBengali,
+                            fontSize = 13.sp,
+                            color = Color(0xFF6B7280)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showForgotDialog = false
+                            val fbPageUrl = "https://www.facebook.com/share/1EqyxeFfXg/"
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fbPageUrl)))
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1877F2))
+                    ) {
+                        Text("📘 Facebook পেজে যান", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showForgotDialog = false }) {
+                        Text("বাতিল", fontFamily = NotoSansBengali, color = Color.Gray)
+                    }
+                }
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Text(
+                text = "পাসওয়ার্ড ভুলে গেছেন?",
+                fontSize = 13.sp,
+                color = Indigo600,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = NotoSansBengali,
+                modifier = Modifier.clickable { showForgotDialog = true }
+            )
+        }
+
         if (state is AuthState.Error) ErrBanner((state as AuthState.Error).message)
 
         Button(
@@ -186,7 +252,7 @@ fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
         GoogleSignInButton(isLoading = state is AuthState.Loading) {
             val activity = ctx as? MainActivity ?: return@GoogleSignInButton
             activity.startGoogleSignIn(
-                onSuccess = { email, name, photoUrl -> vm.googleSignIn(email, name, photoUrl) },
+                onSuccess = { email, name, photoUrl, idToken -> vm.googleSignIn(email, name, photoUrl, idToken) },
                 onError = { msg -> vm.setError(msg) }
             )
         }
@@ -213,7 +279,7 @@ fun SignupForm(
     var confirmPass by remember { mutableStateOf("") }
     var showPw by remember { mutableStateOf(false) }
     var userType by remember { mutableStateOf("Student") }
-    var classLevel by remember { mutableStateOf("Class 10") }
+    var classLevel by remember { mutableStateOf("") }
     var showClassPicker by remember { mutableStateOf(false) }
 
     var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -221,7 +287,7 @@ fun SignupForm(
         ActivityResultContracts.GetContent()
     ) { uri -> selectedPhotoUri = uri }
 
-    val userTypes = listOf("Student" to "Student", "Job" to "Job Seeker", "General" to "General")
+    val userTypes = listOf("Student" to "শিক্ষার্থী", "Job" to "Job Seeker")
 
     LaunchedEffect(state) {
         if (state is AuthState.Success) {
@@ -305,7 +371,6 @@ fun SignupForm(
                 FilterChip(value == userType, {
                     userType = value
                     if (value == "Job") classLevel = ""
-                    else if (classLevel.isBlank()) classLevel = "Class 10"
                 }, label = { Text(label, fontSize = 12.sp, fontFamily = NotoSansBengali) })
             }
         }
@@ -331,7 +396,7 @@ fun SignupForm(
                 ) {
                     Column {
                         Text("নির্বাচিত শ্রেণী", fontSize = 11.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
-                        Text(classLevel.ifBlank { "Class 10" }, fontSize = 15.sp, color = Slate800, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        Text(classLevel.ifBlank { "শ্রেণি বেছে নিন" }, fontSize = 15.sp, color = if(classLevel.isBlank()) Color.Gray else Slate800, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                     }
                     Icon(
                         if (showClassPicker) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -367,6 +432,10 @@ fun SignupForm(
         Button(
             onClick = {
                 fm.clearFocus()
+                if (userType == "Student" && classLevel.isBlank()) {
+                    vm.setError("অনুগ্রহ করে আপনার শ্রেণি/স্তর বেছে নিন")
+                    return@Button
+                }
                 if (isGoogleSignup) {
                     vm.googleSignup(name, prefillEmail, phone, prefillPhotoUrl, userType, classLevel, selectedPhotoUri)
                 } else {
@@ -386,7 +455,7 @@ fun SignupForm(
             GoogleSignInButton(isLoading = state is AuthState.Loading) {
                 val activity = ctx as? MainActivity ?: return@GoogleSignInButton
                 activity.startGoogleSignIn(
-                    onSuccess = { email, name2, photoUrl -> vm.googleSignIn(email, name2, photoUrl) },
+                    onSuccess = { email, name2, photoUrl, idToken -> vm.googleSignIn(email, name2, photoUrl, idToken) },
                     onError = { msg -> vm.setError(msg) }
                 )
             }

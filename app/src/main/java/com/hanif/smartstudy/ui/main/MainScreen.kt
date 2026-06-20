@@ -114,6 +114,15 @@ fun MainScreen(
         }
     }
 
+    // Admin question edit হলে সব ViewModel fresh reload করো
+    LaunchedEffect(menuState.contentEditVersion) {
+        if (menuState.contentEditVersion > 0) {
+            quizViewModel.adminRefreshContent()
+            qbankViewModel.adminRefreshContent()
+            studyViewModel.adminRefreshContent()
+        }
+    }
+
     LaunchedEffect(deepLink.type) {
         when (deepLink.type) {
             DeepLinkAction.Type.QUIZ       -> {
@@ -210,25 +219,46 @@ fun MainScreen(
                 BottomTab.HOME  -> HomeScreen(
                     quizViewModel = quizViewModel,
                     onSearchClick = { showSearch = true },
-                    onTypingClick = { showTyping = true }
+                    onTypingClick = { showTyping = true },
+                    onOpenStudy = { subject, subTopic ->
+                        currentTab = BottomTab.STUDY
+                        studyViewModel.navigateToSubject(subject)
+                        if (subTopic.isNotBlank()) studyViewModel.navigateToSubTopic(subTopic)
+                    },
+                    onOpenInstantTest = { subject, subTopic ->
+                        currentTab = BottomTab.QUIZ
+                        quizViewModel.startInstantTestFor(subject, subTopic)
+                    },
+                    onOpenWeeklyTest = {
+                        currentTab = BottomTab.CHALLENGE
+                    }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
                     viewModel = quizViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.QBANK -> CoreScreen(
                     mode      = StudyMode.QBANK,
                     viewModel = qbankViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.STUDY -> CoreScreen(
                     mode      = StudyMode.STUDY,
                     viewModel = studyViewModel,
                     onAchievementUnlocked = onAchievementUnlocked,
-                    onStreakUpdated       = onStreakUpdated
+                    onStreakUpdated       = onStreakUpdated,
+                    onAdminEdit = { sheet, rowKey, fields, preview ->
+                        menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    }
                 )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
                 BottomTab.MENU  -> MenuScreen(

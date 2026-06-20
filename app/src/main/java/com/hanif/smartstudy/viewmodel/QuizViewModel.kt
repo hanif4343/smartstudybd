@@ -172,10 +172,58 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(highlightQuestionId = null) }
     }
 
+    /**
+     * Admin edit করার পর এই function call হয়। আগে এটা পুরো cache clear করে
+     * setMode() call করত — যেটা navPath রিসেট করে দিত, ফলে admin যেই
+     * subject/subTopic/question স্ক্রিনে ছিল সেখান থেকে subject list এ
+     * ছিটকে যেত।
+     *
+     * এখন: in-memory content (যেটা ইতিমধ্যে ViewModel এর সাথে patch হয়ে গেছে)
+     * থেকে navPath অপরিবর্তিত রেখেই শুধু বর্তমান স্ক্রিনের ডাটা rebuild করা হয়।
+     * Admin ঠিক যেখানে ছিল সেখানেই থাকে, আর edit করা কনটেন্ট সাথে সাথে
+     * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
+     */
     fun adminRefreshContent() {
         viewModelScope.launch {
-            cache.clearCache()
-            setMode(_state.value.mode)
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val path    = _state.value.navPath
+            when {
+                path.subTopic != null && path.subject != null ->
+                    refreshQuestionsInPlace(content, path.subject, path.subTopic, _state.value.mode)
+                path.subject != null ->
+                    rebuildSubTopics(content, path.subject, _state.value.mode)
+                else ->
+                    rebuildSubjects(content, _state.value.mode)
+            }
+        }
+    }
+
+    /**
+     * loadQuestions() এর মতো পুরো question list reset করে না — timer, answered
+     * count, result কিছুই ছোঁয় না। শুধু প্রতিটি প্রশ্নের টেক্সট/অপশন/উত্তর
+     * নতুন content দিয়ে আপডেট করে দেয় (id ধরে ধরে), answerState/bookmark এর
+     * মতো runtime state অপরিবর্তিত রাখে। তাই admin চলমান quiz/qbank/study
+     * স্ক্রিনে কোনো প্রশ্ন এডিট করলে মাঝপথে timer রিস্টার্ট হয় না বা উত্তর
+     * দেওয়া প্রশ্নগুলো আনআনসারড হয়ে যায় না।
+     */
+    private suspend fun refreshQuestionsInPlace(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val fresh = when (mode) {
+            StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
+            StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
+            StudyMode.STUDY -> filtered.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
+        }.associateBy { it.id }
+
+        _state.update { st ->
+            st.copy(questions = st.questions.map { existing ->
+                fresh[existing.id]?.copy(
+                    answerState  = existing.answerState,
+                    isBookmarked = existing.isBookmarked,
+                    isWeakTopic  = existing.isWeakTopic
+                ) ?: existing
+            })
         }
     }
 

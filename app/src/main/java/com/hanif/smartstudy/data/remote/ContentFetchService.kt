@@ -2,7 +2,6 @@ package com.hanif.smartstudy.data.remote
 
 import android.util.Log
 import com.google.gson.JsonObject
-import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.CaseInsensitiveGson
@@ -85,8 +84,19 @@ object ContentFetchService {
                 val trimmed = body.trim()
                 val items: List<T> = when {
                     trimmed.startsWith("[") -> {
-                        val type = object : TypeToken<List<T>>() {}.type
-                        gson.fromJson<List<T>>(trimmed, type) ?: emptyList()
+                        // Quiz/Study/QBank Firebase এ JSON array হিসেবে আছে (GAS syncToFirebase: jsonData.push(...))
+                        // — admin app এর toArr() এর মতো array index টাই "id" / _fbKey হিসেবে ব্যবহার করো।
+                        // নইলে item.id খালি/ভুল থাকে আর admin edit ভুল path এ PATCH করে — Firebase এ জমা হয় না।
+                        val arr = com.google.gson.JsonParser.parseString(trimmed).asJsonArray
+                        arr.mapIndexedNotNull { idx, el ->
+                            try {
+                                if (el != null && el.isJsonObject) {
+                                    val obj2 = el.asJsonObject.deepCopy()
+                                    obj2.addProperty("id", idx.toString())
+                                    gson.fromJson(obj2, T::class.java)
+                                } else null
+                            } catch (e: Exception) { null }
+                        }
                     }
                     trimmed.startsWith("{") -> {
                         val obj = gson.fromJson(trimmed, JsonObject::class.java)
@@ -99,12 +109,12 @@ object ContentFetchService {
                             .mapNotNull { (key, v) ->
                                 try {
                                     if (v.isJsonObject) {
-                                        // Firebase push key (যেমন -NxAbc123) টা "id" হিসেবে inject করো
-                                        // এটা ছাড়া admin edit এ correct Firebase path পাওয়া যায় না
+                                        // Firebase path key (numeric index বা push key যেমন -NxAbc123)
+                                        // সবসময় "id" হিসেবে override করো — এটাই admin edit-এ rowKey হিসেবে ব্যবহার হয়।
+                                        // পুরনো questions-এ "id: 1092" numeric field থাকলেও Firebase path
+                                        // (যেমন "137") দিয়ে replace করতে হবে, নইলে PATCH ভুল path-এ যাবে।
                                         val obj2 = v.asJsonObject.deepCopy()
-                                        if (!obj2.has("id") || obj2.get("id").asString.isNullOrBlank()) {
-                                            obj2.addProperty("id", key)
-                                        }
+                                        obj2.addProperty("id", key)
                                         gson.fromJson(obj2, T::class.java)
                                     } else null
                                 } catch (e: Exception) { null }

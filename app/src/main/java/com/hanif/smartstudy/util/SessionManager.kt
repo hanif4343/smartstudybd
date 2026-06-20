@@ -50,6 +50,12 @@ class SessionManager(private val context: Context) {
         val KEY_EVENING_HOUR     = intPreferencesKey("evening_hour")
         val KEY_EVENING_MIN      = intPreferencesKey("evening_min")
 
+        // Repeat mode: true = Daily (প্রতিদিন), false = Once (একবার)
+        val KEY_MORNING_REPEAT   = booleanPreferencesKey("morning_repeat")
+        val KEY_NIGHT_REPEAT     = booleanPreferencesKey("night_repeat")
+        val KEY_MIDDAY_REPEAT    = booleanPreferencesKey("midday_repeat")
+        val KEY_EVENING_REPEAT   = booleanPreferencesKey("evening_repeat")
+
         val KEY_LAST_NOTIF_CHECK = longPreferencesKey("last_notif_check")
 
         // XP history (JSON list of daily XP)
@@ -158,11 +164,12 @@ class SessionManager(private val context: Context) {
     // ── Reminder ─────────────────────────────────────────────
 
     // ── Morning reminder ──
-    fun setReminderMorning(on: Boolean, hour: Int, minute: Int) = runBlocking {
+    fun setReminderMorning(on: Boolean, hour: Int, minute: Int, repeatDaily: Boolean = true) = runBlocking {
         context.dataStore.edit {
             it[KEY_MORNING_ON] = on
             it[KEY_MORNING_HOUR] = hour
             it[KEY_MORNING_MIN] = minute
+            it[KEY_MORNING_REPEAT] = repeatDaily
         }
     }
     fun isMorningReminderOn(): Boolean = runBlocking {
@@ -174,13 +181,17 @@ class SessionManager(private val context: Context) {
     fun getMorningMinute(): Int = runBlocking {
         context.dataStore.data.first()[KEY_MORNING_MIN] ?: 0
     }
+    fun isMorningRepeatDaily(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_MORNING_REPEAT] ?: true
+    }
 
     // ── Night reminder ──
-    fun setReminderNight(on: Boolean, hour: Int, minute: Int) = runBlocking {
+    fun setReminderNight(on: Boolean, hour: Int, minute: Int, repeatDaily: Boolean = true) = runBlocking {
         context.dataStore.edit {
             it[KEY_NIGHT_ON] = on
             it[KEY_NIGHT_HOUR] = hour
             it[KEY_NIGHT_MIN] = minute
+            it[KEY_NIGHT_REPEAT] = repeatDaily
         }
     }
     fun isNightReminderOn(): Boolean = runBlocking {
@@ -192,13 +203,17 @@ class SessionManager(private val context: Context) {
     fun getNightMinute(): Int = runBlocking {
         context.dataStore.data.first()[KEY_NIGHT_MIN] ?: 0
     }
+    fun isNightRepeatDaily(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_NIGHT_REPEAT] ?: true
+    }
 
     // ── Midday progress check ──
-    fun setReminderMidday(on: Boolean, hour: Int, minute: Int) = runBlocking {
+    fun setReminderMidday(on: Boolean, hour: Int, minute: Int, repeatDaily: Boolean = true) = runBlocking {
         context.dataStore.edit {
             it[KEY_MIDDAY_ON] = on
             it[KEY_MIDDAY_HOUR] = hour
             it[KEY_MIDDAY_MIN] = minute
+            it[KEY_MIDDAY_REPEAT] = repeatDaily
         }
     }
     fun isMiddayReminderOn(): Boolean = runBlocking {
@@ -210,13 +225,17 @@ class SessionManager(private val context: Context) {
     fun getMiddayMinute(): Int = runBlocking {
         context.dataStore.data.first()[KEY_MIDDAY_MIN] ?: 0
     }
+    fun isMiddayRepeatDaily(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_MIDDAY_REPEAT] ?: true
+    }
 
     // ── Evening urgency check ──
-    fun setReminderEvening(on: Boolean, hour: Int, minute: Int) = runBlocking {
+    fun setReminderEvening(on: Boolean, hour: Int, minute: Int, repeatDaily: Boolean = true) = runBlocking {
         context.dataStore.edit {
             it[KEY_EVENING_ON] = on
             it[KEY_EVENING_HOUR] = hour
             it[KEY_EVENING_MIN] = minute
+            it[KEY_EVENING_REPEAT] = repeatDaily
         }
     }
     fun isEveningReminderOn(): Boolean = runBlocking {
@@ -227,6 +246,9 @@ class SessionManager(private val context: Context) {
     }
     fun getEveningMinute(): Int = runBlocking {
         context.dataStore.data.first()[KEY_EVENING_MIN] ?: 0
+    }
+    fun isEveningRepeatDaily(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_EVENING_REPEAT] ?: true
     }
 
     // ── Notification polling ──

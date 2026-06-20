@@ -147,6 +147,9 @@ data class AppContent(
     val fetchedAt: Long             = 0L
 ) {
     fun isEmpty()  = study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()
-    fun isStale(ttlMillis: Long = 6 * 60 * 60 * 1000L) =
+    // FIX: TTL আগে ৬ ঘণ্টা ছিল — admin কোনো প্রশ্ন এডিট করলে অন্য ইউজারদের ডিভাইসে
+    // ৬ ঘণ্টা পর্যন্ত পুরনো (stale) cache-ই দেখানো হতো। ১ ঘণ্টায় নামানো হলো যাতে
+    // আপডেট অনেক দ্রুত সবার কাছে পৌঁছায়, কিন্তু Firebase read খরচও বেড়ে না যায়।
+    fun isStale(ttlMillis: Long = 60 * 60 * 1000L) =
         fetchedAt == 0L || (System.currentTimeMillis() - fetchedAt) > ttlMillis
 }

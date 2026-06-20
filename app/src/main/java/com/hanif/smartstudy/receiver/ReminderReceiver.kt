@@ -31,24 +31,33 @@ class ReminderReceiver : BroadcastReceiver() {
         const val TYPE_MIDDAY      = "midday"
         const val TYPE_EVENING     = "evening"
 
-        fun scheduleMorning(context: Context, hour: Int, minute: Int) {
-            schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING)
-            SessionManager(context).setReminderMorning(true, hour, minute)
+        /** Android 12+ এ exact alarm permission আছে কিনা চেক করো */
+        fun canScheduleExactAlarms(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                return am.canScheduleExactAlarms()
+            }
+            return true
         }
 
-        fun scheduleNight(context: Context, hour: Int, minute: Int) {
-            schedule(context, hour, minute, REQ_NIGHT, TYPE_NIGHT)
-            SessionManager(context).setReminderNight(true, hour, minute)
+        fun scheduleMorning(context: Context, hour: Int, minute: Int, repeatDaily: Boolean = true) {
+            schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING, repeatDaily)
+            SessionManager(context).setReminderMorning(true, hour, minute, repeatDaily)
         }
 
-        fun scheduleMidday(context: Context, hour: Int, minute: Int) {
-            schedule(context, hour, minute, REQ_MIDDAY, TYPE_MIDDAY)
-            SessionManager(context).setReminderMidday(true, hour, minute)
+        fun scheduleNight(context: Context, hour: Int, minute: Int, repeatDaily: Boolean = true) {
+            schedule(context, hour, minute, REQ_NIGHT, TYPE_NIGHT, repeatDaily)
+            SessionManager(context).setReminderNight(true, hour, minute, repeatDaily)
         }
 
-        fun scheduleEvening(context: Context, hour: Int, minute: Int) {
-            schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING)
-            SessionManager(context).setReminderEvening(true, hour, minute)
+        fun scheduleMidday(context: Context, hour: Int, minute: Int, repeatDaily: Boolean = true) {
+            schedule(context, hour, minute, REQ_MIDDAY, TYPE_MIDDAY, repeatDaily)
+            SessionManager(context).setReminderMidday(true, hour, minute, repeatDaily)
+        }
+
+        fun scheduleEvening(context: Context, hour: Int, minute: Int, repeatDaily: Boolean = true) {
+            schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING, repeatDaily)
+            SessionManager(context).setReminderEvening(true, hour, minute, repeatDaily)
         }
 
         fun cancelMorning(context: Context) {
@@ -71,12 +80,13 @@ class ReminderReceiver : BroadcastReceiver() {
             SessionManager(context).setReminderEvening(false, 19, 0)
         }
 
-        private fun schedule(context: Context, hour: Int, minute: Int, reqCode: Int, type: String) {
+        private fun schedule(context: Context, hour: Int, minute: Int, reqCode: Int, type: String, repeatDaily: Boolean = true) {
             val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val intent = Intent(context, ReminderReceiver::class.java).apply {
                 putExtra(EXTRA_TYPE, type)
                 putExtra("hour", hour)
                 putExtra("minute", minute)
+                putExtra("repeatDaily", repeatDaily)
             }
             val pi = PendingIntent.getBroadcast(
                 context, reqCode, intent,
@@ -90,7 +100,15 @@ class ReminderReceiver : BroadcastReceiver() {
                 if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_MONTH, 1)
             }
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (am.canScheduleExactAlarms()) {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    } else {
+                        // Exact alarm permission নেই — কাছাকাছি সময়ে আসবে এমন alarm দাও,
+                        // যাতে সম্পূর্ণ silent fail না হয়ে যায়
+                        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
                 } else {
                     am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
@@ -132,6 +150,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
         val hour   = intent.getIntExtra("hour", defaultHour)
         val minute = intent.getIntExtra("minute", 0)
+        val repeatDaily = intent.getBooleanExtra("repeatDaily", true)
 
         // exam eve — custom title/body সহ একবারই fire হয়, repeat নয়
         if (type == TYPE_EXAM_EVE) {
@@ -143,13 +162,23 @@ class ReminderReceiver : BroadcastReceiver() {
 
         showNotification(context, type)
 
-        // পরের দিনের জন্য আবার schedule করো
         val session = SessionManager(context)
-        when (type) {
-            TYPE_MORNING -> if (session.isMorningReminderOn()) schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING)
-            TYPE_NIGHT   -> if (session.isNightReminderOn())   schedule(context, hour, minute, REQ_NIGHT,   TYPE_NIGHT)
-            TYPE_MIDDAY  -> if (session.isMiddayReminderOn())  schedule(context, hour, minute, REQ_MIDDAY,  TYPE_MIDDAY)
-            TYPE_EVENING -> if (session.isEveningReminderOn()) schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING)
+        if (repeatDaily) {
+            // Daily মোড — পরের দিনের জন্য আবার schedule করো (যদি এখনো on থাকে)
+            when (type) {
+                TYPE_MORNING -> if (session.isMorningReminderOn()) schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING, true)
+                TYPE_NIGHT   -> if (session.isNightReminderOn())   schedule(context, hour, minute, REQ_NIGHT,   TYPE_NIGHT, true)
+                TYPE_MIDDAY  -> if (session.isMiddayReminderOn())  schedule(context, hour, minute, REQ_MIDDAY,  TYPE_MIDDAY, true)
+                TYPE_EVENING -> if (session.isEveningReminderOn()) schedule(context, hour, minute, REQ_EVENING, TYPE_EVENING, true)
+            }
+        } else {
+            // Once মোড — একবার fire হয়ে শেষ। টগল বন্ধ করে দাও যাতে UI-ও সঠিক অবস্থা দেখায়।
+            when (type) {
+                TYPE_MORNING -> session.setReminderMorning(false, hour, minute, false)
+                TYPE_NIGHT   -> session.setReminderNight(false, hour, minute, false)
+                TYPE_MIDDAY  -> session.setReminderMidday(false, hour, minute, false)
+                TYPE_EVENING -> session.setReminderEvening(false, hour, minute, false)
+            }
         }
     }
 
