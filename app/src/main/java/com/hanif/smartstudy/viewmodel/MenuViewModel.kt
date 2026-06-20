@@ -649,10 +649,15 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                         .adminUpdateQuestionField(sheet, rowKey, fields)) {
                     is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                        // DataStore cache + in-memory cache দুটোই clear করো
-                        cache.clearCache()
-                        com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
-                        com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. Cache cleared.")
+                        // পুরো cache clear করে নতুন fetch করানোর বদলে — শুধু এই
+                        // row টাই in-memory + disk cache এ সরাসরি patch করো।
+                        // এতে স্ক্রিন reload হয় না, admin যেখানে ছিল সেখানেই
+                        // থাকে আর পরিবর্তনও সাথে সাথে স্ক্রিনে দেখা যায়।
+                        // TTL (১ ঘণ্টা) শেষ হলে স্বাভাবিক নিয়মেই fresh fetch হবে
+                        // এবং অন্য সব ইউজারের কাছেও আপডেট পৌঁছাবে।
+                        com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                            .patchContentAndPersist(sheet, rowKey, fields)
+                        com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
                         _state.update { it.copy(isEditingQuestion = false,
                             editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
                             contentEditVersion = _state.value.contentEditVersion + 1) }
@@ -699,6 +704,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             var successCount = 0
             var failCount    = 0
             val gson = com.google.gson.Gson()
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
             for (action in pending) {
                 try {
                     val payload    = gson.fromJson(action.payload, Map::class.java)
@@ -709,6 +715,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     when (com.hanif.smartstudy.data.remote.FirebaseDataService
                             .adminUpdateQuestionField(sheet, questionId, fields)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                            repo.patchContentAndPersist(sheet, questionId, fields)
                             q.remove(action.id); successCount++
                         }
                         is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
@@ -716,10 +723,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 } catch (e: Exception) { failCount++ }
-            }
-            if (successCount > 0) {
-                cache.clearCache()
-                com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
             }
             loadPendingEdits()
             val msg = when {
@@ -741,8 +744,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                     .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    cache.clearCache()
-                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    val fields = options.toMutableMap().apply { put("correct", newAnswer) }
+                    com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                        .patchContentAndPersist(sheet, rowKey, fields)
                     _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট",
                         contentEditVersion = it.contentEditVersion + 1) }
                 }
