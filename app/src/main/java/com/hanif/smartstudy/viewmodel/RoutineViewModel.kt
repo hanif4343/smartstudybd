@@ -109,6 +109,20 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Bottom sheet থেকে "পড়া শেষ করেছি" বাটনে — idempotent, শুধু done=true করে,
+    //    আগে থেকে done থাকলে toggle করে আবার false করে না ──
+    fun markDone(id: String) {
+        viewModelScope.launch {
+            val current = _state.value.items.find { it.id == id }
+            if (current?.done == true) return@launch
+            cache.toggleItem(id)
+            val updated = cache.getTodayRoutine()
+            _state.value = updated
+            SoundManager.playCorrect()
+            syncWidget()
+        }
+    }
+
     fun removeItem(id: String) {
         viewModelScope.launch {
             cache.removeItem(id)
