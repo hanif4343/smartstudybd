@@ -91,6 +91,23 @@ class WeekendBattleRepository {
         awaitClose { ref.child("$battleId/entries").removeEventListener(listener) }
     }
 
+    // ── এক-বারের জন্য leaderboard আনো (submit এর পরে rank বের করতে) ──
+    // observeLeaderboard একটা চলমান Flow — submit এর পরে শুধু একবার rank
+    // চেক করার জন্য আলাদা suspend fun, যাতে শুধু এই কাজের জন্য listener
+    // খুলে রাখা না লাগে।
+    suspend fun getLeaderboard(battleId: String): List<BattleEntry> {
+        return try {
+            val snap = withTimeout(8_000L) {
+                ref.child("$battleId/entries").orderByChild("score").limitToLast(50).get().await()
+            }
+            snap.children.mapNotNull { entryFromSnap(it) }
+                .sortedWith(compareByDescending<BattleEntry> { it.score }.thenBy { it.timeTakenSec })
+        } catch (e: Exception) {
+            Log.e(TAG, "getLeaderboard: ${e.message}")
+            emptyList()
+        }
+    }
+
     // ── আমার entry আছে কিনা দেখো ───────────────────────
 
     suspend fun getMyEntry(battleId: String, phone: String): BattleEntry? {
@@ -161,6 +178,17 @@ class WeekendBattleRepository {
         } catch (e: Exception) {
             Log.e(TAG, "submitBattleEntry: ${e.message}")
             false
+        }
+    }
+
+    // ── Submit এর পরে rank bonus যোগ হলে entry এর xpEarned আপডেট করো ──
+    // (leaderboard/history এ সঠিক মোট XP দেখানোর জন্য — শুধু Users/XP তে
+    // award করলেই যথেষ্ট না, কারণ entry রেকর্ড আলাদাভাবে xpEarned রাখে)
+    suspend fun updateEntryXp(battleId: String, phone: String, newXpEarned: Int) {
+        try {
+            ref.child("$battleId/entries/${phone.firebaseKey()}/xpEarned").setValue(newXpEarned).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "updateEntryXp: ${e.message}")
         }
     }
 
