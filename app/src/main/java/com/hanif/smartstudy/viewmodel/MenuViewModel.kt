@@ -448,6 +448,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             SmartStudyFirebaseService.updatePresence(ctx, false)
             session.clearUser()
+            // FIX: content cache (disk + in-memory) ক্লিয়ার না করলে edit করা প্রশ্ন/তথ্য
+            // logout-login করার পরেও পুরনো (stale) cache থেকেই দেখানো হতো।
+            cache.clearCache()
+            com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
             _state.update { it.copy(user = null) }
         }
     }
@@ -713,14 +717,18 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 } catch (e: Exception) { failCount++ }
             }
-            if (successCount > 0) cache.clearCache()
+            if (successCount > 0) {
+                cache.clearCache()
+                com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+            }
             loadPendingEdits()
             val msg = when {
                 failCount == 0 -> "✅ $successCount টি edit sync সফল!"
                 successCount == 0 -> "❌ সব ($failCount টি) fail হয়েছে"
                 else -> "⚠️ $successCount টি সফল, $failCount টি fail"
             }
-            _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = msg) }
+            _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = msg,
+                contentEditVersion = if (successCount > 0) it.contentEditVersion + 1 else it.contentEditVersion) }
         }
     }
 
@@ -734,7 +742,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
-                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট") }
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
@@ -794,8 +804,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
                     _state.update { it.copy(isAddingQuestion = false,
-                        addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}") }
+                        addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isAddingQuestion = false,
@@ -815,8 +827,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     .adminBulkAudienceUpdate(sheet, subject, subTopic, newTag)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
                     _state.update { it.copy(isBulkUpdating = false,
-                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"") }
+                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error ->
                     _state.update { it.copy(isBulkUpdating = false,
