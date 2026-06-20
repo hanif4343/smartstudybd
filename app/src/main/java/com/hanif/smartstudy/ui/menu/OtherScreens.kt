@@ -22,7 +22,10 @@ import com.hanif.smartstudy.viewmodel.MenuViewModel
 //  BookmarksMenuScreen, LeaderboardScreen, AdminScreen
 // ─────────────────────────────────────────────────────────────
 
-// ── Bookmarks screen (placeholder — real data from QuizViewModel) ──
+// ── Bookmarks screen — DEPRECATED placeholder, no longer used.
+//    MenuScreen.kt now routes MenuNav.BOOKMARKS to sections.BookmarksPage,
+//    which shows the actual bookmarked questions. Kept here unused to avoid
+//    breaking any other reference; safe to delete in a future cleanup. ──
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
