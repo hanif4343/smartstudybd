@@ -167,7 +167,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun adminRefreshContent() {
         viewModelScope.launch {
+            // FIX: শুধু disk cache clear করলে চলবে না — ContentRepository এর static
+            // in-memory cache (_memCache) আগে থেকেই থাকলে সেটাই serve হতো এবং
+            // edit/swap/add করা নতুন ডেটা স্ক্রিনে না এসে পুরনোটাই দেখাত।
             cache.clearCache()
+            com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
             setMode(_state.value.mode)
         }
     }
