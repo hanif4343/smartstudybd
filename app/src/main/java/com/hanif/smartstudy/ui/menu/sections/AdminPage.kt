@@ -618,7 +618,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
                 Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("强的 ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("প্রশ্নের ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Switch(checked = isMcq, onCheckedChange = { isMcq = it })
                 Spacer(Modifier.width(8.dp))
                 Text(if (isMcq) "MCQ" else "Written", fontFamily = NotoSansBengali,
