@@ -247,13 +247,13 @@ class SyncWorker(
                 .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
 
-        // ── প্রতি 6 ঘণ্টায় periodic content refresh ──
+        // ── প্রতি ১ ঘণ্টায় periodic content refresh (TTL এর সাথে মিলিয়ে) ──
         fun schedulePeriodic(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
