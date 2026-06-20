@@ -90,7 +90,7 @@ fun ChallengeZone(
 
                 when (activeTab) {
                     0 -> ChallengeHubScreen(state, vm)
-                    1 -> ChampionshipComingSoon()
+                    1 -> WeekendBattleScreen(vm = battleVm)
                 }
             }
         }
@@ -240,40 +240,3 @@ private fun HowItWorksCard() {
     }
 }
 
-@Composable
-fun ChampionshipComingSoon() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFF5F3FF)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Text("🏆", fontSize = 64.sp)
-            Text(
-                "মেগা চ্যাম্পিয়নশিপ",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF4C1D95),
-                fontFamily = NotoSansBengali
-            )
-            Text(
-                "শীঘ্রই আসছে...",
-                fontSize = 16.sp,
-                color = Color(0xFF6D28D9),
-                fontFamily = NotoSansBengali
-            )
-            Text(
-                "প্রতি শুক্রবার রাত ৮টায় নতুন চ্যাম্পিয়নশিপ শুরু হবে",
-                fontSize = 12.sp,
-                color = Color(0xFF7C3AED),
-                fontFamily = NotoSansBengali,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-        }
-    }
-}
