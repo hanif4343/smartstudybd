@@ -586,6 +586,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putStringSet("wrong_q_ids", ids).apply()
     }
 
+    // ── Routine bottom sheet এর জন্য — ইতিমধ্যে লোড হওয়া study content snapshot ──
+    fun getStudyContentSnapshot(): List<StudyItem> {
+        return com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()?.study ?: emptyList()
+    }
+
     fun getWrongQuestions(): List<Pair<QuestionItem, Int>> {
         val content   = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache() ?: return emptyList()
         val ids       = prefs.getStringSet("wrong_q_ids", emptySet()) ?: return emptyList()
