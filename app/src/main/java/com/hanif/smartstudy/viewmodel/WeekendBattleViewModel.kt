@@ -164,9 +164,8 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
             val timeTakenSec = battle.timeLimitSec - s.timerSec
             val accuracy     = if (total > 0) score * 100f / total else 0f
 
-            // XP: score অনুযায়ী (প্রতি সঠিক = 5 XP, top 3 extra reward)
+            // XP: score অনুযায়ী (প্রতি সঠিক = 5 XP) — top 3 extra reward নিচে যোগ হয়
             val baseXp  = score * 5
-            val xpEarned = baseXp
 
             val myPhone = session.getCurrentUser()?.phone ?: ""
             val myName  = session.getCurrentUser()?.displayName() ?: ""
@@ -178,12 +177,47 @@ class WeekendBattleViewModel(app: Application) : AndroidViewModel(app) {
                 score        = score,
                 total        = total,
                 timeTakenSec = timeTakenSec,
-                xpEarned     = xpEarned
+                xpEarned     = baseXp
             )
 
             if (ok) {
-                repo.awardBattleXp(myPhone, xpEarned)
-                val toast = "✅ জমা দেওয়া হয়েছে! তুমি $score/$total সঠিক করেছ (+$xpEarned XP)"
+                repo.awardBattleXp(myPhone, baseXp)
+
+                // ── Top 3 rank bonus ───────────────────────────────
+                // NOTE: কোনো server-side job battle "close" করে rank
+                // চূড়ান্ত করে না (এই প্রজেক্টে Cloud Functions নেই), তাই
+                // submit এর মুহূর্তে leaderboard-এ এই entry-সহ rank
+                // হিসাব করেই বোনাস দেওয়া হয়। কেউ পরে submit করে higher
+                // score দিলে আগের rank বদলে যেতে পারে কিন্তু ততক্ষণে
+                // বোনাস দেওয়া হয়ে গেছে — battle শেষেই বরং leaderboard-এ
+                // চূড়ান্ত standing দেখা যাবে। এটা best-effort approximation।
+                val bonusXp = try {
+                    val leaderboard = repo.getLeaderboard(battle.id)
+                    val myRank = leaderboard.indexOfFirst { it.phone == myPhone } + 1
+                    when (myRank) {
+                        1 -> 500
+                        2 -> 250
+                        3 -> 125
+                        else -> 0
+                    }
+                } catch (e: Exception) {
+                    Log.e("WeekendBattleVM", "rank bonus calc failed: ${e.message}")
+                    0
+                }
+
+                val xpEarned = baseXp + bonusXp
+                if (bonusXp > 0) {
+                    repo.awardBattleXp(myPhone, bonusXp)
+                    repo.updateEntryXp(battle.id, myPhone, xpEarned)
+                }
+
+                val rankMsg = when (bonusXp) {
+                    500 -> " 🥇 ১ম স্থান বোনাস +500 XP!"
+                    250 -> " 🥈 ২য় স্থান বোনাস +250 XP!"
+                    125 -> " 🥉 ৩য় স্থান বোনাস +125 XP!"
+                    else -> ""
+                }
+                val toast = "✅ জমা দেওয়া হয়েছে! তুমি $score/$total সঠিক করেছ (+$xpEarned XP)$rankMsg"
                 _state.update { it.copy(
                     isSubmitting = false,
                     hasSubmitted = true,
