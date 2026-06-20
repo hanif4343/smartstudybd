@@ -4,6 +4,12 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.MutableData
+import com.google.firebase.database.Transaction
+import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
 import com.hanif.smartstudy.data.model.AppContent
@@ -19,6 +25,7 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.tasks.await
 
 class ContentRepository(private val context: Context) {
 
@@ -31,6 +38,7 @@ class ContentRepository(private val context: Context) {
         @Volatile private var _memCache: AppContent? = null
         private val mutex = Mutex()
         fun getMemCache(): AppContent? = _memCache
+        fun clearMemCache() { _memCache = null }
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
@@ -99,11 +107,66 @@ class ContentRepository(private val context: Context) {
         }
     }
 
-    fun clearMemCache() { _memCache = null }
-
     fun getXpInfo(): XpInfo {
         val user = session.getCurrentUser()
         return XpInfo.fromXp(user?.xp ?: 0)
+    }
+
+    // ── XP award করা — Firebase Users/{phone}/XP ফিল্ডে atomic transaction দিয়ে
+    //    বাড়ায় (race condition-safe), আর সাথে সাথে local session-এর cached XP-ও
+    //    আপডেট করে দেয় যাতে Home screen তৎক্ষণাৎ নতুন XP দেখায়, পরের login এর
+    //    জন্য অপেক্ষা করতে না হয়।
+    //
+    //    [মূল কারণ — আগে XP সবসময় ০ দেখাতো]: quiz এ সঠিক উত্তর দিলে কোনো XP-ই
+    //    award হতো না — পুরো pipeline (PendingQueue.enqueueXpUpdate ইত্যাদি)
+    //    কোডে ছিল কিন্তু কোথাও call হতো না। এই ফাংশনটাই সেই gap পূরণ করে।
+    private val xpDb: FirebaseDatabase by lazy {
+        try {
+            val url = BuildConfig.FIREBASE_URL
+            if (url.isNullOrBlank() || url.contains("%%") || !url.startsWith("https://")) {
+                FirebaseDatabase.getInstance()
+            } else {
+                FirebaseDatabase.getInstance(url)
+            }
+        } catch (e: Exception) {
+            FirebaseDatabase.getInstance()
+        }
+    }
+
+    suspend fun awardXp(phone: String, delta: Int) {
+        if (delta == 0 || phone.isBlank()) return
+
+        // - Local cache সাথে সাথে আপডেট — UI তে তাৎক্ষণিক প্রতিফলন
+        try {
+            val current = session.getCurrentUser()
+            if (current != null) {
+                session.saveUser(current.copy(xp = maxOf(0, current.xp + delta)))
+            }
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp local update failed: ${e.message}")
+        }
+
+        // - Firebase এ আসল মান — atomic transaction (একসাথে অনেক answer দিলেও XP হারিয়ে যাবে না)
+        try {
+            val usersRef = xpDb.getReference("Users")
+            val snap = usersRef.orderByChild("Phone").equalTo(phone).get().await()
+            val userRef = snap.children.firstOrNull()?.ref ?: run {
+                Log.w("ContentRepository", "awardXp: user not found for $phone")
+                return
+            }
+            userRef.runTransaction(object : Transaction.Handler {
+                override fun doTransaction(d: MutableData): Transaction.Result {
+                    val cur = d.child("XP").getValue(Int::class.java) ?: 0
+                    d.child("XP").value = maxOf(0, cur + delta)
+                    return Transaction.success(d)
+                }
+                override fun onComplete(e: DatabaseError?, c: Boolean, s: DataSnapshot?) {
+                    if (e != null) Log.e("ContentRepository", "awardXp transaction failed: ${e.message}")
+                }
+            })
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp Firebase write failed: ${e.message}")
+        }
     }
 
     suspend fun getStreakInfo(): StreakInfo {
