@@ -540,6 +540,73 @@ object FirebaseDataService {
             ApiResult.Success(updated)
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Bulk update failed") }
     }
+
+    /**
+     * Admin: একটি Subject অথবা SubTopic এর নাম rename করো।
+     * - renameSubTopic = false হলে: subject নাম বদলাবে (subTopic ফাঁকা রাখলে সব sub_topic সহ পুরো subject rename হবে)
+     * - renameSubTopic = true হলে: শুধু sub_topic নাম বদলাবে (subject অপরিবর্তিত থাকবে, subject দিয়ে scope করা হয়)
+     * sheets প্যারামিটারে একটি বা একাধিক sheet ("Quiz","QBank","Study") দেওয়া যাবে।
+     * প্রতিটি sheet এ matching সব row খুঁজে বের করে শুধু subject/sub_topic ফিল্ড PATCH করা হয় —
+     * বাকি সব ফিল্ড (question, options, answer, audience ইত্যাদি) অপরিবর্তিত থাকে।
+     */
+    suspend fun adminRenameSubjectOrTopic(
+        sheets         : List<String>,
+        oldSubject     : String,
+        oldSubTopic    : String,   // ফাঁকা হলে পুরো subject rename (renameSubTopic=false এর সময়)
+        newName        : String,
+        renameSubTopic : Boolean
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+            var totalUpdated = 0
+            var anySheetHadData = false
+
+            for (sheet in sheets) {
+                val json = client.newCall(
+                    Request.Builder().url("$base/$sheet.json$auth").get().build()
+                ).execute().body?.string() ?: "null"
+                if (json == "null") continue
+
+                val raw: Map<String, Map<String, Any>> = gson.fromJson(
+                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
+                )
+                if (raw.isEmpty()) continue
+                anySheetHadData = true
+
+                val matching = raw.filter { (_, v) ->
+                    val s  = v["subject"]?.toString()?.trim() ?: ""
+                    val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    if (renameSubTopic) {
+                        // SubTopic rename — subject এর মধ্যেই scope, exact sub_topic match লাগবে
+                        s.equals(oldSubject.trim(), ignoreCase = true) &&
+                        st.equals(oldSubTopic.trim(), ignoreCase = true)
+                    } else {
+                        // Subject rename — পুরো subject এর সব প্রশ্ন (sub_topic যাই হোক)
+                        s.equals(oldSubject.trim(), ignoreCase = true)
+                    }
+                }
+                if (matching.isEmpty()) continue
+
+                matching.forEach { (key, _) ->
+                    val obj = JsonObject().apply {
+                        if (renameSubTopic) addProperty("sub_topic", newName.trim())
+                        else addProperty("subject", newName.trim())
+                    }
+                    val body = obj.toString().toRequestBody("application/json".toMediaType())
+                    val resp = client.newCall(
+                        Request.Builder().url("$base/$sheet/$key.json$auth").patch(body).build()
+                    ).execute()
+                    if (resp.isSuccessful) totalUpdated++
+                    resp.close()
+                }
+            }
+
+            if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
+            if (totalUpdated == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
+            ApiResult.Success(totalUpdated)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
+    }
 }
 
 // ── Data model ───────────────────────────────────────────────
