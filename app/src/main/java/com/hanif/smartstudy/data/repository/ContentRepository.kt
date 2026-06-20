@@ -32,6 +32,89 @@ class ContentRepository(private val context: Context) {
         private val mutex = Mutex()
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
+
+        /**
+         * Admin edit এর পর পুরো cache clear করে নতুন fetch করানোর বদলে —
+         * শুধু যে row/fields পরিবর্তন হয়েছে সেটাই in-memory AppContent এ
+         * সরাসরি patch করে দেয়। এতে স্ক্রিন কোথাও reload/reset হয় না,
+         * admin যেখানে ছিল সেখানেই থাকে, আর পরিবর্তনও সাথে সাথে দেখা যায়।
+         * fetchedAt অপরিবর্তিত থাকে — তাই ১ ঘণ্টার TTL অনুযায়ী স্বাভাবিক
+         * নিয়মেই পরে আবার fresh fetch হবে এবং অন্য ইউজারদের কাছেও পৌঁছাবে।
+         */
+        fun patchMemCache(sheet: String, rowKey: String, fields: Map<String, String>) {
+            val current = _memCache ?: return
+            val sheetLower = sheet.trim().lowercase()
+            _memCache = when (sheetLower) {
+                "study" -> current.copy(study = current.study.map { item ->
+                    if (item.id == rowKey) applyStudyFields(item, fields) else item
+                })
+                "quiz" -> current.copy(quiz = current.quiz.map { item ->
+                    if (item.id == rowKey) applyQuizFields(item, fields) else item
+                })
+                "qbank" -> current.copy(qbank = current.qbank.map { item ->
+                    if (item.id == rowKey) applyQBankFields(item, fields) else item
+                })
+                else -> current
+            }
+        }
+
+        private fun applyStudyFields(item: com.hanif.smartstudy.data.model.StudyItem, f: Map<String, String>) = item.copy(
+            subject      = f["subject"]       ?: item.subject,
+            subTopic     = f["sub_topic"]      ?: item.subTopic,
+            question     = f["question"]      ?: item.question,
+            answer       = f["answer"]         ?: item.answer,
+            correct      = f["correct"]        ?: item.correct,
+            explanation  = f["explanation"]    ?: item.explanation,
+            technique    = f["technique"]      ?: item.technique,
+            questionType = f["Question Type"]  ?: item.questionType,
+            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
+            visualUrl    = f["VisualURL"]      ?: item.visualUrl
+        )
+
+        private fun applyQuizFields(item: com.hanif.smartstudy.data.model.QuizItem, f: Map<String, String>) = item.copy(
+            subject      = f["subject"]       ?: item.subject,
+            subTopic     = f["sub_topic"]      ?: item.subTopic,
+            question     = f["question"]      ?: item.question,
+            optionA      = f["option1"]        ?: item.optionA,
+            optionB      = f["option2"]        ?: item.optionB,
+            optionC      = f["option3"]        ?: item.optionC,
+            optionD      = f["option4"]        ?: item.optionD,
+            answer       = f["correct"]        ?: item.answer,
+            explanation  = f["explanation"]    ?: item.explanation,
+            questionType = f["Question Type"]  ?: item.questionType,
+            technique    = f["technique"]      ?: item.technique,
+            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
+            imageUrl     = f["Image"]          ?: item.imageUrl,
+            visualUrl    = f["VisualURL"]      ?: item.visualUrl
+        )
+
+        private fun applyQBankFields(item: com.hanif.smartstudy.data.model.QBankItem, f: Map<String, String>) = item.copy(
+            subject      = f["subject"]       ?: item.subject,
+            subTopic     = f["sub_topic"]      ?: item.subTopic,
+            question     = f["question"]      ?: item.question,
+            optionA      = f["option1"]        ?: item.optionA,
+            optionB      = f["option2"]        ?: item.optionB,
+            optionC      = f["option3"]        ?: item.optionC,
+            optionD      = f["option4"]        ?: item.optionD,
+            answer       = f["correct"]        ?: item.answer,
+            explanation  = f["explanation"]    ?: item.explanation,
+            questionType = f["Question Type"]  ?: item.questionType,
+            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
+            year         = f["Year"]           ?: item.year,
+            examName     = f["Exam_Name"]      ?: item.examName,
+            imageUrl     = f["Image"]          ?: item.imageUrl,
+            visualUrl    = f["VisualURL"]      ?: item.visualUrl
+        )
+    }
+
+    /**
+     * Admin edit এর পর in-memory cache patch করার পাশাপাশি disk (DataStore) cache
+     * ও sync রাখে — যাতে app বন্ধ/পুনরায় খুললেও edited content-ই দেখা যায়,
+     * TTL শেষ না হওয়া পর্যন্ত পুরনো ডাটা ফিরে না আসে।
+     */
+    suspend fun patchContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
+        patchMemCache(sheet, rowKey, fields)
+        _memCache?.let { cache.saveContent(it) }
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
