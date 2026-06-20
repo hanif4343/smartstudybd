@@ -1,536 +1,390 @@
 package com.hanif.smartstudy.ui.home
 
+import android.content.Context
+import android.os.Build
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.os.VibrationEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hanif.smartstudy.data.model.AnswerState
-import com.hanif.smartstudy.data.model.QuestionItem
-import com.hanif.smartstudy.data.model.RoutineItem
-import com.hanif.smartstudy.data.model.StudyItem
-import com.hanif.smartstudy.ui.theme.*
-import com.hanif.smartstudy.util.SoundManager
-import com.hanif.smartstudy.viewmodel.QuizViewModel
-import com.hanif.smartstudy.viewmodel.RoutineViewModel
+import com.hanif.smartstudy.R
+import com.hanif.smartstudy.model.RoutineTask
+import com.hanif.smartstudy.viewmodel.MenuViewModel
+import java.util.Locale
 
-// HomeScreen.kt তে এই রঙগুলো private val হিসেবে আছে (file-scoped, import করা যায় না),
-// তাই এখানে একই value দিয়ে local copy রাখা হলো যাতে UI consistent থাকে।
-private val PrimaryIndigo = Color(0xFF4F46E5)
-private val GreenMint     = Color(0xFF10B981)
-
-// মিনি-কুইজে সর্বোচ্চ কতগুলো প্রশ্ন দেখানো হবে — বেশি হলে ক্লান্তিকর, ছোট/দ্রুত
-// "comprehension check" হিসেবে রাখা হলো।
-private const val MAX_MINI_QUIZ_QUESTIONS = 8
-private const val PASS_THRESHOLD_PCT = 70
-
-/**
- * ════════════════════════════════════════════════════════════════
- *  RoutineFocusSheet
- * ════════════════════════════════════════════════════════════════
- * Routine এর একটা item tap করলে এই bottom sheet খোলে। দুটো অংশ:
- * - Study content — সেই subject/sub_topic এর পড়া এখানেই দেখা যায়।
- * - Quiz (যদি থাকে) — সরাসরি এই sheet এর ভেতরেই ছোট quiz নেওয়া যায়;
- *    ৭০%+ স্কোর করলে routine item স্বয়ংক্রিয়ভাবে "done" হয়ে যায়, আলাদা
- *    করে "পড়া শেষ করেছি" বাটনে চাপতে হয় না।
- *
- * এই mini-quiz সম্পূর্ণ self-contained — শেয়ার্ড QuizViewModel এর মূল
- * state (_state, mock test ইত্যাদি) স্পর্শ করে না, তাই মূল Quiz/QBank ট্যাবে
- * চলমান কোনো সেশনের সাথে এর কোনো সংঘর্ষ হয় না।
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoutineFocusSheet(
-    item: RoutineItem,
-    onDismiss: () -> Unit,
-    routineVm: RoutineViewModel = viewModel(),
-    quizVm: QuizViewModel = viewModel()
+    task: RoutineTask,
+    viewModel: MenuViewModel,
+    onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val ctx = LocalContext.current
+    
+    // Core Timer States
+    val totalSeconds = remember(task.durationMinutes) { task.durationMinutes * 60 }
+    var timeLeft by remember { mutableIntStateOf(totalSeconds) }
+    var isTimerRunning by remember { mutableStateOf(false) }
+    var isCompleted by remember { mutableStateOf(task.isCompleted) }
+    
+    // Analytical Stats Tracks
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
+    var pauseCount by remember { mutableIntStateOf(0) }
+    var showCelebration by remember { mutableStateOf(false) }
 
-    // ── Routine state থেকে live item — markDone হওয়ার পর sheet নিজে থেকেই reflect করবে ──
-    val routineState by routineVm.state.collectAsState()
-    val liveItem = routineState.items.find { it.id == item.id } ?: item
+    // Haptic Feedback / Vibration Controller
+    val triggerVibration = {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator.vibrate(VibrationEffect.createOneShot(200L, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                vibrator.vibrate(200L)
+            }
+        } catch (_: Exception) {}
+    }
 
-    // ── এই routine item এর subject/sub_topic এর সাথে মিলে যাওয়া study content ──
-    val matchedStudy = remember(item.id) {
-        val all = quizVm.getStudyContentSnapshot()
-        all.filter { s ->
-            val subjMatch = s.subject?.trim()?.equals(item.subject.trim(), ignoreCase = true) == true
-            val topicMatch = item.subTopic.isBlank() ||
-                s.subTopic?.trim()?.equals(item.subTopic.trim(), ignoreCase = true) == true
-            subjMatch && topicMatch
+    // Main Countdown Coroutine Loop
+    LaunchedEffect(isTimerRunning, timeLeft) {
+        if (isTimerRunning && timeLeft > 0) {
+            kotlinx.coroutines.delay(1000L)
+            timeLeft--
+            elapsedSeconds++
+            
+            if (timeLeft == 0) {
+                isTimerRunning = false
+                isCompleted = true
+                showCelebration = true
+                triggerVibration()
+                viewModel.toggleRoutineTaskCompletion(task.id)
+            }
         }
-    }
-
-    // ── একই বিষয়/উপবিষয়ের সাথে মিলে যাওয়া quiz প্রশ্ন (থাকলে) ──
-    val matchedQuiz = remember(item.id) {
-        val all = quizVm.getQuizContentSnapshot()
-        all.filter { q ->
-            val subjMatch = q.subject?.trim()?.equals(item.subject.trim(), ignoreCase = true) == true
-            val topicMatch = item.subTopic.isBlank() ||
-                q.subTopic?.trim()?.equals(item.subTopic.trim(), ignoreCase = true) == true
-            subjMatch && topicMatch
-        }.shuffled().take(MAX_MINI_QUIZ_QUESTIONS).map { QuestionItem.fromQuizItem(it) }
-    }
-
-    // sheet এর mode: "study" (default), "quiz" (প্রশ্ন চলছে), "result" (স্কোর দেখানো)
-    var sheetMode by remember(item.id) { mutableStateOf("study") }
-    var quizQuestions by remember(item.id) { mutableStateOf(matchedQuiz) }
-    var qIndex by remember(item.id) { mutableStateOf(0) }
-    var correctCount by remember(item.id) { mutableStateOf(0) }
-
-    fun startQuiz() {
-        quizQuestions = matchedQuiz.map { it.copy(answerState = AnswerState.Unanswered) }
-        qIndex = 0
-        correctCount = 0
-        sheetMode = "quiz"
-    }
-
-    fun finishQuiz() {
-        val pct = if (quizQuestions.isEmpty()) 0 else (correctCount * 100) / quizQuestions.size
-        if (pct >= PASS_THRESHOLD_PCT) {
-            routineVm.markDone(item.id)
-        }
-        sheetMode = "result"
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = White,
-        dragHandle = {
-            Box(
-                Modifier.padding(top = 12.dp).width(40.dp).height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)).background(Color(0xFFE2E8F0))
-            )
-        }
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 280.dp, max = 640.dp)) {
-
-            // ── হেডার ──
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(item.subject, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Slate800)
-                    if (item.subTopic.isNotBlank()) {
-                        Text(item.subTopic, fontSize = 13.sp, fontFamily = NotoSansBengali, color = Color.Gray)
-                    }
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, null, tint = Color.Gray)
-                }
-            }
-
-            when (sheetMode) {
-                "quiz" -> MiniQuizSection(
-                    questions = quizQuestions,
-                    qIndex = qIndex,
-                    onAnswer = { optionIdx, isCorrect ->
-                        val updated = quizQuestions.toMutableList()
-                        updated[qIndex] = updated[qIndex].copy(answerState = AnswerState.McqSelected(optionIdx, isCorrect))
-                        quizQuestions = updated
-                        if (isCorrect) {
-                            correctCount++
-                            SoundManager.playCorrect()
-                            SoundManager.vibrateCorrect(ctx)
-                        } else {
-                            SoundManager.playWrong()
-                            SoundManager.vibrateWrong(ctx)
-                        }
-                        quizQuestions[qIndex].id.takeIf { it.isNotBlank() }?.let {
-                            quizVm.logRoutineQuizAnswer(it, isCorrect)
-                        }
-                    },
-                    onNext = {
-                        if (qIndex < quizQuestions.size - 1) qIndex++ else finishQuiz()
-                    }
-                )
-                "result" -> MiniQuizResult(
-                    correct = correctCount,
-                    total = quizQuestions.size,
-                    passed = quizQuestions.isNotEmpty() && (correctCount * 100 / quizQuestions.size) >= PASS_THRESHOLD_PCT,
-                    onRetry = { startQuiz() },
-                    onClose = onDismiss,
-                    onBackToStudy = { sheetMode = "study" }
-                )
-                else -> StudyModeContent(
-                    item = liveItem,
-                    matchedStudy = matchedStudy,
-                    hasQuiz = matchedQuiz.isNotEmpty(),
-                    onStartQuiz = { startQuiz() },
-                    routineVm = routineVm,
-                    onDismiss = onDismiss
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StudyModeContent(
-    item: RoutineItem,
-    matchedStudy: List<StudyItem>,
-    hasQuiz: Boolean,
-    onStartQuiz: () -> Unit,
-    routineVm: RoutineViewModel,
-    onDismiss: () -> Unit
-) {
-    if (matchedStudy.isEmpty() && !hasQuiz) {
-        // ── কোনো ম্যাচিং কন্টেন্ট পাওয়া যায়নি ──
         Column(
-            Modifier.fillMaxWidth().padding(32.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, bottom = 32.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("📭", fontSize = 40.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "এই বিষয়ে কোনো পড়া এখনো যুক্ত হয়নি",
-                fontSize = 14.sp, fontFamily = NotoSansBengali, color = Color.Gray,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "নিজে পড়াশোনা শেষ করে নিচের বাটনে ট্যাপ করো",
-                fontSize = 12.sp, fontFamily = NotoSansBengali, color = Color.LightGray,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(20.dp))
-            ManualDoneButton(item, routineVm, onDismiss)
-        }
-        return
-    }
-
-    // ── Info row ──
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(Icons.Default.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
-        Text(
-            if (matchedStudy.isNotEmpty()) "${matchedStudy.size}টি পড়া পাওয়া গেছে" else "এই বিষয়ে পড়া নেই, শুধু কুইজ আছে",
-            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray, fontFamily = NotoSansBengali
-        )
-    }
-
-    if (matchedStudy.isNotEmpty()) {
-        val listState = rememberLazyListState()
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
-        ) {
-            items(matchedStudy, key = { it.id ?: it.hashCode().toString() }) { study ->
-                StudyContentCard(study)
-            }
-            item { Spacer(Modifier.height(4.dp)) }
-        }
-    } else {
-        Spacer(Modifier.weight(1f, fill = false).heightIn(min = 20.dp))
-    }
-
-    Divider(color = Color(0xFFF1F5F9))
-
-    // ── নিচে: quiz বাটন (থাকলে) + done বাটন ──
-    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (item.done) {
+            // Section 1: Header Meta Layout
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(GreenMint.copy(alpha = 0.12f)).padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.CheckCircle, null, tint = GreenMint)
-                Text("আজকের জন্য সম্পন্ন ✅", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = GreenMint, fontFamily = NotoSansBengali)
-            }
-        } else {
-            if (hasQuiz) {
-                Button(
-                    onClick = onStartQuiz,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
-                ) {
-                    Icon(Icons.Default.Quiz, null, tint = White, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("কুইজ দাও — পাশ করলে স্বয়ংক্রিয় সম্পন্ন", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = White, fontFamily = NotoSansBengali)
-                }
-            }
-            ManualDoneButton(item, routineVm, onDismiss, label = if (hasQuiz) "নিজে নিশ্চিত করে সম্পন্ন করো" else "পড়া শেষ করেছি")
-        }
-    }
-}
-
-@Composable
-private fun MiniQuizSection(
-    questions: List<QuestionItem>,
-    qIndex: Int,
-    onAnswer: (optionIdx: Int, isCorrect: Boolean) -> Unit,
-    onNext: () -> Unit
-) {
-    if (questions.isEmpty()) return
-    val q = questions[qIndex]
-    val answered = q.answerState as? AnswerState.McqSelected
-
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-        // প্রগ্রেস
-        LinearProgressIndicator(
-            progress = { (qIndex + 1).toFloat() / questions.size },
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-            color = PrimaryIndigo, trackColor = Color(0xFFF1F5F9)
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "প্রশ্ন ${qIndex + 1}/${questions.size}",
-            fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, fontFamily = NotoSansBengali
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            q.question, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Slate800, fontFamily = NotoSansBengali
-        )
-        Spacer(Modifier.height(14.dp))
-
-        val options = listOf(1 to q.optionA, 2 to q.optionB, 3 to q.optionC, 4 to q.optionD)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (idx, text) ->
-                if (text.isBlank()) return@forEach
-                val isSelected = answered?.option == idx
-                val isCorrectOption = text.trim().equals(q.answer.trim(), ignoreCase = true)
-                val bg = when {
-                    answered == null -> Color(0xFFF8FAFC)
-                    isCorrectOption -> GreenMint.copy(alpha = 0.15f)
-                    isSelected && !isCorrectOption -> Red500.copy(alpha = 0.12f)
-                    else -> Color(0xFFF8FAFC)
-                }
-                val borderColor = when {
-                    answered == null -> Color(0xFFE2E8F0)
-                    isCorrectOption -> GreenMint
-                    isSelected && !isCorrectOption -> Red500
-                    else -> Color(0xFFE2E8F0)
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(bg)
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                            enabled = answered == null
-                        ) { onAnswer(idx, isCorrectOption) }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier.size(22.dp).clip(RoundedCornerShape(6.dp))
-                            .background(Color.Transparent),
-                        contentAlignment = Alignment.Center
-                    ) {
+                Column(modifier = Modifier.weight(1f)) { // FIXED: Modifier.weight(1f) scope error resolved[span_0](start_span)[span_0](end_span)
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = task.category,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                         Text(
-                            ('A' + (idx - 1)).toString(),
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                            color = borderColor
+                            text = "⏱️ ${task.startTime}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(text, fontSize = 14.sp, fontFamily = NotoSansBengali, color = Slate800, modifier = Modifier.weight(1f))
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        .clip(CircleShape)
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-        }
 
-        if (answered != null) {
-            Spacer(Modifier.height(8.dp))
-            if (!q.explanation.isBlank() && q.explanation != q.answer) {
-                Text(
-                    "💡 " + q.explanation,
-                    fontSize = 12.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali
-                )
-                Spacer(Modifier.height(10.dp))
-            }
-            Button(
-                onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
+            HorizontalDivider(modifier = Modifier.padding(vertical = 20.dp), alpha = 0.5f)
+
+            // Section 2: Visual Audio-Style Timer Ring Architecture
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(240.dp)
+                    .padding(12.dp)
             ) {
-                Text(
-                    if (qIndex < questions.size - 1) "পরের প্রশ্ন →" else "ফলাফল দেখো",
-                    fontWeight = FontWeight.Bold, fontSize = 14.sp, color = White, fontFamily = NotoSansBengali
+                val sweepAngleProgress by animateFloatAsState(
+                    targetValue = if (totalSeconds > 0) (timeLeft.toFloat() / totalSeconds) else 0f,
+                    animationSpec = tween(durationMillis = 500),
+                    label = "TimerProgress"
                 )
+
+                // Custom Canvas Drawing for Aesthetic Smooth Ring
+                val trackColor = MaterialTheme.colorScheme.surfaceVariant
+                val primaryColor = MaterialTheme.colorScheme.primary
+                val completeColor = Color(0xFF4CAF50)
+
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    // Background Track Ring
+                    drawCircle(
+                        color = trackColor,
+                        style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    // Active Foreground Countdown Arc
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            colors = if (isCompleted) listOf(completeColor, completeColor)
+                                     else listOf(primaryColor, primaryColor.copy(alpha = 0.6f))
+                        ),
+                        startAngle = -90f,
+                        sweepAngle = sweepAngleProgress * 360f,
+                        useCenter = false,
+                        style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+
+                // Inner Status Typography
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = formatTime(timeLeft),
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            letterSpacing = (-1).sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isCompleted) "চমৎকার! শেষ হয়েছে" 
+                               else if (isTimerRunning) "মনোযোগ দিন..." 
+                               else "সাময়িক বিরতি",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Medium,
+                            color = if (isCompleted) completeColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-}
 
-@Composable
-private fun MiniQuizResult(
-    correct: Int,
-    total: Int,
-    passed: Boolean,
-    onRetry: () -> Unit,
-    onClose: () -> Unit,
-    onBackToStudy: () -> Unit
-) {
-    val pct = if (total == 0) 0 else (correct * 100) / total
-    Column(
-        Modifier.fillMaxWidth().padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(if (passed) "🎉" else "📚", fontSize = 48.sp)
-        Spacer(Modifier.height(10.dp))
-        Text(
-            if (passed) "চমৎকার! সম্পন্ন হয়েছে" else "আরেকটু চেষ্টা দরকার",
-            fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
-            color = if (passed) GreenMint else Slate800
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "$correct/$total সঠিক ($pct%)",
-            fontSize = 14.sp, color = Color.Gray, fontFamily = NotoSansBengali
-        )
-        if (passed) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "রুটিন আইটেম স্বয়ংক্রিয়ভাবে সম্পন্ন হিসেবে চিহ্নিত হয়েছে ✅",
-                fontSize = 12.sp, color = GreenMint, fontFamily = NotoSansBengali, textAlign = TextAlign.Center
-            )
-        } else {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "কমপক্ষে ${PASS_THRESHOLD_PCT}% পেতে হবে — আবার পড়ে চেষ্টা করো",
-                fontSize = 12.sp, color = Color.Gray, fontFamily = NotoSansBengali, textAlign = TextAlign.Center
-            )
-        }
-        Spacer(Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-        if (passed) {
-            Button(
-                onClick = onClose,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = GreenMint)
+            // Section 3: Metrics Tracker Analytics Dashboard Block
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("ঠিক আছে", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = White, fontFamily = NotoSansBengali)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "মোট লক্ষ্য", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text = "${task.durationMinutes} মিনিট", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(32.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "ব্যয়িত সময়", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text = "${elapsedSeconds / 60}মি : ${elapsedSeconds % 60}সে", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(32.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "বিরতি সংখ্যা", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text = "$pauseCount বার", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Section 4: Dynamic Call To Actions (CTA) Buttons Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Secondary Reset/Undo Action Modifier Scope
                 OutlinedButton(
-                    onClick = onBackToStudy,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("আবার পড়ো", fontSize = 13.sp, fontFamily = NotoSansBengali)
-                }
-                Button(
-                    onClick = onRetry,
-                    modifier = Modifier.weight(1f).height(50.dp),
+                    onClick = {
+                        triggerVibration()
+                        if (isCompleted) {
+                            isCompleted = false
+                            showCelebration = false
+                            timeLeft = totalSeconds
+                            elapsedSeconds = 0
+                            pauseCount = 0
+                            viewModel.toggleRoutineTaskCompletion(task.id)
+                        } else {
+                            isTimerRunning = false
+                            timeLeft = totalSeconds
+                            elapsedSeconds = 0
+                            pauseCount = 0
+                        }
+                    },
+                    modifier = Modifier.weight(1f), // FIXED: Modifier.weight(1f) layout constraints resolved[span_1](start_span)[span_1](end_span)
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                 ) {
-                    Text("আবার দাও", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = White, fontFamily = NotoSansBengali)
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = "Reset")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = if (isCompleted) "পুনরায় শুরু" else "রিসেট")
+                }
+
+                // Primary Start/Pause State Processing Trigger
+                Button(
+                    onClick = {
+                        triggerVibration()
+                        if (!isCompleted) {
+                            if (isTimerRunning) {
+                                pauseCount++
+                            }
+                            isTimerRunning = !isTimerRunning
+                        }
+                    },
+                    enabled = !isCompleted,
+                    modifier = Modifier.weight(1f), // FIXED: Modifier.weight(1f) layout constraints resolved[span_2](start_span)[span_2](end_span)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isCompleted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = Color(0xFF4CAF50).copy(alpha = 0.8f)
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isCompleted) Icons.Default.CheckCircle else if (isTimerRunning) Icons.Default.Close else Icons.Default.PlayArrow,
+                        contentDescription = "StateAction",
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isCompleted) "সম্পন্ন হয়েছে" else if (isTimerRunning) "থামুন" else "ফোকাস মোড",
+                        color = Color.White
+                    )
                 }
             }
+
+            // Section 5: Experimental Aesthetic Celebration Notification Banner
+            AnimatedVisibility(
+                visible = showCelebration,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp)
+                        .border(1.dp, Color(0xFF81C784), RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Reward",
+                            tint = Color(0xFFFFB300),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "দারুণ অধ্যবসায়!",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2E7D32)
+                            )
+                            Text(
+                                text = "সফলভাবে আপনার মেমরি রিভিশন টাইম ব্লক সম্পন্ন হয়েছে। শৃঙ্খলা লক্ষ্য ধরে রাখে!",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF388E3C)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
-@Composable
-private fun ManualDoneButton(
-    item: RoutineItem,
-    routineVm: RoutineViewModel,
-    onDismiss: () -> Unit,
-    label: String = "পড়া শেষ করেছি"
-) {
-    Button(
-        onClick = {
-            routineVm.markDone(item.id)
-            onDismiss()
-        },
-        modifier = Modifier.fillMaxWidth().height(50.dp),
-        shape = RoundedCornerShape(14.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = GreenMint)
-    ) {
-        Icon(Icons.Default.CheckCircle, null, tint = White, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = White, fontFamily = NotoSansBengali)
-    }
+private fun formatTime(seconds: Int): String {
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return String.format(Locale.getDefault(), "%02d:%02d", minutes, remainingSeconds)
 }
 
-@Composable
-private fun StudyContentCard(study: StudyItem) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFF8FAFC))
-            .padding(14.dp)
-    ) {
-        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Default.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(18.dp))
-            Text(
-                study.question ?: "",
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Slate800,
-                fontFamily = NotoSansBengali,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        val answerText = study.answer ?: study.correct
-        if (!answerText.isNullOrBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                answerText,
-                fontSize = 13.sp, color = Color(0xFF475569), fontFamily = NotoSansBengali,
-                maxLines = if (expanded) Int.MAX_VALUE else 4
-            )
-        }
-        if (!study.explanation.isNullOrBlank() && expanded) {
-            Spacer(Modifier.height(8.dp))
-            Divider(color = Color(0xFFE2E8F0))
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "💡 " + study.explanation,
-                fontSize = 12.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali
-            )
-        }
-        val canExpand = (study.explanation?.isNotBlank() == true) || (answerText?.length ?: 0) > 140
-        if (canExpand) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (expanded) "সংক্ষেপে দেখাও ▲" else "বিস্তারিত দেখাও ▼",
-                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryIndigo, fontFamily = NotoSansBengali,
-                modifier = Modifier.clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() }
-                ) { expanded = !expanded }
-            )
-        }
+private fun getCategoryIcon(category: String): Int {
+    return when (category.lowercase(Locale.getDefault())) {
+        "study" -> R.drawable.ic_routine
+        "revision" -> R.drawable.ic_routine
+        "break" -> R.drawable.ic_routine
+        else -> R.drawable.ic_routine
     }
 }
