@@ -248,6 +248,33 @@ class ContentRepository(private val context: Context) {
         SyncWorker.scheduleOneTime(context)
     }
 
+    // ── Admin edit এর পরে in-memory + disk cache সরাসরি patch করো ──
+    // পুরো cache invalidate/refetch করার বদলে শুধু matching row টাই বদলে দেয়,
+    // যাতে স্ক্রিন reload না হয়ে সাথে সাথে আপডেট দেখা যায় (RoutineFocusSheet/
+    // MenuViewModel.adminEditQuestion ও adminSwapOptions থেকে call হয়)।
+    suspend fun patchContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) != rowKey) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            fields.forEach { (k, v) -> obj.addProperty(k, v) }
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it) { q -> q.id } })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
     fun getPendingQueueCount() = kotlinx.coroutines.flow.flow { emit(queue.count()) }
 
     fun isOnline(): Boolean {
