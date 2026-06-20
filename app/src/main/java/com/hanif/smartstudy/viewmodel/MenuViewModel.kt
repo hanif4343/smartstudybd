@@ -121,6 +121,9 @@ data class MenuUiState(
     // Bulk Audience
     val isBulkUpdating    : Boolean          = false,
     val bulkUpdateMsg     : String?          = null,
+    // Subject/SubTopic Rename
+    val isRenaming        : Boolean          = false,
+    val renameMsg         : String?          = null,
     // Offline admin edits
     val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
     val isSyncingEdits    : Boolean          = false,
@@ -844,6 +847,36 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearBulkMsg() { _state.update { it.copy(bulkUpdateMsg = null) } }
+
+    // ── Admin: Rename Subject/SubTopic ────────────────────────
+    fun adminRenameSubjectOrTopic(
+        sheets         : List<String>,
+        oldSubject     : String,
+        oldSubTopic    : String,
+        newName        : String,
+        renameSubTopic : Boolean
+    ) {
+        if (!_state.value.isAdmin) return
+        if (sheets.isEmpty() || oldSubject.isBlank() || newName.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isRenaming = true, renameMsg = null) }
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                    .adminRenameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    val what = if (renameSubTopic) "অধ্যায়" else "বিষয়"
+                    _state.update { it.copy(isRenaming = false,
+                        renameMsg = "✅ ${r.data}টি প্রশ্নে $what \"$newName\" এ পরিবর্তিত হয়েছে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                    _state.update { it.copy(isRenaming = false, renameMsg = "❌ ${r.message}") }
+            }
+        }
+    }
+
+    fun clearRenameMsg() { _state.update { it.copy(renameMsg = null) } }
 
     // ── Toast clear ───────────────────────────────────────────
 
