@@ -394,6 +394,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Android 12+ এ exact alarm permission আছে কিনা — UI থেকে save করার আগে চেক করার জন্য */
+    fun hasExactAlarmPermission(): Boolean = ReminderReceiver.canScheduleExactAlarms(ctx)
+
     fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute, repeatDaily: Boolean = _state.value.isMorningRepeat) {
         viewModelScope.launch {
             _state.update { it.copy(isMorningOn = on, morningHour = hour, morningMinute = minute, isMorningRepeat = repeatDaily) }
