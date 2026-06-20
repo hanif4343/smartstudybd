@@ -1,31 +1,129 @@
 {
   "rules": {
-    ".read": true,
-    ".write": "auth != null",
-    "users": {
+    ".read": false,
+    ".write": false,
+
+    "Quiz": {
+      ".read": true,
+      ".write": "auth != null && auth.token.admin == true"
+    },
+    "QBank": {
+      ".read": true,
+      ".write": "auth != null && auth.token.admin == true"
+    },
+    "Study": {
+      ".read": true,
+      ".write": "auth != null && auth.token.admin == true"
+    },
+
+    "Users": {
+      ".read": "auth != null",
+      ".write": "auth != null",
       ".indexOn": ["Phone", "phone"]
     },
+
+    "users": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null",
+      ".indexOn": ["Phone", "phone"]
+    },
+
     "Challenges": {
-      "$challengeId": {
-        ".read": true,
-        ".write": true
-      }
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
     "Invites": {
-      "$phone": {
-        ".read": true,
-        ".write": true
-      }
-    },
-    "Reports": {
-      ".write": true
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
     "MatchHistory": {
+      ".read": "auth != null",
+      ".write": "auth != null",
       "$myPhone": {
         "$opponentPhone": {
           ".indexOn": ["playedAt"]
         }
       }
+    },
+    "WeekendBattles": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "Buddies": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "BuddyProgress": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "BuddyRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "Notifications": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null",
+      "$phone": {
+        ".read": "auth != null"
+      }
+    },
+
+    "Reports": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null",
+      "$reportId": {
+        ".validate": "newData.hasChildren(['questionId','issue','timestamp','status'])",
+        "questionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "question":   { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "issue":      { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "userName":   { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "userPhone":  { ".validate": "newData.isString() && newData.val().length <= 20 && newData.val().matches(/^[+0-9]*$/)" },
+        "tab":        { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "qsheet":     { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "timestamp":  { ".validate": "newData.isNumber()" },
+        "status":     { ".validate": "newData.isString() && newData.val().length <= 20" },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "QuizAnswers": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null"
+    },
+    "StudyLog": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null"
+    },
+
+    "broadcasts": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null && auth.token.admin == true"
+    },
+
+    "AdminAppLogcat": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null"
+    },
+    "DebugLogs": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null"
+    },
+
+    "Routine": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin == true"
+    },
+
+    "UserContent": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": "auth != null"
+    },
+    "Techniques": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin == true"
     }
   }
 }
