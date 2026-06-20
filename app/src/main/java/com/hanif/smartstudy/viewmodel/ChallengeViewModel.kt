@@ -433,7 +433,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         answers[questionId] = selectedOption
         _state.update { it.copy(answers = answers) }
 
-        // Firebase 에 live progress 업데이트
+        // Firebase এ live progress আপডেট
         viewModelScope.launch {
             val idx = _state.value.currentQIndex
             repo.updateProgress(_state.value.challenge?.id ?: return@launch, _state.value.myPhone, idx)
@@ -707,7 +707,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(isLoading = false, error = "চ্যালেঞ্জ তৈরি ব্যর্থ হয়েছে") }
                 return@launch
             }
-            // সরাসরি Exam 에 যাও — creator একাই পরীক্ষা দেবে
+            // সরাসরি Exam এ যাও — creator একাই পরীক্ষা দেবে
             val ghostChallenge = repo.getChallenge(id)
             val questions = c.quiz.filter { it.id in questionIds }.map { QuestionItem.fromQuizItem(it) }
             _state.update { it.copy(
