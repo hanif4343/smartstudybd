@@ -1,5 +1,10 @@
 package com.hanif.smartstudy.ui.menu
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -10,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.ui.theme.*
@@ -27,6 +33,31 @@ fun SettingsScreen(
     vm     : MenuViewModel,
     onBack : () -> Unit
 ) {
+    val context = LocalContext.current
+
+    // Exact-alarm permission না থাকলে reminder dialog খোলার বদলে settings এ পাঠাও —
+    // এতে reminder কখনো "চালু আছে" দেখাবে অথচ আসলে বাজবে না, এমন হবে না।
+    fun openReminderOrAskPermission(openDialog: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !vm.hasExactAlarmPermission()) {
+            Toast.makeText(
+                context,
+                "⚠️ Settings থেকে \"Alarms & reminders\" Allow করো, তারপর আবার চেষ্টা করো",
+                Toast.LENGTH_LONG
+            ).show()
+            try {
+                context.startActivity(
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                )
+            } catch (e: Exception) {
+                // ignore — কিছু ডিভাইসে এই action সাপোর্ট নাও করতে পারে
+            }
+            return
+        }
+        openDialog()
+    }
+
     var showTimePicker by remember { mutableStateOf(false) }
     val timeState = rememberTimePickerState(
         initialHour   = state.reminderHour,
@@ -144,10 +175,10 @@ fun SettingsScreen(
                         else "বন্ধ আছে",
                         isOn    = state.isMorningOn,
                         onToggle = { on ->
-                            if (on) { morningRepeatDaily = state.isMorningRepeat; showTimePicker = true }
+                            if (on) { morningRepeatDaily = state.isMorningRepeat; openReminderOrAskPermission { showTimePicker = true } }
                             else vm.setMorningReminder(false)
                         },
-                        onEdit  = { morningRepeatDaily = state.isMorningRepeat; showTimePicker = true },
+                        onEdit  = { morningRepeatDaily = state.isMorningRepeat; openReminderOrAskPermission { showTimePicker = true } },
                         timeStr = "${state.morningHour}:${state.morningMinute.toString().padStart(2,'0')}"
                     )
 
@@ -168,10 +199,10 @@ fun SettingsScreen(
                         else "বন্ধ আছে",
                         isOn    = state.isMiddayOn,
                         onToggle = { on ->
-                            if (on) { middayRepeatDaily = state.isMiddayRepeat; showMiddayPicker = true }
+                            if (on) { middayRepeatDaily = state.isMiddayRepeat; openReminderOrAskPermission { showMiddayPicker = true } }
                             else vm.setMiddayReminder(false)
                         },
-                        onEdit  = { middayRepeatDaily = state.isMiddayRepeat; showMiddayPicker = true },
+                        onEdit  = { middayRepeatDaily = state.isMiddayRepeat; openReminderOrAskPermission { showMiddayPicker = true } },
                         timeStr = "${state.middayHour}:${state.middayMinute.toString().padStart(2,'0')}"
                     )
                     if (showMiddayPicker) {
@@ -205,10 +236,10 @@ fun SettingsScreen(
                         else "বন্ধ আছে",
                         isOn    = state.isEveningOn,
                         onToggle = { on ->
-                            if (on) { eveningRepeatDaily = state.isEveningRepeat; showEveningPicker = true }
+                            if (on) { eveningRepeatDaily = state.isEveningRepeat; openReminderOrAskPermission { showEveningPicker = true } }
                             else vm.setEveningReminder(false)
                         },
-                        onEdit  = { eveningRepeatDaily = state.isEveningRepeat; showEveningPicker = true },
+                        onEdit  = { eveningRepeatDaily = state.isEveningRepeat; openReminderOrAskPermission { showEveningPicker = true } },
                         timeStr = "${state.eveningHour}:${state.eveningMinute.toString().padStart(2,'0')}"
                     )
                     if (showEveningPicker) {
@@ -243,10 +274,10 @@ fun SettingsScreen(
                         else "বন্ধ আছে",
                         isOn    = state.isNightOn,
                         onToggle = { on ->
-                            if (on) { nightRepeatDaily = state.isNightRepeat; showNightPicker = true }
+                            if (on) { nightRepeatDaily = state.isNightRepeat; openReminderOrAskPermission { showNightPicker = true } }
                             else vm.setNightReminder(false)
                         },
-                        onEdit  = { nightRepeatDaily = state.isNightRepeat; showNightPicker = true },
+                        onEdit  = { nightRepeatDaily = state.isNightRepeat; openReminderOrAskPermission { showNightPicker = true } },
                         timeStr = "${state.nightHour}:${state.nightMinute.toString().padStart(2,'0')}"
                     )
 
