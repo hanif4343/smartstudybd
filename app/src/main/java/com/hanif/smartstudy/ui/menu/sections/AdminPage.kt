@@ -70,7 +70,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "📋 Logs", "⏳ Sync")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -83,8 +83,8 @@ fun AdminPage(
 
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
-            // Auto-load debug log phone list when tab 6 opens
-            LaunchedEffect(tab) { if (tab == 6) vm.loadDebugLogPhones() }
+            // Auto-load debug log phone list when tab 7 opens
+            LaunchedEffect(tab) { if (tab == 7) vm.loadDebugLogPhones() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -100,8 +100,9 @@ fun AdminPage(
                 3 -> ReportQueueTab(state, vm)
                 4 -> AddQuestionTab(state, vm)
                 5 -> BulkAudienceTab(state, vm)
-                6 -> LogsTab(state, vm)
-                7 -> PendingSyncTab(state, vm)
+                6 -> RenameTab(state, vm)
+                7 -> LogsTab(state, vm)
+                8 -> PendingSyncTab(state, vm)
             }
         }
     }
@@ -926,6 +927,173 @@ private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
                 Icon(Icons.Default.Bolt, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Bulk Update চালান 🚀", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+}
+
+// ── Rename Subject / SubTopic Tab ──
+@Composable
+private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
+    // কোন sheet(গুলো) এ rename হবে — multi-select, ডিফল্ট সবগুলো বেছে নেওয়া
+    val selectedSheets = remember { mutableStateListOf("Quiz", "QBank", "Study") }
+
+    var renameSubTopic by remember { mutableStateOf(false) }  // false = Subject rename, true = SubTopic rename
+    var oldSubject  by remember { mutableStateOf("") }
+    var oldSubTopic by remember { mutableStateOf("") }
+    var newName     by remember { mutableStateOf("") }
+    var confirmed   by remember { mutableStateOf(false) }
+
+    val msg      = state.renameMsg
+    val updating = state.isRenaming
+    val isOk     = msg?.startsWith("✅") == true
+
+    LaunchedEffect(isOk) {
+        if (isOk) {
+            kotlinx.coroutines.delay(3000)
+            vm.clearRenameMsg()
+            oldSubject = ""; oldSubTopic = ""; newName = ""; confirmed = false
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFEEF2FF),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F46E5).copy(0.3f))
+        ) {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.Edit, null, tint = Indigo600, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("বিষয় / অধ্যায় Rename করুন", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Indigo600)
+                    Text("সব প্রশ্নের subject/sub_topic একসাথে বদলে যাবে — প্রশ্ন/উত্তর অপরিবর্তিত থাকবে।",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF4338CA))
+                }
+            }
+        }
+
+        // কী rename হবে — Subject নাকি SubTopic
+        Text("কী Rename করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !renameSubTopic, onClick = { renameSubTopic = false },
+                label = { Text("📚 Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Indigo600, selectedLabelColor = Color.White))
+            FilterChip(selected = renameSubTopic, onClick = { renameSubTopic = true },
+                label = { Text("📖 SubTopic (অধ্যায়)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Indigo600, selectedLabelColor = Color.White))
+        }
+
+        // Sheet বেছে নেওয়া — multi-select chips, "সব" সহ
+        Text("কোন Sheet(গুলো) এ?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SHEETS_LIST.forEach { s ->
+                val isSel = selectedSheets.contains(s)
+                FilterChip(
+                    selected = isSel,
+                    onClick = {
+                        if (isSel) selectedSheets.remove(s) else selectedSheets.add(s)
+                    },
+                    label = { Text(s, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF0891B2), selectedLabelColor = Color.White)
+                )
+            }
+        }
+        Text(
+            if (selectedSheets.isEmpty()) "⚠️ অন্তত একটি sheet বেছে নিন"
+            else "নির্বাচিত: ${selectedSheets.joinToString(", ")}",
+            fontFamily = NotoSansBengali, fontSize = 11.sp,
+            color = if (selectedSheets.isEmpty()) Color(0xFFEF4444) else MutedText
+        )
+
+        AdminTabField("বর্তমান বিষয় (Subject) *", oldSubject, { oldSubject = it })
+
+        if (renameSubTopic) {
+            AdminTabField("বর্তমান অধ্যায় (SubTopic) *", oldSubTopic, { oldSubTopic = it })
+        } else {
+            Text(
+                "ℹ️ SubTopic ফাঁকা রাখলে এই বিষয়ের সব অধ্যায়সহ পুরো Subject rename হবে",
+                fontFamily = NotoSansBengali, fontSize = 11.sp, color = MutedText
+            )
+        }
+
+        AdminTabField(
+            if (renameSubTopic) "নতুন অধ্যায়ের নাম *" else "নতুন বিষয়ের নাম *",
+            newName, { newName = it }
+        )
+
+        val canSubmit = selectedSheets.isNotEmpty() && oldSubject.isNotBlank() &&
+            newName.isNotBlank() && (!renameSubTopic || oldSubTopic.isNotBlank())
+
+        if (canSubmit) {
+            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFF0FDF4),
+                border = androidx.compose.foundation.BorderStroke(1.dp, GreenOk.copy(0.3f))
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("📋 Summary:", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = GreenOk)
+                    Text("Sheet: ${selectedSheets.joinToString(", ")}", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    if (renameSubTopic) {
+                        Text("Subject: $oldSubject", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                        Text("\"$oldSubTopic\" → \"$newName\"", fontFamily = NotoSansBengali,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GreenOk)
+                    } else {
+                        Text("\"$oldSubject\" → \"$newName\"" + if (oldSubTopic.isNotBlank()) " (শুধু \"$oldSubTopic\" অধ্যায়ে)" else " (সব অধ্যায়সহ)",
+                            fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GreenOk)
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFFFF1F2), RoundedCornerShape(10.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = confirmed, onCheckedChange = { confirmed = it },
+                colors = CheckboxDefaults.colors(checkedColor = Color(0xFFEF4444)))
+            Spacer(Modifier.width(8.dp))
+            Text("আমি নিশ্চিত যে এই Rename করতে চাই।",
+                fontFamily = NotoSansBengali, fontSize = 12.sp,
+                color = Color(0xFF9F1239), fontWeight = FontWeight.Bold)
+        }
+
+        msg?.let {
+            Surface(shape = RoundedCornerShape(10.dp), color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF1F2),
+                modifier = Modifier.fillMaxWidth()) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = if (isOk) Color(0xFF166534) else Color(0xFF991B1B))
+            }
+        }
+
+        Button(
+            onClick = {
+                vm.adminRenameSubjectOrTopic(
+                    sheets         = selectedSheets.toList(),
+                    oldSubject     = oldSubject,
+                    oldSubTopic    = if (renameSubTopic) oldSubTopic else "",
+                    newName        = newName,
+                    renameSubTopic = renameSubTopic
+                )
+            },
+            enabled = canSubmit && confirmed && !updating,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+        ) {
+            if (updating) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("Rename হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.Edit, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Rename করুন ✏️", fontFamily = NotoSansBengali,
                     fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
             }
         }
