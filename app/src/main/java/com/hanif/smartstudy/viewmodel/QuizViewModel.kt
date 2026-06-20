@@ -44,6 +44,13 @@ data class QuizUiState(
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
+    companion object {
+        // সঠিক উত্তরে XP — written এ একটু বেশি (বেশি effort লাগে)
+        private const val XP_PER_CORRECT_MCQ     = 2
+        private const val XP_PER_CORRECT_WRITTEN = 3
+    }
+
+
     private val repo    = ContentRepository(app)
     private val cache   = ContentCache(app)
     private val session = SessionManager(app)
@@ -57,6 +64,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _pendingStreak = MutableStateFlow(0)
     val pendingStreak: StateFlow<Int> = _pendingStreak.asStateFlow()
+
+    // Sound + Vibration এর জন্য — true=সঠিক, false=ভুল, null=কোনো event নেই
+    private val _feedbackEvent = MutableStateFlow<Boolean?>(null)
+    val feedbackEvent: StateFlow<Boolean?> = _feedbackEvent.asStateFlow()
+    fun clearFeedback() { _feedbackEvent.value = null }
 
     fun consumeAchievement() { _pendingAchievement.value = null }
     fun consumeStreak()      { _pendingStreak.value = 0 }
@@ -175,12 +187,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(isMockZone = false, navPath = NavPath(), isQuizActive = false,
                         result = null, showResult = false, timerSec = 0)
             }
-            _state.value.showResult -> _state.update {
-                it.copy(showResult = false, isQuizActive = false, result = null,
-                        navPath = NavPath(path.subject), timerSec = 0)
+            _state.value.showResult -> {
+                _state.update {
+                    it.copy(showResult = false, isQuizActive = false, result = null,
+                            navPath = NavPath(path.subject), timerSec = 0)
+                }
+                // উত্তর দেওয়ার পর progress আপডেট হয়েছে — subTopic list রিফ্রেশ করো
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
             }
-            path.subTopic != null -> _state.update { it.copy(navPath = NavPath(path.subject)) }
-            path.subject  != null -> _state.update { it.copy(navPath = NavPath()) }
+            path.subTopic != null -> {
+                _state.update { it.copy(navPath = NavPath(path.subject)) }
+                if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    }
+                }
+            }
+            path.subject  != null -> {
+                _state.update { it.copy(navPath = NavPath()) }
+                viewModelScope.launch {
+                    val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                    rebuildSubjects(content, _state.value.mode)
+                }
+            }
             else -> {}
         }
     }
@@ -190,6 +225,40 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
             rebuildSubjects(content, _state.value.mode, forMock = true)
+        }
+    }
+
+    /**
+     * রুটিন থেকে "এখন টেস্ট দাও" — নির্দিষ্ট subject/subTopic এর উপর সরাসরি
+     * Mock Test শুরু করো। subTopic ফাঁকা থাকলে ওই subject এর সব subTopic
+     * সিলেক্ট হবে।
+     */
+    fun startInstantTestFor(subject: String, subTopic: String, limit: Int = 10) {
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            rebuildSubjects(content, _state.value.mode, forMock = true)
+
+            val subjectEntry = _state.value.subjects.find { it.name == subject }
+            val keys = if (subTopic.isNotBlank()) {
+                listOf("$subject||$subTopic")
+            } else if (subjectEntry?.subTopics?.isNotEmpty() == true) {
+                subjectEntry.subTopics.map { "$subject||${it.name}" }
+            } else {
+                // এই বিষয়ে কোনো SubTopic নেই — সরাসরি subject-ভিত্তিক প্রশ্ন (subTopic ফাঁকা)
+                listOf("$subject||")
+            }
+
+            _state.update {
+                it.copy(
+                    isMockZone = true,
+                    navPath    = NavPath(),
+                    mockConfig = it.mockConfig.copy(
+                        selectedTopics = keys,
+                        questionLimit  = limit
+                    )
+                )
+            }
+            startMock()
         }
     }
 
@@ -241,10 +310,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
+        markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
+                session.getCurrentUser()?.phone?.let { phone ->
+                    repo.awardXp(phone, XP_PER_CORRECT_MCQ)
+                }
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -261,10 +335,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
+        markProgress(q.id, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)
+                session.getCurrentUser()?.phone?.let { phone ->
+                    repo.awardXp(phone, XP_PER_CORRECT_WRITTEN)
+                }
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -349,17 +428,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.QBANK -> "qbank"
             StudyMode.STUDY -> "study"
         }
+        val qsheet = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
         viewModelScope.launch {
             try {
-                com.hanif.smartstudy.data.remote.GasApiService.reportQuestion(
+                com.hanif.smartstudy.data.remote.FirebaseDataService.reportQuestion(
                     questionId = q.id,
                     question   = q.question,
                     issue      = issue,
                     userName   = user?.displayName() ?: "",
                     userPhone  = user?.phone ?: "",
-                    tab        = tab
+                    tab        = tab,
+                    qsheet     = qsheet
                 )
-                Log.d("QuizVM", "Reported question ${q.id} [$tab]: $issue")
+                Log.d("QuizVM", "Reported question ${q.id} [$tab/$qsheet]: $issue")
             } catch (e: Exception) {
                 Log.e("QuizVM", "Report failed: ${e.message}")
             }
@@ -468,6 +553,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadProgressMap(): Set<String> = prefs.getStringSet("progress", emptySet()) ?: emptySet()
 
+    // প্রশ্ন উত্তর দেওয়া হলে "done" সেট এ যোগ করো — নইলে progressPct সবসময় ০% থেকে যায়
+    private fun markProgress(qId: String, mode: StudyMode) {
+        if (qId.isBlank()) return
+        val key   = "${mode.name}:$qId"
+        val saved = prefs.getStringSet("progress", mutableSetOf())!!.toMutableSet()
+        if (saved.add(key)) prefs.edit().putStringSet("progress", saved).apply()
+    }
+
     private fun saveWeakTopic(subject: String, subTopic: String) {
         if (subTopic.isBlank()) return
         val key = "weak_$subTopic"
@@ -504,6 +597,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
         ids.remove(entry)
         prefs.edit().putStringSet("wrong_q_ids", ids).apply()
+    }
+
+    // ── Routine bottom sheet এর জন্য — ইতিমধ্যে লোড হওয়া study content snapshot ──
+    fun getStudyContentSnapshot(): List<StudyItem> {
+        return com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()?.study ?: emptyList()
+    }
+
+    // ── Routine bottom sheet এর জন্য — matching quiz snapshot (in-place mini-quiz এর জন্য) ──
+    fun getQuizContentSnapshot(): List<QuizItem> {
+        return com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()?.quiz ?: emptyList()
+    }
+
+    // ── একটা প্রশ্নের উত্তরের log রাখা (routine mini-quiz থেকে — শেয়ার্ড _state ছোঁয় না) ──
+    fun logRoutineQuizAnswer(questionId: String, isCorrect: Boolean) {
+        viewModelScope.launch { repo.submitQuizAnswer(questionId, isCorrect) }
     }
 
     fun getWrongQuestions(): List<Pair<QuestionItem, Int>> {
