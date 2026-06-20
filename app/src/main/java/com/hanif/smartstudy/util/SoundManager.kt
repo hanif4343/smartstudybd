@@ -1,10 +1,15 @@
 package com.hanif.smartstudy.util
 
+import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,6 +23,30 @@ object SoundManager {
 
     fun setEnabled(on: Boolean) { enabled = on }
     fun isEnabled() = enabled
+
+    // ── ভাইব্রেশন — সঠিক/ভুল উত্তরের জন্য shared helper, যাতে প্রতিটা স্ক্রিনে
+    //    আলাদা করে Vibrator/VibratorManager boilerplate লিখতে না হয় ──
+    fun vibrateCorrect(ctx: Context) = vibrate(ctx, longArrayOf(0, 60))
+    fun vibrateWrong(ctx: Context)   = vibrate(ctx, longArrayOf(0, 80, 60, 80))
+
+    fun vibrate(ctx: Context, pattern: LongArray, repeat: Int = -1) {
+        if (!enabled) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator.vibrate(VibrationEffect.createWaveform(pattern, repeat))
+            } else {
+                @Suppress("DEPRECATION")
+                val vib = ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vib.vibrate(VibrationEffect.createWaveform(pattern, repeat))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(pattern, repeat)
+                }
+            }
+        } catch (e: Exception) { /* silent fail */ }
+    }
 
     // ── সঠিক উত্তর: দুটো উঠতি tone (ding-ding ✅) ──
     fun playCorrect() {
