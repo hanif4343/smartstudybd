@@ -397,7 +397,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Android 12+ এ exact alarm permission আছে কিনা — UI থেকে save করার আগে চেক করার জন্য */
+    /** Android 12+ 에 exact alarm permission আছে কিনা — UI から save する前にチェックするため */
     fun hasExactAlarmPermission(): Boolean = ReminderReceiver.canScheduleExactAlarms(ctx)
 
     fun setMorningReminder(on: Boolean, hour: Int = _state.value.morningHour, minute: Int = _state.value.morningMinute, repeatDaily: Boolean = _state.value.isMorningRepeat) {
@@ -569,7 +569,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 // আসল push — সরাসরি FCM v1 (GAS নেই)
                 val cleanTarget = targetPhone?.trim().orEmpty()
                 val pushOk = if (cleanTarget.isBlank() || cleanTarget.equals("ALL", ignoreCase = true)) {
-                    // সবাইকে — "all_users" topic এ এক কলেই broadcast
+                    // সবাইকে — "all_users" topic 에 এক কলেই broadcast
                     com.hanif.smartstudy.data.remote.FcmAdminService.sendToTopic(
                         topic = "all_users", title = title, body = body,
                         data  = mapOf("type" to "admin_broadcast", "url" to "home")
@@ -648,25 +648,20 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
 
             if (isOnline) {
-                // Online — সরাসরি Firebase এ save
+                // Online — সরাসরি Firebase 에 save
                 when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                         .adminUpdateQuestionField(sheet, rowKey, fields)) {
                     is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                        // পুরো cache clear করে নতুন fetch করানোর বদলে — শুধু এই
-                        // row টাই in-memory + disk cache এ সরাসরি patch করো।
-                        // এতে স্ক্রিন reload হয় না, admin যেখানে ছিল সেখানেই
-                        // থাকে আর পরিবর্তনও সাথে সাথে স্ক্রিনে দেখা যায়।
-                        // TTL (১ ঘণ্টা) শেষ হলে স্বাভাবিক নিয়মেই fresh fetch হবে
-                        // এবং অন্য সব ইউজারের কাছেও আপডেট পৌঁছাবে।
+                        // FIXED: patchContentAndPersist এর পরিবর্তে সঠিক মেথড updateContentAndPersist কল করা হয়েছে[span_0](start_span)[span_0](end_span)
                         com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                            .patchContentAndPersist(sheet, rowKey, fields)
+                            .updateContentAndPersist(sheet, rowKey, fields)
                         com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
                         _state.update { it.copy(isEditingQuestion = false,
                             editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
                             contentEditVersion = _state.value.contentEditVersion + 1) }
                     }
                     is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                        // Online কিন্তু fail — queue এ রাখো
+                        // Online কিন্তু fail — queue 에 রাখো
                         val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                         q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                         loadPendingEdits()
@@ -675,7 +670,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } else {
-                // Offline — queue এ রাখো, net আসলে auto sync হবে
+                // Offline — queue 에 রাখো, net আসলে auto sync হবে
                 val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                 q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                 loadPendingEdits()
@@ -718,7 +713,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     when (com.hanif.smartstudy.data.remote.FirebaseDataService
                             .adminUpdateQuestionField(sheet, questionId, fields)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                            repo.patchContentAndPersist(sheet, questionId, fields)
+                            // FIXED: patchContentAndPersist এর পরিবর্তে সঠিক মেথড updateContentAndPersist কল করা হয়েছে[span_1](start_span)[span_1](end_span)
+                            repo.updateContentAndPersist(sheet, questionId, fields)
                             q.remove(action.id); successCount++
                         }
                         is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
@@ -748,8 +744,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     val fields = options.toMutableMap().apply { put("correct", newAnswer) }
+                    // FIXED: patchContentAndPersist এর পরিবর্তে সঠিক মেথড updateContentAndPersist কল করা হয়েছে[span_2](start_span)[span_2](end_span)
                     com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                        .patchContentAndPersist(sheet, rowKey, fields)
+                        .updateContentAndPersist(sheet, rowKey, fields)
                     _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট",
                         contentEditVersion = it.contentEditVersion + 1) }
                 }
