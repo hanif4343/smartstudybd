@@ -31,6 +31,15 @@ class ReminderReceiver : BroadcastReceiver() {
         const val TYPE_MIDDAY      = "midday"
         const val TYPE_EVENING     = "evening"
 
+        /** Android 12+ এ exact alarm permission আছে কিনা চেক করো */
+        fun canScheduleExactAlarms(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                return am.canScheduleExactAlarms()
+            }
+            return true
+        }
+
         fun scheduleMorning(context: Context, hour: Int, minute: Int, repeatDaily: Boolean = true) {
             schedule(context, hour, minute, REQ_MORNING, TYPE_MORNING, repeatDaily)
             SessionManager(context).setReminderMorning(true, hour, minute, repeatDaily)
@@ -91,7 +100,15 @@ class ReminderReceiver : BroadcastReceiver() {
                 if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_MONTH, 1)
             }
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (am.canScheduleExactAlarms()) {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    } else {
+                        // Exact alarm permission নেই — কাছাকাছি সময়ে আসবে এমন alarm দাও,
+                        // যাতে সম্পূর্ণ silent fail না হয়ে যায়
+                        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
                 } else {
                     am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
