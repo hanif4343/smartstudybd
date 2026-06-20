@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.ui.home
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -10,18 +11,22 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -29,6 +34,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
@@ -45,15 +51,12 @@ import com.hanif.smartstudy.receiver.ReminderReceiver
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val PrimaryIndigo = Color(0xFF4F46E5)
 private val DeepIndigo    = Color(0xFF1E1B4B)
 private val Amber         = Color(0xFFF59E0B)
 private val GreenMint     = Color(0xFF10B981)
-// CardBg → MaterialTheme.colorScheme.surface
-// SlateBg → MaterialTheme.colorScheme.background
-// TextPrimary → MaterialTheme.colorScheme.onSurface
-// TextMuted → MaterialTheme.colorScheme.onSurfaceVariant
 
 // ═══════════════════════════════════════════════════════════
 // Exam Eve Notification — পরীক্ষার আগের রাত ১০টায় রিমাইন্ডার
@@ -62,7 +65,6 @@ object ExamNotificationHelper {
 
     private const val EXAM_NOTIF_REQ = 2025
 
-    // পরীক্ষার তারিখের আগের রাত ২২:০০ তে alarm set করে
     fun scheduleExamEveReminder(ctx: Context, dateStr: String, examName: String) {
         try {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -76,7 +78,6 @@ object ExamNotificationHelper {
                 set(Calendar.SECOND, 0)
             }
 
-            // আগের সময় চলে গেলে set করার দরকার নেই
             if (cal.timeInMillis <= System.currentTimeMillis()) return
 
             val intent = Intent(ctx, ReminderReceiver::class.java).apply {
@@ -116,12 +117,14 @@ fun HomeScreen(
     viewModel     : HomeViewModel = viewModel(),
     quizViewModel : QuizViewModel? = null,
     onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {}
+    onTypingClick : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val ctx   = LocalContext.current
 
-    // XP ও user data — যেকোনো screen থেকে ফিরলে auto-refresh
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -133,7 +136,6 @@ fun HomeScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    // Wrong questions থেকে review data — mutableStateOf দিয়ে refresh করা যাবে
     var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
     LaunchedEffect(state) {
         wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
@@ -156,39 +158,44 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── AD SLOT 1: Banner — Hero 아래, 콘텐츠 시작 전 ──
-            // AdMob policy: ✅ content와 content 사이, 자연스러운 위치
             AdBannerPlaceholder()
 
-            // Quick Stats
             QuickStatsRow(stats = state.studyStats)
 
-            // ── AD SLOT 2: Native In-Feed — stats 아래, streak 전 ──
-            // AdMob policy: ✅ native/in-feed는 content와 구분되게
             AdNativePlaceholder()
 
-            // Daily Goal
             DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
 
-            // ── Daily Routine Checklist — হোম স্ক্রিন চেকলিস্ট ──
-            DailyRoutineCard()
+            DailyRoutineCard(
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
 
-            // Weekly Streak
             WeeklyStreakCard(streak = state.streakInfo)
 
-            // ── Wrong Question Review Section ──
-            if (wrongItems.isNotEmpty()) {
+            // ── Wrong Question Review Section (QuizViewModel এর আসল মেথড দিয়ে ফিক্সড) ──
+            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
                 WrongReviewSection(
                     wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt -> quizViewModel?.answerMcq(
-                        wrongItems.indexOfFirst { it.first.id == qId }, opt) },
-                    onAnswerWritten = { qId, text -> quizViewModel?.answerWritten(
-                        wrongItems.indexOfFirst { it.first.id == qId }, text) ?: 0 },
-                    onRemoveCorrect = { qId -> quizViewModel?.removeWrongQId(qId) }
+                    onAnswerMcq     = { qId, opt -> 
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) {
+                            quizViewModel?.answerMcq(idx, opt)
+                        }
+                    },
+                    onAnswerWritten = { qId, text -> 
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) {
+                            quizViewModel?.answerWritten(idx, text) ?: 0
+                        } else { 0 }
+                    },
+                    onRemoveCorrect = { qId -> 
+                        quizViewModel?.removeWrongQId(qId)
+                    }
                 )
             }
 
-            // Exam Countdown — শেষ হলে auto-hide, না থাকলে set বাটন
             val examExpired = state.examCountdown.isSet &&
                 state.examCountdown.days   == 0L &&
                 state.examCountdown.hours  == 0L &&
@@ -203,13 +210,10 @@ fun HomeScreen(
                 !state.examCountdown.isSet ->
                     SetExamCard(onSet = { d, n ->
                         viewModel.setExamDate(d, n)
-                        // পরীক্ষার আগের রাতে নোটিফিকেশন schedule করো
                         ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
                     })
-                // expired → কিছুই দেখাবে না (auto-hide ✅)
             }
 
-            // Loading / Error
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = PrimaryIndigo, modifier = Modifier.size(32.dp))
@@ -235,164 +239,13 @@ fun AdBannerPlaceholder() {
 
 @Composable
 fun AdNativePlaceholder() {
-    // Native Ad — Banner দিয়ে replace করা হচ্ছে (Native ad XML layout ছাড়া কাজ করে না)
-    // একটু বেশি জায়গায় banner দেখাও
     com.hanif.smartstudy.ui.ads.AdBannerView(
         adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_HOME
     )
 }
 
 // ═══════════════════════════════════════════════════════════
-// WRONG QUESTION REVIEW CARD
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-fun WrongReviewCard(
-    wrongItems : List<Pair<QuestionItem, Int>>,
-    onStart    : () -> Unit
-) {
-    val wrongCount   = wrongItems.size
-    val previewItems = wrongItems.take(2)
-
-    Card(
-        modifier  = Modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = Color.White),
-        border    = BorderStroke(1.5.dp, Color(0xFFEF4444).copy(alpha = 0.2f)),
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
-            // Header
-            Row(
-                Modifier.fillMaxWidth(),
-                Arrangement.SpaceBetween,
-                Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Brush.linearGradient(listOf(Color(0xFFDC2626), Color(0xFFF97316)))),
-                        contentAlignment = Alignment.Center
-                    ) { Text("🔁", fontSize = 18.sp) }
-                    Column {
-                        Text("ভুল প্রশ্ন Review", fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold, color = Color(0xFFDC2626),
-                            fontFamily = NotoSansBengali)
-                        Text("আবার চেষ্টা করো", fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                    }
-                }
-                // Stats pills
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatPill(wrongCount.toString(), "ভুল", Color(0xFFDC2626), Color(0xFFFEF2F2))
-                }
-            }
-
-            // Preview questions (২টা)
-            previewItems.forEach { (q, count) ->
-                WrongQuestionPreview(q = q, wrongCount = count)
-            }
-
-            // CTA button
-            Button(
-                onClick = onStart,
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(12.dp),
-                colors   = ButtonDefaults.buttonColors(
-                    containerColor = Brush.horizontalGradient(
-                        listOf(Color(0xFFDC2626), Color(0xFFEF4444))
-                    ).let { Color(0xFFDC2626) }
-                )
-            ) {
-                Text("🎯 ", fontSize = 14.sp)
-                Text(
-                    if (wrongCount > 2) "সব ${wrongCount}টি প্রশ্ন অনুশীলন করুন"
-                    else "${wrongCount}টি ভুল প্রশ্ন অনুশীলন করুন",
-                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                    fontFamily = NotoSansBengali
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier.clip(RoundedCornerShape(8.dp))
-                        .background(Color.White.copy(0.25f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Text("$wrongCount", fontSize = 11.sp,
-                        color = Color.White, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WrongQuestionPreview(q: QuestionItem, wrongCount: Int) {
-    val badgeColor = when {
-        wrongCount >= 3 -> Color(0xFFDC2626)
-        wrongCount == 2 -> Color(0xFFF97316)
-        else            -> Color(0xFFF59E0B)
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFFFFF1F2))
-            .border(1.dp, Color(0xFFFECACA), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(
-            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFFFEF2F2)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(if (q.optionA.isNotBlank()) "🔘" else "✍️", fontSize = 14.sp)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                q.question.replace(Regex("<[^>]+>"), "").take(55) +
-                    if (q.question.length > 55) "…" else "",
-                fontSize   = 12.sp, fontWeight = FontWeight.Bold,
-                color      = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, lineHeight = 16.sp
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 3.dp)) {
-                Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFE0F2FE))
-                    .padding(horizontal = 5.dp, vertical = 1.dp)) {
-                    Text(q.subTopic.take(20), fontSize = 9.sp, color = Color(0xFF0284C7),
-                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                }
-            }
-        }
-        Box(
-            Modifier.clip(RoundedCornerShape(10.dp))
-                .background(badgeColor)
-                .padding(horizontal = 7.dp, vertical = 2.dp)
-        ) {
-            Text("×$wrongCount", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.ExtraBold)
-        }
-    }
-}
-
-@Composable
-private fun StatPill(value: String, label: String, textColor: Color, bgColor: Color) {
-    Column(
-        modifier            = Modifier.clip(RoundedCornerShape(10.dp))
-            .background(bgColor)
-            .border(1.dp, textColor.copy(0.3f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-            color = textColor, fontFamily = NotoSansBengali, lineHeight = 15.sp)
-        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold,
-            fontFamily = NotoSansBengali)
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-// EXISTING COMPONENTS (unchanged)
+// EXISTING COMPONENTS
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -514,11 +367,15 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 
 @Composable
 fun DailyRoutineCard(
-    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel()
+    vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val routine by vm.state.collectAsState()
     val subjectOptions by vm.subjectOptions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var focusItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
 
     if (showAddDialog) {
         AddRoutineItemDialog(
@@ -528,6 +385,14 @@ fun DailyRoutineCard(
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false }
+        )
+    }
+
+    focusItem?.let { item ->
+        RoutineFocusSheet(
+            item = item,
+            onDismiss = { focusItem = null },
+            routineVm = vm
         )
     }
 
@@ -555,7 +420,7 @@ fun DailyRoutineCard(
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress   = { routine.progressPct / 100f },
-                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    modifier   = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.3.dp)),
                     color      = if (routine.isComplete) GreenMint else PrimaryIndigo,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
@@ -574,7 +439,11 @@ fun DailyRoutineCard(
                     RoutineItemRow(
                         item     = item,
                         onToggle = { vm.toggleItem(item.id) },
-                        onRemove = { vm.removeItem(item.id) }
+                        onRemove = { vm.removeItem(item.id) },
+                        onOpenFocus       = { focusItem = item },
+                        onOpenStudy       = onOpenStudy,
+                        onOpenInstantTest = onOpenInstantTest,
+                        onOpenWeeklyTest  = onOpenWeeklyTest
                     )
                 }
             }
@@ -586,8 +455,15 @@ fun DailyRoutineCard(
 private fun RoutineItemRow(
     item     : com.hanif.smartstudy.data.model.RoutineItem,
     onToggle : () -> Unit,
-    onRemove : () -> Unit
+    onRemove : () -> Unit,
+    onOpenFocus       : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
+    var showActionMenu by remember { mutableStateOf(false) }
+    val hasSubject = item.subject.isNotBlank()
+
     Row(
         Modifier
             .fillMaxWidth()
@@ -599,7 +475,11 @@ private fun RoutineItemRow(
             onCheckedChange = { onToggle() },
             colors = CheckboxDefaults.colors(checkedColor = GreenMint)
         )
-        Column(Modifier.weight(1f)) {
+        Column(
+            Modifier
+                .weight(1f)
+                .then(if (hasSubject) Modifier.clickable { onOpenFocus() } else Modifier)
+        ) {
             Text(
                 item.title,
                 fontSize = 13.sp,
@@ -609,7 +489,7 @@ private fun RoutineItemRow(
                 textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
-            if (item.subject.isNotBlank()) {
+            if (hasSubject) {
                 val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
                 Text(
                     "$subjLabel • ${item.minutes} মিনিট",
@@ -618,6 +498,45 @@ private fun RoutineItemRow(
                 )
             }
         }
+
+        if (hasSubject) {
+            Box {
+                IconButton(onClick = { showActionMenu = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(16.dp))
+                }
+                DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("📖 এখানেই পড়ো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenFocus()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📚 পুরো অধ্যায় দেখো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenStudy(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📝 এখন টেস্ট দাও (Instant)", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenInstantTest(item.subject, item.subTopic)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("⚔️ সাপ্তাহিক চ্যালেঞ্জে যাও", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenWeeklyTest()
+                        }
+                    )
+                }
+            }
+        }
+
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
             Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
         }
@@ -639,7 +558,6 @@ private fun AddRoutineItemDialog(
     var subTopicMenuExpanded by remember { mutableStateOf(false) }
     val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
 
-    // নির্বাচিত Subject-এর অধীনে SubTopic লিস্ট (ইউজারের audience অনুযায়ী)
     val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
 
     AlertDialog(
@@ -653,7 +571,6 @@ private fun AddRoutineItemDialog(
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
 
-                // ── বিষয় (ঐচ্ছিক) — ইউজারের audience অনুযায়ী আসল Subject লিস্ট থেকে dropdown ──
                 ExposedDropdownMenuBox(
                     expanded = subjectMenuExpanded,
                     onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
@@ -691,7 +608,7 @@ private fun AddRoutineItemDialog(
                                 text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
                                 onClick = {
                                     subject = opt.subject
-                                    subTopic = ""   // বিষয় বদলালে আগের SubTopic রিসেট
+                                    subTopic = ""
                                     subjectMenuExpanded = false
                                 }
                             )
@@ -699,7 +616,6 @@ private fun AddRoutineItemDialog(
                     }
                 }
 
-                // ── SubTopic (ঐচ্ছিক) — নির্বাচিত Subject-এর অধীনে থাকা SubTopic থেকে dropdown ──
                 if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
                     ExposedDropdownMenuBox(
                         expanded = subTopicMenuExpanded,
@@ -780,14 +696,14 @@ fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("📚 দৈনিক লক্ষ্য", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                Text("${goal.doneMinutes} / ${goal.goalMinutes} মিনিট", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
+                Text("${goal.doneMinutes} / ${goal.goalMinutes} minute", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
                 if (goal.progressPct >= 100f) Text("🎉 লক্ষ্য পূরণ হয়েছে!", fontSize = 10.sp, color = GreenMint, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp))
             }
             IconButton(onClick = { showGoalDialog = true }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
         }
     }
-    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, { onSetGoal(it); showGoalDialog = false }, { showGoalDialog = false })
+    if (showGoalDialog) GoalSetDialog(goal.goalMinutes, onSet = { onSetGoal(it); showGoalDialog = false }, onDismiss = { showGoalDialog = false })
 }
 
 @Composable
@@ -851,7 +767,6 @@ fun ExamCountdownCard(countdown: ExamCountdown, onClear: () -> Unit = {}) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("📅", fontSize = 24.sp)
-                    // Clear বাটন
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -895,7 +810,7 @@ private fun SetExamCard(onSet: (String, String) -> Unit) {
             }
         }
     }
-    if (showDialog) ExamDateDialog({ d, n -> onSet(d, n); showDialog = false }, { showDialog = false })
+    if (showDialog) ExamDateDialog(onSet = { d, n -> onSet(d, n); showDialog = false }, onDismiss = { showDialog = false })
 }
 
 @Composable
