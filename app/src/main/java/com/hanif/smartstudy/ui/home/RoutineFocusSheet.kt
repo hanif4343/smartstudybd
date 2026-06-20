@@ -192,7 +192,7 @@ fun RoutineFocusSheet(
 }
 
 @Composable
-private fun StudyModeContent(
+private fun ColumnScope.StudyModeContent(
     item: RoutineItem,
     matchedStudy: List<StudyItem>,
     hasQuiz: Boolean,
