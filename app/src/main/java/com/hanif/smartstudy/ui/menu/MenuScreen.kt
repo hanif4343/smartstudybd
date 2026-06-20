@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.ui.menu.sections.AdminPage
+import com.hanif.smartstudy.ui.menu.sections.BookmarksPage
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.MenuViewModel
@@ -96,7 +97,7 @@ fun MenuScreen(
             MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN }, onOpenTestHistory = { screen = MenuNav.TEST_HISTORY })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.SETTINGS    -> SettingsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
-            MenuNav.BOOKMARKS   -> BookmarksMenuScreen(onBack = { screen = MenuNav.MAIN })
+            MenuNav.BOOKMARKS   -> BookmarksPage(state, onBack = { screen = MenuNav.MAIN })
             MenuNav.LEADERBOARD -> LeaderboardScreen(state, onBack = { screen = MenuNav.MAIN })
             MenuNav.ADMIN       -> AdminPage(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.PRIVACY     -> PrivacyPolicyScreen(onBack = { screen = MenuNav.MAIN })
