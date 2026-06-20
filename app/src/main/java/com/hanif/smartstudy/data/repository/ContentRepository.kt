@@ -4,6 +4,12 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.MutableData
+import com.google.firebase.database.Transaction
+import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
 import com.hanif.smartstudy.data.model.AppContent
@@ -19,6 +25,7 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.tasks.await
 
 class ContentRepository(private val context: Context) {
 
@@ -32,89 +39,6 @@ class ContentRepository(private val context: Context) {
         private val mutex = Mutex()
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
-
-        /**
-         * Admin edit এর পর পুরো cache clear করে নতুন fetch করানোর বদলে —
-         * শুধু যে row/fields পরিবর্তন হয়েছে সেটাই in-memory AppContent এ
-         * সরাসরি patch করে দেয়। এতে স্ক্রিন কোথাও reload/reset হয় না,
-         * admin যেখানে ছিল সেখানেই থাকে, আর পরিবর্তনও সাথে সাথে দেখা যায়।
-         * fetchedAt অপরিবর্তিত থাকে — তাই ১ ঘণ্টার TTL অনুযায়ী স্বাভাবিক
-         * নিয়মেই পরে আবার fresh fetch হবে এবং অন্য ইউজারদের কাছেও পৌঁছাবে।
-         */
-        fun patchMemCache(sheet: String, rowKey: String, fields: Map<String, String>) {
-            val current = _memCache ?: return
-            val sheetLower = sheet.trim().lowercase()
-            _memCache = when (sheetLower) {
-                "study" -> current.copy(study = current.study.map { item ->
-                    if (item.id == rowKey) applyStudyFields(item, fields) else item
-                })
-                "quiz" -> current.copy(quiz = current.quiz.map { item ->
-                    if (item.id == rowKey) applyQuizFields(item, fields) else item
-                })
-                "qbank" -> current.copy(qbank = current.qbank.map { item ->
-                    if (item.id == rowKey) applyQBankFields(item, fields) else item
-                })
-                else -> current
-            }
-        }
-
-        private fun applyStudyFields(item: com.hanif.smartstudy.data.model.StudyItem, f: Map<String, String>) = item.copy(
-            subject      = f["subject"]       ?: item.subject,
-            subTopic     = f["sub_topic"]      ?: item.subTopic,
-            question     = f["question"]      ?: item.question,
-            answer       = f["answer"]         ?: item.answer,
-            correct      = f["correct"]        ?: item.correct,
-            explanation  = f["explanation"]    ?: item.explanation,
-            technique    = f["technique"]      ?: item.technique,
-            questionType = f["Question Type"]  ?: item.questionType,
-            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
-            visualUrl    = f["VisualURL"]      ?: item.visualUrl
-        )
-
-        private fun applyQuizFields(item: com.hanif.smartstudy.data.model.QuizItem, f: Map<String, String>) = item.copy(
-            subject      = f["subject"]       ?: item.subject,
-            subTopic     = f["sub_topic"]      ?: item.subTopic,
-            question     = f["question"]      ?: item.question,
-            optionA      = f["option1"]        ?: item.optionA,
-            optionB      = f["option2"]        ?: item.optionB,
-            optionC      = f["option3"]        ?: item.optionC,
-            optionD      = f["option4"]        ?: item.optionD,
-            answer       = f["correct"]        ?: item.answer,
-            explanation  = f["explanation"]    ?: item.explanation,
-            questionType = f["Question Type"]  ?: item.questionType,
-            technique    = f["technique"]      ?: item.technique,
-            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
-            imageUrl     = f["Image"]          ?: item.imageUrl,
-            visualUrl    = f["VisualURL"]      ?: item.visualUrl
-        )
-
-        private fun applyQBankFields(item: com.hanif.smartstudy.data.model.QBankItem, f: Map<String, String>) = item.copy(
-            subject      = f["subject"]       ?: item.subject,
-            subTopic     = f["sub_topic"]      ?: item.subTopic,
-            question     = f["question"]      ?: item.question,
-            optionA      = f["option1"]        ?: item.optionA,
-            optionB      = f["option2"]        ?: item.optionB,
-            optionC      = f["option3"]        ?: item.optionC,
-            optionD      = f["option4"]        ?: item.optionD,
-            answer       = f["correct"]        ?: item.answer,
-            explanation  = f["explanation"]    ?: item.explanation,
-            questionType = f["Question Type"]  ?: item.questionType,
-            audienceTags = f["AudienceTags"]   ?: item.audienceTags,
-            year         = f["Year"]           ?: item.year,
-            examName     = f["Exam_Name"]      ?: item.examName,
-            imageUrl     = f["Image"]          ?: item.imageUrl,
-            visualUrl    = f["VisualURL"]      ?: item.visualUrl
-        )
-    }
-
-    /**
-     * Admin edit এর পর in-memory cache patch করার পাশাপাশি disk (DataStore) cache
-     * ও sync রাখে — যাতে app বন্ধ/পুনরায় খুললেও edited content-ই দেখা যায়,
-     * TTL শেষ না হওয়া পর্যন্ত পুরনো ডাটা ফিরে না আসে।
-     */
-    suspend fun patchContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
-        patchMemCache(sheet, rowKey, fields)
-        _memCache?.let { cache.saveContent(it) }
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
@@ -186,6 +110,63 @@ class ContentRepository(private val context: Context) {
     fun getXpInfo(): XpInfo {
         val user = session.getCurrentUser()
         return XpInfo.fromXp(user?.xp ?: 0)
+    }
+
+    // ── XP award করা — Firebase Users/{phone}/XP ফিল্ডে atomic transaction দিয়ে
+    //    বাড়ায় (race condition-safe), আর সাথে সাথে local session-এর cached XP-ও
+    //    আপডেট করে দেয় যাতে Home screen তৎক্ষণাৎ নতুন XP দেখায়, পরের login এর
+    //    জন্য অপেক্ষা করতে না হয়।
+    //
+    //    [মূল কারণ — আগে XP সবসময় ০ দেখাতো]: quiz এ সঠিক উত্তর দিলে কোনো XP-ই
+    //    award হতো না — পুরো pipeline (PendingQueue.enqueueXpUpdate ইত্যাদি)
+    //    কোডে ছিল কিন্তু কোথাও call হতো না। এই ফাংশনটাই সেই gap পূরণ করে।
+    private val xpDb: FirebaseDatabase by lazy {
+        try {
+            val url = BuildConfig.FIREBASE_URL
+            if (url.isNullOrBlank() || url.contains("%%") || !url.startsWith("https://")) {
+                FirebaseDatabase.getInstance()
+            } else {
+                FirebaseDatabase.getInstance(url)
+            }
+        } catch (e: Exception) {
+            FirebaseDatabase.getInstance()
+        }
+    }
+
+    suspend fun awardXp(phone: String, delta: Int) {
+        if (delta == 0 || phone.isBlank()) return
+
+        // - Local cache সাথে সাথে আপডেট — UI তে তাৎক্ষণিক প্রতিফলন
+        try {
+            val current = session.getCurrentUser()
+            if (current != null) {
+                session.saveUser(current.copy(xp = maxOf(0, current.xp + delta)))
+            }
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp local update failed: ${e.message}")
+        }
+
+        // - Firebase এ আসল মান — atomic transaction (একসাথে অনেক answer দিলেও XP হারিয়ে যাবে না)
+        try {
+            val usersRef = xpDb.getReference("Users")
+            val snap = usersRef.orderByChild("Phone").equalTo(phone).get().await()
+            val userRef = snap.children.firstOrNull()?.ref ?: run {
+                Log.w("ContentRepository", "awardXp: user not found for $phone")
+                return
+            }
+            userRef.runTransaction(object : Transaction.Handler {
+                override fun doTransaction(d: MutableData): Transaction.Result {
+                    val cur = d.child("XP").getValue(Int::class.java) ?: 0
+                    d.child("XP").value = maxOf(0, cur + delta)
+                    return Transaction.success(d)
+                }
+                override fun onComplete(e: DatabaseError?, c: Boolean, s: DataSnapshot?) {
+                    if (e != null) Log.e("ContentRepository", "awardXp transaction failed: ${e.message}")
+                }
+            })
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp Firebase write failed: ${e.message}")
+        }
     }
 
     suspend fun getStreakInfo(): StreakInfo {

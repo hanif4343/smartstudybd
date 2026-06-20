@@ -44,6 +44,13 @@ data class QuizUiState(
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
+    companion object {
+        // সঠিক উত্তরে XP — written এ একটু বেশি (বেশি effort লাগে)
+        private const val XP_PER_CORRECT_MCQ     = 2
+        private const val XP_PER_CORRECT_WRITTEN = 3
+    }
+
+
     private val repo    = ContentRepository(app)
     private val cache   = ContentCache(app)
     private val session = SessionManager(app)
@@ -357,6 +364,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
+                session.getCurrentUser()?.phone?.let { phone ->
+                    repo.awardXp(phone, XP_PER_CORRECT_MCQ)
+                }
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -379,6 +389,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)
+                session.getCurrentUser()?.phone?.let { phone ->
+                    repo.awardXp(phone, XP_PER_CORRECT_WRITTEN)
+                }
             } else {
                 cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
@@ -637,6 +650,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     // ── Routine bottom sheet এর জন্য — ইতিমধ্যে লোড হওয়া study content snapshot ──
     fun getStudyContentSnapshot(): List<StudyItem> {
         return com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()?.study ?: emptyList()
+    }
+
+    // ── Routine bottom sheet এর জন্য — matching quiz snapshot (in-place mini-quiz এর জন্য) ──
+    fun getQuizContentSnapshot(): List<QuizItem> {
+        return com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()?.quiz ?: emptyList()
+    }
+
+    // ── একটা প্রশ্নের উত্তরের log রাখা (routine mini-quiz থেকে — শেয়ার্ড _state ছোঁয় না) ──
+    fun logRoutineQuizAnswer(questionId: String, isCorrect: Boolean) {
+        viewModelScope.launch { repo.submitQuizAnswer(questionId, isCorrect) }
     }
 
     fun getWrongQuestions(): List<Pair<QuestionItem, Int>> {
