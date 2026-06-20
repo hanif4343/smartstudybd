@@ -375,6 +375,7 @@ fun DailyRoutineCard(
     val routine by vm.state.collectAsState()
     val subjectOptions by vm.subjectOptions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var focusItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
 
     if (showAddDialog) {
         AddRoutineItemDialog(
@@ -384,6 +385,14 @@ fun DailyRoutineCard(
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false }
+        )
+    }
+
+    focusItem?.let { item ->
+        RoutineFocusSheet(
+            item = item,
+            onDismiss = { focusItem = null },
+            routineVm = vm
         )
     }
 
@@ -431,6 +440,7 @@ fun DailyRoutineCard(
                         item     = item,
                         onToggle = { vm.toggleItem(item.id) },
                         onRemove = { vm.removeItem(item.id) },
+                        onOpenFocus       = { focusItem = item },
                         onOpenStudy       = onOpenStudy,
                         onOpenInstantTest = onOpenInstantTest,
                         onOpenWeeklyTest  = onOpenWeeklyTest
@@ -446,6 +456,7 @@ private fun RoutineItemRow(
     item     : com.hanif.smartstudy.data.model.RoutineItem,
     onToggle : () -> Unit,
     onRemove : () -> Unit,
+    onOpenFocus       : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {}
@@ -467,7 +478,7 @@ private fun RoutineItemRow(
         Column(
             Modifier
                 .weight(1f)
-                .then(if (hasSubject) Modifier.clickable { showActionMenu = true } else Modifier)
+                .then(if (hasSubject) Modifier.clickable { onOpenFocus() } else Modifier)
         ) {
             Text(
                 item.title,
@@ -495,7 +506,14 @@ private fun RoutineItemRow(
                 }
                 DropdownMenu(expanded = showActionMenu, onDismissRequest = { showActionMenu = false }) {
                     DropdownMenuItem(
-                        text = { Text("📖 পড়া শুরু করো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        text = { Text("📖 এখানেই পড়ো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = {
+                            showActionMenu = false
+                            onOpenFocus()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("📚 পুরো অধ্যায় দেখো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
                         onClick = {
                             showActionMenu = false
                             onOpenStudy(item.subject, item.subTopic)
