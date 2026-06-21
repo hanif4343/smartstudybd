@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * ════════════════════════════════════════════════════════════════
- *  FcmAdminService — GAS ছাড়াই সরাসরি FCM HTTP v1 API
+ * FcmAdminService — GAS ছাড়াই সরাসরি FCM HTTP v1 API
  * ════════════════════════════════════════════════════════════════
  * Firebase service account (FCM_PROJECT_ID / FCM_CLIENT_EMAIL /
  * FCM_PRIVATE_KEY — GitHub Actions secrets থেকে build-time এ
@@ -259,7 +259,7 @@ object FcmAdminService {
                     Request.Builder().url("$base/AdminFCMTokens/token.json$auth").get().build()
                 ).execute().body?.string()
                 if (!fallbackBody.isNullOrBlank() && fallbackBody != "null") {
-                    val t = fallbackBody.trim().removeSurrounding(""")
+                    val t = fallbackBody.trim().removeSurrounding("\"")
                     if (t.isNotBlank()) {
                         tokens += t
                         Log.d(TAG, "fetchAdminTokens: using AdminFCMTokens fallback")
