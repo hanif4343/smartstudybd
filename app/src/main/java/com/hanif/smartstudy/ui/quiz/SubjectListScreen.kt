@@ -55,7 +55,14 @@ fun SubjectListScreen(
     isLoading  : Boolean,
     error      : String?   = null,
     onSubject  : (String) -> Unit,
-    onMockZone : () -> Unit
+    onMockZone : () -> Unit,
+    // ── Admin: ইনলাইন ক্রম সাজানো ──
+    isAdmin       : Boolean        = false,
+    isReorderMode : Boolean        = false,
+    isSavingOrder : Boolean        = false,
+    orderSavedMsg : String?        = null,
+    onToggleReorder: () -> Unit    = {},
+    onMoveSubject  : (Int, Int) -> Unit = { _, _ -> }
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -79,13 +86,22 @@ fun SubjectListScreen(
                 Modifier.fillMaxWidth().background(modeColor)
                     .padding(horizontal = 16.dp, vertical = 20.dp)
             ) {
-                Column {
-                    Text(modeLabel, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
-                        color = Color.White, fontFamily = NotoSansBengali)
-                    Text("বিষয় বেছে নিন", fontSize = 12.sp, color = Color.White.copy(0.65f),
-                        fontFamily = NotoSansBengali)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(modeLabel, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali)
+                        Text("বিষয় বেছে নিন", fontSize = 12.sp, color = Color.White.copy(0.65f),
+                            fontFamily = NotoSansBengali)
+                    }
+                    if (isAdmin) {
+                        ReorderToggleButton(isReorderMode = isReorderMode, onClick = onToggleReorder)
+                    }
                 }
             }
+        }
+
+        if (isAdmin && isReorderMode) {
+            item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
         }
 
         // (দুর্বল টপিক শুধু Profile/Stats পেজে দেখাবে)
@@ -128,8 +144,16 @@ fun SubjectListScreen(
         }
 
         // Subject cards
-        itemsIndexed(subjects) { _, subject ->
-            SubjectCard(subject = subject, onClick = { onSubject(subject.name) })
+        itemsIndexed(subjects) { idx, subject ->
+            SubjectCard(
+                subject = subject,
+                onClick = { onSubject(subject.name) },
+                reorderEnabled = isAdmin && isReorderMode,
+                isFirst = idx == 0,
+                isLast  = idx == subjects.lastIndex,
+                onMoveUp   = { onMoveSubject(idx, idx - 1) },
+                onMoveDown = { onMoveSubject(idx, idx + 1) }
+            )
         }
 
         // ── QBank subject list — banner ad (list এর শেষে, Mock button এর আগে) ──
@@ -161,13 +185,74 @@ fun SubjectListScreen(
 }
 
 @Composable
-private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
+private fun ReorderToggleButton(isReorderMode: Boolean, onClick: () -> Unit) {
+    Surface(
+        shape    = RoundedCornerShape(12.dp),
+        color    = if (isReorderMode) Color.White else Color.White.copy(alpha = 0.18f),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(if (isReorderMode) "✖️" else "🔢", fontSize = 13.sp)
+            Text(
+                if (isReorderMode) "শেষ" else "ক্রম সাজান",
+                fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                color = if (isReorderMode) Color(0xFF4F46E5) else Color.White
+            )
+        }
+    }
+}
+
+@Composable
+private fun OrderHintBar(isSaving: Boolean, msg: String?) {
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        shape  = RoundedCornerShape(12.dp),
+        color  = Color(0xFFFFFBEB),
+        border = BorderStroke(1.dp, Color(0xFFFDE68A))
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    isSaving        -> "⏳ সংরক্ষণ হচ্ছে..."
+                    msg != null     -> msg
+                    else            -> "▲▼ বাটনে চেপে ক্রম সাজান — সাথে সাথেই সংরক্ষিত হবে"
+                },
+                fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                color = when {
+                    msg?.startsWith("❌") == true -> Color(0xFFB91C1C)
+                    msg?.startsWith("✅") == true -> Color(0xFF166534)
+                    else -> Color(0xFF92400E)
+                },
+                modifier = Modifier.weight(1f)
+            )
+            if (isSaving) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF92400E), strokeWidth = 2.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubjectCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {}
+) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
     val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
 
     Card(
-        modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp).clickable { onClick() },
+        modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
         shape     = RoundedCornerShape(16.dp),
         colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(2.dp)
@@ -205,8 +290,43 @@ private fun SubjectCard(subject: SubjectEntry, onClick: () -> Unit) {
                     fontFamily = NotoSansBengali)
             }
 
-            Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
-                modifier = Modifier.size(14.dp))
+            if (reorderEnabled) {
+                ReorderUpDownButtons(isFirst = isFirst, isLast = isLast, onMoveUp = onMoveUp, onMoveDown = onMoveDown)
+            } else {
+                Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                    modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReorderUpDownButtons(
+    isFirst : Boolean,
+    isLast  : Boolean,
+    onMoveUp   : () -> Unit,
+    onMoveDown : () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick  = onMoveUp,
+            enabled  = !isFirst,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                androidx.compose.material.icons.Icons.Default.KeyboardArrowUp, null,
+                tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1)
+            )
+        }
+        IconButton(
+            onClick  = onMoveDown,
+            enabled  = !isLast,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null,
+                tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1)
+            )
         }
     }
 }
@@ -247,7 +367,14 @@ fun SubTopicListScreen(
     mode       : StudyMode,
     subTopics  : List<SubTopicEntry>,
     onSubTopic : (String) -> Unit,
-    onBack     : () -> Unit
+    onBack     : () -> Unit,
+    // ── Admin: ইনলাইন ক্রম সাজানো ──
+    isAdmin       : Boolean        = false,
+    isReorderMode : Boolean        = false,
+    isSavingOrder : Boolean        = false,
+    orderSavedMsg : String?        = null,
+    onToggleReorder : () -> Unit   = {},
+    onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> }
 ) {
     val isQBank = mode == StudyMode.QBANK
 
@@ -265,50 +392,85 @@ fun SubTopicListScreen(
                     )
                     .padding(horizontal = 16.dp, vertical = 18.dp)
             ) {
-                Column {
-                    Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-                        color = Color.White, fontFamily = NotoSansBengali)
-                    Text("${subTopics.size} টি অধ্যায়", fontSize = 11.sp, color = Color.White.copy(0.65f),
-                        fontFamily = NotoSansBengali)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali)
+                        Text("${subTopics.size} টি অধ্যায়", fontSize = 11.sp, color = Color.White.copy(0.65f),
+                            fontFamily = NotoSansBengali)
+                    }
+                    if (isAdmin) {
+                        ReorderToggleButton(isReorderMode = isReorderMode, onClick = onToggleReorder)
+                    }
                 }
             }
             Spacer(Modifier.height(6.dp))
+            if (isAdmin && isReorderMode) {
+                OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg)
+                Spacer(Modifier.height(6.dp))
+            }
             // ── Banner Ad — subject header এর নিচে ──
             AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QUIZ_LIST)
             Spacer(Modifier.height(6.dp))
         }
+
+        val reorderEnabled = isAdmin && isReorderMode
 
         if (isQBank) {
             // QBank Grid layout
             item {
                 LazyVerticalGrid(
                     columns            = GridCells.Fixed(2),
-                    modifier           = Modifier.heightIn(max = 2000.dp).padding(horizontal = 12.dp),
+                    modifier           = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement   = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(subTopics) { st ->
-                        QBankTopicCard(st = st, onClick = { onSubTopic(st.name) })
+                    itemsIndexed(subTopics) { idx, st ->
+                        QBankTopicCard(
+                            st = st,
+                            onClick = { onSubTopic(st.name) },
+                            reorderEnabled = reorderEnabled,
+                            isFirst = idx == 0,
+                            isLast  = idx == subTopics.lastIndex,
+                            onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
+                            onMoveDown = { onMoveSubTopic(idx, idx + 1) }
+                        )
                     }
                 }
             }
         } else {
-            itemsIndexed(subTopics) { _, st ->
-                SubTopicCard(st = st, onClick = { onSubTopic(st.name) })
+            itemsIndexed(subTopics) { idx, st ->
+                SubTopicCard(
+                    st = st,
+                    onClick = { onSubTopic(st.name) },
+                    reorderEnabled = reorderEnabled,
+                    isFirst = idx == 0,
+                    isLast  = idx == subTopics.lastIndex,
+                    onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
+                    onMoveDown = { onMoveSubTopic(idx, idx + 1) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
+private fun SubTopicCard(
+    st : SubTopicEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {}
+) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
     val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
 
     Card(
         modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
-            .clickable { onClick() },
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
         shape     = RoundedCornerShape(14.dp),
         colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(1.dp)
@@ -339,26 +501,55 @@ private fun SubTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
                     )
                 }
             }
-            Icon(Icons.Default.ArrowForwardIos, null, tint = mutedColor,
-                modifier = Modifier.size(12.dp))
+            if (reorderEnabled) {
+                ReorderUpDownButtons(isFirst = isFirst, isLast = isLast, onMoveUp = onMoveUp, onMoveDown = onMoveDown)
+            } else {
+                Icon(Icons.Default.ArrowForwardIos, null, tint = mutedColor,
+                    modifier = Modifier.size(12.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun QBankTopicCard(st: SubTopicEntry, onClick: () -> Unit) {
+private fun QBankTopicCard(
+    st : SubTopicEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {}
+) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
     val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
 
     Card(
-        modifier  = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier  = Modifier.fillMaxWidth()
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
         shape     = RoundedCornerShape(14.dp),
         colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("📋", fontSize = 20.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("📋", fontSize = 20.sp, modifier = Modifier.weight(1f))
+                if (reorderEnabled) {
+                    IconButton(
+                        onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowUp, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1))
+                    }
+                    IconButton(
+                        onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1))
+                    }
+                }
+            }
             Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
             Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
