@@ -582,6 +582,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
             vm.clearAddQuestionMsg()
         }
     }
+    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -627,8 +628,10 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
         }
 
         HorizontalDivider()
-        AdminTabField("বিষয় (Subject) *", subject, { subject = it })
-        AdminTabField("অধ্যায় (SubTopic)", subTopic, { subTopic = it })
+        val subjectOptions  = state.adminSubjectsBySheet[sheet].orEmpty()
+        val subTopicOptions = state.adminSubTopicsByKey["$sheet|$subject"].orEmpty()
+        AdminSubjectField("বিষয় (Subject) *", subject, subjectOptions, { subject = it })
+        AdminSubjectField("অধ্যায় (SubTopic)", subTopic, subTopicOptions, { subTopic = it })
         AdminTabField("প্রশ্ন (Question) *", question, { question = it }, 3)
 
         if (isMcq) {
@@ -811,6 +814,54 @@ private fun AdminTabField(label: String, value: String, onChange: (String) -> Un
         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp))
 }
 
+// ── Subject/SubTopic এর জন্য editable dropdown ──
+// সাধারণ OutlinedTextField এর মতোই admin যেকোনো নতুন নাম টাইপ করতে পারবে,
+// কিন্তু একইসাথে আগে থেকে database এ থাকা subject/subtopic গুলো dropdown এ
+// suggestion হিসেবে দেখাবে — যাতে বানান ভুলে duplicate subject তৈরি না হয়
+// (যেমন "গণিত" আর "গনিত" আলাদা subject হয়ে না যায়)।
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AdminSubjectField(
+    label    : String,
+    value    : String,
+    options  : List<String>,
+    onChange : (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val filtered = remember(value, options) {
+        if (value.isBlank()) options
+        else options.filter { it.contains(value, ignoreCase = true) }
+    }
+    ExposedDropdownMenuBox(expanded = expanded && filtered.isNotEmpty(), onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onChange(it); expanded = true },
+            label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
+            placeholder = if (options.isEmpty()) null else ({
+                Text("টাইপ করুন বা নিচ থেকে বেছে নিন", fontFamily = NotoSansBengali, fontSize = 11.sp)
+            }),
+            trailingIcon = {
+                if (options.isNotEmpty()) ExposedDropdownMenuDefaults.TrailingIcon(expanded)
+            },
+            modifier = Modifier.menuAnchor().fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp)
+        )
+        if (filtered.isNotEmpty()) {
+            ExposedDropdownMenu(expanded = expanded && filtered.isNotEmpty(), onDismissRequest = { expanded = false }) {
+                filtered.take(50).forEach { opt ->
+                    DropdownMenuItem(
+                        text = { Text(opt, fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        onClick = { onChange(opt); expanded = false }
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ── Bulk Audience Tag Tab ──
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -829,6 +880,7 @@ private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
     LaunchedEffect(isOk) {
         if (isOk) { kotlinx.coroutines.delay(3000); vm.clearBulkMsg(); subject = ""; subTopic = ""; confirmed = false }
     }
+    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -858,8 +910,11 @@ private fun BulkAudienceTab(state: MenuUiState, vm: MenuViewModel) {
             }
         }
 
-        AdminTabField("বিষয় (Subject) *", subject, { subject = it })
-        AdminTabField("অধ্যায় (SubTopic) — ফাঁকা = সব অধ্যায়", subTopic, { subTopic = it })
+        val subjectOptions  = state.adminSubjectsBySheet[sheet].orEmpty()
+        val subTopicOptions = state.adminSubTopicsByKey["$sheet|$subject"].orEmpty()
+
+        AdminSubjectField("বিষয় (Subject) *", subject, subjectOptions, { subject = it })
+        AdminSubjectField("অধ্যায় (SubTopic) — ফাঁকা = সব অধ্যায়", subTopic, subTopicOptions, { subTopic = it })
 
         ExposedDropdownMenuBox(expanded = tagExp, onExpandedChange = { tagExp = it }) {
             OutlinedTextField(
@@ -957,6 +1012,7 @@ private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
             oldSubject = ""; oldSubTopic = ""; newName = ""; confirmed = false
         }
     }
+    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -1013,10 +1069,18 @@ private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
             color = if (selectedSheets.isEmpty()) Color(0xFFEF4444) else MutedText
         )
 
-        AdminTabField("বর্তমান বিষয় (Subject) *", oldSubject, { oldSubject = it })
+        // নির্বাচিত sheet গুলোর সব subject মিলিয়ে suggestion দেখাবে
+        val subjectOptions = remember(selectedSheets.toList(), state.adminSubjectsBySheet) {
+            selectedSheets.flatMap { state.adminSubjectsBySheet[it].orEmpty() }.distinct().sorted()
+        }
+        val subTopicOptions = remember(selectedSheets.toList(), oldSubject, state.adminSubTopicsByKey) {
+            selectedSheets.flatMap { state.adminSubTopicsByKey["$it|$oldSubject"].orEmpty() }.distinct().sorted()
+        }
+
+        AdminSubjectField("বর্তমান বিষয় (Subject) *", oldSubject, subjectOptions, { oldSubject = it })
 
         if (renameSubTopic) {
-            AdminTabField("বর্তমান অধ্যায় (SubTopic) *", oldSubTopic, { oldSubTopic = it })
+            AdminSubjectField("বর্তমান অধ্যায় (SubTopic) *", oldSubTopic, subTopicOptions, { oldSubTopic = it })
         } else {
             Text(
                 "ℹ️ SubTopic ফাঁকা রাখলে এই বিষয়ের সব অধ্যায়সহ পুরো Subject rename হবে",
