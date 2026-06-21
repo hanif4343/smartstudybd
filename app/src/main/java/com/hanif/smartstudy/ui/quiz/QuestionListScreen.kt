@@ -53,6 +53,7 @@ private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
     } catch (_: Exception) { }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionListScreen(
     viewModel   : QuizViewModel,
@@ -167,6 +168,7 @@ fun QuestionListScreen(
                             )
                             Box(
                                 modifier = Modifier
+                                    .animateItemPlacement()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(hlColor)
                             ) {
@@ -196,7 +198,8 @@ fun QuestionListScreen(
                             onReport    = { reportIdx = idx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
-                            onAdminEdit = onAdminEdit
+                            onAdminEdit = onAdminEdit,
+                            modifier    = Modifier.animateItemPlacement()
                         )
                         }
                     }
