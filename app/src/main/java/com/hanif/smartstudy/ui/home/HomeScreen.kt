@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
@@ -376,15 +378,27 @@ fun DailyRoutineCard(
     val subjectOptions by vm.subjectOptions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var focusItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
+    var reminderEditItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
 
     if (showAddDialog) {
         AddRoutineItemDialog(
             subjectOptions = subjectOptions,
-            onAdd = { title, subject, subTopic, minutes ->
-                vm.addItem(title, subject, subTopic, minutes)
+            onAdd = { title, subject, subTopic, minutes, reminderEnabled, rHour, rMinute ->
+                vm.addItem(title, subject, subTopic, minutes, reminderEnabled, rHour, rMinute)
                 showAddDialog = false
             },
             onDismiss = { showAddDialog = false }
+        )
+    }
+
+    reminderEditItem?.let { item ->
+        RoutineReminderDialog(
+            item = item,
+            onSave = { enabled, hour, minute ->
+                vm.setItemReminder(item.id, enabled, hour, minute)
+                reminderEditItem = null
+            },
+            onDismiss = { reminderEditItem = null }
         )
     }
 
@@ -441,6 +455,7 @@ fun DailyRoutineCard(
                         onToggle = { vm.toggleItem(item.id) },
                         onRemove = { vm.removeItem(item.id) },
                         onOpenFocus       = { focusItem = item },
+                        onEditReminder    = { reminderEditItem = item },
                         onOpenStudy       = onOpenStudy,
                         onOpenInstantTest = onOpenInstantTest,
                         onOpenWeeklyTest  = onOpenWeeklyTest
@@ -457,6 +472,7 @@ private fun RoutineItemRow(
     onToggle : () -> Unit,
     onRemove : () -> Unit,
     onOpenFocus       : () -> Unit = {},
+    onEditReminder    : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {}
@@ -489,14 +505,27 @@ private fun RoutineItemRow(
                 textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+            val metaParts = mutableListOf<String>()
             if (hasSubject) {
-                val subjLabel = if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject
-                Text(
-                    "$subjLabel • ${item.minutes} মিনিট",
-                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = NotoSansBengali
-                )
+                metaParts.add(if (item.subTopic.isNotBlank()) "${item.subject} • ${item.subTopic}" else item.subject)
             }
+            metaParts.add("${item.minutes} মিনিট")
+            if (item.hasReminder) metaParts.add("⏰ ${item.reminderTimeLabel()}")
+            Text(
+                metaParts.joinToString(" • "),
+                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = NotoSansBengali
+            )
+        }
+
+        // ── এই আইটেমের নিজস্ব রিমাইন্ডার সেট/এডিট করার বাটন ──
+        IconButton(onClick = onEditReminder, modifier = Modifier.size(28.dp)) {
+            Icon(
+                if (item.hasReminder) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                contentDescription = "রিমাইন্ডার",
+                tint = if (item.hasReminder) Amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
         }
 
         if (hasSubject) {
@@ -547,7 +576,7 @@ private fun RoutineItemRow(
 @Composable
 private fun AddRoutineItemDialog(
     subjectOptions: List<com.hanif.smartstudy.data.model.RoutineSubjectOption>,
-    onAdd: (String, String, String, Int) -> Unit,
+    onAdd: (title: String, subject: String, subTopic: String, minutes: Int, reminderEnabled: Boolean, reminderHour: Int, reminderMinute: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var title    by remember { mutableStateOf("") }
@@ -557,6 +586,19 @@ private fun AddRoutineItemDialog(
     var subjectMenuExpanded  by remember { mutableStateOf(false) }
     var subTopicMenuExpanded by remember { mutableStateOf(false) }
     val minuteOptions = listOf(10, 15, 20, 30, 45, 60)
+
+    // ── এই আইটেমের নিজস্ব রিমাইন্ডার (alarm_create_v0 কনসেপ্ট) ──
+    var reminderOn by remember { mutableStateOf(false) }
+    val timePickerState = rememberTimePickerState(initialHour = 20, initialMinute = 0, is24Hour = false)
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    if (showTimePicker) {
+        TimePickerDialog(
+            state = timePickerState,
+            onConfirm = { showTimePicker = false },
+            onDismiss = { showTimePicker = false }
+        )
+    }
 
     val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
 
@@ -666,13 +708,167 @@ private fun AddRoutineItemDialog(
                         FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
                     }
                 }
+
+                Divider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+
+                // ── প্রতি-আইটেম রিমাইন্ডার টগল + সময় ──
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (reminderOn) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                            null, tint = if (reminderOn) Amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("এই আইটেমের জন্য রিমাইন্ডার", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    }
+                    Switch(checked = reminderOn, onCheckedChange = { reminderOn = it })
+                }
+
+                if (reminderOn) {
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(16.dp), tint = PrimaryIndigo)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            formatHourMinute(timePickerState.hour, timePickerState.minute),
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = PrimaryIndigo
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (title.isNotBlank()) onAdd(title, subject, subTopic, minutes) },
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onAdd(
+                            title, subject, subTopic, minutes,
+                            reminderOn,
+                            if (reminderOn) timePickerState.hour else -1,
+                            if (reminderOn) timePickerState.minute else -1
+                        )
+                    }
+                },
                 enabled = title.isNotBlank()
             ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    )
+}
+
+// ── hour(0-23)/minute কে 12-ঘণ্টার AM/PM ফরম্যাটে দেখানোর হেল্পার ──
+private fun formatHourMinute(hour: Int, minute: Int): String {
+    val h12 = when {
+        hour == 0  -> 12
+        hour > 12  -> hour - 12
+        else       -> hour
+    }
+    val ampm = if (hour < 12) "AM" else "PM"
+    return "%d:%02d %s".format(h12, minute, ampm)
+}
+
+// ── Material3 TimePicker কে dialog আকারে দেখানোর জন্য — material3 এ বিল্ট-ইন
+//    TimePickerDialog এখনো experimental/অনুপস্থিত, তাই হালকা wrapper ──
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimePickerDialog(
+    state: TimePickerState,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("⏰ রিমাইন্ডারের সময় বেছে নাও", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
+        text = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TimePicker(state = state)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("ঠিক আছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    )
+}
+
+// ── বিদ্যমান routine আইটেমের রিমাইন্ডার (on/off + সময়) এডিট করার ডায়ালগ ──
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RoutineReminderDialog(
+    item: com.hanif.smartstudy.data.model.RoutineItem,
+    onSave: (enabled: Boolean, hour: Int, minute: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var reminderOn by remember { mutableStateOf(item.hasReminder) }
+    val initialHour   = if (item.reminderHour in 0..23) item.reminderHour else 20
+    val initialMinute = if (item.reminderMinute in 0..59) item.reminderMinute else 0
+    val timePickerState = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute, is24Hour = false)
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    if (showTimePicker) {
+        TimePickerDialog(
+            state = timePickerState,
+            onConfirm = { showTimePicker = false },
+            onDismiss = { showTimePicker = false }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("⏰ রিমাইন্ডার — ${item.title}", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (reminderOn) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                            null, tint = if (reminderOn) Amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("রিমাইন্ডার চালু", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                    Switch(checked = reminderOn, onCheckedChange = { reminderOn = it })
+                }
+
+                if (reminderOn) {
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(16.dp), tint = PrimaryIndigo)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            formatHourMinute(timePickerState.hour, timePickerState.minute),
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = PrimaryIndigo
+                        )
+                    }
+                    Text(
+                        "প্রতিদিন এই সময়ে এই টপিকের জন্য আলাদা নোটিফিকেশন আসবে।",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(reminderOn, if (reminderOn) timePickerState.hour else -1, if (reminderOn) timePickerState.minute else -1)
+            }) { Text("সংরক্ষণ করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
