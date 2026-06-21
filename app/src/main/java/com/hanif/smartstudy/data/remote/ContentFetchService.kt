@@ -68,14 +68,15 @@ object ContentFetchService {
     }
 
     /**
-     * Admin সেট করা subject সিরিয়াল — "SubjectOrder" node থেকে, mode-ভিত্তিক।
-     * নতুন গঠন: { "QUIZ": { "subject": serial }, "QBANK": {...}, "STUDY": {...} }
-     * পুরনো (migration-পূর্ব) গঠন ছিল ফ্ল্যাট: { "subject": serial }।
-     * নতুন গঠন না পেলে পুরনো ফ্ল্যাট গঠন পড়ে সবগুলো mode এ একই ক্রম হিসেবে ব্যবহার করে —
-     * এতে আগে যারা ক্রম সেট করেছিল তাদের ডেটা হারিয়ে যায় না, admin আবার save করলেই
-     * নতুন mode-ভিত্তিক গঠনে upgrade হয়ে যাবে।
+     * Admin সেট করা subject সিরিয়াল — "SubjectOrder" node থেকে, mode + audience tag ভিত্তিক।
+     * নতুন গঠন (v3): { "QUIZ": { "Job": { "subject": serial }, "Masters%201": {...} }, ... }
+     * মধ্যবর্তী গঠন (v2, mode-only): { "QUIZ": { "subject": serial }, ... }
+     * পুরনো গঠন (v1, flat): { "subject": serial }
+     *
+     * v2/v1 → fallback: পুরনো data হারিয়ে যায় না; admin আবার save করলেই v3-তে upgrade হবে।
+     * Return type: Map<mode, Map<tag, Map<subject, serial>>>
      */
-    private suspend fun fetchSubjectOrder(): Map<String, Map<String, Int>> = withContext(Dispatchers.IO) {
+    private suspend fun fetchSubjectOrder(): Map<String, Map<String, Map<String, Int>>> = withContext(Dispatchers.IO) {
         try {
             val auth = authParam()
             val url  = "$BASE_URL/SubjectOrder.json$auth"
@@ -87,22 +88,39 @@ object ContentFetchService {
             val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
 
             val modeKeys = setOf("QUIZ", "QBANK", "STUDY")
-            val looksNewFormat = obj.entrySet().any { (k, v) -> k in modeKeys && v.isJsonObject }
 
-            if (looksNewFormat) {
-                obj.entrySet().mapNotNull { (mode, subTree) ->
-                    try {
-                        if (!subTree.isJsonObject) return@mapNotNull null
-                        val inner = parseSerialMap(subTree.asJsonObject)
-                        if (inner.isEmpty()) null else mode to inner
-                    } catch (e: Exception) { null }
-                }.toMap()
-            } else {
-                // পুরনো flat format — সব mode এ একই ক্রম হিসেবে fallback
+            // v1 detection: top-level keys are NOT mode names → flat legacy format
+            val hasModeLevelKey = obj.entrySet().any { (k, _) -> k in modeKeys }
+            if (!hasModeLevelKey) {
+                // v1 flat: { "subject": serial } → wrap into all modes under "Job" tag
                 val flat = parseSerialMap(obj)
-                if (flat.isEmpty()) emptyMap()
-                else modeKeys.associateWith { flat }
+                return@withContext if (flat.isEmpty()) emptyMap()
+                else modeKeys.associateWith { mapOf("Job" to flat) }
             }
+
+            // Mode level exists — check if v2 (mode→subject→serial) or v3 (mode→tag→subject→serial)
+            obj.entrySet().mapNotNull { (mode, modeVal) ->
+                if (!modeVal.isJsonObject) return@mapNotNull null
+                val modeObj = modeVal.asJsonObject
+
+                // v3 detection: children of mode are themselves objects (tag level), not numbers
+                val looksV3 = modeObj.entrySet().any { (_, v) -> v.isJsonObject }
+
+                val tagMap: Map<String, Map<String, Int>> = if (looksV3) {
+                    // v3: mode → tag → subject → serial
+                    modeObj.entrySet().mapNotNull { (encodedTag, tagVal) ->
+                        if (!tagVal.isJsonObject) return@mapNotNull null
+                        val inner = parseSerialMap(tagVal.asJsonObject)
+                        if (inner.isEmpty()) null else encodedTag to inner
+                    }.toMap()
+                } else {
+                    // v2: mode → subject → serial → promote to "Job" tag
+                    val flat = parseSerialMap(modeObj)
+                    if (flat.isEmpty()) emptyMap() else mapOf("Job" to flat)
+                }
+
+                if (tagMap.isEmpty()) null else mode to tagMap
+            }.toMap()
         } catch (e: Exception) {
             Log.e(TAG, "fetchSubjectOrder error: ${e.message}")
             emptyMap()
@@ -118,12 +136,14 @@ object ContentFetchService {
         }.toMap()
 
     /**
-     * Admin সেট করা subTopic সিরিয়াল — "SubTopicOrder" node থেকে, mode-ভিত্তিক।
-     * নতুন গঠন: { "QUIZ": { "subject": { "subTopic": serial } }, "QBANK": {...}, "STUDY": {...} }
-     * পুরনো গঠন ছিল: { "subject": { "subTopic": serial } } (mode ছাড়া)।
-     * নতুন গঠন না পেলে পুরনোটা সবগুলো mode এ fallback হিসেবে ব্যবহার করে।
+     * Admin সেট করা subTopic সিরিয়াল — "SubTopicOrder" node থেকে, mode + tag ভিত্তিক।
+     * নতুন গঠন (v3): { "QUIZ": { "Job": { "subject": { "subTopic": serial } } }, ... }
+     * মধ্যবর্তী গঠন (v2): { "QUIZ": { "subject": { "subTopic": serial } }, ... }
+     * পুরনো গঠন (v1): { "subject": { "subTopic": serial } }
+     *
+     * Return type: Map<mode, Map<tag, Map<subject, Map<subtopic, serial>>>>
      */
-    private suspend fun fetchSubTopicOrder(): Map<String, Map<String, Map<String, Int>>> = withContext(Dispatchers.IO) {
+    private suspend fun fetchSubTopicOrder(): Map<String, Map<String, Map<String, Map<String, Int>>>> = withContext(Dispatchers.IO) {
         try {
             val auth = authParam()
             val url  = "$BASE_URL/SubTopicOrder.json$auth"
@@ -135,30 +155,49 @@ object ContentFetchService {
             val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
 
             val modeKeys = setOf("QUIZ", "QBANK", "STUDY")
-            val looksNewFormat = obj.entrySet().any { (k, v) -> k in modeKeys && v.isJsonObject }
 
-            fun parseSubjectTree(subjectTree: JsonObject): Map<String, Map<String, Int>> =
-                subjectTree.entrySet().mapNotNull { (subject, subTree) ->
-                    try {
-                        if (!subTree.isJsonObject) return@mapNotNull null
-                        val inner = parseSerialMap(subTree.asJsonObject)
-                        if (inner.isEmpty()) null else subject to inner
-                    } catch (e: Exception) { null }
+            fun parseSubjectMap(subjectObj: JsonObject): Map<String, Map<String, Int>> =
+                subjectObj.entrySet().mapNotNull { (subject, subTree) ->
+                    if (!subTree.isJsonObject) return@mapNotNull null
+                    val inner = parseSerialMap(subTree.asJsonObject)
+                    if (inner.isEmpty()) null else subject to inner
                 }.toMap()
 
-            if (looksNewFormat) {
-                obj.entrySet().mapNotNull { (mode, subjectTree) ->
-                    try {
-                        if (!subjectTree.isJsonObject) return@mapNotNull null
-                        val inner = parseSubjectTree(subjectTree.asJsonObject)
-                        if (inner.isEmpty()) null else mode to inner
-                    } catch (e: Exception) { null }
-                }.toMap()
-            } else {
-                val flat = parseSubjectTree(obj)
-                if (flat.isEmpty()) emptyMap()
-                else modeKeys.associateWith { flat }
+            val hasModeLevelKey = obj.entrySet().any { (k, _) -> k in modeKeys }
+            if (!hasModeLevelKey) {
+                // v1: { subject → { subtopic → serial } } → promote to Job tag, all modes
+                val flat = parseSubjectMap(obj)
+                return@withContext if (flat.isEmpty()) emptyMap()
+                else modeKeys.associateWith { mapOf("Job" to flat) }
             }
+
+            obj.entrySet().mapNotNull { (mode, modeVal) ->
+                if (!modeVal.isJsonObject) return@mapNotNull null
+                val modeObj = modeVal.asJsonObject
+
+                // v3 detection: child values of mode-obj are objects whose OWN children are objects
+                // (tag → subject → subtopic → serial means two nesting levels under mode)
+                val looksV3 = modeObj.entrySet().any { (_, tagOrSubjVal) ->
+                    if (!tagOrSubjVal.isJsonObject) return@any false
+                    // If the grand-children are objects (not numbers), this is tag→subject level
+                    tagOrSubjVal.asJsonObject.entrySet().any { (_, v) -> v.isJsonObject }
+                }
+
+                val tagMap: Map<String, Map<String, Map<String, Int>>> = if (looksV3) {
+                    // v3: mode → encodedTag → subject → subtopic → serial
+                    modeObj.entrySet().mapNotNull { (encodedTag, tagVal) ->
+                        if (!tagVal.isJsonObject) return@mapNotNull null
+                        val inner = parseSubjectMap(tagVal.asJsonObject)
+                        if (inner.isEmpty()) null else encodedTag to inner
+                    }.toMap()
+                } else {
+                    // v2: mode → subject → subtopic → serial → promote to Job tag
+                    val flat = parseSubjectMap(modeObj)
+                    if (flat.isEmpty()) emptyMap() else mapOf("Job" to flat)
+                }
+
+                if (tagMap.isEmpty()) null else mode to tagMap
+            }.toMap()
         } catch (e: Exception) {
             Log.e(TAG, "fetchSubTopicOrder error: ${e.message}")
             emptyMap()
