@@ -40,6 +40,9 @@ class SmartStudyApp : Application() {
         // FCM token collect করে Firebase RTDB এ save করো
         FcmHelper.collectAndSave(this)
 
+        // Text-to-Speech — Study content এ "শুনো" বাটনের জন্য আগে থেকেই init করে রাখা
+        com.hanif.smartstudy.util.TtsManager.init(this)
+
         // Admin broadcast notification এর জন্য "all_users" topic এ subscribe করো —
         // তাহলে broadcast পাঠানোর সময় প্রতিটা user এর token আলাদাভাবে লুকআপ
         // করে পাঠাতে হয় না, একবারেই topic এ push করা যায়।
