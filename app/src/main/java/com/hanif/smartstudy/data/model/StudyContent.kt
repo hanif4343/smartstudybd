@@ -144,18 +144,25 @@ data class AppContent(
     val study       : List<StudyItem>   = emptyList(),
     val quiz        : List<QuizItem>    = emptyList(),
     val qbank       : List<QBankItem>   = emptyList(),
-    // Admin যে সিরিয়াল নাম্বার সেট করেছে — এখন mode-ভিত্তিক (Quiz/QBank/Study আলাদা)।
-    // key: mode name ("QUIZ"/"QBANK"/"STUDY") → (key: subject name → serial)।
+    // Admin যে সিরিয়াল নাম্বার সেট করেছে — এখন mode + audience tag উভয়ভিত্তিক।
+    // key: mode name ("QUIZ"/"QBANK"/"STUDY") → tag ("Job"/"Masters 1" ইত্যাদি) → (subject name → serial)।
     // যে সাবজেক্টের serial নেই, সেটা সবসময় তালিকার শেষে (নাম অনুযায়ী) দেখানো হবে।
-    // আগে এটা সব mode মিলিয়ে একটাই global Map<String,Int> ছিল — তাতে Quiz/QBank/Study
-    // এর সাবজেক্ট একসাথে মিশে যেত admin editor এ। এখন প্রতিটা mode এর নিজস্ব ক্রম।
-    val subjectOrder: Map<String, Map<String, Int>> = emptyMap(),
-    // subTopic এর সিরিয়াল — mode + subject দুটো দিয়েই আলাদা আলাদা ক্রম থাকে।
-    // key: mode name → (key: subject name → (key: subTopic name → serial))। not-set হলে শেষে যায়।
-    val subTopicOrder: Map<String, Map<String, Map<String, Int>>> = emptyMap(),
+    // আগে mode-only (2-level) ছিল — তাতে Job আর Masters/Honours এর subjects একই key শেয়ার করত।
+    // এখন প্রতিটা mode+tag এর নিজস্ব আলাদা ক্রম — কোনো cross-tag collision সম্ভব নয়।
+    val subjectOrder: Map<String, Map<String, Map<String, Int>>> = emptyMap(),
+    // subTopic এর সিরিয়াল — mode + tag + subject তিনটো দিয়েই আলাদা আলাদা ক্রম থাকে।
+    // key: mode name → tag → subject name → (subTopic name → serial)। not-set হলে শেষে যায়।
+    val subTopicOrder: Map<String, Map<String, Map<String, Map<String, Int>>>> = emptyMap(),
     val fetchedAt   : Long              = 0L
 ) {
     fun isEmpty()  = study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()
+
+    // Firebase path segment হিসেবে ব্যবহারের আগে audience tag কে normalize করো।
+    // e.g. "Masters 1" → "Masters%201", "Job" → "Job", "" → "Job"
+    companion object {
+        fun normalizedTagForPath(tag: String): String =
+            java.net.URLEncoder.encode(tag.trim().ifBlank { "Job" }, "UTF-8").replace("+", "%20")
+    }
     // FIX: TTL আগে ৬ ঘণ্টা ছিল — admin কোনো প্রশ্ন এডিট করলে অন্য ইউজারদের ডিভাইসে
     // ৬ ঘণ্টা পর্যন্ত পুরনো (stale) cache-ই দেখানো হতো। ১ ঘণ্টায় নামানো হলো যাতে
     // আপডেট অনেক দ্রুত সবার কাছে পৌঁছায়, কিন্তু Firebase read খরচও বেড়ে না যায়।
