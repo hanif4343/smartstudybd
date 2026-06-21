@@ -11,8 +11,27 @@ data class RoutineItem(
     val subject : String  = "",     // যেমন: "বাংলাদেশ বিষয়াবলী"
     val subTopic: String  = "",     // যেমন: "মুক্তিযুদ্ধ" — subject এর অধীনে SubTopic
     val minutes : Int     = 20,     // আনুমানিক সময় (মিনিট)
-    val done    : Boolean = false
-)
+    val done    : Boolean = false,
+
+    // ── প্রতি আইটেমের নিজস্ব সময় + রিমাইন্ডার (alarm_create_v0-এর কনসেপ্টের মতো) ──
+    val reminderEnabled : Boolean = false,  // এই আইটেমের জন্য আলাদা alarm অন/অফ
+    val reminderHour    : Int     = -1,     // 0-23, -1 মানে সেট করা হয়নি
+    val reminderMinute  : Int     = -1      // 0-59, -1 মানে সেট করা হয়নি
+) {
+    val hasReminder: Boolean get() = reminderEnabled && reminderHour in 0..23 && reminderMinute in 0..59
+
+    // hh:mm AM/PM ফরম্যাটে দেখানোর জন্য
+    fun reminderTimeLabel(): String {
+        if (!hasReminder) return ""
+        val h12 = when {
+            reminderHour == 0  -> 12
+            reminderHour > 12  -> reminderHour - 12
+            else               -> reminderHour
+        }
+        val ampm = if (reminderHour < 12) "AM" else "PM"
+        return "%d:%02d %s".format(h12, reminderMinute, ampm)
+    }
+}
 
 data class DailyRoutine(
     val date  : String           = "",   // yyyy-MM-dd
