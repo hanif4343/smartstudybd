@@ -39,7 +39,12 @@ data class QuizUiState(
     val bookmarkedIds : Set<String>      = emptySet(),
     val weakTopics    : List<WeakTopic>  = emptyList(),
     val contentLoaded : Boolean          = false,
-    val highlightQuestionId : String?    = null
+    val highlightQuestionId : String?    = null,
+    // ── Admin: ইনলাইন ক্রম সাজানো (Subject/SubTopic list screen-এই ▲▼ বাটন) ──
+    val isAdmin        : Boolean         = false,
+    val isReorderMode  : Boolean         = false,   // ▲▼ বাটন দেখানো হবে কিনা (admin টগল করে)
+    val isSavingOrder  : Boolean         = false,
+    val orderSavedMsg  : String?         = null
 )
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
@@ -106,7 +111,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         loadJob = viewModelScope.launch {
             val bookmarks  = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val weakTopics = loadWeakTopics()
-            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics) }
+            val isAdmin    = session.getCurrentUser()?.isAdmin() == true
+            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
             // 30 সেকেন্ড timeout
             val result = withTimeoutOrNull(30_000L) { repo.getContent() }
@@ -539,7 +545,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
 
         val progressMap = loadProgressMap()
-        val order = content.subjectOrder
+        val order = content.subjectOrder[mode.name] ?: emptyMap()
         val subjects = items
             .filter { it.subject.isNotBlank() }
             .groupBy { it.subject }
@@ -561,8 +567,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                                   }
                 )
             }
-            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে)।
-            // যে সাবজেক্টের serial সেট করা নেই, সেগুলো সবসময় শেষে — নাম অনুযায়ী sort হয়ে।
+            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে) — এই mode (Quiz/QBank/Study)
+            // এর জন্য আলাদা ক্রম। যে সাবজেক্টের serial সেট করা নেই, সেগুলো সবসময় শেষে — নাম অনুযায়ী sort হয়ে।
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode")
         _state.update { it.copy(subjects = subjects, isLoading = false) }
@@ -578,7 +584,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> filtered.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
-        val order = content.subTopicOrder[subject] ?: emptyMap()
+        val order = content.subTopicOrder[mode.name]?.get(subject) ?: emptyMap()
         val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
             SubTopicEntry(name = st, subject = subject, totalQ = qs.size,
                           doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
@@ -587,6 +593,85 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         _state.update { it.copy(subTopics = subTopics) }
     }
+
+    // ═════════════════════════════════════════════════════════
+    // Admin: ইনলাইন সাবজেক্ট/সাবটপিক ক্রম সাজানো
+    // (Subject List / SubTopic List screen-এই ▲▼ বাটন চেপে — Admin Panel এ আলাদা
+    //  করে যেতে হয় না। যেহেতু এই স্ক্রিন আগে থেকেই mode (Quiz/QBank/Study) আর
+    //  audience tag অনুযায়ী filter হয়ে subjects/subTopics দেখায়, এখানে সরাসরি
+    //  ক্রম বদলালে সেটা ঠিক ওই mode এর জন্যই সংরক্ষিত হয় — অন্য mode প্রভাবিত হয় না।)
+    // ═════════════════════════════════════════════════════════
+
+    /** Admin "ক্রম সাজান" বাটনে চাপলে ▲▼ controls toggle হয় */
+    fun toggleReorderMode() {
+        if (!_state.value.isAdmin) return
+        _state.update { it.copy(isReorderMode = !it.isReorderMode, orderSavedMsg = null) }
+    }
+
+    /** Subject list এ একটা subject উপরে/নিচে সরানো — শুধু local state, সাথে সাথেই Firebase এ সংরক্ষণ হয় */
+    fun moveSubject(fromIndex: Int, toIndex: Int) {
+        if (!_state.value.isAdmin) return
+        val list = _state.value.subjects.toMutableList()
+        if (fromIndex !in list.indices || toIndex !in list.indices) return
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        _state.update { it.copy(subjects = list) }
+        persistSubjectOrder(list.map { it.name })
+    }
+
+    /** SubTopic list এ একটা subTopic উপরে/নিচে সরানো — শুধু local state, সাথে সাথেই Firebase এ সংরক্ষণ হয় */
+    fun moveSubTopic(fromIndex: Int, toIndex: Int) {
+        if (!_state.value.isAdmin) return
+        val subject = _state.value.navPath.subject ?: return
+        val list = _state.value.subTopics.toMutableList()
+        if (fromIndex !in list.indices || toIndex !in list.indices) return
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        _state.update { it.copy(subTopics = list) }
+        persistSubTopicOrder(subject, list.map { it.name })
+    }
+
+    private var orderSaveJob: Job? = null
+
+    /** বর্তমান subjects ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode এর জন্য Firebase এ সেভ করো */
+    private fun persistSubjectOrder(orderedNames: List<String>) {
+        val mode = _state.value.mode
+        orderSaveJob?.cancel()
+        orderSaveJob = viewModelScope.launch {
+            _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
+            val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode.name, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    repo.patchSubjectOrderAndPersist(mode.name, order)
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "❌ সংরক্ষণ ব্যর্থ: ${r.message}") }
+                }
+            }
+        }
+    }
+
+    /** বর্তমান subTopics ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+subject এর জন্য Firebase এ সেভ করো */
+    private fun persistSubTopicOrder(subject: String, orderedNames: List<String>) {
+        val mode = _state.value.mode
+        orderSaveJob?.cancel()
+        orderSaveJob = viewModelScope.launch {
+            _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
+            val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, subject, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    repo.patchSubTopicOrderAndPersist(mode.name, subject, order)
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "❌ সংরক্ষণ ব্যর্থ: ${r.message}") }
+                }
+            }
+        }
+    }
+
+    fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
 
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
         val bookmarks = _state.value.bookmarkedIds
