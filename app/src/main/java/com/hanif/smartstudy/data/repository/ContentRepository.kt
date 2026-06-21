@@ -280,22 +280,25 @@ class ContentRepository(private val context: Context) {
      * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই। patchContentAndPersist()
      * এর মতই fallback প্যাটার্ন: memCache না থাকলে disk cache থেকে নেয়। fetchedAt
      * বদলায় না, তাই TTL অনুযায়ী পরে normal fresh fetch হবে এবং অন্য ইউজারদের কাছেও পৌঁছাবে।
+     * mode-ভিত্তিক — শুধু সেই mode (Quiz/QBank/Study) এর subject order replace হয়,
+     * বাকি mode গুলোর order অপরিবর্তিত থাকে।
      */
-    suspend fun patchSubjectOrderAndPersist(order: Map<String, Int>) {
+    suspend fun patchSubjectOrderAndPersist(mode: String, order: Map<String, Int>) {
         val base = _memCache ?: cache.loadContent() ?: return
-        val patched = base.copy(subjectOrder = order)
+        val patched = base.copy(subjectOrder = base.subjectOrder.toMutableMap().apply { put(mode, order) })
         _memCache = patched
         cache.saveContent(patched)
     }
 
     /**
-     * Admin একটা subject এর subTopic order সেভ করার পর in-memory + disk cache এ
-     * সরাসরি প্যাচ করে দেয় — শুধু সেই subject এর entry replace হয়, বাকি
-     * subject গুলোর subTopic order অপরিবর্তিত থাকে।
+     * Admin একটা mode + subject এর subTopic order সেভ করার পর in-memory + disk cache এ
+     * সরাসরি প্যাচ করে দেয় — শুধু সেই mode+subject এর entry replace হয়, বাকি সব
+     * mode/subject গুলোর subTopic order অপরিবর্তিত থাকে।
      */
-    suspend fun patchSubTopicOrderAndPersist(subject: String, order: Map<String, Int>) {
+    suspend fun patchSubTopicOrderAndPersist(mode: String, subject: String, order: Map<String, Int>) {
         val base = _memCache ?: cache.loadContent() ?: return
-        val patched = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(subject, order) })
+        val modeMap = (base.subTopicOrder[mode] ?: emptyMap()).toMutableMap().apply { put(subject, order) }
+        val patched = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(mode, modeMap) })
         _memCache = patched
         cache.saveContent(patched)
     }
