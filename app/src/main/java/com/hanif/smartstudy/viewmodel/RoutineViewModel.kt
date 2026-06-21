@@ -9,6 +9,7 @@ import com.hanif.smartstudy.data.model.DailyRoutine
 import com.hanif.smartstudy.data.model.RoutineSubjectOption
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
+import com.hanif.smartstudy.receiver.RoutineItemReminderReceiver
 import com.hanif.smartstudy.util.AudienceFilter.forUser
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.util.SoundManager
@@ -44,6 +45,9 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
     fun load() {
         viewModelScope.launch {
             _state.value = cache.getTodayRoutine()
+            // App চালু/resume হওয়ার সময় আজকের active reminder-গুলো আবার schedule করো
+            // (date rollover, app kill, ইত্যাদির পরও alarm ঠিকভাবে চলতে থাকুক)
+            RoutineItemReminderReceiver.rescheduleAll(getApplication())
             syncWidget()
         }
     }
@@ -85,12 +89,27 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun addItem(title: String, subject: String = "", subTopic: String = "", minutes: Int = 20) {
+    fun addItem(
+        title: String,
+        subject: String = "",
+        subTopic: String = "",
+        minutes: Int = 20,
+        reminderEnabled: Boolean = false,
+        reminderHour: Int = -1,
+        reminderMinute: Int = -1
+    ) {
         val cleaned = title.trim()
         if (cleaned.isBlank()) return
         viewModelScope.launch {
-            cache.addItem(cleaned, subject.trim(), subTopic.trim(), minutes)
+            val added = cache.addItem(cleaned, subject.trim(), subTopic.trim(), minutes, reminderEnabled, reminderHour, reminderMinute)
             _state.value = cache.getTodayRoutine()
+
+            if (added.hasReminder) {
+                RoutineItemReminderReceiver.schedule(
+                    getApplication(), added.id, added.title, added.subject,
+                    added.reminderHour, added.reminderMinute
+                )
+            }
             syncWidget()
         }
     }
@@ -104,6 +123,18 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
             // টিক দেওয়ার সময় সাউন্ড ফিডব্যাক
             val item = updated.items.find { it.id == id }
             if (item?.done == true) SoundManager.playCorrect()
+
+            // আইটেম সম্পন্ন হলে আজকের আর রিমাইন্ডার দরকার নেই; আনচেক করলে আবার চালু করো
+            if (item != null && item.hasReminder) {
+                if (item.done) {
+                    RoutineItemReminderReceiver.cancel(getApplication(), id)
+                } else {
+                    RoutineItemReminderReceiver.schedule(
+                        getApplication(), item.id, item.title, item.subject,
+                        item.reminderHour, item.reminderMinute
+                    )
+                }
+            }
 
             syncWidget()
         }
@@ -119,6 +150,11 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
             val updated = cache.getTodayRoutine()
             _state.value = updated
             SoundManager.playCorrect()
+
+            if (current?.hasReminder == true) {
+                RoutineItemReminderReceiver.cancel(getApplication(), id)
+            }
+
             syncWidget()
         }
     }
@@ -127,6 +163,27 @@ class RoutineViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             cache.removeItem(id)
             _state.value = cache.getTodayRoutine()
+            RoutineItemReminderReceiver.cancel(getApplication(), id)
+            syncWidget()
+        }
+    }
+
+    // ── বিদ্যমান আইটেমের রিমাইন্ডার সময় সেট/পরিবর্তন/বন্ধ করো ──
+    fun setItemReminder(id: String, enabled: Boolean, hour: Int, minute: Int) {
+        viewModelScope.launch {
+            val updatedItem = cache.setItemReminder(id, enabled, hour, minute)
+            _state.value = cache.getTodayRoutine()
+
+            if (updatedItem != null) {
+                if (updatedItem.hasReminder && !updatedItem.done) {
+                    RoutineItemReminderReceiver.schedule(
+                        getApplication(), updatedItem.id, updatedItem.title, updatedItem.subject,
+                        updatedItem.reminderHour, updatedItem.reminderMinute
+                    )
+                } else {
+                    RoutineItemReminderReceiver.cancel(getApplication(), id)
+                }
+            }
             syncWidget()
         }
     }
