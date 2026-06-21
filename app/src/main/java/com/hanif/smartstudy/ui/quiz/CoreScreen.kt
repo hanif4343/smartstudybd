@@ -124,7 +124,13 @@ fun CoreScreen(
                 mode       = state.mode,
                 subTopics  = state.subTopics,
                 onSubTopic = { viewModel.navigateToSubTopic(it) },
-                onBack     = { viewModel.navigateBack() }
+                onBack     = { viewModel.navigateBack() },
+                isAdmin         = state.isAdmin,
+                isReorderMode   = state.isReorderMode,
+                isSavingOrder   = state.isSavingOrder,
+                orderSavedMsg   = state.orderSavedMsg,
+                onToggleReorder = { viewModel.toggleReorderMode() },
+                onMoveSubTopic  = { from, to -> viewModel.moveSubTopic(from, to) }
             )
         }
 
@@ -137,7 +143,13 @@ fun CoreScreen(
                 isLoading  = state.isLoading,
                 error      = state.error,
                 onSubject  = { viewModel.navigateToSubject(it) },
-                onMockZone = { viewModel.openMockZone() }
+                onMockZone = { viewModel.openMockZone() },
+                isAdmin         = state.isAdmin,
+                isReorderMode   = state.isReorderMode,
+                isSavingOrder   = state.isSavingOrder,
+                orderSavedMsg   = state.orderSavedMsg,
+                onToggleReorder = { viewModel.toggleReorderMode() },
+                onMoveSubject   = { from, to -> viewModel.moveSubject(from, to) }
             )
         }
     }
