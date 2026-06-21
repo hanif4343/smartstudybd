@@ -67,8 +67,15 @@ object ContentFetchService {
         }
     }
 
-    /** Admin সেট করা subject সিরিয়াল — "SubjectOrder" node থেকে (subject name → serial Int) */
-    private suspend fun fetchSubjectOrder(): Map<String, Int> = withContext(Dispatchers.IO) {
+    /**
+     * Admin সেট করা subject সিরিয়াল — "SubjectOrder" node থেকে, mode-ভিত্তিক।
+     * নতুন গঠন: { "QUIZ": { "subject": serial }, "QBANK": {...}, "STUDY": {...} }
+     * পুরনো (migration-পূর্ব) গঠন ছিল ফ্ল্যাট: { "subject": serial }।
+     * নতুন গঠন না পেলে পুরনো ফ্ল্যাট গঠন পড়ে সবগুলো mode এ একই ক্রম হিসেবে ব্যবহার করে —
+     * এতে আগে যারা ক্রম সেট করেছিল তাদের ডেটা হারিয়ে যায় না, admin আবার save করলেই
+     * নতুন mode-ভিত্তিক গঠনে upgrade হয়ে যাবে।
+     */
+    private suspend fun fetchSubjectOrder(): Map<String, Map<String, Int>> = withContext(Dispatchers.IO) {
         try {
             val auth = authParam()
             val url  = "$BASE_URL/SubjectOrder.json$auth"
@@ -78,23 +85,45 @@ object ContentFetchService {
             resp.close()
             if (body.isBlank() || body == "null") return@withContext emptyMap()
             val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
-            obj.entrySet().mapNotNull { (key, v) ->
-                try {
-                    val serial = if (v.isJsonPrimitive) v.asJsonPrimitive.asNumber.toInt() else null
-                    serial?.let { key to it }
-                } catch (e: Exception) { null }
-            }.toMap()
+
+            val modeKeys = setOf("QUIZ", "QBANK", "STUDY")
+            val looksNewFormat = obj.entrySet().any { (k, v) -> k in modeKeys && v.isJsonObject }
+
+            if (looksNewFormat) {
+                obj.entrySet().mapNotNull { (mode, subTree) ->
+                    try {
+                        if (!subTree.isJsonObject) return@mapNotNull null
+                        val inner = parseSerialMap(subTree.asJsonObject)
+                        if (inner.isEmpty()) null else mode to inner
+                    } catch (e: Exception) { null }
+                }.toMap()
+            } else {
+                // পুরনো flat format — সব mode এ একই ক্রম হিসেবে fallback
+                val flat = parseSerialMap(obj)
+                if (flat.isEmpty()) emptyMap()
+                else modeKeys.associateWith { flat }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "fetchSubjectOrder error: ${e.message}")
             emptyMap()
         }
     }
 
+    private fun parseSerialMap(obj: JsonObject): Map<String, Int> =
+        obj.entrySet().mapNotNull { (key, v) ->
+            try {
+                val serial = if (v.isJsonPrimitive) v.asJsonPrimitive.asNumber.toInt() else null
+                serial?.let { key to it }
+            } catch (e: Exception) { null }
+        }.toMap()
+
     /**
-     * Admin সেট করা subTopic সিরিয়াল — "SubTopicOrder" node থেকে।
-     * গঠন: { "subject name": { "subTopic name": serial(Int), ... }, ... }
+     * Admin সেট করা subTopic সিরিয়াল — "SubTopicOrder" node থেকে, mode-ভিত্তিক।
+     * নতুন গঠন: { "QUIZ": { "subject": { "subTopic": serial } }, "QBANK": {...}, "STUDY": {...} }
+     * পুরনো গঠন ছিল: { "subject": { "subTopic": serial } } (mode ছাড়া)।
+     * নতুন গঠন না পেলে পুরনোটা সবগুলো mode এ fallback হিসেবে ব্যবহার করে।
      */
-    private suspend fun fetchSubTopicOrder(): Map<String, Map<String, Int>> = withContext(Dispatchers.IO) {
+    private suspend fun fetchSubTopicOrder(): Map<String, Map<String, Map<String, Int>>> = withContext(Dispatchers.IO) {
         try {
             val auth = authParam()
             val url  = "$BASE_URL/SubTopicOrder.json$auth"
@@ -104,18 +133,32 @@ object ContentFetchService {
             resp.close()
             if (body.isBlank() || body == "null") return@withContext emptyMap()
             val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
-            obj.entrySet().mapNotNull { (subject, subTree) ->
-                try {
-                    if (!subTree.isJsonObject) return@mapNotNull null
-                    val inner = subTree.asJsonObject.entrySet().mapNotNull { (st, v) ->
-                        try {
-                            val serial = if (v.isJsonPrimitive) v.asJsonPrimitive.asNumber.toInt() else null
-                            serial?.let { st to it }
-                        } catch (e: Exception) { null }
-                    }.toMap()
-                    if (inner.isEmpty()) null else subject to inner
-                } catch (e: Exception) { null }
-            }.toMap()
+
+            val modeKeys = setOf("QUIZ", "QBANK", "STUDY")
+            val looksNewFormat = obj.entrySet().any { (k, v) -> k in modeKeys && v.isJsonObject }
+
+            fun parseSubjectTree(subjectTree: JsonObject): Map<String, Map<String, Int>> =
+                subjectTree.entrySet().mapNotNull { (subject, subTree) ->
+                    try {
+                        if (!subTree.isJsonObject) return@mapNotNull null
+                        val inner = parseSerialMap(subTree.asJsonObject)
+                        if (inner.isEmpty()) null else subject to inner
+                    } catch (e: Exception) { null }
+                }.toMap()
+
+            if (looksNewFormat) {
+                obj.entrySet().mapNotNull { (mode, subjectTree) ->
+                    try {
+                        if (!subjectTree.isJsonObject) return@mapNotNull null
+                        val inner = parseSubjectTree(subjectTree.asJsonObject)
+                        if (inner.isEmpty()) null else mode to inner
+                    } catch (e: Exception) { null }
+                }.toMap()
+            } else {
+                val flat = parseSubjectTree(obj)
+                if (flat.isEmpty()) emptyMap()
+                else modeKeys.associateWith { flat }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "fetchSubTopicOrder error: ${e.message}")
             emptyMap()
