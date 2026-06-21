@@ -539,6 +539,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
 
         val progressMap = loadProgressMap()
+        val order = content.subjectOrder
         val subjects = items
             .filter { it.subject.isNotBlank() }
             .groupBy { it.subject }
@@ -560,6 +561,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                                   }
                 )
             }
+            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে)।
+            // যে সাবজেক্টের serial সেট করা নেই, সেগুলো সবসময় শেষে — নাম অনুযায়ী sort হয়ে।
+            .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode")
         _state.update { it.copy(subjects = subjects, isLoading = false) }
     }
@@ -574,10 +578,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> filtered.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
+        val order = content.subTopicOrder[subject] ?: emptyMap()
         val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
             SubTopicEntry(name = st, subject = subject, totalQ = qs.size,
                           doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
         }
+            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে), serial না থাকলে নাম অনুযায়ী শেষে
+            .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         _state.update { it.copy(subTopics = subTopics) }
     }
 
