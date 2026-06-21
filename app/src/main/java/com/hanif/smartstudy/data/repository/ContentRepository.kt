@@ -275,6 +275,31 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
+    /**
+     * Admin subject order সেভ করার পর in-memory + disk cache দুটোতেই সরাসরি নতুন
+     * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই। patchContentAndPersist()
+     * এর মতই fallback প্যাটার্ন: memCache না থাকলে disk cache থেকে নেয়। fetchedAt
+     * বদলায় না, তাই TTL অনুযায়ী পরে normal fresh fetch হবে এবং অন্য ইউজারদের কাছেও পৌঁছাবে।
+     */
+    suspend fun patchSubjectOrderAndPersist(order: Map<String, Int>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val patched = base.copy(subjectOrder = order)
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /**
+     * Admin একটা subject এর subTopic order সেভ করার পর in-memory + disk cache এ
+     * সরাসরি প্যাচ করে দেয় — শুধু সেই subject এর entry replace হয়, বাকি
+     * subject গুলোর subTopic order অপরিবর্তিত থাকে।
+     */
+    suspend fun patchSubTopicOrderAndPersist(subject: String, order: Map<String, Int>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val patched = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(subject, order) })
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
     fun getPendingQueueCount() = kotlinx.coroutines.flow.flow { emit(queue.count()) }
 
     fun isOnline(): Boolean {
