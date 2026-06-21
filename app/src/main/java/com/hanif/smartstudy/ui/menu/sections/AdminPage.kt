@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.MenuUiState
 import com.hanif.smartstudy.viewmodel.MenuViewModel
+import com.hanif.smartstudy.viewmodel.SubjectOrderEntry
+import com.hanif.smartstudy.viewmodel.SubTopicOrderEntry
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -70,7 +72,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "🔢 সাবজেক্ট ক্রম")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -85,6 +87,8 @@ fun AdminPage(
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
             // Auto-load debug log phone list when tab 7 opens
             LaunchedEffect(tab) { if (tab == 7) vm.loadDebugLogPhones() }
+            // Auto-load subject list when Subject Order tab (9) opens
+            LaunchedEffect(tab) { if (tab == 9) vm.loadSubjectOrderEditor() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -103,6 +107,7 @@ fun AdminPage(
                 6 -> RenameTab(state, vm)
                 7 -> LogsTab(state, vm)
                 8 -> PendingSyncTab(state, vm)
+                9 -> SubjectOrderTab(state, vm)
             }
         }
     }
@@ -1334,6 +1339,255 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Admin সাবজেক্টের সিরিয়াল/ক্রম ঠিক করার ট্যাব।
+ * উপরে-নিচে move করে (▲▼ বাটন) ক্রম বদলানো যায়, তারপর "সংরক্ষণ করুন" চাপলে
+ * Firebase এর SubjectOrder node এ পুরো ক্রম একসাথে save হয়। সব ইউজার তখন
+ * থেকে এই ক্রম অনুযায়ীই Study/Quiz/QBank এ সাবজেক্ট লিস্ট দেখবে।
+ */
+@Composable
+private fun SubjectOrderTab(state: MenuUiState, vm: MenuViewModel) {
+    val list    = state.subjectOrderList
+    val loading = state.isSubjectOrderLoading
+    val saving  = state.isSavingSubjectOrder
+    val msg     = state.subjectOrderMsg
+
+    LaunchedEffect(msg) {
+        if (msg != null) { kotlinx.coroutines.delay(3000); vm.clearSubjectOrderMsg() }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+        // Header / info card
+        Card(
+            Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("🔢", fontSize = 28.sp)
+                Column(Modifier.weight(1f)) {
+                    Text("সাবজেক্টের ক্রম ঠিক করুন", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF1E1B4B))
+                    Text("▲▼ চেপে উপরে-নিচে সাজান, তারপর সংরক্ষণ করুন। সব ইউজার এই ক্রমেই দেখবে।",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp, color = MutedText)
+                }
+            }
+        }
+
+        // Save button
+        Button(
+            onClick  = { vm.saveSubjectOrder() },
+            enabled  = !saving && !loading && list.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape    = RoundedCornerShape(14.dp),
+            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+        ) {
+            if (saving) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("সংরক্ষণ হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("✅ ক্রম সংরক্ষণ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            }
+        }
+
+        msg?.let {
+            val isOk = it.startsWith("✅")
+            Surface(shape = RoundedCornerShape(10.dp),
+                color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF7ED),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                    color = if (isOk) Color(0xFF166534) else Color(0xFF92400E))
+            }
+        }
+
+        when {
+            loading -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Indigo600)
+            }
+            list.isEmpty() -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                Text("কোনো সাবজেক্ট পাওয়া যায়নি", fontFamily = NotoSansBengali, color = MutedText)
+            }
+            else -> LazyColumn(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(list, key = { _, e -> e.name }) { idx, entry ->
+                    val isExpanded = entry.name in state.expandedSubjectsForOrder
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = CardBg,
+                        tonalElevation = 1.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // সিরিয়াল নাম্বার badge
+                                Surface(shape = RoundedCornerShape(20.dp), color = Indigo600.copy(0.12f)) {
+                                    Text(
+                                        "${idx + 1}",
+                                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                        color = Indigo600, fontSize = 13.sp
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.name, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp, color = SlateText, maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text("${entry.totalQ} প্রশ্ন" + if (entry.serial == null) " · নতুন (এখনো ক্রম সেট হয়নি)" else "",
+                                        fontFamily = NotoSansBengali, fontSize = 10.sp, color = MutedText)
+                                }
+                                // অধ্যায় (subTopic) সিরিয়াল expand/collapse বাটন
+                                IconButton(
+                                    onClick = { vm.toggleSubjectExpandedForOrder(entry.name) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = "অধ্যায় ক্রম",
+                                        tint = Color(0xFF7C3AED)
+                                    )
+                                }
+                                // Up/Down controls
+                                IconButton(
+                                    onClick = { if (idx > 0) vm.moveSubjectOrderItem(idx, idx - 1) },
+                                    enabled = idx > 0,
+                                    modifier = Modifier.size(32.dp)
+                                ) { Icon(Icons.Default.KeyboardArrowUp, null, tint = if (idx > 0) Indigo600 else Color(0xFFCBD5E1)) }
+                                IconButton(
+                                    onClick = { if (idx < list.lastIndex) vm.moveSubjectOrderItem(idx, idx + 1) },
+                                    enabled = idx < list.lastIndex,
+                                    modifier = Modifier.size(32.dp)
+                                ) { Icon(Icons.Default.KeyboardArrowDown, null, tint = if (idx < list.lastIndex) Indigo600 else Color(0xFFCBD5E1)) }
+                            }
+
+                            if (isExpanded) {
+                                Divider(color = Color(0xFFE5E7EB))
+                                SubTopicOrderEditorInline(subject = entry.name, state = state, vm = vm)
+                            }
+                        }
+                    }
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
+        }
+    }
+}
+
+/**
+ * একটা subject card expand করলে ঠিক নিচে দেখানো হয় — সেই subject এর সব
+ * subTopic (অধ্যায়) এর সিরিয়াল ▲▼ বাটনে সাজানো এবং আলাদাভাবে সংরক্ষণ করার UI।
+ * subTopic সিরিয়াল subject-ভিত্তিক — এক subject এর ক্রম অন্য subject কে প্রভাবিত করে না।
+ */
+@Composable
+private fun SubTopicOrderEditorInline(subject: String, state: MenuUiState, vm: MenuViewModel) {
+    val list    = state.subTopicOrderLists[subject] ?: emptyList()
+    val loading = subject in state.isSubTopicOrderLoading
+    val saving  = subject in state.isSavingSubTopicOrder
+    val msg     = state.subTopicOrderMsg
+
+    LaunchedEffect(msg) {
+        if (msg != null) { kotlinx.coroutines.delay(3000); vm.clearSubTopicOrderMsg() }
+    }
+
+    Column(
+        Modifier.fillMaxWidth().background(Color(0xFFFAFAFE))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("📖 অধ্যায়ের ক্রম", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                fontSize = 12.sp, color = Color(0xFF7C3AED), modifier = Modifier.weight(1f))
+            Button(
+                onClick  = { vm.saveSubTopicOrder(subject) },
+                enabled  = !saving && !loading && list.isNotEmpty(),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                shape    = RoundedCornerShape(10.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(Modifier.size(14.dp), Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("✅ সংরক্ষণ", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+        }
+
+        when {
+            loading -> Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = Color(0xFF7C3AED), strokeWidth = 2.dp)
+            }
+            list.isEmpty() -> Text("কোনো অধ্যায় পাওয়া যায়নি", fontFamily = NotoSansBengali,
+                fontSize = 11.sp, color = MutedText, modifier = Modifier.padding(vertical = 8.dp))
+            else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                list.forEachIndexed { idx, entry ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.White,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(shape = RoundedCornerShape(16.dp), color = Color(0xFF7C3AED).copy(0.12f)) {
+                                Text(
+                                    "${idx + 1}",
+                                    Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF7C3AED), fontSize = 11.sp
+                                )
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.name, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp, color = SlateText, maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text("${entry.totalQ} প্রশ্ন" + if (entry.serial == null) " · নতুন" else "",
+                                    fontFamily = NotoSansBengali, fontSize = 9.sp, color = MutedText)
+                            }
+                            IconButton(
+                                onClick = { if (idx > 0) vm.moveSubTopicOrderItem(subject, idx, idx - 1) },
+                                enabled = idx > 0,
+                                modifier = Modifier.size(28.dp)
+                            ) { Icon(Icons.Default.KeyboardArrowUp, null, modifier = Modifier.size(18.dp),
+                                tint = if (idx > 0) Color(0xFF7C3AED) else Color(0xFFCBD5E1)) }
+                            IconButton(
+                                onClick = { if (idx < list.lastIndex) vm.moveSubTopicOrderItem(subject, idx, idx + 1) },
+                                enabled = idx < list.lastIndex,
+                                modifier = Modifier.size(28.dp)
+                            ) { Icon(Icons.Default.KeyboardArrowDown, null, modifier = Modifier.size(18.dp),
+                                tint = if (idx < list.lastIndex) Color(0xFF7C3AED) else Color(0xFFCBD5E1)) }
+                        }
+                    }
+                }
+            }
+        }
+
+        msg?.let {
+            val isOk = it.startsWith("✅")
+            Surface(shape = RoundedCornerShape(8.dp),
+                color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF7ED),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(it, Modifier.padding(8.dp), fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp, color = if (isOk) Color(0xFF166534) else Color(0xFF92400E))
             }
         }
     }
