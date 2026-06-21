@@ -544,8 +544,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
 
+        // Canonical tag for order lookup — same logic as audienceGroupOf() / forUser() filter
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+
         val progressMap = loadProgressMap()
-        val order = content.subjectOrder[mode.name] ?: emptyMap()
+        val order = content.subjectOrder[mode.name]?.get(encodedTag) ?: emptyMap()
         val subjects = items
             .filter { it.subject.isNotBlank() }
             .groupBy { it.subject }
@@ -567,10 +572,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                                   }
                 )
             }
-            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে) — এই mode (Quiz/QBank/Study)
-            // এর জন্য আলাদা ক্রম। যে সাবজেক্টের serial সেট করা নেই, সেগুলো সবসময় শেষে — নাম অনুযায়ী sort হয়ে।
+            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে) — এই mode+tag এর জন্য আলাদা ক্রম।
+            // যে সাবজেক্টের serial সেট করা নেই, সেগুলো সবসময় শেষে — নাম অনুযায়ী sort হয়ে।
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
-        Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode")
+        Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode tag=$effectiveTag")
         _state.update { it.copy(subjects = subjects, isLoading = false) }
     }
 
@@ -584,12 +589,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> filtered.study.filter { it.subject == subject }.map { QuestionItem.fromStudyItem(it) }
         }
         val progressMap = loadProgressMap()
-        val order = content.subTopicOrder[mode.name]?.get(subject) ?: emptyMap()
+
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+
+        val order = content.subTopicOrder[mode.name]?.get(encodedTag)?.get(subject) ?: emptyMap()
         val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
             SubTopicEntry(name = st, subject = subject, totalQ = qs.size,
                           doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
         }
-            // Admin সেট করা সিরিয়াল অনুযায়ী সাজাও (ছোট নাম্বার আগে), serial না থাকলে নাম অনুযায়ী শেষে
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         _state.update { it.copy(subTopics = subTopics) }
     }
@@ -633,16 +642,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private var orderSaveJob: Job? = null
 
-    /** বর্তমান subjects ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode এর জন্য Firebase এ সেভ করো */
+    /** বর্তমান subjects ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag এর জন্য Firebase এ সেভ করো */
     private fun persistSubjectOrder(orderedNames: List<String>) {
         val mode = _state.value.mode
+        val user = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
         orderSaveJob?.cancel()
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
             val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode.name, order)) {
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode.name, effectiveTag, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    repo.patchSubjectOrderAndPersist(mode.name, order)
+                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+                    repo.patchSubjectOrderAndPersist(mode.name, encodedTag, order)
                     _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
@@ -652,16 +666,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** বর্তমান subTopics ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+subject এর জন্য Firebase এ সেভ করো */
+    /** বর্তমান subTopics ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag+subject এর জন্য Firebase এ সেভ করো */
     private fun persistSubTopicOrder(subject: String, orderedNames: List<String>) {
         val mode = _state.value.mode
+        val user = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
         orderSaveJob?.cancel()
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
             val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, subject, order)) {
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, effectiveTag, subject, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    repo.patchSubTopicOrderAndPersist(mode.name, subject, order)
+                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+                    repo.patchSubTopicOrderAndPersist(mode.name, encodedTag, subject, order)
                     _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
