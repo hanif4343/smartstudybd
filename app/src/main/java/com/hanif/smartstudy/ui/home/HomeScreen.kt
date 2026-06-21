@@ -591,8 +591,8 @@ private fun RoutineDialogShell(
     title: String,
     subtitle: String? = null,
     onDismiss: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit,
-    footer: @Composable () -> Unit
+    footer: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
