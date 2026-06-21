@@ -134,6 +134,14 @@ fun QuestionCard(
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
+            // ── _studyNoQ logic — index.html এর মতো ──
+            // Study mode এ প্রশ্ন না থাকলে explanation/answer কেই প্রশ্ন হিসেবে দেখাবে
+            // (links সহ — PDF/image/video সব render হবে)
+            // (TTS speak বাটনের জন্য আইকন রো-এর আগেই হিসেব করে নেওয়া হলো)
+            val studyNoQ = mode == StudyMode.STUDY && item.question.isBlank()
+            val displayQuestion = if (studyNoQ) (item.explanation.ifBlank { item.answer }) else item.question
+            val displayExplanation = if (studyNoQ) "" else item.explanation
+
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -177,6 +185,23 @@ fun QuestionCard(
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // ── 🔊 প্রশ্ন শুনো — শুধু Study mode এ ──
+                    if (mode == StudyMode.STUDY && displayQuestion.isNotBlank()) {
+                        val ttsKey = "${item.id}_q"
+                        val speakingKey by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
+                        val isThisSpeaking = speakingKey == ttsKey
+                        IconButton(
+                            onClick = { com.hanif.smartstudy.util.TtsManager.speak(displayQuestion, ttsKey) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                if (isThisSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                                contentDescription = if (isThisSpeaking) "থামাও" else "প্রশ্ন শুনো",
+                                tint = if (isThisSpeaking) Indigo600 else Color(0xFFCBD5E1),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
                         Icon(
                             if (item.isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -205,13 +230,6 @@ fun QuestionCard(
             }
 
             Spacer(Modifier.height(8.dp))
-
-            // ── _studyNoQ logic — index.html এর মতো ──
-            // Study mode এ প্রশ্ন না থাকলে explanation/answer কেই প্রশ্ন হিসেবে দেখাবে
-            // (links সহ — PDF/image/video সব render হবে)
-            val studyNoQ = mode == StudyMode.STUDY && item.question.isBlank()
-            val displayQuestion = if (studyNoQ) (item.explanation.ifBlank { item.answer }) else item.question
-            val displayExplanation = if (studyNoQ) "" else item.explanation
 
             // প্রশ্ন — QuestionText (LaTeX support আছে) + RichContentText (link support)
             // studyNoQ তে explanation-ই প্রশ্ন, সেটায় link থাকতে পারে
@@ -260,6 +278,29 @@ fun QuestionCard(
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
+                if (mode == StudyMode.STUDY) {
+                    // ── 🔊 উত্তর শুনো বাটন সহ AnswerBox header ──
+                    val ttsAnswerKey = "${item.id}_a"
+                    val speakingKeyA by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
+                    val isAnswerSpeaking = speakingKeyA == ttsAnswerKey
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { com.hanif.smartstudy.util.TtsManager.speak(item.answer, ttsAnswerKey) },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                if (isAnswerSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                                contentDescription = if (isAnswerSpeaking) "থামাও" else "উত্তর শুনো",
+                                tint = if (isAnswerSpeaking) Indigo600 else Color(0xFF94A3B8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
                 AnswerBox(text = item.answer)
             }
 
