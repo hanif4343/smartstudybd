@@ -124,6 +124,12 @@ data class MenuUiState(
     // Subject/SubTopic Rename
     val isRenaming        : Boolean          = false,
     val renameMsg         : String?          = null,
+    // ── Subject/SubTopic taxonomy (dropdown suggestions এর জন্য) ──
+    // key: sheet ("Quiz"/"QBank"/"Study") → distinct subject list
+    val adminSubjectsBySheet  : Map<String, List<String>> = emptyMap(),
+    // key: "sheet|subject" → distinct subTopic list
+    val adminSubTopicsByKey   : Map<String, List<String>> = emptyMap(),
+    val isLoadingTaxonomy     : Boolean      = false,
     // Offline admin edits
     val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
     val isSyncingEdits    : Boolean          = false,
@@ -824,6 +830,54 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
+
+    // ── Admin: Subject/SubTopic taxonomy লোড করো (dropdown suggestion এর জন্য) ──
+    // Rename/Bulk/AddQuestion — এই তিনটা tab এই একই taxonomy share করে, তাই
+    // একবার লোড করে state এ cache রাখা হয় (পুরো content fetch করা লাগে,
+    // তাই বারবার না করাই ভালো — admin চাইলে refresh icon দিয়ে আবার লোড করবে)।
+    fun loadAdminTaxonomy(forceRefresh: Boolean = false) {
+        if (!_state.value.isAdmin) return
+        if (_state.value.adminSubjectsBySheet.isNotEmpty() && !forceRefresh) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingTaxonomy = true) }
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            when (val r = repo.getContent(forceRefresh)) {
+                is com.hanif.smartstudy.data.repository.DataState.Success -> {
+                    val content = r.data
+                    val subjectsBySheet = mutableMapOf<String, List<String>>()
+                    val subTopicsByKey  = mutableMapOf<String, MutableSet<String>>()
+
+                    fun <T> index(sheet: String, items: List<T>, subjectOf: (T) -> String?, subTopicOf: (T) -> String?) {
+                        val subjects = sortedSetOf<String>()
+                        items.forEach { item ->
+                            val subj = subjectOf(item)?.trim().orEmpty()
+                            if (subj.isBlank()) return@forEach
+                            subjects.add(subj)
+                            val sub = subTopicOf(item)?.trim().orEmpty()
+                            if (sub.isNotBlank()) {
+                                subTopicsByKey.getOrPut("$sheet|$subj") { sortedSetOf() }.add(sub)
+                            }
+                        }
+                        subjectsBySheet[sheet] = subjects.toList()
+                    }
+
+                    index("Quiz",  content.quiz,  { it.subject }, { it.subTopic })
+                    index("QBank", content.qbank, { it.subject }, { it.subTopic })
+                    index("Study", content.study, { it.subject }, { it.subTopic })
+
+                    _state.update { it.copy(
+                        isLoadingTaxonomy    = false,
+                        adminSubjectsBySheet = subjectsBySheet,
+                        adminSubTopicsByKey  = subTopicsByKey.mapValues { (_, v) -> v.toList() }
+                    )}
+                }
+                is com.hanif.smartstudy.data.repository.DataState.Error -> {
+                    _state.update { it.copy(isLoadingTaxonomy = false) }
+                }
+                else -> _state.update { it.copy(isLoadingTaxonomy = false) }
+            }
+        }
+    }
 
     // ── Admin: Bulk Audience Update ───────────────────────────
     fun adminBulkAudienceUpdate(sheet: String, subject: String, subTopic: String, newTag: String) {
