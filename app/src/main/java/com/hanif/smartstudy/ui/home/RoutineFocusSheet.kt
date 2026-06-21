@@ -486,6 +486,9 @@ private fun ManualDoneButton(
 @Composable
 private fun StudyContentCard(study: StudyItem) {
     var expanded by remember { mutableStateOf(false) }
+    val cardKey = study.id ?: study.hashCode().toString()
+    val speakingKey by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -501,15 +504,49 @@ private fun StudyContentCard(study: StudyItem) {
                 fontFamily = NotoSansBengali,
                 modifier = Modifier.weight(1f)
             )
+            // 🔊 প্রশ্ন শুনো
+            val questionText = study.question
+            if (!questionText.isNullOrBlank()) {
+                val qKey = "${cardKey}_q"
+                val isSpeaking = speakingKey == qKey
+                IconButton(
+                    onClick = { com.hanif.smartstudy.util.TtsManager.speak(questionText, qKey) },
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                        contentDescription = if (isSpeaking) "থামাও" else "প্রশ্ন শুনো",
+                        tint = if (isSpeaking) PrimaryIndigo else Color(0xFFCBD5E1),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
         val answerText = study.answer ?: study.correct
         if (!answerText.isNullOrBlank()) {
             Spacer(Modifier.height(8.dp))
-            Text(
-                answerText,
-                fontSize = 13.sp, color = Color(0xFF475569), fontFamily = NotoSansBengali,
-                maxLines = if (expanded) Int.MAX_VALUE else 4
-            )
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    answerText,
+                    fontSize = 13.sp, color = Color(0xFF475569), fontFamily = NotoSansBengali,
+                    maxLines = if (expanded) Int.MAX_VALUE else 4,
+                    modifier = Modifier.weight(1f)
+                )
+                // 🔊 উত্তর শুনো
+                val aKey = "${cardKey}_a"
+                val isAnswerSpeaking = speakingKey == aKey
+                IconButton(
+                    onClick = { com.hanif.smartstudy.util.TtsManager.speak(answerText, aKey) },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        if (isAnswerSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                        contentDescription = if (isAnswerSpeaking) "থামাও" else "উত্তর শুনো",
+                        tint = if (isAnswerSpeaking) PrimaryIndigo else Color(0xFF94A3B8),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
         }
         if (!study.explanation.isNullOrBlank() && expanded) {
             Spacer(Modifier.height(8.dp))
