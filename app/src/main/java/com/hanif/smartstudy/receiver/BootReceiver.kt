@@ -28,5 +28,8 @@ class BootReceiver : BroadcastReceiver() {
         if (session.isEveningReminderOn()) {
             ReminderReceiver.scheduleEvening(context, session.getEveningHour(), session.getEveningMinute(), session.isEveningRepeatDaily())
         }
+
+        // Daily Routine — প্রতি আইটেমের নিজস্ব রিমাইন্ডার (reboot/আপডেটের পরও বহাল থাকুক)
+        RoutineItemReminderReceiver.rescheduleAll(context)
     }
 }
