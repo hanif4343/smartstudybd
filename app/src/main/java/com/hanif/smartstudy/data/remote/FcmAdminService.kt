@@ -229,20 +229,46 @@ object FcmAdminService {
     }
 
     // ── Admin দের fcmToken বের করো (presence/users node, lowercase) ──
+    // Fallback: AdminFCMTokens node (admin app সরাসরি এখানে save করে)
     suspend fun fetchAdminTokens(): List<String> = withContext(Dispatchers.IO) {
         try {
-            val adminPhones = fetchAdminPhones()
-            if (adminPhones.isEmpty()) return@withContext emptyList()
+            val token = FirebaseTokenProvider.getToken()
+            val auth  = if (token.isNotBlank()) "?auth=$token" else ""
+            val base  = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val tokens = mutableListOf<String>()
 
-            val token = FirebaseTokenProvider.getToken(); val auth = if (token.isNotBlank()) "?auth=$token" else ""
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val presenceBody = client.newCall(Request.Builder().url("$base/users.json$auth").get().build())
-                .execute().body?.string()
-            if (presenceBody.isNullOrBlank() || presenceBody == "null") return@withContext emptyList()
-            val presence = JSONObject(presenceBody)
-            adminPhones.mapNotNull { phone ->
-                presence.optJSONObject(phone)?.optString("fcmToken")?.ifBlank { null }
+            // Priority 1: users/{adminPhone}/fcmToken
+            val adminPhones = fetchAdminPhones()
+            if (adminPhones.isNotEmpty()) {
+                val presenceBody = client.newCall(
+                    Request.Builder().url("$base/users.json$auth").get().build()
+                ).execute().body?.string()
+                if (!presenceBody.isNullOrBlank() && presenceBody != "null") {
+                    val presence = JSONObject(presenceBody)
+                    adminPhones.forEach { phone ->
+                        presence.optJSONObject(phone)
+                            ?.optString("fcmToken")?.ifBlank { null }
+                            ?.let { tokens += it }
+                    }
+                }
             }
+
+            // Fallback: AdminFCMTokens/token (admin Capacitor app save করে)
+            if (tokens.isEmpty()) {
+                val fallbackBody = client.newCall(
+                    Request.Builder().url("$base/AdminFCMTokens/token.json$auth").get().build()
+                ).execute().body?.string()
+                if (!fallbackBody.isNullOrBlank() && fallbackBody != "null") {
+                    val t = fallbackBody.trim().removeSurrounding(""")
+                    if (t.isNotBlank()) {
+                        tokens += t
+                        Log.d(TAG, "fetchAdminTokens: using AdminFCMTokens fallback")
+                    }
+                }
+            }
+
+            Log.d(TAG, "fetchAdminTokens: ${tokens.size} token(s) found")
+            tokens.distinct()
         } catch (e: Exception) {
             Log.e(TAG, "fetchAdminTokens: ${e.message}")
             emptyList()
