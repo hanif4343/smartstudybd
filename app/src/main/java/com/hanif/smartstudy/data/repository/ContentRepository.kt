@@ -277,28 +277,27 @@ class ContentRepository(private val context: Context) {
 
     /**
      * Admin subject order সেভ করার পর in-memory + disk cache দুটোতেই সরাসরি নতুন
-     * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই। patchContentAndPersist()
-     * এর মতই fallback প্যাটার্ন: memCache না থাকলে disk cache থেকে নেয়। fetchedAt
-     * বদলায় না, তাই TTL অনুযায়ী পরে normal fresh fetch হবে এবং অন্য ইউজারদের কাছেও পৌঁছাবে।
-     * mode-ভিত্তিক — শুধু সেই mode (Quiz/QBank/Study) এর subject order replace হয়,
-     * বাকি mode গুলোর order অপরিবর্তিত থাকে।
+     * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই।
+     * mode + tag উভয়ভিত্তিক — শুধু সেই mode+tag এর subject order replace হয়।
      */
-    suspend fun patchSubjectOrderAndPersist(mode: String, order: Map<String, Int>) {
+    suspend fun patchSubjectOrderAndPersist(mode: String, tag: String, order: Map<String, Int>) {
         val base = _memCache ?: cache.loadContent() ?: return
-        val patched = base.copy(subjectOrder = base.subjectOrder.toMutableMap().apply { put(mode, order) })
+        val modeMap = (base.subjectOrder[mode] ?: emptyMap()).toMutableMap().apply { put(tag, order) }
+        val patched = base.copy(subjectOrder = base.subjectOrder.toMutableMap().apply { put(mode, modeMap) })
         _memCache = patched
         cache.saveContent(patched)
     }
 
     /**
-     * Admin একটা mode + subject এর subTopic order সেভ করার পর in-memory + disk cache এ
-     * সরাসরি প্যাচ করে দেয় — শুধু সেই mode+subject এর entry replace হয়, বাকি সব
-     * mode/subject গুলোর subTopic order অপরিবর্তিত থাকে।
+     * Admin একটা mode + tag + subject এর subTopic order সেভ করার পর in-memory + disk cache এ
+     * সরাসরি প্যাচ করে দেয় — শুধু সেই mode+tag+subject এর entry replace হয়, বাকি সব অপরিবর্তিত।
      */
-    suspend fun patchSubTopicOrderAndPersist(mode: String, subject: String, order: Map<String, Int>) {
+    suspend fun patchSubTopicOrderAndPersist(mode: String, tag: String, subject: String, order: Map<String, Int>) {
         val base = _memCache ?: cache.loadContent() ?: return
-        val modeMap = (base.subTopicOrder[mode] ?: emptyMap()).toMutableMap().apply { put(subject, order) }
-        val patched = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(mode, modeMap) })
+        val tagMap    = (base.subTopicOrder[mode] ?: emptyMap()).toMutableMap()
+        val subjMap   = (tagMap[tag] ?: emptyMap()).toMutableMap().apply { put(subject, order) }
+        tagMap[tag]   = subjMap
+        val patched   = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(mode, tagMap) })
         _memCache = patched
         cache.saveContent(patched)
     }
