@@ -65,17 +65,29 @@ class RoutineCache(private val context: Context) {
         context.dataStore.edit { it[KEY_ROUTINE_JSON] = gson.toJson(routine) }
     }
 
-    suspend fun addItem(title: String, subject: String, subTopic: String, minutes: Int) {
+    suspend fun addItem(
+        title: String,
+        subject: String,
+        subTopic: String,
+        minutes: Int,
+        reminderEnabled: Boolean = false,
+        reminderHour: Int = -1,
+        reminderMinute: Int = -1
+    ): RoutineItem {
         val routine = getTodayRoutine()
         val newItem = RoutineItem(
-            id      = "r_${System.currentTimeMillis()}",
-            title   = title,
-            subject = subject,
+            id       = "r_${System.currentTimeMillis()}",
+            title    = title,
+            subject  = subject,
             subTopic = subTopic,
-            minutes = minutes,
-            done    = false
+            minutes  = minutes,
+            done     = false,
+            reminderEnabled = reminderEnabled,
+            reminderHour    = reminderHour,
+            reminderMinute  = reminderMinute
         )
         saveRoutine(routine.copy(items = routine.items + newItem))
+        return newItem
     }
 
     suspend fun toggleItem(id: String) {
@@ -89,6 +101,21 @@ class RoutineCache(private val context: Context) {
     suspend fun removeItem(id: String) {
         val routine = getTodayRoutine()
         saveRoutine(routine.copy(items = routine.items.filterNot { it.id == id }))
+    }
+
+    // ── একটা আইটেমের নিজস্ব reminder (hour/minute/on-off) সেট বা আপডেট করো ──
+    suspend fun setItemReminder(id: String, enabled: Boolean, hour: Int, minute: Int): RoutineItem? {
+        val routine = getTodayRoutine()
+        var changed: RoutineItem? = null
+        val updated = routine.items.map {
+            if (it.id == id) {
+                val item = it.copy(reminderEnabled = enabled, reminderHour = hour, reminderMinute = minute)
+                changed = item
+                item
+            } else it
+        }
+        saveRoutine(routine.copy(items = updated))
+        return changed
     }
 
     private fun parseJson(json: String?): DailyRoutine {
