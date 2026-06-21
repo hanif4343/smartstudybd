@@ -346,22 +346,29 @@ object FirebaseDataService {
     //  ADMIN FUNCTIONS
     // ══════════════════════════════════════════════════════════
 
+    // ── Firebase path-safe tag encoding ───────────────────────────────────────
+    // Audience tags যেমন "Masters 1", "Honours 2", "Class 10" — এগুলোতে space আছে।
+    // Firebase RTDB REST path segment এ space allowed নয়, তাই URL-encode করতে হয়।
+    // "Job" বা অন্য simple ASCII tag গুলো encode করলেও অপরিবর্তিত থাকে।
+    private fun String.toFirebasePathSegment(): String =
+        java.net.URLEncoder.encode(this.trim().ifBlank { "Job" }, "UTF-8").replace("+", "%20")
+
     /**
-     * Admin: একটা নির্দিষ্ট mode (Quiz/QBank/Study) এর সব subject এর serial একসাথে সেট করো।
-     * PUT ব্যবহার করা হয় — SubjectOrder/{mode} এর পুরো subtree-টাই নতুন order দিয়ে replace
-     * হয় (পুরনো stale subject key থেকে যাওয়ার সুযোগ থাকে না)। mode আলাদা path এ থাকায়
-     * Quiz/QBank/Study এর সাবজেক্ট ক্রম একে অপরকে প্রভাবিত করে না।
+     * Admin: একটা নির্দিষ্ট mode + audience tag এর সব subject এর serial একসাথে সেট করো।
+     * Path: SubjectOrder/{mode}/{encodedTag} — PUT দিয়ে এই node সম্পূর্ণ replace হয়।
+     * এই node এখন একটি নির্দিষ্ট tag এর জন্যই dedicated — তাই PUT নিরাপদ (cross-tag collision নেই)।
      */
-    suspend fun adminSetSubjectOrderBulk(mode: String, order: Map<String, Int>): ApiResult<Unit> =
+    suspend fun adminSetSubjectOrderBulk(mode: String, tag: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubjectOrder/$mode.json$auth"
-                val obj  = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
-                val body = obj.toString().toRequestBody("application/json".toMediaType())
-                val resp = client.newCall(Request.Builder().url(url).put(body).build()).execute()
+                val auth    = authQuery()
+                val safeTag = tag.toFirebasePathSegment()
+                val url     = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubjectOrder/$mode/$safeTag.json$auth"
+                val obj     = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
+                val body    = obj.toString().toRequestBody("application/json".toMediaType())
+                val resp    = client.newCall(Request.Builder().url(url).put(body).build()).execute()
                 val respBody = resp.body?.string() ?: ""
-                val code = resp.code
+                val code    = resp.code
                 resp.close()
                 if (resp.isSuccessful) ApiResult.Success(Unit)
                 else ApiResult.Error("Firebase error: $code — $respBody")
@@ -371,22 +378,23 @@ object FirebaseDataService {
         }
 
     /**
-     * Admin: একটা নির্দিষ্ট mode + subject এর ভিতরের সব subTopic এর serial একসাথে সেট করো।
-     * PUT ব্যবহার করা হয় — SubTopicOrder/{mode}/{subject} এর পুরো subtree-টাই নতুন order
-     * দিয়ে replace হয়। subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে
-     * বাংলা/স্পেশাল ক্যারেক্টার নিয়ে URL-encoding এর কোনো ঝামেলা নেই।
+     * Admin: একটা নির্দিষ্ট mode + audience tag + subject এর ভিতরের সব subTopic এর serial সেট করো।
+     * Path: SubTopicOrder/{mode}/{encodedTag} — PATCH দিয়ে শুধু এই subject এর entry বদলায়।
+     * subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে বাংলা/স্পেশাল
+     * ক্যারেক্টার নিয়ে URL-encoding এর ঝামেলা নেই।
      */
-    suspend fun adminSetSubTopicOrderBulk(mode: String, subject: String, order: Map<String, Int>): ApiResult<Unit> =
+    suspend fun adminSetSubTopicOrderBulk(mode: String, tag: String, subject: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubTopicOrder/$mode.json$auth"
+                val auth       = authQuery()
+                val safeTag    = tag.toFirebasePathSegment()
+                val url        = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubTopicOrder/$mode/$safeTag.json$auth"
                 val subjectObj = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
-                val obj  = JsonObject().apply { add(subject, subjectObj) }
-                val body = obj.toString().toRequestBody("application/json".toMediaType())
-                val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
-                val respBody = resp.body?.string() ?: ""
-                val code = resp.code
+                val obj        = JsonObject().apply { add(subject, subjectObj) }
+                val body       = obj.toString().toRequestBody("application/json".toMediaType())
+                val resp       = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+                val respBody   = resp.body?.string() ?: ""
+                val code       = resp.code
                 resp.close()
                 if (resp.isSuccessful) ApiResult.Success(Unit)
                 else ApiResult.Error("Firebase error: $code — $respBody")
