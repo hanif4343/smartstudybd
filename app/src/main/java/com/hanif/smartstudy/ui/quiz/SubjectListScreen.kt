@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -314,7 +316,7 @@ private fun ReorderUpDownButtons(
             modifier = Modifier.size(30.dp)
         ) {
             Icon(
-                androidx.compose.material.icons.Icons.Default.KeyboardArrowUp, null,
+                Icons.Default.KeyboardArrowUp, null,
                 tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1)
             )
         }
@@ -324,7 +326,7 @@ private fun ReorderUpDownButtons(
             modifier = Modifier.size(30.dp)
         ) {
             Icon(
-                androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null,
+                Icons.Default.KeyboardArrowDown, null,
                 tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1)
             )
         }
@@ -539,13 +541,13 @@ private fun QBankTopicCard(
                     IconButton(
                         onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(24.dp)
                     ) {
-                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowUp, null,
+                        Icon(Icons.Default.KeyboardArrowUp, null,
                             modifier = Modifier.size(18.dp), tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1))
                     }
                     IconButton(
                         onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(24.dp)
                     ) {
-                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null,
+                        Icon(Icons.Default.KeyboardArrowDown, null,
                             modifier = Modifier.size(18.dp), tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1))
                     }
                 }
