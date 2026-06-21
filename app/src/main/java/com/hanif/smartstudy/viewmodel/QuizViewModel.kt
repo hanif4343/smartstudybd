@@ -363,6 +363,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
+        // সঠিক উত্তর হলে প্রশ্নটা এই সাবটপিকের তালিকায় সবার নিচে চলে যাবে —
+        // ফলে নতুন/ভুল করা প্রশ্নগুলো স্বয়ংক্রিয়ভাবে উপরে উঠে আসবে
+        if (isCorrect) {
+            val answered = questions.removeAt(questionIndex)
+            questions.add(answered)
+        }
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
@@ -391,6 +397,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val matchPct = fuzzyMatch(userText, q.answer)
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
+        // সঠিক উত্তর হলে প্রশ্নটা এই সাবটপিকের তালিকায় সবার নিচে চলে যাবে —
+        // ফলে নতুন/ভুল করা প্রশ্নগুলো স্বয়ংক্রিয়ভাবে উপরে উঠে আসবে
+        if (isCorrect) {
+            val answered = questions.removeAt(questionIndex)
+            questions.add(answered)
+        }
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
@@ -709,6 +721,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
             StudyMode.STUDY -> filtered.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
         }.map { it.copy(isBookmarked = bookmarks.contains(it.id), isWeakTopic = isWeak(it.subTopic)) }
+            // আগে সঠিক হয়েছে এমন (mastered) প্রশ্নগুলো এই সাবটপিকে সবার নিচে শুরু হবে —
+            // নতুন/ভুল করা প্রশ্নগুলো উপরে থাকবে, যাতে আগে সেগুলোর দিকেই নজর যায়
+            .sortedBy { isMastered(it.id, mode) }
 
         _state.update {
             it.copy(questions = items, isQuizActive = mode != StudyMode.STUDY,
@@ -818,6 +833,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun isWeak(subTopic: String) = prefs.getInt("weak_$subTopic", 0) >= 2
+
+    // ── একটা প্রশ্ন আগে সঠিকভাবে উত্তর দেওয়া (mastered) কিনা — অর্থাৎ আগে অন্তত
+    // একবার উত্তর দেওয়া হয়েছে (progress এ আছে) এবং এখন আর "ভুল" তালিকায় নেই ──
+    private fun sheetNameFor(mode: StudyMode) = when (mode) {
+        StudyMode.QUIZ  -> "quiz"
+        StudyMode.QBANK -> "qbank"
+        StudyMode.STUDY -> "study"
+    }
+
+    private fun isMastered(qId: String, mode: StudyMode): Boolean {
+        if (qId.isBlank()) return false
+        val doneKey  = "${mode.name}:$qId"
+        val wrongKey = "${sheetNameFor(mode)}:$qId"
+        val progressSet = prefs.getStringSet("progress", emptySet()) ?: emptySet()
+        val wrongSet     = prefs.getStringSet("wrong_q_ids", emptySet()) ?: emptySet()
+        return progressSet.contains(doneKey) && !wrongSet.contains(wrongKey)
+    }
 
     private fun loadWeakTopics(): List<WeakTopic> =
         prefs.all.entries
