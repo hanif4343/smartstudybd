@@ -1,0 +1,52 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": false,
+
+    "Quiz":   { ".read": "auth != null", ".write": false },
+    "QBank":  { ".read": "auth != null", ".write": false },
+    "Study":  { ".read": "auth != null", ".write": false },
+
+    "SubjectOrder": {
+      "$mode": {
+        "$tag": {
+          ".read": "auth != null",
+          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+        }
+      }
+    },
+
+    "SubTopicOrder": {
+      "$mode": {
+        "$tag": {
+          ".read": "auth != null",
+          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+        }
+      }
+    },
+
+    "Users": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && (auth.uid === $userId || root.child('Users').child(auth.uid).child('isAdmin').val() === true)"
+      }
+    },
+
+    "Reports": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+
+    "Notifications": {
+      "$phone": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+
+    "UserTechniques": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}
