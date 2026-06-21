@@ -141,10 +141,16 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
 }
 
 data class AppContent(
-    val study    : List<StudyItem>  = emptyList(),
-    val quiz     : List<QuizItem>   = emptyList(),
-    val qbank    : List<QBankItem>  = emptyList(),
-    val fetchedAt: Long             = 0L
+    val study       : List<StudyItem>   = emptyList(),
+    val quiz        : List<QuizItem>    = emptyList(),
+    val qbank       : List<QBankItem>   = emptyList(),
+    // Admin যে সিরিয়াল নাম্বার সেট করেছে — key: subject name, value: serial (ছোট আগে)।
+    // যে সাবজেক্টের serial নেই, সেটা সবসময় তালিকার শেষে (নাম অনুযায়ী) দেখানো হবে।
+    val subjectOrder: Map<String, Int>  = emptyMap(),
+    // subTopic এর সিরিয়াল — প্রতিটা subject এর ভিতরে আলাদা আলাদা ক্রম থাকে।
+    // key: subject name → (key: subTopic name → serial)। not-set হলে শেষে যায়।
+    val subTopicOrder: Map<String, Map<String, Int>> = emptyMap(),
+    val fetchedAt   : Long              = 0L
 ) {
     fun isEmpty()  = study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()
     // FIX: TTL আগে ৬ ঘণ্টা ছিল — admin কোনো প্রশ্ন এডিট করলে অন্য ইউজারদের ডিভাইসে
