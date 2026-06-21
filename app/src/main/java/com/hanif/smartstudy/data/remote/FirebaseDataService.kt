@@ -346,6 +346,51 @@ object FirebaseDataService {
     //  ADMIN FUNCTIONS
     // ══════════════════════════════════════════════════════════
 
+    /** Admin: একাধিক subject এর serial একসাথে সেট করো (drag-reorder সেভ করার সময়) */
+    suspend fun adminSetSubjectOrderBulk(order: Map<String, Int>): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubjectOrder.json$auth"
+                val obj  = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+                val respBody = resp.body?.string() ?: ""
+                val code = resp.code
+                resp.close()
+                if (resp.isSuccessful) ApiResult.Success(Unit)
+                else ApiResult.Error("Firebase error: $code — $respBody")
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
+     * Admin: একটা নির্দিষ্ট subject এর ভিতরের সব subTopic এর serial একসাথে সেট করো।
+     * PUT ব্যবহার করা হয় — SubTopicOrder/{subject} এর পুরো subtree-টাই নতুন order
+     * দিয়ে replace হয় (পুরনো কোনো stale subtopic key থেকে যাওয়ার সুযোগ থাকে না)।
+     * subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে
+     * বাংলা/স্পেশাল ক্যারেক্টার নিয়ে URL-encoding এর কোনো ঝামেলা নেই।
+     */
+    suspend fun adminSetSubTopicOrderBulk(subject: String, order: Map<String, Int>): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubTopicOrder.json$auth"
+                val subjectObj = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
+                val obj  = JsonObject().apply { add(subject, subjectObj) }
+                val body = obj.toString().toRequestBody("application/json".toMediaType())
+                val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+                val respBody = resp.body?.string() ?: ""
+                val code = resp.code
+                resp.close()
+                if (resp.isSuccessful) ApiResult.Success(Unit)
+                else ApiResult.Error("Firebase error: $code — $respBody")
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
     /** Admin: যেকোনো question এর field Firebase এ PATCH করো */
     suspend fun adminUpdateQuestionField(
         sheet  : String,
