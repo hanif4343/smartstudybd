@@ -13,8 +13,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsNone
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
@@ -572,6 +576,232 @@ private fun RoutineItemRow(
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Routine Dialog — shared visual primitives
+//  কাস্টম Dialog + Card স্টাইল ব্যবহার করা হয়েছে (AlertDialog নয়),
+//  যাতে header badge, sectioned card, এবং বড় filled/outlined বাটন
+//  রাখা যায় — অ্যাপের বাকি অংশের (AddTechniqueDialog) মতোই প্যাটার্ন,
+//  এবং সব রঙ MaterialTheme.colorScheme থেকে আসে বলে ৪টা থিম + ডার্ক
+//  মোড — সবকিছুতেই সঠিকভাবে মানানসই হয়।
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun RoutineDialogShell(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+    footer: @Composable () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape  = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(10.dp),
+            modifier = Modifier.fillMaxWidth(0.94f)
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 22.dp)) {
+
+                // ── হেডার: রঙিন আইকন ব্যাজ + শিরোনাম ──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali
+                        )
+                        if (subtitle != null) {
+                            Text(
+                                subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+
+                Spacer(Modifier.height(20.dp))
+
+                footer()
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutineSectionLabel(text: String) {
+    Text(
+        text, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
+        letterSpacing = 0.2.sp
+    )
+}
+
+// ── টাইম-চিপ — selected হলে primary রঙে ভরাট, নাহলে হালকা surface outline ──
+@Composable
+private fun MinuteChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .then(if (!selected) Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(12.dp)) else Modifier)
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { onClick() }
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = fg, fontFamily = NotoSansBengali)
+    }
+}
+
+// ── রিমাইন্ডার অন/অফ + সময় বাছাই — গ্রুপ করা tinted surface row ──
+@Composable
+private fun ReminderToggleSection(
+    reminderOn: Boolean,
+    onToggle: (Boolean) -> Unit,
+    timeLabel: String,
+    onPickTime: () -> Unit,
+    helperText: String? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (reminderOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, if (reminderOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Box(
+                        Modifier.size(30.dp).clip(RoundedCornerShape(9.dp))
+                            .background(if (reminderOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (reminderOn) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                            null,
+                            tint = if (reminderOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            "আলাদা রিমাইন্ডার", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali
+                        )
+                        Text(
+                            "এই টপিকের জন্য নির্দিষ্ট সময়ে নোটিফিকেশন",
+                            fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
+                        )
+                    }
+                }
+                Switch(
+                    checked = reminderOn,
+                    onCheckedChange = onToggle,
+                    colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
+                )
+            }
+
+            AnimatedVisibility(visible = reminderOn) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(11.dp))
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) { onPickTime() }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AccessTime, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(timeLabel, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Text("পরিবর্তন →", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    }
+                    if (helperText != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(helperText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── ফুটার: outlined বাতিল + filled প্রধান একশন, দুটোই সমান প্রস্থ ──
+@Composable
+private fun RoutineDialogFooter(
+    confirmLabel: String,
+    confirmEnabled: Boolean = true,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.weight(1f).height(46.dp),
+            shape = RoundedCornerShape(13.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        ) {
+            Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Button(
+            onClick = onConfirm,
+            enabled = confirmEnabled,
+            modifier = Modifier.weight(1f).height(46.dp),
+            shape = RoundedCornerShape(13.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+        ) {
+            Text(confirmLabel, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+@Composable
+private fun routineFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor    = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor  = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+    focusedTextColor      = MaterialTheme.colorScheme.onSurface,
+    unfocusedTextColor    = MaterialTheme.colorScheme.onSurface,
+    cursorColor           = MaterialTheme.colorScheme.primary,
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddRoutineItemDialog(
@@ -602,151 +832,17 @@ private fun AddRoutineItemDialog(
 
     val subTopicsForSubject = subjectOptions.firstOrNull { it.subject == subject }?.subTopics ?: emptyList()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("➕ রুটিনে নতুন টপিক যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title, onValueChange = { title = it },
-                    label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded = subjectMenuExpanded,
-                    onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = subject,
-                        onValueChange = {},
-                        readOnly = true,
-                        enabled = subjectOptions.isNotEmpty(),
-                        label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                        placeholder = {
-                            Text(
-                                if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
-                                fontFamily = NotoSansBengali, fontSize = 12.sp
-                            )
-                        },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = subjectMenuExpanded,
-                        onDismissRequest = { subjectMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            onClick = {
-                                subject = ""
-                                subTopic = ""
-                                subjectMenuExpanded = false
-                            }
-                        )
-                        subjectOptions.forEach { opt ->
-                            DropdownMenuItem(
-                                text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subject = opt.subject
-                                    subTopic = ""
-                                    subjectMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = subTopicMenuExpanded,
-                        onExpandedChange = { subTopicMenuExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = subTopic,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().menuAnchor()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = subTopicMenuExpanded,
-                            onDismissRequest = { subTopicMenuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                onClick = {
-                                    subTopic = ""
-                                    subTopicMenuExpanded = false
-                                }
-                            )
-                            subTopicsForSubject.forEach { st ->
-                                DropdownMenuItem(
-                                    text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
-                                    onClick = {
-                                        subTopic = st
-                                        subTopicMenuExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Text("আনুমানিক সময়:", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.take(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    minuteOptions.drop(3).forEach { m ->
-                        FilterChip(minutes == m, { minutes = m }, { Text("${m}মি", fontFamily = NotoSansBengali, fontSize = 11.sp) })
-                    }
-                }
-
-                Divider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.surfaceVariant)
-
-                // ── প্রতি-আইটেম রিমাইন্ডার টগল + সময় ──
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (reminderOn) Icons.Default.Notifications else Icons.Default.NotificationsNone,
-                            null, tint = if (reminderOn) Amber else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("এই আইটেমের জন্য রিমাইন্ডার", fontFamily = NotoSansBengali, fontSize = 12.sp)
-                    }
-                    Switch(checked = reminderOn, onCheckedChange = { reminderOn = it })
-                }
-
-                if (reminderOn) {
-                    OutlinedButton(
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(16.dp), tint = PrimaryIndigo)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            formatHourMinute(timePickerState.hour, timePickerState.minute),
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = PrimaryIndigo
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
+    RoutineDialogShell(
+        icon = Icons.Default.Add,
+        title = "নতুন টপিক যুক্ত করো",
+        subtitle = "আজকের রুটিনে যোগ হবে",
+        onDismiss = onDismiss,
+        footer = {
+            RoutineDialogFooter(
+                confirmLabel = "যুক্ত করো",
+                confirmEnabled = title.isNotBlank(),
+                onCancel = onDismiss,
+                onConfirm = {
                     if (title.isNotBlank()) {
                         onAdd(
                             title, subject, subTopic, minutes,
@@ -755,14 +851,129 @@ private fun AddRoutineItemDialog(
                             if (reminderOn) timePickerState.minute else -1
                         )
                     }
-                },
-                enabled = title.isNotBlank()
-            ) { Text("যুক্ত করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            )
         }
-    )
+    ) {
+        OutlinedTextField(
+            value = title, onValueChange = { title = it },
+            label = { Text("টপিকের নাম", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+            placeholder = { Text("যেমন: বাংলাদেশের সংবিধান", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+            singleLine = true,
+            shape = RoundedCornerShape(13.dp),
+            colors = routineFieldColors(),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        ExposedDropdownMenuBox(
+            expanded = subjectMenuExpanded,
+            onExpandedChange = { if (subjectOptions.isNotEmpty()) subjectMenuExpanded = it }
+        ) {
+            OutlinedTextField(
+                value = subject,
+                onValueChange = {},
+                readOnly = true,
+                enabled = subjectOptions.isNotEmpty(),
+                label = { Text("বিষয় (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                placeholder = {
+                    Text(
+                        if (subjectOptions.isEmpty()) "কোনো বিষয় পাওয়া যায়নি" else "নির্বাচন করুন",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp
+                    )
+                },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
+                singleLine = true,
+                shape = RoundedCornerShape(13.dp),
+                colors = routineFieldColors(),
+                modifier = Modifier.fillMaxWidth().menuAnchor()
+            )
+            ExposedDropdownMenu(
+                expanded = subjectMenuExpanded,
+                onDismissRequest = { subjectMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("— কোনো বিষয় না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    onClick = {
+                        subject = ""
+                        subTopic = ""
+                        subjectMenuExpanded = false
+                    }
+                )
+                subjectOptions.forEach { opt ->
+                    DropdownMenuItem(
+                        text = { Text(opt.subject, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                        onClick = {
+                            subject = opt.subject
+                            subTopic = ""
+                            subjectMenuExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (subject.isNotBlank() && subTopicsForSubject.isNotEmpty()) {
+            ExposedDropdownMenuBox(
+                expanded = subTopicMenuExpanded,
+                onExpandedChange = { subTopicMenuExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = subTopic,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("SubTopic (ঐচ্ছিক)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    placeholder = { Text("নির্বাচন করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subTopicMenuExpanded) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(13.dp),
+                    colors = routineFieldColors(),
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = subTopicMenuExpanded,
+                    onDismissRequest = { subTopicMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("— কোনো SubTopic না —", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                        onClick = {
+                            subTopic = ""
+                            subTopicMenuExpanded = false
+                        }
+                    )
+                    subTopicsForSubject.forEach { st ->
+                        DropdownMenuItem(
+                            text = { Text(st, fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                            onClick = {
+                                subTopic = st
+                                subTopicMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RoutineSectionLabel("আনুমানিক সময়")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                minuteOptions.take(3).forEach { m ->
+                    MinuteChip("${m}মি", minutes == m, { minutes = m }, Modifier.weight(1f))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                minuteOptions.drop(3).forEach { m ->
+                    MinuteChip("${m}মি", minutes == m, { minutes = m }, Modifier.weight(1f))
+                }
+            }
+        }
+
+        ReminderToggleSection(
+            reminderOn = reminderOn,
+            onToggle = { reminderOn = it },
+            timeLabel = formatHourMinute(timePickerState.hour, timePickerState.minute),
+            onPickTime = { showTimePicker = true }
+        )
+    }
 }
 
 // ── hour(0-23)/minute কে 12-ঘণ্টার AM/PM ফরম্যাটে দেখানোর হেল্পার ──
@@ -785,21 +996,43 @@ private fun TimePickerDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("⏰ রিমাইন্ডারের সময় বেছে নাও", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                TimePicker(state = state)
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape  = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(10.dp)
+        ) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "⏰ রিমাইন্ডারের সময় বেছে নাও",
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                )
+                TimePicker(
+                    state = state,
+                    colors = TimePickerDefaults.colors(
+                        selectorColor = MaterialTheme.colorScheme.primary,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    )
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).height(44.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Button(
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f).height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) { Text("ঠিক আছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimary) }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("ঠিক আছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-    )
+    }
 }
 
 // ── বিদ্যমান routine আইটেমের রিমাইন্ডার (on/off + সময়) এডিট করার ডায়ালগ ──
@@ -824,57 +1057,31 @@ private fun RoutineReminderDialog(
         )
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("⏰ রিমাইন্ডার — ${item.title}", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (reminderOn) Icons.Default.Notifications else Icons.Default.NotificationsNone,
-                            null, tint = if (reminderOn) Amber else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("রিমাইন্ডার চালু", fontFamily = NotoSansBengali, fontSize = 13.sp)
-                    }
-                    Switch(checked = reminderOn, onCheckedChange = { reminderOn = it })
+    RoutineDialogShell(
+        icon = Icons.Default.Notifications,
+        title = "রিমাইন্ডার",
+        subtitle = item.title,
+        onDismiss = onDismiss,
+        footer = {
+            RoutineDialogFooter(
+                confirmLabel = "সংরক্ষণ করো",
+                onCancel = onDismiss,
+                onConfirm = {
+                    onSave(reminderOn, if (reminderOn) timePickerState.hour else -1, if (reminderOn) timePickerState.minute else -1)
                 }
-
-                if (reminderOn) {
-                    OutlinedButton(
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(16.dp), tint = PrimaryIndigo)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            formatHourMinute(timePickerState.hour, timePickerState.minute),
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = PrimaryIndigo
-                        )
-                    }
-                    Text(
-                        "প্রতিদিন এই সময়ে এই টপিকের জন্য আলাদা নোটিফিকেশন আসবে।",
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onSave(reminderOn, if (reminderOn) timePickerState.hour else -1, if (reminderOn) timePickerState.minute else -1)
-            }) { Text("সংরক্ষণ করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = PrimaryIndigo) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            )
         }
-    )
+    ) {
+        ReminderToggleSection(
+            reminderOn = reminderOn,
+            onToggle = { reminderOn = it },
+            timeLabel = formatHourMinute(timePickerState.hour, timePickerState.minute),
+            onPickTime = { showTimePicker = true },
+            helperText = "প্রতিদিন এই সময়ে এই টপিকের জন্য আলাদা নোটিফিকেশন আসবে।"
+        )
+    }
 }
+
 
 @Composable
 fun DailyGoalCard(goal: GoalProgress, onSetGoal: (Int) -> Unit) {
