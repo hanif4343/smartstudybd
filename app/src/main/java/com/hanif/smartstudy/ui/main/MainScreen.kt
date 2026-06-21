@@ -27,6 +27,7 @@ import com.hanif.smartstudy.util.DeepLinkAction
 import com.hanif.smartstudy.viewmodel.ChallengeViewModel
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
+import kotlinx.coroutines.launch
 
 enum class BottomTab(val icon: String, val label: String) {
     HOME(      "🏠", "Home"),
@@ -51,6 +52,22 @@ fun MainScreen(
     var showSearch     by remember { mutableStateOf(false) }
     var showTyping     by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
+
+    // ── Typing/Search achievement unlock এর জন্য ──
+    // এই দুটো screen এর নিজস্ব ViewModel নেই (শুধু stateless composable),
+    // তাই QuizViewModel.checkAndUnlock() এর মতো একই কাজ এখানে সরাসরি
+    // SessionManager দিয়ে করা হলো (CoreScreen/MenuScreen এও একই pattern
+    // ব্যবহৃত হয়েছে)।
+    val session = remember { com.hanif.smartstudy.util.SessionManager(context) }
+    val scope   = rememberCoroutineScope()
+    fun unlockAchievement(id: String) {
+        scope.launch {
+            if (!session.hasAchievement(id)) {
+                session.unlockAchievement(id)
+                com.hanif.smartstudy.data.model.Achievements.findById(id)?.let { onAchievementUnlocked(it) }
+            }
+        }
+    }
 
     // Exit confirmation dialog
     if (showExitDialog) {
@@ -175,6 +192,7 @@ fun MainScreen(
             else            -> quizViewModel
         }
         val activeState by activeVm.state.collectAsState()
+        LaunchedEffect(Unit) { unlockAchievement("search_used") }
         GlobalSearchScreen(
             allQuestions = activeState.questions,
             onBack       = { showSearch = false }
@@ -184,7 +202,7 @@ fun MainScreen(
     if (showTyping) {
         TypingPracticeScreen(
             onBack   = { showTyping = false },
-            onResult = {}
+            onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }
         )
         return
     }
