@@ -370,8 +370,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
-                session.getCurrentUser()?.phone?.let { phone ->
-                    repo.awardXp(phone, XP_PER_CORRECT_MCQ)
+                // STUDY mode এ per-answer XP award — QUIZ mode এ submitQuiz() এ bulk award হয় (double নয়)
+                if (_state.value.mode == StudyMode.STUDY) {
+                    session.getCurrentUser()?.phone?.let { phone ->
+                        repo.awardXp(phone, XP_PER_CORRECT_MCQ)
+                    }
                 }
             } else {
                 cache.incrementWrong()
@@ -395,8 +398,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (isCorrect) {
                 cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)
-                session.getCurrentUser()?.phone?.let { phone ->
-                    repo.awardXp(phone, XP_PER_CORRECT_WRITTEN)
+                // STUDY mode এ per-answer XP award — QUIZ mode এ submitQuiz() এ bulk award হয়
+                if (_state.value.mode == StudyMode.STUDY) {
+                    session.getCurrentUser()?.phone?.let { phone ->
+                        repo.awardXp(phone, XP_PER_CORRECT_WRITTEN)
+                    }
                 }
             } else {
                 cache.incrementWrong()
@@ -452,8 +458,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             cache.markTodayActivity()
             val user = session.getCurrentUser()
-            if (user != null) session.saveUser(user.copy(xp = (user.xp + xp).coerceAtMost(999999)))
             session.recordDailyXp(xp)
+            // awardXp() local session + Firebase RTDB দুটোই update করে (atomic transaction)
+            user?.phone?.let { phone -> repo.awardXp(phone, xp) }
             val streak = session.updateStreak()
             _pendingStreak.value = streak
 
