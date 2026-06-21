@@ -80,7 +80,11 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: Exception) {
                     baseUser
                 }
-                session.saveUser(fullUser)
+                // Local session এ already XP থাকলে সেটাই রাখো — Firebase XP দিয়ে overwrite করো না।
+                // (Quiz করার পর Firebase XP update হতে সময় লাগতে পারে, তাই local টাই বেশি নির্ভরযোগ্য)
+                val localXp = session.getCurrentUser()?.xp ?: 0
+                val mergedUser = fullUser.copy(xp = maxOf(fullUser.xp, localXp))
+                session.saveUser(mergedUser)
                 FcmHelper.collectAndSaveForPhone(getApplication(), cleanPhone)
                 Log.d("Auth", "Login success: ${fullUser.name}")
                 _authState.value = AuthState.Success(fullUser)
