@@ -346,15 +346,20 @@ object FirebaseDataService {
     //  ADMIN FUNCTIONS
     // ══════════════════════════════════════════════════════════
 
-    /** Admin: একাধিক subject এর serial একসাথে সেট করো (drag-reorder সেভ করার সময়) */
-    suspend fun adminSetSubjectOrderBulk(order: Map<String, Int>): ApiResult<Unit> =
+    /**
+     * Admin: একটা নির্দিষ্ট mode (Quiz/QBank/Study) এর সব subject এর serial একসাথে সেট করো।
+     * PUT ব্যবহার করা হয় — SubjectOrder/{mode} এর পুরো subtree-টাই নতুন order দিয়ে replace
+     * হয় (পুরনো stale subject key থেকে যাওয়ার সুযোগ থাকে না)। mode আলাদা path এ থাকায়
+     * Quiz/QBank/Study এর সাবজেক্ট ক্রম একে অপরকে প্রভাবিত করে না।
+     */
+    suspend fun adminSetSubjectOrderBulk(mode: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubjectOrder.json$auth"
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubjectOrder/$mode.json$auth"
                 val obj  = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
-                val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
+                val resp = client.newCall(Request.Builder().url(url).put(body).build()).execute()
                 val respBody = resp.body?.string() ?: ""
                 val code = resp.code
                 resp.close()
@@ -366,17 +371,16 @@ object FirebaseDataService {
         }
 
     /**
-     * Admin: একটা নির্দিষ্ট subject এর ভিতরের সব subTopic এর serial একসাথে সেট করো।
-     * PUT ব্যবহার করা হয় — SubTopicOrder/{subject} এর পুরো subtree-টাই নতুন order
-     * দিয়ে replace হয় (পুরনো কোনো stale subtopic key থেকে যাওয়ার সুযোগ থাকে না)।
-     * subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে
+     * Admin: একটা নির্দিষ্ট mode + subject এর ভিতরের সব subTopic এর serial একসাথে সেট করো।
+     * PUT ব্যবহার করা হয় — SubTopicOrder/{mode}/{subject} এর পুরো subtree-টাই নতুন order
+     * দিয়ে replace হয়। subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে
      * বাংলা/স্পেশাল ক্যারেক্টার নিয়ে URL-encoding এর কোনো ঝামেলা নেই।
      */
-    suspend fun adminSetSubTopicOrderBulk(subject: String, order: Map<String, Int>): ApiResult<Unit> =
+    suspend fun adminSetSubTopicOrderBulk(mode: String, subject: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
                 val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubTopicOrder.json$auth"
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/SubTopicOrder/$mode.json$auth"
                 val subjectObj = JsonObject().apply { order.forEach { (k, v) -> addProperty(k, v) } }
                 val obj  = JsonObject().apply { add(subject, subjectObj) }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
