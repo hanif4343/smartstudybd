@@ -26,6 +26,43 @@ object FirebaseDataService {
         return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
+    // ── নিরাপদ Firebase node parsing ──────────────────────────
+    // Firebase Realtime Database REST API: কোনো node-এর child key গুলো sparse/সব numeric
+    // (যেমন "0","1","2"...) হলে Firebase সেটাকে {"0":..,"1":..} object এর বদলে raw JSON
+    // array [..,..] হিসেবে ফেরত দেয়। Gson এর built-in Map<String,T> deserializer array
+    // পেলে সেটাকে "[key,value] জোড়ার array" ভেবে read করতে যায়, আর row object পেলেই
+    // "Expected BEGIN_ARRAY but was BEGIN_OBJECT" ছুঁড়ে crash করে। নিচের হেল্পারগুলো
+    // object ও array — দুই ফরম্যাটই নিরাপদে handle করে।
+    private val rowMapType = object : TypeToken<Map<String, Any>>() {}.type
+
+    private fun firebaseEntries(element: com.google.gson.JsonElement?): List<Pair<String, com.google.gson.JsonElement>> {
+        if (element == null || element.isJsonNull) return emptyList()
+        return when {
+            element.isJsonObject -> element.asJsonObject.entrySet().map { it.key to it.value }
+            element.isJsonArray  -> element.asJsonArray.mapIndexedNotNull { idx, v ->
+                if (v == null || v.isJsonNull) null else idx.toString() to v
+            }
+            else -> emptyList()
+        }
+    }
+
+    private fun firebaseEntries(json: String): List<Pair<String, com.google.gson.JsonElement>> =
+        firebaseEntries(try { com.google.gson.JsonParser.parseString(json) } catch (e: Exception) { null })
+
+    /** sheet/node root কে Map<rowKey, rowFields> এ parse করে — node object বা array, দুই আকারেই */
+    private fun parseRowMap(json: String): Map<String, Map<String, Any>> =
+        firebaseEntries(json)
+            .filter { it.second.isJsonObject }
+            .associate { (k, v) -> k to (gson.fromJson<Map<String, Any>>(v, rowMapType) ?: emptyMap()) }
+
+    /** UserTechniques এর মতো ২-লেভেল nested node (questionId -> pushKey -> fields) parse করে */
+    private fun parseNestedRowMap(json: String): Map<String, Map<String, Map<String, Any>>> =
+        firebaseEntries(json).associate { (k, v) ->
+            k to firebaseEntries(v)
+                .filter { it.second.isJsonObject }
+                .associate { (k2, v2) -> k2 to (gson.fromJson<Map<String, Any>>(v2, rowMapType) ?: emptyMap()) }
+        }
+
     suspend fun getUserFromFirebase(phone: String): ApiResult<Map<String, Any>> {
         return withContext(Dispatchers.IO) {
             try {
@@ -34,8 +71,7 @@ object FirebaseDataService {
                     .url("${BuildConfig.FIREBASE_URL.trimEnd('/')}/Users.json$auth").get().build()
                 val json = client.newCall(req).execute().body?.string()
                     ?: return@withContext ApiResult.Error("No data")
-                val all: Map<String, Map<String, Any>> = gson.fromJson(
-                    json, object : TypeToken<Map<String, Map<String, Any>>>() {}.type)
+                val all: Map<String, Map<String, Any>> = parseRowMap(json)
                 val user = all.values.find { entry ->
                     val p = entry["Phone"]?.toString() ?: entry["phone"]?.toString() ?: ""
                     p.trim() == phone.trim()
@@ -187,8 +223,7 @@ object FirebaseDataService {
                 val req  = Request.Builder().url(url).get().build()
                 val json = client.newCall(req).execute().body?.string() ?: "null"
                 if (json == "null") return@withContext ApiResult.Success(emptyList())
-                val raw: Map<String, Map<String, Any>> = gson.fromJson(
-                    json, object : TypeToken<Map<String, Map<String, Any>>>() {}.type)
+                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
                 val list = raw.map { (k, v) ->
                     com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to questionId))
                 }.filter { t ->
@@ -278,8 +313,7 @@ object FirebaseDataService {
                 val req  = Request.Builder().url(url).get().build()
                 val json = client.newCall(req).execute().body?.string() ?: "null"
                 if (json == "null") return@withContext ApiResult.Success(emptyList())
-                val raw: Map<String, Map<String, Map<String, Any>>> = gson.fromJson(
-                    json, object : TypeToken<Map<String, Map<String, Map<String, Any>>>>() {}.type)
+                val raw: Map<String, Map<String, Map<String, Any>>> = parseNestedRowMap(json)
                 val list = raw.flatMap { (qId, entries) ->
                     entries.map { (k, v) ->
                         com.hanif.smartstudy.data.model.UserTechnique.fromMap(k, v + mapOf("questionId" to qId))
@@ -388,9 +422,7 @@ object FirebaseDataService {
                 val json = client.newCall(Request.Builder().url(url).get().build())
                     .execute().body?.string() ?: "null"
                 if (json == "null") return@withContext ApiResult.Success(emptyList())
-                val raw: Map<String, Map<String, Any>> = gson.fromJson(
-                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
-                )
+                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
                 val list = raw.map { (key, v) ->
                     ReportedQuestion(
                         reportKey  = key,
@@ -516,9 +548,7 @@ object FirebaseDataService {
             ).execute().body?.string() ?: "null"
             if (json == "null") return@withContext ApiResult.Error("Sheet empty")
 
-            val raw: Map<String, Map<String, Any>> = gson.fromJson(
-                json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
-            )
+            val raw: Map<String, Map<String, Any>> = parseRowMap(json)
             val matching = raw.filter { (_, v) ->
                 val s  = v["subject"]?.toString()?.trim() ?: ""
                 val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
@@ -568,9 +598,7 @@ object FirebaseDataService {
                 ).execute().body?.string() ?: "null"
                 if (json == "null") continue
 
-                val raw: Map<String, Map<String, Any>> = gson.fromJson(
-                    json, object : com.google.gson.reflect.TypeToken<Map<String, Map<String, Any>>>() {}.type
-                )
+                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
                 if (raw.isEmpty()) continue
                 anySheetHadData = true
 
