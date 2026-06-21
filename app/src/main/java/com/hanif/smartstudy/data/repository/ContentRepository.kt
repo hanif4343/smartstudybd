@@ -4,11 +4,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.MutableData
-import com.google.firebase.database.Transaction
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
@@ -25,7 +20,8 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.tasks.await
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class ContentRepository(private val context: Context) {
 
@@ -112,58 +108,74 @@ class ContentRepository(private val context: Context) {
         return XpInfo.fromXp(user?.xp ?: 0)
     }
 
-    // ── XP award করা — Firebase Users/{phone}/XP ফিল্ডে atomic transaction দিয়ে
-    //    বাড়ায় (race condition-safe), আর সাথে সাথে local session-এর cached XP-ও
-    //    আপডেট করে দেয় যাতে Home screen তৎক্ষণাৎ নতুন XP দেখায়, পরের login এর
-    //    জন্য অপেক্ষা করতে না হয়।
-    //
-    //    [মূল কারণ — আগে XP সবসময় ০ দেখাতো]: quiz এ সঠিক উত্তর দিলে কোনো XP-ই
-    //    award হতো না — পুরো pipeline (PendingQueue.enqueueXpUpdate ইত্যাদি)
-    //    কোডে ছিল কিন্তু কোথাও call হতো না। এই ফাংশনটাই সেই gap পূরণ করে।
-    private val xpDb: FirebaseDatabase by lazy {
-        try {
-            val url = BuildConfig.FIREBASE_URL
-            if (url.isNullOrBlank() || url.contains("%%") || !url.startsWith("https://")) {
-                FirebaseDatabase.getInstance()
-            } else {
-                FirebaseDatabase.getInstance(url)
-            }
-        } catch (e: Exception) {
-            FirebaseDatabase.getInstance()
-        }
-    }
-
+    // ── XP award করা — Firebase Users REST API দিয়ে (SDK transaction নয়)
+    //    REST API consistent — বাকি সব Firebase write এভাবেই হয়।
+    //    Local session এও তাৎক্ষণিক update — Home screen সাথে সাথেই নতুন XP দেখায়।
     suspend fun awardXp(phone: String, delta: Int) {
         if (delta == 0 || phone.isBlank()) return
 
-        // - Local cache সাথে সাথে আপডেট — UI তে তাৎক্ষণিক প্রতিফলন
+        // ── Step 1: Local session তাৎক্ষণিক update ──
         try {
             val current = session.getCurrentUser()
             if (current != null) {
-                session.saveUser(current.copy(xp = maxOf(0, current.xp + delta)))
+                val newXp = (current.xp + delta).coerceAtMost(999999)
+                session.saveUser(current.copy(xp = newXp))
             }
         } catch (e: Exception) {
             Log.e("ContentRepository", "awardXp local update failed: ${e.message}")
         }
 
-        // - Firebase এ আসল মান — atomic transaction (একসাথে অনেক answer দিলেও XP হারিয়ে যাবে না)
+        // ── Step 2: Firebase REST API দিয়ে XP update ──
+        // SDK transaction এর বদলে REST ব্যবহার — consistent, reliable
         try {
-            val usersRef = xpDb.getReference("Users")
-            val snap = usersRef.orderByChild("Phone").equalTo(phone).get().await()
-            val userRef = snap.children.firstOrNull()?.ref ?: run {
-                Log.w("ContentRepository", "awardXp: user not found for $phone")
+            val token = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            if (token.isBlank()) {
+                Log.w("ContentRepository", "awardXp: no auth token, skipping Firebase write")
                 return
             }
-            userRef.runTransaction(object : Transaction.Handler {
-                override fun doTransaction(d: MutableData): Transaction.Result {
-                    val cur = d.child("XP").getValue(Int::class.java) ?: 0
-                    d.child("XP").value = maxOf(0, cur + delta)
-                    return Transaction.success(d)
-                }
-                override fun onComplete(e: DatabaseError?, c: Boolean, s: DataSnapshot?) {
-                    if (e != null) Log.e("ContentRepository", "awardXp transaction failed: ${e.message}")
-                }
-            })
+            val base  = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val auth  = "?auth=$token"
+            val httpClient = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val gson2 = com.google.gson.Gson()
+
+            // ── Step 2a: User এর Firebase key খুঁজে বের করো ──
+            val queryUrl = "$base/Users.json?orderBy=%22Phone%22&equalTo=%22${phone.trim()}%22$auth"
+            val queryResp = httpClient.newCall(
+                okhttp3.Request.Builder().url(queryUrl).get().build()
+            ).execute()
+            val queryBody = queryResp.body?.string() ?: ""
+            queryResp.close()
+
+            if (queryBody.isBlank() || queryBody == "null" || queryBody == "{}") {
+                Log.w("ContentRepository", "awardXp: user not found in Firebase for $phone")
+                return
+            }
+
+            val rootMap = gson2.fromJson(queryBody, Map::class.java) as? Map<String, Any> ?: return
+            val (userKey, userMap) = rootMap.entries.firstOrNull()
+                ?.let { it.key to (it.value as? Map<String, Any>) }
+                ?: run { Log.w("ContentRepository", "awardXp: malformed user data"); return }
+            if (userMap == null) return
+
+            // ── Step 2b: Current Firebase XP + delta ──
+            val firebaseXp = userMap["XP"]?.toString()?.toIntOrNull()
+                ?: userMap["xp"]?.toString()?.toIntOrNull() ?: 0
+            val newXp = (firebaseXp + delta).coerceAtMost(999999)
+
+            // ── Step 2c: PATCH করো — শুধু XP field, বাকি সব অপরিবর্তিত ──
+            val patchUrl  = "$base/Users/$userKey.json$auth"
+            val patchBody = com.google.gson.JsonObject().apply { addProperty("XP", newXp) }
+                .toString().toRequestBody("application/json".toMediaType())
+            val patchResp = httpClient.newCall(
+                okhttp3.Request.Builder().url(patchUrl).patch(patchBody).build()
+            ).execute()
+            val patchCode = patchResp.code
+            patchResp.close()
+
+            Log.d("ContentRepository", "awardXp: $phone +$delta → newXp=$newXp (Firebase HTTP $patchCode)")
         } catch (e: Exception) {
             Log.e("ContentRepository", "awardXp Firebase write failed: ${e.message}")
         }
