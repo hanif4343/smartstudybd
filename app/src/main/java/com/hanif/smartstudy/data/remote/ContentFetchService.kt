@@ -43,23 +43,82 @@ object ContentFetchService {
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
 
         try {
-            val quiz  = fetchSheet<QuizItem>("Quiz")
-            val qbank = fetchSheet<QBankItem>("QBank")
-            val study = fetchSheet<StudyItem>("Study")
+            val quiz          = fetchSheet<QuizItem>("Quiz")
+            val qbank         = fetchSheet<QBankItem>("QBank")
+            val study         = fetchSheet<StudyItem>("Study")
+            val subjectOrder  = fetchSubjectOrder()
+            val subTopicOrder = fetchSubTopicOrder()
 
-            Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} ===")
+            Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size} ===")
 
             if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
                 ContentResult.Error("Firebase থেকে data আসেনি (সব empty)")
             } else {
                 ContentResult.Success(AppContent(
                     quiz = quiz, qbank = qbank, study = study,
+                    subjectOrder = subjectOrder,
+                    subTopicOrder = subTopicOrder,
                     fetchedAt = System.currentTimeMillis()
                 ))
             }
         } catch (e: Exception) {
             Log.e(TAG, "fetchAllContent error: ${e.message}", e)
             ContentResult.Error("Error: ${e.message}")
+        }
+    }
+
+    /** Admin সেট করা subject সিরিয়াল — "SubjectOrder" node থেকে (subject name → serial Int) */
+    private suspend fun fetchSubjectOrder(): Map<String, Int> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authParam()
+            val url  = "$BASE_URL/SubjectOrder.json$auth"
+            val req  = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            if (body.isBlank() || body == "null") return@withContext emptyMap()
+            val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
+            obj.entrySet().mapNotNull { (key, v) ->
+                try {
+                    val serial = if (v.isJsonPrimitive) v.asJsonPrimitive.asNumber.toInt() else null
+                    serial?.let { key to it }
+                } catch (e: Exception) { null }
+            }.toMap()
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchSubjectOrder error: ${e.message}")
+            emptyMap()
+        }
+    }
+
+    /**
+     * Admin সেট করা subTopic সিরিয়াল — "SubTopicOrder" node থেকে।
+     * গঠন: { "subject name": { "subTopic name": serial(Int), ... }, ... }
+     */
+    private suspend fun fetchSubTopicOrder(): Map<String, Map<String, Int>> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authParam()
+            val url  = "$BASE_URL/SubTopicOrder.json$auth"
+            val req  = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            if (body.isBlank() || body == "null") return@withContext emptyMap()
+            val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
+            obj.entrySet().mapNotNull { (subject, subTree) ->
+                try {
+                    if (!subTree.isJsonObject) return@mapNotNull null
+                    val inner = subTree.asJsonObject.entrySet().mapNotNull { (st, v) ->
+                        try {
+                            val serial = if (v.isJsonPrimitive) v.asJsonPrimitive.asNumber.toInt() else null
+                            serial?.let { st to it }
+                        } catch (e: Exception) { null }
+                    }.toMap()
+                    if (inner.isEmpty()) null else subject to inner
+                } catch (e: Exception) { null }
+            }.toMap()
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchSubTopicOrder error: ${e.message}")
+            emptyMap()
         }
     }
 
