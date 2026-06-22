@@ -486,9 +486,7 @@ private fun SubTopicCard(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = textColor, fontFamily = NotoSansBengali)
-                    if (st.isWeak) {
-                        Text("🔁", fontSize = 12.sp)
-                    }
+                    // review symbol সরানো হয়েছে
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
                     color = mutedColor, fontFamily = NotoSansBengali)
