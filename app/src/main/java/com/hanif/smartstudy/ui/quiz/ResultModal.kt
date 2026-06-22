@@ -140,20 +140,20 @@ fun ResultModal(
                         Text("🏠 হোম", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                     }
                     Button(
-                        onClick  = { com.hanif.smartstudy.util.ResultShareUtil.share(context, result, subjectName) },
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(14.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
-                    ) {
-                        Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
-                    }
-                    Button(
                         onClick  = onRetry,
                         modifier = Modifier.weight(1f),
                         shape    = RoundedCornerShape(14.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
                     ) {
                         Text("🔄 আবার চেষ্টা", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                    }
+                    Button(
+                        onClick  = { com.hanif.smartstudy.util.ResultShareUtil.share(context, result, subjectName) },
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(14.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
+                    ) {
+                        Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
