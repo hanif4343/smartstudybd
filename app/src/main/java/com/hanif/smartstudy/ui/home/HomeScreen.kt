@@ -170,7 +170,7 @@ fun HomeScreen(
 
             AdNativePlaceholder()
 
-            DailyGoalCard(goal = state.goalProgress, onSetGoal = { viewModel.setDailyGoal(it) })
+            // Daily Goal feature removed
 
             DailyRoutineCard(
                 onOpenStudy       = onOpenStudy,
