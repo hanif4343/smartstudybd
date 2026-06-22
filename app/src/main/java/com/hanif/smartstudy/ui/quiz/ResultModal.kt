@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -123,16 +124,28 @@ fun ResultModal(
 
             // Action buttons
             item {
+                val context = LocalContext.current
+                // Subject name বের করো breakdown থেকে
+                val subjectName = result.subjectBreakdown.keys.firstOrNull() ?: ""
+
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
-                        onClick  = onHomeWithAd,   // ← ad দেখাবে তারপর home
+                        onClick  = onHomeWithAd,
                         modifier = Modifier.weight(1f),
                         shape    = RoundedCornerShape(14.dp)
                     ) {
                         Text("🏠 হোম", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                    }
+                    Button(
+                        onClick  = { com.hanif.smartstudy.util.ResultShareUtil.share(context, result, subjectName) },
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(14.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
+                    ) {
+                        Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                     }
                     Button(
                         onClick  = onRetry,
