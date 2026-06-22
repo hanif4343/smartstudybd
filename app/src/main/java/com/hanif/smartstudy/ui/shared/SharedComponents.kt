@@ -1071,11 +1071,15 @@ fun AdminQuestionEditDialog(
         )
     }
 
-    LaunchedEffect(optionOrder) {
-        editOptionA = optionOrder.getOrNull(0)?.second ?: ""
-        editOptionB = optionOrder.getOrNull(1)?.second ?: ""
-        editOptionC = optionOrder.getOrNull(2)?.second ?: ""
-        editOptionD = optionOrder.getOrNull(3)?.second ?: ""
+    // optionOrder থেকে editOption sync — LaunchedEffect এর বদলে সরাসরি derive করি
+    // কারণ LaunchedEffect async হওয়ায় একটু দেরিতে state update করে এবং
+    // AdminTextField এ value prop হিসেবে পাঠালে cursor reset হয়।
+    // এর বদলে optionOrder পরিবর্তনের সময়ই সরাসরি assign করি:
+    fun syncOptionsFromOrder(order: List<Pair<String, String>>) {
+        editOptionA = order.getOrNull(0)?.second ?: ""
+        editOptionB = order.getOrNull(1)?.second ?: ""
+        editOptionC = order.getOrNull(2)?.second ?: ""
+        editOptionD = order.getOrNull(3)?.second ?: ""
     }
 
     var isSaving  by remember { mutableStateOf(false) }
@@ -1244,6 +1248,7 @@ fun AdminQuestionEditDialog(
                                                         val l = optionOrder.toMutableList()
                                                         val t = l[idx-1]; l[idx-1] = l[idx]; l[idx] = t
                                                         optionOrder = l
+                                                        syncOptionsFromOrder(l)
                                                     }
                                                 }, enabled = idx > 0, modifier = Modifier.size(26.dp)) {
                                                     Icon(Icons.Default.KeyboardArrowUp, null,
@@ -1255,6 +1260,7 @@ fun AdminQuestionEditDialog(
                                                         val l = optionOrder.toMutableList()
                                                         val t = l[idx+1]; l[idx+1] = l[idx]; l[idx] = t
                                                         optionOrder = l
+                                                        syncOptionsFromOrder(l)
                                                     }
                                                 }, enabled = idx < optionOrder.size-1, modifier = Modifier.size(26.dp)) {
                                                     Icon(Icons.Default.KeyboardArrowDown, null,
@@ -1271,8 +1277,17 @@ fun AdminQuestionEditDialog(
                                 optionOrder.forEachIndexed { idx, _ ->
                                     val cur = when(idx) { 0->editOptionA; 1->editOptionB; 2->editOptionC; else->editOptionD }
                                     AdminTextField("Option ${listOf("A","B","C","D").getOrElse(idx){""}} ", cur, { v ->
+                                        // editOptionX সরাসরি আপডেট করি — optionOrder ছুঁই না
+                                        // তাহলে AdminTextField এ value prop same থাকে → cursor reset হয় না
+                                        when(idx) {
+                                            0 -> editOptionA = v
+                                            1 -> editOptionB = v
+                                            2 -> editOptionC = v
+                                            else -> editOptionD = v
+                                        }
+                                        // optionOrder display text sync (swap UI এর জন্য)
                                         val l = optionOrder.toMutableList()
-                                        l[idx] = l[idx].copy(second = v)
+                                        if (idx < l.size) l[idx] = l[idx].copy(second = v)
                                         optionOrder = l
                                     })
                                 }
@@ -1395,12 +1410,16 @@ private fun AdminTextField(
     hint     : String = ""
 ) {
     val adminIndigo = Color(0xFF4F46E5)
-    var tfv        by remember(value) { mutableStateOf(TextFieldValue(value)) }
+    // remember(value) ব্যবহার করা যাবে না — value বদলালেই tfv রিসেট করে cursor প্রথমে পাঠায়
+    var tfv        by remember { mutableStateOf(TextFieldValue(value)) }
     var showPreview by remember { mutableStateOf(false) }
 
-    // Keep external value in sync (e.g. when dialog resets)
+    // শুধু বাইরে থেকে programmatic reset হলে sync করি (dialog প্রথম খোলা)।
+    // টাইপ করার সময়: onChange → parent state → value আসে → text same → ছুঁই না → cursor ঠিক থাকে।
     LaunchedEffect(value) {
-        if (tfv.text != value) tfv = TextFieldValue(value)
+        if (tfv.text != value) {
+            tfv = TextFieldValue(value, selection = TextRange(value.length))
+        }
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -1516,7 +1535,7 @@ private fun AdminTextField(
             ) {
                 Column(Modifier.padding(10.dp)) {
                     Text(
-                        "미리보기",
+                        "প্রিভিউ",
                         fontSize   = 9.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color      = adminIndigo,
