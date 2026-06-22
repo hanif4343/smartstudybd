@@ -461,7 +461,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             session.recordDailyXp(xp)
             // awardXp() local session + Firebase RTDB দুটোই update করে (atomic transaction)
             user?.phone?.let { phone -> repo.awardXp(phone, xp) }
-            val streak = session.updateStreak()
+            // cache.markTodayActivity() ইতিমধ্যে streak update করেছে (streak_days key) —
+            // session.updateStreak() shared streak_last_date দেখে "already today" ভেবে increment করে না,
+            // তাই সরাসরি cache থেকে পড়ো
+            val streak = cache.getStreak()
             _pendingStreak.value = streak
 
             checkAndUnlock("first_quiz")
