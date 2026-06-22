@@ -228,8 +228,10 @@ object FcmAdminService {
         }
     }
 
-    // ── Admin দের fcmToken বের করো (presence/users node, lowercase) ──
-    // Fallback: AdminFCMTokens node (admin app সরাসরি এখানে save করে)
+    // ── Admin দের adminFcmToken বের করো (admin app এখানেই save করে) ──
+    // admin app: users/{phone}/adminFcmToken
+    // main app:  users/{phone}/fcmToken  (regular user token — আলাদা field, clash নেই)
+    // Fallback:  AdminFCMTokens/token
     suspend fun fetchAdminTokens(): List<String> = withContext(Dispatchers.IO) {
         try {
             val token = FirebaseTokenProvider.getToken()
@@ -237,7 +239,7 @@ object FcmAdminService {
             val base  = BuildConfig.FIREBASE_URL.trimEnd('/')
             val tokens = mutableListOf<String>()
 
-            // Priority 1: users/{adminPhone}/fcmToken
+            // Priority 1: users/{adminPhone}/adminFcmToken  (Smart Admin app saves here)
             val adminPhones = fetchAdminPhones()
             if (adminPhones.isNotEmpty()) {
                 val presenceBody = client.newCall(
@@ -247,13 +249,13 @@ object FcmAdminService {
                     val presence = JSONObject(presenceBody)
                     adminPhones.forEach { phone ->
                         presence.optJSONObject(phone)
-                            ?.optString("fcmToken")?.ifBlank { null }
+                            ?.optString("adminFcmToken")?.ifBlank { null }
                             ?.let { tokens += it }
                     }
                 }
             }
 
-            // Fallback: AdminFCMTokens/token (admin Capacitor app save করে)
+            // Fallback: AdminFCMTokens/token
             if (tokens.isEmpty()) {
                 val fallbackBody = client.newCall(
                     Request.Builder().url("$base/AdminFCMTokens/token.json$auth").get().build()
