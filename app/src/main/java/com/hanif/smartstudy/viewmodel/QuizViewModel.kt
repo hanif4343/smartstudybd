@@ -750,12 +750,19 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putStringSet("wrong_q_ids", ids).putStringSet("wrong_q_count", counts).apply()
     }
 
-    /** HomeScreen WrongReviewSection থেকে call হয় — সঠিক হলে remove */
+    /** HomeScreen WrongReviewSection থেকে call হয় — সঠিক হলে সব sheet এর entry remove */
     fun removeWrongQId(qId: String) {
-        listOf("quiz", "qbank", "study").forEach { sheet ->
-            val entry = "$sheet:$qId"
-            val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
-            if (ids.remove(entry)) { prefs.edit().putStringSet("wrong_q_ids", ids).apply(); return }
+        if (qId.isBlank()) return
+        val suffix = ":$qId"
+        val ids    = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        val counts = prefs.getStringSet("wrong_q_count", mutableSetOf())!!.toMutableSet()
+        val removedIds    = ids.removeAll    { it.endsWith(suffix) }
+        val removedCounts = counts.removeAll { it.substringBefore("=").endsWith(suffix) }
+        if (removedIds || removedCounts) {
+            prefs.edit()
+                .putStringSet("wrong_q_ids",   ids)
+                .putStringSet("wrong_q_count", counts)
+                .apply()
         }
     }
 
