@@ -143,8 +143,11 @@ fun HomeScreen(
     }
 
     var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
-    LaunchedEffect(state) {
-        wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
+    // state পরিবর্তনে reload করি, কিন্তু practice চলাকালে নয়
+    LaunchedEffect(state.isLoading) {
+        if (!state.isLoading) {
+            wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
+        }
     }
 
     Column(
@@ -198,6 +201,9 @@ fun HomeScreen(
                     },
                     onRemoveCorrect = { qId -> 
                         quizViewModel?.removeWrongQId(qId)
+                        // local state থেকেও সাথে সাথে সরিয়ে দাও
+                        // তাহলে পরবর্তী recomposition এ আর দেখাবে না
+                        wrongItems = wrongItems.filter { it.first.id != qId }
                     }
                 )
             }
