@@ -770,9 +770,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private fun removeWrongQIdByMode(qId: String, mode: StudyMode) {
         val sheet = when (mode) { StudyMode.QUIZ -> "quiz"; StudyMode.QBANK -> "qbank"; StudyMode.STUDY -> "study" }
         val entry = "$sheet:$qId"
-        val ids   = prefs.getStringSet("wrong_q_ids", mutableSetOf())!!.toMutableSet()
+        val ids    = prefs.getStringSet("wrong_q_ids",   mutableSetOf())!!.toMutableSet()
+        val counts = prefs.getStringSet("wrong_q_count", mutableSetOf())!!.toMutableSet()
         ids.remove(entry)
-        prefs.edit().putStringSet("wrong_q_ids", ids).apply()
+        counts.removeAll { it.startsWith("$entry=") }
+        prefs.edit()
+            .putStringSet("wrong_q_ids",   ids)
+            .putStringSet("wrong_q_count", counts)
+            .apply()
     }
 
     // ── Routine bottom sheet এর জন্য — ইতিমধ্যে লোড হওয়া study content snapshot ──
