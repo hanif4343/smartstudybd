@@ -715,15 +715,35 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
-    val sdf = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
-    var selectedPhone by remember { mutableStateOf("") }
-    var phoneExp by remember { mutableStateOf(false) }
+    val sdf      = SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault())
+    val dateSdf  = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val timeSdf  = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+    var selectedPhone  by remember { mutableStateOf("") }
+    var phoneExp       by remember { mutableStateOf(false) }
+    var levelFilter    by remember { mutableStateOf("সব") }  // E, W, I, D, সব
+    var dateFilter     by remember { mutableStateOf("") }    // "dd/MM/yyyy" or ""
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val levelOptions = listOf("সব", "E", "W", "I", "D")
+
+    // Apply filters
+    val filteredLogs = remember(state.debugLogs, levelFilter, dateFilter) {
+        state.debugLogs.filter { entry ->
+            val levelOk = levelFilter == "সব" || entry.level == levelFilter
+            val dateOk  = if (dateFilter.isBlank()) true else {
+                dateSdf.format(Date(entry.ts)) == dateFilter
+            }
+            levelOk && dateOk
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(12.dp)) {
 
         Text("📋 অ্যাপ লগ (Remote Logcat)", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
             color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 8.dp))
 
+        // Phone filter + refresh
         Row(verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 
@@ -756,6 +776,83 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
 
         Spacer(Modifier.height(8.dp))
 
+        // ── Filter row: Level chips + Date picker ──
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            // Level filter chips
+            LazyRow(
+                modifier              = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                items(levelOptions.size) { i ->
+                    val opt = levelOptions[i]
+                    val isActive = levelFilter == opt
+                    val chipColor = when (opt) {
+                        "E"   -> RedWrong
+                        "W"   -> Color(0xFFD97706)
+                        "I"   -> Indigo600
+                        "D"   -> MutedText
+                        else  -> Indigo600
+                    }
+                    Surface(
+                        onClick  = { levelFilter = opt },
+                        shape    = RoundedCornerShape(20.dp),
+                        color    = if (isActive) chipColor.copy(0.15f) else Color(0xFFF1F5F9),
+                        border   = if (isActive) androidx.compose.foundation.BorderStroke(1.dp, chipColor) else null,
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Box(Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                            Text(opt, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                                color = if (isActive) chipColor else MutedText,
+                                fontFamily = NotoSansBengali)
+                        }
+                    }
+                }
+            }
+
+            // Date filter button
+            Surface(
+                onClick  = { showDatePicker = true },
+                shape    = RoundedCornerShape(8.dp),
+                color    = if (dateFilter.isNotBlank()) Indigo600.copy(0.12f) else Color(0xFFF1F5F9),
+                border   = if (dateFilter.isNotBlank()) androidx.compose.foundation.BorderStroke(1.dp, Indigo600) else null,
+                modifier = Modifier.height(30.dp)
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(Icons.Default.DateRange, null, modifier = Modifier.size(13.dp),
+                        tint = if (dateFilter.isNotBlank()) Indigo600 else MutedText)
+                    Text(
+                        if (dateFilter.isNotBlank()) dateFilter else "তারিখ",
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        color = if (dateFilter.isNotBlank()) Indigo600 else MutedText,
+                        fontFamily = NotoSansBengali
+                    )
+                    if (dateFilter.isNotBlank()) {
+                        Text("✕", fontSize = 10.sp, color = Indigo600,
+                            modifier = Modifier.clickable { dateFilter = "" })
+                    }
+                }
+            }
+        }
+
+        // Active filter summary
+        if (levelFilter != "সব" || dateFilter.isNotBlank()) {
+            Text(
+                "দেখাচ্ছে: ${filteredLogs.size} / ${state.debugLogs.size} লগ",
+                fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(4.dp))
+
         if (state.isLoadingLogs) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -771,9 +868,14 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                         modifier = Modifier.padding(horizontal = 24.dp))
                 }
             }
+        } else if (filteredLogs.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("এই ফিল্টারে কোনো লগ নেই", fontSize = 13.sp, color = MutedText,
+                    fontFamily = NotoSansBengali)
+            }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(state.debugLogs) { entry ->
+                items(filteredLogs) { entry ->
                     val color = when (entry.level) {
                         "E" -> RedWrong
                         "W" -> Color(0xFFD97706)
@@ -801,6 +903,63 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                 }
             }
         }
+    }
+
+    // Date Picker Dialog (manual input — simple approach)
+    if (showDatePicker) {
+        var inputDate by remember { mutableStateOf(dateFilter) }
+        AlertDialog(
+            onDismissRequest = { showDatePicker = false },
+            title = {
+                Text("তারিখ ফিল্টার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("dd/MM/yyyy ফরম্যাটে লিখুন (যেমন: 21/06/2026)",
+                        fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                    OutlinedTextField(
+                        value         = inputDate,
+                        onValueChange = { inputDate = it },
+                        label         = { Text("তারিখ", fontFamily = NotoSansBengali) },
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(10.dp),
+                        modifier      = Modifier.fillMaxWidth()
+                    )
+                    // Quick date shortcuts from available logs
+                    val availableDates = remember(state.debugLogs) {
+                        state.debugLogs.map { dateSdf.format(Date(it.ts)) }.distinct().sorted().reversed()
+                    }
+                    if (availableDates.isNotEmpty()) {
+                        Text("দ্রুত বাছাই:", fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(availableDates.size) { i ->
+                                val d = availableDates[i]
+                                Surface(
+                                    onClick = { inputDate = d },
+                                    shape   = RoundedCornerShape(16.dp),
+                                    color   = if (inputDate == d) Indigo600.copy(0.15f) else Color(0xFFF1F5F9),
+                                    border  = if (inputDate == d) androidx.compose.foundation.BorderStroke(1.dp, Indigo600) else null
+                                ) {
+                                    Text(d, fontSize = 11.sp, color = if (inputDate == d) Indigo600 else MutedText,
+                                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { dateFilter = inputDate.trim(); showDatePicker = false }) {
+                    Text("প্রয়োগ করুন", fontFamily = NotoSansBengali, color = Indigo600, fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
     }
 }
 
