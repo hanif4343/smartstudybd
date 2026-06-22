@@ -165,15 +165,6 @@ fun QuestionCard(
                             Text("Written", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = OrangeTech)
                         }
                     }
-                    if (item.isWeakTopic) {
-                        Box(
-                            Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(RedWrong.copy(alpha = 0.15f))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Text("🔁 Review", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = RedWrong)
-                        }
-                    }
                     if (item.year.isNotBlank()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
