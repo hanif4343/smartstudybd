@@ -363,12 +363,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
-        // সঠিক উত্তর হলে প্রশ্নটা এই সাবটপিকের তালিকায় সবার নিচে চলে যাবে —
-        // ফলে নতুন/ভুল করা প্রশ্নগুলো স্বয়ংক্রিয়ভাবে উপরে উঠে আসবে
-        if (isCorrect) {
-            val answered = questions.removeAt(questionIndex)
-            questions.add(answered)
-        }
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
@@ -397,12 +391,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val matchPct = fuzzyMatch(userText, q.answer)
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
-        // সঠিক উত্তর হলে প্রশ্নটা এই সাবটপিকের তালিকায় সবার নিচে চলে যাবে —
-        // ফলে নতুন/ভুল করা প্রশ্নগুলো স্বয়ংক্রিয়ভাবে উপরে উঠে আসবে
-        if (isCorrect) {
-            val answered = questions.removeAt(questionIndex)
-            questions.add(answered)
-        }
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
