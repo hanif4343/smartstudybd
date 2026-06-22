@@ -56,6 +56,7 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.shared.parseRichAnnotated
 import kotlin.math.max
 import kotlin.math.min
 
@@ -225,7 +226,7 @@ fun RichContentText(
                 is MediaSegment.PlainText -> {
                     if (seg.text.isNotBlank()) {
                         Text(
-                            text       = seg.text,
+                            text       = parseRichAnnotated(seg.text, fontSize.toFloat()),
                             color      = textColor,
                             fontSize   = fontSize.sp,
                             fontFamily = NotoSansBengali,
@@ -315,20 +316,7 @@ fun AutoImage(url: String, onClick: () -> Unit) {
             }
         }
 
-        // Zoom hint (top-right) — index এ zoom icon দেখায়
-        if (state is AsyncImagePainter.State.Success) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.45f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🔍", fontSize = 12.sp)
-            }
-        }
+        // ছবিতে ট্যাপ করলেই সরাসরি জুম হয় — আলাদা বাটন দরকার নেই
     }
 }
 
