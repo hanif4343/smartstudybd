@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.QuestionItem
+import com.hanif.smartstudy.data.model.AnswerState
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.remote.LeaderboardEntry
 import com.hanif.smartstudy.data.remote.UserSyncService
@@ -136,6 +137,11 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
 
 @Composable
 private fun BookmarkCard(q: QuestionItem) {
+    val hasOptions = q.isMcq() && listOf(q.optionA, q.optionB, q.optionC, q.optionD).any { it.isNotBlank() }
+    // Practice state: null = unanswered, String = selected option text
+    var selectedOption by remember(q.id) { mutableStateOf<String?>(null) }
+    val isAnswered = selectedOption != null
+
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
@@ -148,12 +154,9 @@ private fun BookmarkCard(q: QuestionItem) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Type badge
                     Box(
                         Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (q.isMcq()) Color(0xFFEEF2FF) else Color(0xFFF5F3FF)
-                            )
+                            .background(if (q.isMcq()) Color(0xFFEEF2FF) else Color(0xFFF5F3FF))
                             .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
@@ -163,7 +166,6 @@ private fun BookmarkCard(q: QuestionItem) {
                             fontFamily = NotoSansBengali
                         )
                     }
-                    // Subject badge
                     if (q.subject.isNotBlank()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(6.dp))
@@ -180,7 +182,7 @@ private fun BookmarkCard(q: QuestionItem) {
 
             // প্রশ্ন
             Text(
-                q.question.take(120) + if (q.question.length > 120) "…" else "",
+                q.question.take(200) + if (q.question.length > 200) "…" else "",
                 fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 color = SlateText, fontFamily = NotoSansBengali, lineHeight = 20.sp
             )
@@ -191,8 +193,93 @@ private fun BookmarkCard(q: QuestionItem) {
                     fontFamily = NotoSansBengali)
             }
 
-            // উত্তর
-            if (q.answer.isNotBlank()) {
+            // MCQ Options (interactive practice)
+            if (hasOptions) {
+                val options = listOf(
+                    "ক" to q.optionA,
+                    "খ" to q.optionB,
+                    "গ" to q.optionC,
+                    "ঘ" to q.optionD
+                ).filter { it.second.isNotBlank() }
+
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    options.forEach { (label, text) ->
+                        val isCorrect = text.trim().equals(q.answer.trim(), ignoreCase = true)
+                        val isSelected = selectedOption == text
+
+                        val bgColor = when {
+                            !isAnswered -> Color(0xFFF8FAFC)
+                            isSelected && isCorrect -> Color(0xFFF0FDF4)
+                            isSelected && !isCorrect -> Color(0xFFFFF1F2)
+                            isAnswered && isCorrect -> Color(0xFFF0FDF4)
+                            else -> Color(0xFFF8FAFC)
+                        }
+                        val borderColor = when {
+                            !isAnswered -> Color(0xFFE2E8F0)
+                            isSelected && isCorrect -> GreenOk
+                            isSelected && !isCorrect -> RedWrong
+                            isAnswered && isCorrect -> GreenOk
+                            else -> Color(0xFFE2E8F0)
+                        }
+                        val textColor = when {
+                            !isAnswered -> SlateText
+                            isSelected && isCorrect -> GreenOk
+                            isSelected && !isCorrect -> RedWrong
+                            isAnswered && isCorrect -> GreenOk
+                            else -> MutedText
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(bgColor)
+                                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                                .then(
+                                    if (!isAnswered) Modifier.clickable { selectedOption = text }
+                                    else Modifier
+                                )
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(borderColor.copy(alpha = 0.15f))
+                                    .border(1.dp, borderColor, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(label, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = borderColor, fontFamily = NotoSansBengali)
+                            }
+                            Text(text, fontSize = 11.sp, color = textColor,
+                                fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                            if (isAnswered) {
+                                when {
+                                    isSelected && isCorrect -> Text("✅", fontSize = 12.sp)
+                                    isSelected && !isCorrect -> Text("❌", fontSize = 12.sp)
+                                    isAnswered && isCorrect -> Text("✅", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Reset button after answering
+                if (isAnswered) {
+                    TextButton(
+                        onClick = { selectedOption = null },
+                        modifier = Modifier.align(Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("🔄 আবার চেষ্টা", fontSize = 10.sp, color = Indigo600,
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else if (!q.isMcq() && q.answer.isNotBlank()) {
+                // Written — show answer directly
                 Row(
                     Modifier.fillMaxWidth()
                         .background(Color(0xFFF0FDF4), RoundedCornerShape(8.dp))
@@ -202,7 +289,7 @@ private fun BookmarkCard(q: QuestionItem) {
                 ) {
                     Text("✅", fontSize = 12.sp)
                     Text(
-                        q.answer.take(80) + if (q.answer.length > 80) "…" else "",
+                        q.answer.take(120) + if (q.answer.length > 120) "…" else "",
                         fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         color = GreenOk, fontFamily = NotoSansBengali
                     )
