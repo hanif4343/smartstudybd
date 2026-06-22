@@ -176,18 +176,23 @@ fun QuestionCard(
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // ── 🔊 প্রশ্ন শুনো — শুধু Study mode এ ──
+                    // ── 🔊 প্রশ্ন + উত্তর একসাথে শুনো — শুধু Study mode এ ──
                     if (mode == StudyMode.STUDY && displayQuestion.isNotBlank()) {
-                        val ttsKey = "${item.id}_q"
+                        val ttsKey = "${item.id}_qa"
                         val speakingKey by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
                         val isThisSpeaking = speakingKey == ttsKey
+                        val combinedText = buildString {
+                            append(displayQuestion)
+                            val ans = item.answer.ifBlank { item.explanation }
+                            if (ans.isNotBlank()) { append("। উত্তর। "); append(ans) }
+                        }
                         IconButton(
-                            onClick = { com.hanif.smartstudy.util.TtsManager.speak(displayQuestion, ttsKey) },
+                            onClick = { com.hanif.smartstudy.util.TtsManager.speak(combinedText, ttsKey) },
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
                                 if (isThisSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
-                                contentDescription = if (isThisSpeaking) "থামাও" else "প্রশ্ন শুনো",
+                                contentDescription = if (isThisSpeaking) "থামাও" else "প্রশ্ন ও উত্তর শুনো",
                                 tint = if (isThisSpeaking) Indigo600 else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp)
                             )
@@ -270,27 +275,7 @@ fun QuestionCard(
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
                 if (mode == StudyMode.STUDY) {
-                    // ── 🔊 উত্তর শুনো বাটন সহ AnswerBox header ──
-                    val ttsAnswerKey = "${item.id}_a"
-                    val speakingKeyA by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
-                    val isAnswerSpeaking = speakingKeyA == ttsAnswerKey
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { com.hanif.smartstudy.util.TtsManager.speak(item.answer, ttsAnswerKey) },
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                if (isAnswerSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
-                                contentDescription = if (isAnswerSpeaking) "থামাও" else "উত্তর শুনো",
-                                tint = if (isAnswerSpeaking) Indigo600 else Color(0xFF94A3B8),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+                    // answer TTS উপরের একক বাটনেই handle হচ্ছে
                 }
                 AnswerBox(text = item.answer)
             }
