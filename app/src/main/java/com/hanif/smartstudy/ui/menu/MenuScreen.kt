@@ -479,17 +479,16 @@ fun MenuRow(
 
 private val AUDIENCE_TAGS = listOf(
     "" to "👔 Job Seeker (Default)",
-    "Job" to "👔 Job",
-    "Honours 1" to "🎓 Honours 1st",
-    "Honours 2" to "🎓 Honours 2nd",
-    "Honours 3" to "🎓 Honours 3rd",
-    "Honours 4" to "🎓 Honours 4th",
-    "Masters 1" to "🎓 Masters 1st",
     "Masters 2" to "🎓 Masters 2nd",
-    "Class 9"   to "📚 Class 9",
-    "Class 10"  to "📚 Class 10",
+    "Masters 1" to "🎓 Masters 1st",
+    "Honours 4" to "🎓 Honours 4th",
+    "Honours 3" to "🎓 Honours 3rd",
+    "Honours 2" to "🎓 Honours 2nd",
+    "Honours 1" to "🎓 Honours 1st",
+    "Class 12"  to "📚 Class 12",
     "Class 11"  to "📚 Class 11",
-    "Class 12"  to "📚 Class 12"
+    "Class 10"  to "📚 Class 10",
+    "Class 9"   to "📚 Class 9"
 )
 
 @Composable
