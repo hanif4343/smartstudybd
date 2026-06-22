@@ -44,6 +44,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 
 val Indigo600   = Color(0xFF4F46E5)
 val DeepIndigo  = Color(0xFF1E1B4B)
@@ -1309,21 +1318,221 @@ fun AdminQuestionEditDialog(
     }
 }
 
+// ── Inline formatting helper ─────────────────────────────────────
+// Supported markers:
+//   **text**  → Bold
+//   *text*    → Italic
+//   __text__  → Underline
+//   ++text++  → Larger size (16.sp)
+internal fun parseRichAnnotated(raw: String, baseSizeSp: Float = 13f): AnnotatedString {
+    return buildAnnotatedString {
+        var i = 0
+        while (i < raw.length) {
+            when {
+                raw.startsWith("**", i) -> {
+                    val end = raw.indexOf("**", i + 2)
+                    if (end == -1) { append(raw[i]); i++ }
+                    else {
+                        withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) {
+                            append(raw.substring(i + 2, end))
+                        }
+                        i = end + 2
+                    }
+                }
+                raw.startsWith("__", i) -> {
+                    val end = raw.indexOf("__", i + 2)
+                    if (end == -1) { append(raw[i]); i++ }
+                    else {
+                        withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
+                            append(raw.substring(i + 2, end))
+                        }
+                        i = end + 2
+                    }
+                }
+                raw.startsWith("++", i) -> {
+                    val end = raw.indexOf("++", i + 2)
+                    if (end == -1) { append(raw[i]); i++ }
+                    else {
+                        withStyle(SpanStyle(fontSize = (baseSizeSp + 3).sp)) {
+                            append(raw.substring(i + 2, end))
+                        }
+                        i = end + 2
+                    }
+                }
+                raw[i] == '*' && !raw.startsWith("**", i) -> {
+                    val end = raw.indexOf('*', i + 1).let { if (it != -1 && !raw.startsWith("**", it)) it else -1 }
+                    if (end == -1) { append(raw[i]); i++ }
+                    else {
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                            append(raw.substring(i + 1, end))
+                        }
+                        i = end + 1
+                    }
+                }
+                else -> { append(raw[i]); i++ }
+            }
+        }
+    }
+}
+
+private fun wrapSelection(tfv: TextFieldValue, open: String, close: String): TextFieldValue {
+    val sel = tfv.selection
+    val txt = tfv.text
+    val start = minOf(sel.start, sel.end)
+    val end   = maxOf(sel.start, sel.end)
+    val selected = txt.substring(start, end)
+    val newText  = txt.substring(0, start) + open + selected + close + txt.substring(end)
+    val newCursor = if (start == end) start + open.length else end + open.length + close.length
+    return TextFieldValue(newText, TextRange(newCursor))
+}
+
 @Composable
-private fun AdminTextField(label: String, value: String, onChange: (String) -> Unit,
-                           minLines: Int = 1, hint: String = "") {
-    OutlinedTextField(
-        value = value, onValueChange = onChange,
-        label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
-        modifier = Modifier.fillMaxWidth(), minLines = minLines,
-        shape = RoundedCornerShape(10.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = MaterialTheme.colorScheme.outline),
-        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
-        placeholder = if (hint.isNotBlank()) {
-            { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1)) }
-        } else null
-    )
+private fun AdminTextField(
+    label    : String,
+    value    : String,
+    onChange : (String) -> Unit,
+    minLines : Int    = 1,
+    hint     : String = ""
+) {
+    val adminIndigo = Color(0xFF4F46E5)
+    var tfv        by remember(value) { mutableStateOf(TextFieldValue(value)) }
+    var showPreview by remember { mutableStateOf(false) }
+
+    // Keep external value in sync (e.g. when dialog resets)
+    LaunchedEffect(value) {
+        if (tfv.text != value) tfv = TextFieldValue(value)
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        // ── Label ──
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            color = adminIndigo, fontFamily = NotoSansBengali,
+            modifier = Modifier.padding(bottom = 3.dp))
+
+        // ── Formatting toolbar ──
+        val toolbarItems = listOf(
+            "B"  to ("**" to "**"),
+            "I"  to ("*" to "*"),
+            "U"  to ("__" to "__"),
+            "A↑" to ("++" to "++")
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
+            color    = Color(0xFFF1F5F9),
+            border   = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+        ) {
+            Row(
+                Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                toolbarItems.forEach { (btnLabel, markers) ->
+                    val (open, close) = markers
+                    val isBold      = btnLabel == "B"
+                    val isItalic    = btnLabel == "I"
+                    val isUnderline = btnLabel == "U"
+                    Surface(
+                        onClick = {
+                            val updated = wrapSelection(tfv, open, close)
+                            tfv = updated
+                            onChange(updated.text)
+                        },
+                        shape  = RoundedCornerShape(6.dp),
+                        color  = Color.White,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                btnLabel,
+                                fontSize   = 12.sp,
+                                fontWeight = if (isBold) FontWeight.ExtraBold else FontWeight.Normal,
+                                fontStyle  = if (isItalic) FontStyle.Italic else FontStyle.Normal,
+                                textDecoration = if (isUnderline) TextDecoration.Underline else TextDecoration.None,
+                                color = adminIndigo
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                // Preview toggle
+                Surface(
+                    onClick  = { showPreview = !showPreview },
+                    shape    = RoundedCornerShape(6.dp),
+                    color    = if (showPreview) adminIndigo.copy(0.12f) else Color.White,
+                    border   = androidx.compose.foundation.BorderStroke(
+                        1.dp, if (showPreview) adminIndigo else Color(0xFFE2E8F0)
+                    ),
+                    modifier = Modifier.height(26.dp)
+                ) {
+                    Box(
+                        Modifier.padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "👁 Preview",
+                            fontSize   = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = if (showPreview) adminIndigo else Color(0xFF94A3B8)
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Text field ──
+        OutlinedTextField(
+            value          = tfv,
+            onValueChange  = { updated ->
+                tfv = updated
+                onChange(updated.text)
+            },
+            modifier       = Modifier.fillMaxWidth(),
+            minLines       = minLines,
+            shape          = RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp),
+            colors         = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = adminIndigo,
+                unfocusedBorderColor = Color(0xFFE2E8F0)
+            ),
+            textStyle      = androidx.compose.ui.text.TextStyle(
+                fontFamily = NotoSansBengali,
+                fontSize   = 13.sp
+            ),
+            placeholder    = if (hint.isNotBlank()) {
+                { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1)) }
+            } else null
+        )
+
+        // ── Live Preview panel ──
+        if (showPreview && tfv.text.isNotBlank()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                shape    = RoundedCornerShape(10.dp),
+                color    = Color(0xFFF8FAFC),
+                border   = androidx.compose.foundation.BorderStroke(1.dp, adminIndigo.copy(0.3f))
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(
+                        "미리보기",
+                        fontSize   = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color      = adminIndigo,
+                        modifier   = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text       = parseRichAnnotated(tfv.text),
+                        fontSize   = 13.sp,
+                        fontFamily = NotoSansBengali,
+                        color      = Color(0xFF1E293B),
+                        lineHeight = 20.sp
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
