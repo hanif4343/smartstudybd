@@ -108,10 +108,12 @@ object ContentFetchService {
 
                 val tagMap: Map<String, Map<String, Int>> = if (looksV3) {
                     // v3: mode → tag → subject → serial
-                    modeObj.entrySet().mapNotNull { (encodedTag, tagVal) ->
+                    // Firebase key may be raw ("Masters 1") or already encoded ("Masters%201").
+                    // Normalize to URL-encoded form so QuizViewModel lookup always matches.
+                    modeObj.entrySet().mapNotNull { (rawTag, tagVal) ->
                         if (!tagVal.isJsonObject) return@mapNotNull null
                         val inner = parseSerialMap(tagVal.asJsonObject)
-                        if (inner.isEmpty()) null else encodedTag to inner
+                        if (inner.isEmpty()) null else com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(rawTag) to inner
                     }.toMap()
                 } else {
                     // v2: mode → subject → serial → promote to "Job" tag
@@ -185,10 +187,11 @@ object ContentFetchService {
 
                 val tagMap: Map<String, Map<String, Map<String, Int>>> = if (looksV3) {
                     // v3: mode → encodedTag → subject → subtopic → serial
-                    modeObj.entrySet().mapNotNull { (encodedTag, tagVal) ->
+                    // Normalize Firebase tag key to URL-encoded form to match QuizViewModel lookup.
+                    modeObj.entrySet().mapNotNull { (rawTag, tagVal) ->
                         if (!tagVal.isJsonObject) return@mapNotNull null
                         val inner = parseSubjectMap(tagVal.asJsonObject)
-                        if (inner.isEmpty()) null else encodedTag to inner
+                        if (inner.isEmpty()) null else com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(rawTag) to inner
                     }.toMap()
                 } else {
                     // v2: mode → subject → subtopic → serial → promote to Job tag
