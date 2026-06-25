@@ -460,7 +460,7 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
                 val selectedText = when (selected) {
                     1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
                 }
-                if (selectedText.trim().equals(q.answer.trim(), ignoreCase = true)) {
+                if (selectedText.trim().equals(resolveCorrectText(q).trim(), ignoreCase = true)) {
                     score++
                     correctIds.add(q.id)
                 }
@@ -633,12 +633,13 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
         if (s.usedFiftyFifty) return
         val currentQ = s.questions.getOrNull(s.currentQIndex) ?: return
 
+        val resolved = resolveCorrectText(currentQ)
         // সঠিক option index বের করো (1-indexed)
         val correctIdx = when {
-            currentQ.optionA.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 1
-            currentQ.optionB.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 2
-            currentQ.optionC.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 3
-            currentQ.optionD.trim().equals(currentQ.answer.trim(), ignoreCase = true) -> 4
+            currentQ.optionA.trim().equals(resolved.trim(), ignoreCase = true) -> 1
+            currentQ.optionB.trim().equals(resolved.trim(), ignoreCase = true) -> 2
+            currentQ.optionC.trim().equals(resolved.trim(), ignoreCase = true) -> 3
+            currentQ.optionD.trim().equals(resolved.trim(), ignoreCase = true) -> 4
             else -> 1
         }
         // বাকি তিনটা থেকে দুটো random বেছে লুকাও
@@ -790,6 +791,23 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
             val summary = repo.getWinLossSummary(myPhone)
             _state.update { it.copy(winLossSummary = summary) }
         }
+    }
+
+    /**
+     * answer field এ যদি শুধু ক/খ/গ/ঘ অথবা a/b/c/d থাকে,
+     * তাহলে সেই position এর option text return করে।
+     * অন্যথায় original answer text ই return করে।
+     */
+    private fun resolveCorrectText(q: QuestionItem): String {
+        val raw = q.answer.trim()
+        val optionByIndex = when (raw.lowercase()) {
+            "ক", "a", "1" -> q.optionA
+            "খ", "b", "2" -> q.optionB
+            "গ", "c", "3" -> q.optionC
+            "ঘ", "d", "4" -> q.optionD
+            else           -> null
+        }
+        return if (optionByIndex != null && optionByIndex.isNotBlank()) optionByIndex else raw
     }
 
     override fun onCleared() {
