@@ -33,9 +33,9 @@ import kotlinx.coroutines.launch
 private val Indigo600 = Color(0xFF4F46E5)
 private val AmberWarn = Color(0xFFF59E0B)
 private val RedWrong  = Color(0xFFEF4444)
-private val SlateText = Color(0xFF1E293B)
-private val MutedText = Color(0xFF64748B)
-private val CardBg    = Color(0xFFFFFFFF)
+// SlateText replaced by MaterialTheme.colorScheme.onSurface
+// MutedText replaced by MaterialTheme.colorScheme.onSurfaceVariant
+// CardBg replaced by MaterialTheme.colorScheme.surface
 private val GreenOk   = Color(0xFF10B981)
 
 // ═══════════════════════════════════════════════════════════
@@ -76,7 +76,7 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
                 title = { Text("সংরক্ষিত প্রশ্ন (${bookmarkIds.size})",
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -105,7 +105,7 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
                         Text("⭐", fontSize = 48.sp)
                         Spacer(Modifier.height(8.dp))
                         Text("কোনো সংরক্ষিত প্রশ্ন নেই", fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold, color = MutedText,
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali)
                         Text("Quiz পড়তে গিয়ে ⭐ বাটনে ট্যাপ করো",
                             fontSize = 12.sp, color = Color(0xFFCBD5E1),
@@ -125,7 +125,7 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
                             Box(Modifier.fillMaxWidth().padding(32.dp),
                                 contentAlignment = Alignment.Center) {
                                 Text("এই ফিল্টারে কিছু নেই", fontSize = 13.sp,
-                                    color = MutedText, fontFamily = NotoSansBengali)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                             }
                         }
                     }
@@ -144,7 +144,7 @@ private fun BookmarkCard(q: QuestionItem) {
 
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             // Header row
@@ -184,12 +184,12 @@ private fun BookmarkCard(q: QuestionItem) {
             Text(
                 q.question.take(200) + if (q.question.length > 200) "…" else "",
                 fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                color = SlateText, fontFamily = NotoSansBengali, lineHeight = 20.sp
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, lineHeight = 20.sp
             )
 
             // SubTopic
             if (q.subTopic.isNotBlank()) {
-                Text("📌 ${q.subTopic}", fontSize = 10.sp, color = MutedText,
+                Text("📌 ${q.subTopic}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali)
             }
 
@@ -222,11 +222,11 @@ private fun BookmarkCard(q: QuestionItem) {
                             else -> Color(0xFFE2E8F0)
                         }
                         val textColor = when {
-                            !isAnswered -> SlateText
+                            !isAnswered -> MaterialTheme.colorScheme.onSurface
                             isSelected && isCorrect -> GreenOk
                             isSelected && !isCorrect -> RedWrong
                             isAnswered && isCorrect -> GreenOk
-                            else -> MutedText
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
 
                         Row(
@@ -322,7 +322,7 @@ fun LeaderboardPage(vm: MenuViewModel, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("🏆 লিডারবোর্ড", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -420,7 +420,7 @@ private fun LeaderboardRow(rank: Int, entry: LeaderboardEntry, isMe: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("#$rank", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-            color = MutedText, modifier = Modifier.width(28.dp))
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(28.dp))
         Box(
             Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFEEF2FF)),
             contentAlignment = Alignment.Center
@@ -432,7 +432,7 @@ private fun LeaderboardRow(rank: Int, entry: LeaderboardEntry, isMe: Boolean) {
         }
         Column(Modifier.weight(1f)) {
             Text(entry.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                color = if (isMe) Indigo600 else SlateText, fontFamily = NotoSansBengali)
+                color = if (isMe) Indigo600 else MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
             if (isMe) Text("(তুমি)", fontSize = 9.sp, color = Indigo600, fontFamily = NotoSansBengali)
         }
         Text("${entry.xp} XP", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
@@ -459,7 +459,7 @@ fun ReminderPage(context: Context, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("পড়ার রিমাইন্ডার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -492,7 +492,7 @@ fun ReminderPage(context: Context, onBack: () -> Unit) {
             // Enable switch
             Card(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -500,7 +500,7 @@ fun ReminderPage(context: Context, onBack: () -> Unit) {
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text("রিমাইন্ডার চালু", fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                        color = SlateText, fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                     Switch(
                         checked         = isEnabled,
                         onCheckedChange = {
@@ -527,7 +527,7 @@ fun ReminderPage(context: Context, onBack: () -> Unit) {
                         verticalAlignment     = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("নির্ধারিত সময়", fontSize = 11.sp, color = MutedText,
+                            Text("নির্ধারিত সময়", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali)
                             Text("%02d:%02d".format(hour, minute), fontSize = 28.sp,
                                 fontWeight = FontWeight.ExtraBold, color = Indigo600,
@@ -535,7 +535,7 @@ fun ReminderPage(context: Context, onBack: () -> Unit) {
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(if (hour < 12) "সকাল" else if (hour < 17) "বিকাল" else "রাত",
-                                fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                             Icon(Icons.Default.Edit, null, tint = Indigo600, modifier = Modifier.size(20.dp))
                         }
                     }
