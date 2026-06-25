@@ -25,9 +25,9 @@ import com.hanif.smartstudy.viewmodel.MenuUiState
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 
 private val Indigo600 = Color(0xFF4F46E5)
-private val SlateText = Color(0xFF1E293B)
-private val MutedText = Color(0xFF64748B)
-private val CardBg    = Color(0xFFFFFFFF)
+// SlateText replaced by MaterialTheme.colorScheme.onSurface
+// MutedText replaced by MaterialTheme.colorScheme.onSurfaceVariant
+// CardBg replaced by MaterialTheme.colorScheme.surface
 
 // ── UserType এবং ClassLevel এর অপশন ──────────────────────
 private val USER_TYPE_OPTIONS = listOf(
@@ -91,7 +91,7 @@ fun ProfilePage(
             TopAppBar(
                 title = { Text("প্রোফাইল", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -135,16 +135,16 @@ fun ProfilePage(
             }
 
             Text("ছবিতে ট্যাপ করে নতুন ছবি বেছে নিন",
-                fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
 
             // ── Editable info card ──
             Card(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("ব্যক্তিগত তথ্য", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                        color = SlateText, fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
 
                     // ── Name ──
                     OutlinedTextField(
@@ -165,7 +165,7 @@ fun ProfilePage(
                     Divider(color = Color(0xFFE2E8F0))
 
                     Text("📚 শ্রেণি ও ধরন", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                        color = MutedText, fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
 
                     // ── UserType dropdown ──
                     ExposedDropdownMenuBox(
@@ -306,8 +306,8 @@ private fun ReadOnlyField(label: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontSize = 12.sp, color = MutedText, fontFamily = NotoSansBengali)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateText,
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
             fontFamily = NotoSansBengali)
     }
 }
