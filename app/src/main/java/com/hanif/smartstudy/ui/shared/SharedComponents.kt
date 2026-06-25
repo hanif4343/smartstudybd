@@ -63,10 +63,18 @@ val GreenOk     = Color(0xFF10B981)
 val RedWrong    = Color(0xFFEF4444)
 val AmberWarn   = Color(0xFFF59E0B)
 val OrangeTech  = Color(0xFFF97316)
+// Legacy light-only constants — use AppColors composable for theme-aware colors
 val SlateText   = Color(0xFF1E293B)
 val MutedText   = Color(0xFF64748B)
 val CardBg      = Color(0xFFFFFFFF)
 val SlateLight  = Color(0xFFF8FAFC)
+
+// ── Theme-aware color helpers (dark mode safe) ─────────────────
+object AppColors {
+    val slateText: Color @Composable get() = MaterialTheme.colorScheme.onSurface
+    val mutedText: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+    val cardBg: Color    @Composable get() = MaterialTheme.colorScheme.surface
+}
 
 @Composable
 fun TimerBar(
@@ -1147,7 +1155,7 @@ fun AdminQuestionEditDialog(
         Surface(
             modifier = Modifier.fillMaxWidth(0.97f).fillMaxHeight(0.95f),
             shape    = RoundedCornerShape(20.dp),
-            color    = Color.White
+            color    = MaterialTheme.colorScheme.surface
         ) {
             Column(Modifier.fillMaxSize()) {
 
@@ -1314,9 +1322,9 @@ fun AdminQuestionEditDialog(
                     Surface(
                         onClick  = { audienceExpanded = !audienceExpanded },
                         shape    = RoundedCornerShape(10.dp),
-                        color    = Color(0xFFF5F3FF),
+                        color    = MaterialTheme.colorScheme.surfaceVariant,
                         border   = androidx.compose.foundation.BorderStroke(
-                            1.5.dp, if (audienceExpanded) Color(0xFF8B5CF6) else Color(0xFFDDD6FE)
+                            1.5.dp, if (audienceExpanded) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.outlineVariant
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1330,7 +1338,7 @@ fun AdminQuestionEditDialog(
                                 Text("Audience", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                     color = Color(0xFF8B5CF6), fontFamily = NotoSansBengali)
                                 Text(currentAudienceLabel, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF1E293B), fontFamily = NotoSansBengali)
+                                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                             }
                             Icon(
                                 if (audienceExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -1342,8 +1350,8 @@ fun AdminQuestionEditDialog(
                     androidx.compose.animation.AnimatedVisibility(audienceExpanded) {
                         Surface(
                             shape  = RoundedCornerShape(10.dp),
-                            color  = Color(0xFFFAF5FF),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDDD6FE)),
+                            color  = MaterialTheme.colorScheme.surfaceVariant,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1352,9 +1360,9 @@ fun AdminQuestionEditDialog(
                                     Surface(
                                         onClick = { editAudience = tag; audienceExpanded = false },
                                         shape   = RoundedCornerShape(8.dp),
-                                        color   = if (isSelected) Color(0xFF8B5CF6) else Color.White,
+                                        color   = if (isSelected) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.surface,
                                         border  = if (isSelected) null else
-                                            androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                            androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Row(
@@ -1368,7 +1376,7 @@ fun AdminQuestionEditDialog(
                                             }
                                             Text(label, fontSize = 13.sp, fontFamily = NotoSansBengali,
                                                 fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
-                                                color = if (isSelected) Color.White else Color(0xFF1E293B))
+                                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface)
                                         }
                                     }
                                 }
@@ -1380,7 +1388,7 @@ fun AdminQuestionEditDialog(
                 }
 
                 // ── Bottom: Cancel button ────────────────────────────────
-                Surface(color = Color.White, modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp) {
+                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp) {
                     OutlinedButton(
                         onClick  = { if (!isSaving) onDismiss() },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -1594,7 +1602,7 @@ private fun AdminTextField(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isFocused) adminIndigo else Color(0xFF64748B),
+                color = if (isFocused) adminIndigo else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = NotoSansBengali)
             // Preview toggle pill
             Surface(
@@ -1691,7 +1699,7 @@ private fun AdminTextField(
             Surface(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 shape    = RoundedCornerShape(10.dp),
-                color    = Color(0xFFFAFAFF),
+                color    = MaterialTheme.colorScheme.surfaceVariant,
                 border   = androidx.compose.foundation.BorderStroke(1.dp, adminIndigo.copy(0.25f))
             ) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1702,7 +1710,7 @@ private fun AdminTextField(
                             text       = parseRichAnnotated(tfv.text),
                             fontSize   = 13.sp,
                             fontFamily = NotoSansBengali,
-                            color      = Color(0xFF1E293B),
+                            color      = MaterialTheme.colorScheme.onSurface,
                             lineHeight = 20.sp
                         )
                     } else {
