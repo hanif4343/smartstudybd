@@ -361,7 +361,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val selectedText = when (selectedOption) {
             1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
         }
-        val isCorrect = selectedText.trim().equals(q.answer.trim(), ignoreCase = true)
+        val isCorrect = selectedText.trim().equals(resolveCorrectText(q).trim(), ignoreCase = true)
         questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
@@ -859,6 +859,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
             .map { WeakTopic(it.key.removePrefix("weak_"), "", it.value as Int) }
             .sortedByDescending { it.wrongCount }
+
+    /**
+     * answer field এ যদি শুধু ক/খ/গ/ঘ অথবা a/b/c/d থাকে,
+     * তাহলে সেই position এর option text return করে।
+     * অন্যথায় original answer text ই return করে।
+     */
+    private fun resolveCorrectText(q: QuestionItem): String {
+        val raw = q.answer.trim()
+        val optionByIndex = when (raw.lowercase()) {
+            "ক", "a", "1" -> q.optionA
+            "খ", "b", "2" -> q.optionB
+            "গ", "c", "3" -> q.optionC
+            "ঘ", "d", "4" -> q.optionD
+            else           -> null
+        }
+        return if (optionByIndex != null && optionByIndex.isNotBlank()) optionByIndex else raw
+    }
 
     private fun fuzzyMatch(userText: String, correctText: String): Int {
         if (userText.isBlank()) return 0
