@@ -54,7 +54,7 @@ fun LobbyScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
                         ChallengeStatus.PENDING  -> Color(0xFFF59E0B)
                         ChallengeStatus.WAITING  -> Color(0xFF10B981)
                         ChallengeStatus.ACTIVE   -> Color(0xFF4F46E5)
-                        else                     -> Color(0xFF64748B)
+                        else                     -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 ).padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
