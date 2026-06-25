@@ -35,7 +35,7 @@ fun CreateChallengeScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
             TopAppBar(
                 title = { Text("নতুন চ্যালেঞ্জ", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = vm::goHome) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
