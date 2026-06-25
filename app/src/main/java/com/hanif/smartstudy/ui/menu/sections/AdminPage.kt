@@ -26,9 +26,8 @@ import java.util.*
 private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
 private val RedWrong  = Color(0xFFEF4444)
-private val SlateText = Color(0xFF1E293B)
-private val MutedText = Color(0xFF64748B)
-private val CardBg    = Color(0xFFFFFFFF)
+// Theme-aware colors accessed via MaterialTheme.colorScheme inside composables
+// Legacy constants below are kept only for non-composable contexts
 private val DeepIndigo= Color(0xFF1E1B4B)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -176,7 +175,7 @@ private fun ActiveUsersTab(
                 Text("👥", fontSize = 40.sp)
                 Spacer(Modifier.height(8.dp))
                 Text("কোনো ইউজার নেই", fontFamily = NotoSansBengali,
-                    color = MutedText, fontWeight = FontWeight.Bold)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = { vm.loadActiveUsers() }) {
                     Text("Refresh", fontFamily = NotoSansBengali)
@@ -203,7 +202,7 @@ private fun ActiveUsersTab(
                 Text("🟢 $online অনলাইন", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                     color = GreenOk, fontFamily = NotoSansBengali)
                 Text("⚫ $offline অফলাইন", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                    color = MutedText, fontFamily = NotoSansBengali)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                 Text("👥 ${state.activeUsers.size} মোট", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                     color = Indigo600, fontFamily = NotoSansBengali)
             }
@@ -212,7 +211,7 @@ private fun ActiveUsersTab(
         items(state.activeUsers) { user ->
             Card(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
             ) {
                 Row(
                     Modifier.padding(12.dp),
@@ -227,14 +226,14 @@ private fun ActiveUsersTab(
 
                     Column(Modifier.weight(1f)) {
                         Text(user.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                            color = SlateText, fontFamily = NotoSansBengali)
-                        Text(user.phone, fontSize = 10.sp, color = MutedText,
+                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                        Text(user.phone, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali)
                         Text(
                             if (user.isOnline) "🟢 এখন সক্রিয়"
                             else "শেষ সক্রিয়: ${if (user.lastSeen > 0) sdf.format(Date(user.lastSeen)) else "অজানা"}",
                             fontSize = 9.sp,
-                            color     = if (user.isOnline) GreenOk else MutedText,
+                            color     = if (user.isOnline) GreenOk else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali
                         )
                     }
@@ -268,11 +267,11 @@ private fun NotifyTab(
     ) {
         Card(
             Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("📣 Notification পাঠান", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-                    color = SlateText, fontFamily = NotoSansBengali)
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
 
                 OutlinedTextField(
                     value         = title,
@@ -327,21 +326,21 @@ private fun FcmTab(state: MenuUiState) {
     ) {
         item {
             Text("🔑 FCM Token সমূহ", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                color = SlateText, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
                 modifier = Modifier.padding(vertical = 8.dp))
         }
         val usersWithToken = state.activeUsers.filter { it.fcmToken.isNotBlank() }
         if (usersWithToken.isEmpty()) {
             item {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("কোনো FCM token নেই", fontFamily = NotoSansBengali, color = MutedText)
+                    Text("কোনো FCM token নেই", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
             items(usersWithToken) { user ->
                 Card(
                     Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(CardBg)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Row(
@@ -349,8 +348,8 @@ private fun FcmTab(state: MenuUiState) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(user.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                color = SlateText, fontFamily = NotoSansBengali)
-                            Text(user.phone, fontSize = 10.sp, color = MutedText,
+                                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                            Text(user.phone, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali)
                         }
                         Spacer(Modifier.height(4.dp))
@@ -403,7 +402,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = Color(0xFF4F46E5))
                     Spacer(Modifier.height(10.dp))
-                    Text("লোড হচ্ছে...", fontFamily = NotoSansBengali, color = Color(0xFF64748B))
+                    Text("লোড হচ্ছে...", fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else if (reports.isEmpty()) {
@@ -421,7 +420,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                 Card(
                     Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -433,14 +432,14 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                             }
                             Spacer(Modifier.width(8.dp))
                             Text(sdf.format(Date(report.timestamp)), fontSize = 10.sp,
-                                color = Color(0xFF64748B), fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
-                            Icon(Icons.Default.Person, null, tint = Color(0xFF64748B), modifier = Modifier.size(12.dp))
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(3.dp))
                             Text(report.userName.ifBlank { report.userPhone }, fontSize = 10.sp,
-                                color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                         }
                         Text("❓ " + report.question.take(100) + if (report.question.length > 100) "…" else "",
-                            fontSize = 12.sp, color = Color(0xFF1E293B), fontFamily = NotoSansBengali,
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Medium)
                         Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFFFF1F2)) {
                             Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -473,7 +472,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                             IconButton(onClick = {
                                 vm.resolveReport(report.reportKey, "dismissed", report.userPhone, report.question, report.userName, report.questionId, report.tab)
                             }, modifier = Modifier.size(36.dp)) {
-                                Icon(Icons.Default.Close, null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -502,7 +501,7 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFF8FAFC)) {
                         Text("মূল: " + r.question.take(80), Modifier.padding(10.dp),
-                            fontSize = 11.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali)
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                     }
                     Text("🚩 ${r.issue}", fontSize = 12.sp, color = Color(0xFFEF4444),
                         fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
@@ -599,12 +598,12 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
                 Text("নতুন প্রশ্ন যোগ করুন", fontFamily = NotoSansBengali,
                     fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color(0xFF4F46E5))
                 Text("Firebase এ সরাসরি push — সব ডিভাইসে দেখাবে",
-                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF64748B))
+                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         // Sheet chips
-        Text("📂 Sheet", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+        Text("📂 Sheet", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SHEETS_LIST.forEach { s ->
                 FilterChip(selected = sheet == s, onClick = { sheet = s; if (s == "Study") isMcq = false },
@@ -741,7 +740,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
 
         Text("📋 অ্যাপ লগ (Remote Logcat)", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-            color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 8.dp))
+            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 8.dp))
 
         // Phone filter + refresh
         Row(verticalAlignment = Alignment.CenterVertically,
@@ -794,7 +793,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                         "E"   -> RedWrong
                         "W"   -> Color(0xFFD97706)
                         "I"   -> Indigo600
-                        "D"   -> MutedText
+                        "D"   -> MaterialTheme.colorScheme.onSurfaceVariant
                         else  -> Indigo600
                     }
                     Surface(
@@ -806,7 +805,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                     ) {
                         Box(Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
                             Text(opt, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                                color = if (isActive) chipColor else MutedText,
+                                color = if (isActive) chipColor else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali)
                         }
                     }
@@ -827,11 +826,11 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(Icons.Default.DateRange, null, modifier = Modifier.size(13.dp),
-                        tint = if (dateFilter.isNotBlank()) Indigo600 else MutedText)
+                        tint = if (dateFilter.isNotBlank()) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         if (dateFilter.isNotBlank()) dateFilter else "তারিখ",
                         fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        color = if (dateFilter.isNotBlank()) Indigo600 else MutedText,
+                        color = if (dateFilter.isNotBlank()) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali
                     )
                     if (dateFilter.isNotBlank()) {
@@ -846,7 +845,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
         if (levelFilter != "সব" || dateFilter.isNotBlank()) {
             Text(
                 "দেখাচ্ছে: ${filteredLogs.size} / ${state.debugLogs.size} লগ",
-                fontSize = 10.sp, color = MutedText, fontFamily = NotoSansBengali,
+                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
             )
         }
@@ -863,14 +862,14 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                     Text("📋", fontSize = 36.sp)
                     Spacer(Modifier.height(8.dp))
                     Text("কোনো লগ পাওয়া যায়নি। উপরে \"নিজের ফোন\" বা একটা নম্বর সিলেক্ট করে Refresh দাও।",
-                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = MutedText,
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp))
                 }
             }
         } else if (filteredLogs.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("এই ফিল্টারে কোনো লগ নেই", fontSize = 13.sp, color = MutedText,
+                Text("এই ফিল্টারে কোনো লগ নেই", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali)
             }
         } else {
@@ -880,22 +879,22 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                         "E" -> RedWrong
                         "W" -> Color(0xFFD97706)
                         "I" -> Indigo600
-                        else -> MutedText
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     Card(
                         Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(CardBg)
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Column(Modifier.padding(8.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("${entry.level} • ${entry.tag}", fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold, color = color)
                                 Text(if (entry.ts > 0) sdf.format(Date(entry.ts)) else "",
-                                    fontSize = 9.sp, color = MutedText)
+                                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(Modifier.height(2.dp))
                             SelectionContainer {
-                                Text(entry.msg, fontSize = 10.sp, color = SlateText,
+                                Text(entry.msg, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                             }
                         }
@@ -916,7 +915,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("dd/MM/yyyy ফরম্যাটে লিখুন (যেমন: 21/06/2026)",
-                        fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                     OutlinedTextField(
                         value         = inputDate,
                         onValueChange = { inputDate = it },
@@ -930,7 +929,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                         state.debugLogs.map { dateSdf.format(Date(it.ts)) }.distinct().sorted().reversed()
                     }
                     if (availableDates.isNotEmpty()) {
-                        Text("দ্রুত বাছাই:", fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                        Text("দ্রুত বাছাই:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(availableDates.size) { i ->
                                 val d = availableDates[i]
@@ -940,7 +939,7 @@ private fun LogsTab(state: MenuUiState, vm: MenuViewModel) {
                                     color   = if (inputDate == d) Indigo600.copy(0.15f) else Color(0xFFF1F5F9),
                                     border  = if (inputDate == d) androidx.compose.foundation.BorderStroke(1.dp, Indigo600) else null
                                 ) {
-                                    Text(d, fontSize = 11.sp, color = if (inputDate == d) Indigo600 else MutedText,
+                                    Text(d, fontSize = 11.sp, color = if (inputDate == d) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                                 }
@@ -1225,7 +1224,7 @@ private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
             if (selectedSheets.isEmpty()) "⚠️ অন্তত একটি sheet বেছে নিন"
             else "নির্বাচিত: ${selectedSheets.joinToString(", ")}",
             fontFamily = NotoSansBengali, fontSize = 11.sp,
-            color = if (selectedSheets.isEmpty()) Color(0xFFEF4444) else MutedText
+            color = if (selectedSheets.isEmpty()) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         // নির্বাচিত sheet গুলোর সব subject মিলিয়ে suggestion দেখাবে
@@ -1243,7 +1242,7 @@ private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
         } else {
             Text(
                 "ℹ️ SubTopic ফাঁকা রাখলে এই বিষয়ের সব অধ্যায়সহ পুরো Subject rename হবে",
-                fontFamily = NotoSansBengali, fontSize = 11.sp, color = MutedText
+                fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -1362,7 +1361,7 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                     )
                     Text(
                         "Offline এ করা edit গুলো এখানে জমা থাকে",
-                        fontFamily = NotoSansBengali, fontSize = 11.sp, color = MutedText
+                        fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 // Badge
@@ -1430,7 +1429,7 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
             Text(
                 "pending edits:",
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
-                fontSize = 12.sp, color = MutedText
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1446,7 +1445,7 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
 
                     Card(
                         Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(CardBg),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(1.dp)
                     ) {
                         Row(
@@ -1474,7 +1473,7 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                             color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
                                     }
                                     Text(sdf.format(java.util.Date(action.createdAt)),
-                                        fontSize = 9.sp, color = MutedText, fontFamily = NotoSansBengali)
+                                        fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                                     if (retry > 0) {
                                         Text("retry: $retry", fontSize = 9.sp,
                                             color = Color(0xFFEA580C), fontFamily = NotoSansBengali,
@@ -1484,7 +1483,7 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                 Spacer(Modifier.height(3.dp))
                                 Text(
                                     preview.ifBlank { "প্রশ্ন preview নেই" },
-                                    fontSize = 11.sp, color = SlateText,
+                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface,
                                     fontFamily = NotoSansBengali,
                                     maxLines = 2,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
