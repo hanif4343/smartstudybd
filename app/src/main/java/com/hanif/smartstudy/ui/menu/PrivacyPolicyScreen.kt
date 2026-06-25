@@ -39,7 +39,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -54,7 +54,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                     Text("লোড হয়নি", fontFamily = NotoSansBengali,
                         fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                     Text("ইন্টারনেট সংযোগ চেক করো", fontFamily = NotoSansBengali,
-                        fontSize = 13.sp, color = Color(0xFF64748B))
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 AndroidView(
