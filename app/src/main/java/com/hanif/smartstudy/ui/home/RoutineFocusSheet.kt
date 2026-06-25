@@ -371,7 +371,7 @@ private fun MiniQuizSection(
             if (!q.explanation.isBlank() && q.explanation != q.answer) {
                 Text(
                     "💡 " + q.explanation,
-                    fontSize = 12.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
                 )
                 Spacer(Modifier.height(10.dp))
             }
@@ -556,7 +556,7 @@ private fun StudyContentCard(study: StudyItem) {
             Spacer(Modifier.height(8.dp))
             Text(
                 "💡 " + study.explanation,
-                fontSize = 12.sp, color = Color(0xFF64748B), fontFamily = NotoSansBengali
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
             )
         }
         val canExpand = (study.explanation?.isNotBlank() == true) || (answerText?.length ?: 0) > 140
