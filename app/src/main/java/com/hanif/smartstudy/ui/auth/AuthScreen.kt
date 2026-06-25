@@ -176,7 +176,7 @@ fun LoginForm(onLoginSuccess: () -> Unit, vm: AuthViewModel = viewModel()) {
         if (showForgotDialog) {
             AlertDialog(
                 onDismissRequest = { showForgotDialog = false },
-                containerColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(20.dp),
                 title = {
                     Text(
