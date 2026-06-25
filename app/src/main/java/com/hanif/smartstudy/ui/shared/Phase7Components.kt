@@ -114,10 +114,7 @@ fun SubjectListSkeleton(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White)
-                    .padding(16.dp),
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
                 Box(Modifier.size(40.dp).clip(CircleShape).background(brush))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -140,7 +137,7 @@ fun QuestionCardSkeleton(modifier: Modifier = Modifier) {
         repeat(2) {
             Column(
                 modifier            = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp)).background(Color.White).padding(16.dp),
+                    .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Box(Modifier.fillMaxWidth(0.9f).height(14.dp).clip(RoundedCornerShape(4.dp)).background(brush))
