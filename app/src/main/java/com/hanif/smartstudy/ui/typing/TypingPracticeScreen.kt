@@ -31,9 +31,9 @@ import kotlinx.coroutines.delay
 private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
 private val RedWrong  = Color(0xFFEF4444)
-private val SlateText = Color(0xFF1E293B)
-private val MutedText = Color(0xFF64748B)
-private val CardBg    = Color(0xFFFFFFFF)
+// SlateText -> MaterialTheme.colorScheme.onSurface
+// MutedText -> MaterialTheme.colorScheme.onSurfaceVariant
+// CardBg -> MaterialTheme.colorScheme.surface
 
 private val PASSAGES = listOf(
     "বাংলাদেশ একটি সুন্দর দেশ। এখানে অনেক নদী আছে। পদ্মা, মেঘনা, যমুনা প্রধান নদী।",
@@ -112,7 +112,7 @@ fun TypingPracticeScreen(
             TopAppBar(
                 title = { Text("⌨️ Typing Practice", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                 actions = {
                     // Best WPM badge
                     if (bestWpm > 0) {
@@ -151,7 +151,7 @@ fun TypingPracticeScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E7FF))
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("📖 Passage", fontSize = 11.sp, color = MutedText,
+                    Text("📖 Passage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 8.dp))
 
                     // Colored passage showing correct/wrong chars
@@ -159,7 +159,7 @@ fun TypingPracticeScreen(
                         buildAnnotatedString {
                             passage.forEachIndexed { i, ch ->
                                 val style = when {
-                                    i >= userInput.length -> SpanStyle(color = SlateText)
+                                    i >= userInput.length -> SpanStyle(color = MaterialTheme.colorScheme.onSurface)
                                     userInput[i] == ch   -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
                                     else                 -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
                                 }
@@ -197,7 +197,7 @@ fun TypingPracticeScreen(
             // Hint: timer starts on typing
             if (!isStarted) {
                 Text("💡 Type করলেই Timer শুরু হবে",
-                    fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali,
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
                     modifier = Modifier.align(Alignment.CenterHorizontally))
             }
 
@@ -216,7 +216,7 @@ fun TypingPracticeScreen(
 
             // Passage selector
             if (!isStarted) {
-                Text("📝 Passage বেছে নিন:", fontSize = 12.sp, color = MutedText,
+                Text("📝 Passage বেছে নিন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                 PASSAGES.forEachIndexed { i, p ->
                     OutlinedButton(
@@ -233,7 +233,7 @@ fun TypingPracticeScreen(
                         Text(
                             "${i + 1}. ${p.take(40)}...",
                             fontSize = 11.sp, fontFamily = NotoSansBengali,
-                            color = if (passageIndex == i) Indigo600 else SlateText,
+                            color = if (passageIndex == i) Indigo600 else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -292,7 +292,7 @@ private fun ResultCard(
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            if (isNewBest) Color(0xFF1E1B4B) else CardBg
+            if (isNewBest) Color(0xFF1E1B4B) else MaterialTheme.colorScheme.surface
         ),
         border = if (isNewBest) androidx.compose.foundation.BorderStroke(
             2.dp, Brush.horizontalGradient(listOf(Color(0xFFFBBF24), Color(0xFFF59E0B)))
@@ -327,7 +327,7 @@ private fun ResultCard(
                 else -> "D" to "🔄 Try Again!"
             }
             Text("${grade.first} Grade — ${grade.second}", fontSize = 13.sp,
-                color = if (isNewBest) Color(0xFF94A3B8) else MutedText,
+                color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -349,6 +349,6 @@ private fun ResultCard(
 private fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
-        Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MutedText, fontFamily = NotoSansBengali)
+        Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
     }
 }
