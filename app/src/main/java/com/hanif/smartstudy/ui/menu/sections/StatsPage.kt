@@ -25,9 +25,9 @@ private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
 private val RedWrong  = Color(0xFFEF4444)
 private val AmberWarn = Color(0xFFF59E0B)
-private val SlateText = Color(0xFF1E293B)
-private val MutedText = Color(0xFF64748B)
-private val CardBg    = Color(0xFFFFFFFF)
+// SlateText replaced by MaterialTheme.colorScheme.onSurface
+// MutedText replaced by MaterialTheme.colorScheme.onSurfaceVariant
+// CardBg replaced by MaterialTheme.colorScheme.surface
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,7 +40,7 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("পরিসংখ্যান", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
@@ -110,7 +110,7 @@ fun StatsPage(state: MenuUiState, onBack: () -> Unit) {
 private fun AccuracyRingCard(correct: Int, wrong: Int, accPct: Int) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(
             Modifier.padding(16.dp),
@@ -133,8 +133,8 @@ private fun AccuracyRingCard(correct: Int, wrong: Int, accPct: Int) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("$accPct%", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-                        color = SlateText, fontFamily = NotoSansBengali)
-                    Text("নির্ভুল", fontSize = 8.sp, color = MutedText, fontFamily = NotoSansBengali)
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                    Text("নির্ভুল", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                 }
             }
 
@@ -152,7 +152,7 @@ private fun AccRow(label: String, value: Int, color: Color) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-            color = SlateText, fontFamily = NotoSansBengali)
+            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
         Text(value.toString(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
             color = color, fontFamily = NotoSansBengali)
     }
@@ -174,11 +174,11 @@ private fun TimeStatBox(label: String, value: String, vc: Color, mod: Modifier) 
 private fun XpChartCard(history: List<Pair<String, Int>>) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Text("⭐ XP ইতিহাস", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                color = SlateText, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 12.dp))
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 12.dp))
             val max = history.maxOf { it.second }.coerceAtLeast(1).toFloat()
             Box(Modifier.fillMaxWidth().height(120.dp)) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -199,7 +199,7 @@ private fun XpChartCard(history: List<Pair<String, Int>>) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 history.takeLast(7).forEach { (label, _) ->
-                    Text(label, fontSize = 8.sp, color = MutedText, fontFamily = NotoSansBengali)
+                    Text(label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                 }
             }
         }
@@ -223,7 +223,7 @@ private fun XpPlaceholderCard(xp: Int) {
                 Text("মোট XP: $xp", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
                     color = Indigo600, fontFamily = NotoSansBengali)
                 Text("আরো Quiz দিলে XP ইতিহাস চার্ট দেখাবে",
-                    fontSize = 11.sp, color = MutedText, fontFamily = NotoSansBengali)
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
             }
         }
     }
@@ -233,18 +233,18 @@ private fun XpPlaceholderCard(xp: Int) {
 private fun SubjectBreakdownCard(stats: Map<String, Pair<Int, Int>>) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(CardBg), elevation = CardDefaults.cardElevation(1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(1.dp)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("📊 বিষয় ভিত্তিক ফলাফল", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                color = SlateText, fontFamily = NotoSansBengali)
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
             stats.entries.forEach { (subject, pair) ->
                 val (correct, total) = pair
                 val pct = if (total > 0) correct * 100 / total else 0
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(subject, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                            color = SlateText, fontFamily = NotoSansBengali)
+                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                         Text("$correct/$total ($pct%)", fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold, color = Indigo600,
                             fontFamily = NotoSansBengali)
