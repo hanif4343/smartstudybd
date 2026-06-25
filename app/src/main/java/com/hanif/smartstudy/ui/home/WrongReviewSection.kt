@@ -82,7 +82,7 @@ fun WrongReviewSection(
     Card(
         modifier  = Modifier.fillMaxWidth(),
         shape     = RoundedCornerShape(18.dp),
-        colors    = CardDefaults.cardColors(containerColor = Color.White),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border    = BorderStroke(1.5.dp, WR_RedMain.copy(alpha = 0.25f)),
         elevation = CardDefaults.cardElevation(3.dp)
     ) {
@@ -364,7 +364,7 @@ private fun WRPracticeItem(
                 containerColor = when {
                     isCorrect  -> Color(0xFFF0FDF4)
                     isAnswered -> Color(0xFFFFF1F2)
-                    else       -> Color(0xFFFAFAFA)
+                    else       -> MaterialTheme.colorScheme.surfaceVariant
                 }
             ),
             border    = BorderStroke(
@@ -408,10 +408,10 @@ private fun WRPracticeItem(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (q.isMcq()) Color(0xFFEFF6FF) else Color(0xFFFAF5FF))
+                                .background(if (q.isMcq()) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f))
                                 .border(
                                     1.dp,
-                                    if (q.isMcq()) Color(0xFFBFDBFE) else Color(0xFFDDD6FE),
+                                    if (q.isMcq()) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f),
                                     RoundedCornerShape(8.dp)
                                 )
                                 .padding(horizontal = 7.dp, vertical = 3.dp)
@@ -419,7 +419,7 @@ private fun WRPracticeItem(
                             Text(
                                 if (q.isMcq()) "MCQ" else "Written",
                                 fontSize   = 9.sp,
-                                color      = if (q.isMcq()) Color(0xFF1D4ED8) else Color(0xFF7C3AED),
+                                color      = if (q.isMcq()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
                                 fontWeight = FontWeight.Bold
                             )
                         }
