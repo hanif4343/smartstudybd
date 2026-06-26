@@ -38,8 +38,11 @@ class ContentRepository(private val context: Context) {
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
-        // In-memory cache hit — সবচেয়ে fast
-        if (!forceRefresh) {
+        // REALTIME_DATA=true + online → সরাসরি Firebase, কোনো cache নয়
+        val debugRealtime = BuildConfig.REALTIME_DATA && isOnline()
+
+        // In-memory cache hit — সবচেয়ে fast (DEBUG online-এ skip)
+        if (!forceRefresh && !debugRealtime) {
             _memCache?.let { mem ->
                 if (!mem.isEmpty() && !mem.isStale()) {
                     Log.d("Repo", "Memory cache hit: quiz=${mem.quiz.size}")
@@ -50,8 +53,8 @@ class ContentRepository(private val context: Context) {
 
         // mutex দিয়ে protect — concurrent calls এ একবারই fetch হবে
         return mutex.withLock {
-            // Double-check after lock
-            if (!forceRefresh) {
+            // Double-check after lock (DEBUG online-এ skip)
+            if (!forceRefresh && !debugRealtime) {
                 _memCache?.let { mem ->
                     if (!mem.isEmpty() && !mem.isStale()) {
                         return@withLock DataState.Success(mem, fromCache = true)
@@ -59,8 +62,8 @@ class ContentRepository(private val context: Context) {
                 }
             }
 
-            // DataStore cache check
-            if (!forceRefresh) {
+            // DataStore cache check (DEBUG online-এ skip)
+            if (!forceRefresh && !debugRealtime) {
                 val cached = cache.loadContent()
                 if (cached != null && !cached.isEmpty() && !cached.isStale()) {
                     _memCache = cached
@@ -81,7 +84,7 @@ class ContentRepository(private val context: Context) {
             }
 
             // Network fetch
-            Log.d("Repo", "Fetching from Firebase...")
+            Log.d("Repo", if (debugRealtime) "REALTIME: Firebase থেকে fresh data নিচ্ছি..." else "Fetching from Firebase...")
             when (val result = ContentFetchService.fetchAllContent()) {
                 is ContentResult.Success -> {
                     Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
