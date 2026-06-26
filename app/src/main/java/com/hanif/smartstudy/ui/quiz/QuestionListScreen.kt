@@ -14,6 +14,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -155,20 +163,30 @@ fun QuestionListScreen(
                     itemsIndexed(questions, key = { _, q -> q.id }) { idx, q ->
                         val isHighlighted = q.id == activeHighlightId
                         if (isHighlighted) {
-                            val transition = rememberInfiniteTransition(label = "highlight")
-                            val hlColor by transition.animateColor(
-                                initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
-                                targetValue   = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                                animationSpec = infiniteRepeatable(
-                                    animation  = tween(600),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "highlightColor"
+                            // ── Report-resolved glow highlight ─────────────────
+                            val hlTransition = rememberInfiniteTransition(label = "reportResolvedHL")
+                            val hlAlpha by hlTransition.animateFloat(
+                                initialValue = 0.08f, targetValue = 0.32f,
+                                animationSpec = infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                                label = "hlAlpha"
                             )
+                            val hlBorder by hlTransition.animateFloat(
+                                initialValue = 0.4f, targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                                label = "hlBorder"
+                            )
+                            val hlScale by hlTransition.animateFloat(
+                                initialValue = 1.0f, targetValue = 1.012f,
+                                animationSpec = infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                                label = "hlScale"
+                            )
+                            val resolvedGreen = Color(0xFF10B981)
                             Box(
                                 modifier = Modifier
+                                    .graphicsLayer(scaleX = hlScale, scaleY = hlScale)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(hlColor)
+                                    .background(resolvedGreen.copy(alpha = hlAlpha))
+                                    .border(2.dp, resolvedGreen.copy(alpha = hlBorder), RoundedCornerShape(16.dp))
                             ) {
                                 QuestionCard(
                                     index       = idx,
