@@ -386,7 +386,19 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (n, text) ->
             val isSelected  = answered?.option == n
-            val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
+            // answer এ ক/খ/গ/ঘ বা a/b/c/d থাকলে position দিয়ে correct option বের করো
+            val correctOptionIndex = when (item.answer.trim().lowercase()) {
+                "ক", "a", "1" -> 1
+                "খ", "b", "2" -> 2
+                "গ", "c", "3" -> 3
+                "ঘ", "d", "4" -> 4
+                else           -> null
+            }
+            val isCorrectOpt = if (correctOptionIndex != null) {
+                n == correctOptionIndex
+            } else {
+                text.trim().equals(item.answer.trim(), ignoreCase = true)
+            }
             val bg = when {
                 answered == null        -> surfaceColor
                 isSelected && answered.isCorrect  -> Color(0xFFF0FDF4)
