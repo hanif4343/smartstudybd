@@ -71,6 +71,7 @@ fun QuestionListScreen(
     timerSec    : Int,
     totalTime   : Int,
     answered    : Int,
+    currentPage : Int,
     onBack      : () -> Unit,
     onSubmit    : () -> Unit,
     currentUser : com.hanif.smartstudy.data.model.User? = null,
@@ -78,6 +79,12 @@ fun QuestionListScreen(
     onHighlightConsumed : () -> Unit = {},
     onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
 ) {
+    val pageSize = QuizViewModel.PAGE_SIZE
+    val totalPages = (questions.size + pageSize - 1) / pageSize
+    val safeCurrentPage = currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+    val pageOffset = safeCurrentPage * pageSize
+    val pagedQuestions = questions.subList(pageOffset, minOf(pageOffset + pageSize, questions.size))
+    val isLastPage = safeCurrentPage >= totalPages - 1
     val listState = rememberLazyListState()
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
@@ -102,9 +109,13 @@ fun QuestionListScreen(
 
     LaunchedEffect(highlightQuestionId, questions) {
         val targetId = highlightQuestionId ?: return@LaunchedEffect
-        val idx = questions.indexOfFirst { it.id == targetId }
-        if (idx >= 0) {
-            listState.animateScrollToItem(idx)
+        val globalIdx = questions.indexOfFirst { it.id == targetId }
+        if (globalIdx >= 0) {
+            // সঠিক page-এ যাও প্রথমে
+            val targetPage = globalIdx / pageSize
+            if (targetPage != safeCurrentPage) viewModel.goToPage(targetPage)
+            val localIdx = globalIdx % pageSize
+            listState.animateScrollToItem(localIdx)
             activeHighlightId = targetId
             kotlinx.coroutines.delay(2500)
             activeHighlightId = null
@@ -112,7 +123,12 @@ fun QuestionListScreen(
         }
     }
 
-    val readingIdx by remember { derivedStateOf { listState.firstVisibleItemIndex } }
+    // Page পরিবর্তন হলে list এর উপরে scroll করো
+    LaunchedEffect(safeCurrentPage) {
+        listState.scrollToItem(0)
+    }
+
+    val readingIdx by remember { derivedStateOf { pageOffset + listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
 
     // ── Back button = Android system back ──
@@ -160,7 +176,8 @@ fun QuestionListScreen(
                     contentPadding      = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 100.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    itemsIndexed(questions, key = { _, q -> q.id }) { idx, q ->
+                    itemsIndexed(pagedQuestions, key = { _, q -> q.id }) { localIdx, q ->
+                        val globalIdx = pageOffset + localIdx
                         val isHighlighted = q.id == activeHighlightId
                         if (isHighlighted) {
                             // ── Report-resolved glow highlight ─────────────────
@@ -189,14 +206,14 @@ fun QuestionListScreen(
                                     .border(2.dp, resolvedGreen.copy(alpha = hlBorder), RoundedCornerShape(16.dp))
                             ) {
                                 QuestionCard(
-                                    index       = idx,
+                                    index       = globalIdx,
                                     item        = q,
                                     mode        = mode,
                                     totalCount  = questions.size,
-                                    onMcqAnswer = { opt -> viewModel.answerMcq(idx, opt) },
-                                    onWritten   = { text -> viewModel.answerWritten(idx, text) },
+                                    onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
+                                    onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
-                                    onReport    = { reportIdx = idx },
+                                    onReport    = { reportIdx = globalIdx },
                                     currentUser = currentUser,
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit
@@ -204,14 +221,14 @@ fun QuestionListScreen(
                             }
                         } else {
                         QuestionCard(
-                            index       = idx,
+                            index       = globalIdx,
                             item        = q,
                             mode        = mode,
                             totalCount  = questions.size,
-                            onMcqAnswer = { opt -> viewModel.answerMcq(idx, opt) },
-                            onWritten   = { text -> viewModel.answerWritten(idx, text) },
+                            onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
+                            onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
-                            onReport    = { reportIdx = idx },
+                            onReport    = { reportIdx = globalIdx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit
@@ -263,7 +280,7 @@ fun QuestionListScreen(
                             fontFamily = NotoSansBengali
                         )
                         Text(
-                            "প্রশ্ন নম্বর",
+                            if (totalPages > 1) "পৃষ্ঠা ${safeCurrentPage + 1}/$totalPages" else "প্রশ্ন নম্বর",
                             fontSize = 10.sp,
                             color = Color.White.copy(alpha = 0.7f),
                             fontFamily = NotoSansBengali
@@ -288,22 +305,45 @@ fun QuestionListScreen(
                             )
                         }
 
-                        // Submit button
-                        Button(
-                            onClick = { showSubmitDialog = true },
-                            shape   = RoundedCornerShape(20.dp),
-                            colors  = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF10B981)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                "✅ সাবমিট",
-                                fontSize   = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color      = Color.White,
-                                fontFamily = NotoSansBengali
-                            )
+                        // Next page or Submit button
+                        if (!isLastPage) {
+                            // পরবর্তী পৃষ্ঠা বাটন
+                            Button(
+                                onClick = {
+                                    viewModel.goToPage(safeCurrentPage + 1)
+                                },
+                                shape   = RoundedCornerShape(20.dp),
+                                colors  = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF4F46E5)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    "পরবর্তী ➜",
+                                    fontSize   = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color      = Color.White,
+                                    fontFamily = NotoSansBengali
+                                )
+                            }
+                        } else {
+                            // Submit button (শেষ পৃষ্ঠায়)
+                            Button(
+                                onClick = { showSubmitDialog = true },
+                                shape   = RoundedCornerShape(20.dp),
+                                colors  = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF10B981)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    "✅ সাবমিট",
+                                    fontSize   = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color      = Color.White,
+                                    fontFamily = NotoSansBengali
+                                )
+                            }
                         }
                     }
                 }
