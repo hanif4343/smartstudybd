@@ -39,6 +39,12 @@ android {
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
         buildConfigField "String", "FIREBASE_DB_SECRET", "\"%%FIREBASE_DB_SECRET%%\""
 
+        // ── Real-time data mode ──
+        // true  → online হলে সবসময় Firebase থেকে fresh data (testing/development)
+        // false → cache ব্যবহার করে (production — Firebase read কম হবে)
+        // Production ready হলে এটা false করো।
+        buildConfigField "boolean", "REALTIME_DATA", "true"
+
         // ── FCM HTTP v1 service account — সরাসরি app থেকে push পাঠানোর জন্য (GAS নেই) ──
         buildConfigField "String", "FCM_PROJECT_ID",   secretField("FCM_PROJECT_ID")
         buildConfigField "String", "FCM_CLIENT_EMAIL", secretField("FCM_CLIENT_EMAIL")
