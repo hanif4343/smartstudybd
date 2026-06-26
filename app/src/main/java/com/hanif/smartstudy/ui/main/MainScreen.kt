@@ -51,7 +51,8 @@ fun MainScreen(
     var currentTab     by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch     by remember { mutableStateOf(false) }
     var showTyping     by remember { mutableStateOf(false) }
-    var showExitDialog by remember { mutableStateOf(false) }
+    var showExitDialog        by remember { mutableStateOf(false) }
+    var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
     // ── Typing/Search achievement unlock এর জন্য ──
     // এই দুটো screen এর নিজস্ব ViewModel নেই (শুধু stateless composable),
@@ -170,6 +171,10 @@ fun MainScreen(
             DeepLinkAction.Type.TECHNIQUES -> { currentTab = BottomTab.MENU  }
             DeepLinkAction.Type.MENU       -> { currentTab = BottomTab.MENU  }
             DeepLinkAction.Type.CHALLENGE  -> { currentTab = BottomTab.CHALLENGE }
+            DeepLinkAction.Type.ROUTINE    -> {
+                currentTab = BottomTab.HOME
+                pendingRoutineItemId = deepLink.routineItemId
+            }
             DeepLinkAction.Type.NONE       -> {}
         }
     }
@@ -235,7 +240,9 @@ fun MainScreen(
                 OfflineBanner(visible = !isOnline)
             when (currentTab) {
                 BottomTab.HOME  -> HomeScreen(
-                    quizViewModel = quizViewModel,
+                    quizViewModel          = quizViewModel,
+                    highlightRoutineItemId = pendingRoutineItemId,
+                    onRoutineItemHighlighted = { pendingRoutineItemId = null },
                     onSearchClick = { showSearch = true },
                     onTypingClick = { showTyping = true },
                     onOpenStudy = { subject, subTopic ->
