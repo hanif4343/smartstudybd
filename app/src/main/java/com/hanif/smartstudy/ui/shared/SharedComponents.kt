@@ -1047,8 +1047,8 @@ fun ReportDialog(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  AdminQuestionEditDialog — সব field একসাথে, কোনো tab নেই
-//  Save button header-এ থাকে, কাজ হচ্ছে তা বোঝা যায়
+//  AdminQuestionEditDialog — HTML index23.html inspired redesign
+//  Clean, compact, scroll-free for most questions
 // ═══════════════════════════════════════════════════════════════
 
 private val ADMIN_AUDIENCE_LIST = listOf(
@@ -1090,25 +1090,51 @@ fun AdminQuestionEditDialog(
     var editAudience    by remember { mutableStateOf(item.audienceTags) }
     var audienceExpanded by remember { mutableStateOf(false) }
 
+    // active field for toolbar
+    var activeFieldId   by remember { mutableStateOf("question") }
+    var showPreviewFor  by remember { mutableStateOf<String?>(null) }
+
     var isSaving    by remember { mutableStateOf(false) }
-    var saveSuccess by remember { mutableStateOf<Boolean?>(null) }  // null=idle, true=ok, false=err
+    var saveSuccess by remember { mutableStateOf<Boolean?>(null) }
     var saveMsg     by remember { mutableStateOf("") }
     val scope       = rememberCoroutineScope()
     val adminIndigo = Color(0xFF4F46E5)
     val greenOkClr  = Color(0xFF10B981)
 
+    // Map fieldId → state getter/setter
+    fun getFieldValue(id: String) = when(id) {
+        "question"    -> editQuestion
+        "optA"        -> editOptionA
+        "optB"        -> editOptionB
+        "optC"        -> editOptionC
+        "optD"        -> editOptionD
+        "answer"      -> editAnswer
+        "explanation" -> editExplanation
+        "technique"   -> editTechnique
+        else          -> editQuestion
+    }
+    fun setFieldValue(id: String, v: String) = when(id) {
+        "question"    -> editQuestion    = v
+        "optA"        -> editOptionA     = v
+        "optB"        -> editOptionB     = v
+        "optC"        -> editOptionC     = v
+        "optD"        -> editOptionD     = v
+        "answer"      -> editAnswer      = v
+        "explanation" -> editExplanation = v
+        "technique"   -> editTechnique   = v
+        else          -> Unit
+    }
+
     val doSave: () -> Unit = {
         scope.launch {
-            isSaving = true
-            saveSuccess = null
-            saveMsg = ""
+            isSaving = true; saveSuccess = null; saveMsg = ""
             try {
                 val fields = mutableMapOf<String, String>()
                 if (editQuestion    != item.question)     fields["question"]     = editQuestion
                 if (editExplanation != item.explanation)  fields["explanation"]  = editExplanation
                 if (editTechnique   != item.technique)    fields["technique"]    = editTechnique
                 if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
-                if (editAnswer      != item.answer)       { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
+                if (editAnswer      != item.answer) { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
                 val origOpts = listOf(item.optionA, item.optionB, item.optionC, item.optionD)
                 val newOpts  = listOf(editOptionA, editOptionB, editOptionC, editOptionD)
                 if (newOpts != origOpts) {
@@ -1118,17 +1144,10 @@ fun AdminQuestionEditDialog(
                     if (editOptionD.isNotBlank()) fields["option4"] = editOptionD
                     fields["correct"] = editAnswer
                 }
-                if (fields.isEmpty()) {
-                    saveMsg = "⚠️ কিছু পরিবর্তন করা হয়নি"
-                    saveSuccess = false
-                    isSaving = false
-                    return@launch
-                }
-
+                if (fields.isEmpty()) { saveMsg = "⚠️ কিছু পরিবর্তন করা হয়নি"; saveSuccess = false; isSaving = false; return@launch }
                 if (onAdminEdit != null) {
                     onAdminEdit(sheet, item.id, fields, item.question.take(60))
-                    saveMsg = "✅ ${fields.size}টি field সংরক্ষিত হচ্ছে!"
-                    saveSuccess = true
+                    saveMsg = "✅ ${fields.size}টি field সংরক্ষিত হচ্ছে!"; saveSuccess = true
                 } else {
                     when (val r = FirebaseDataService.adminUpdateQuestionField(sheet, item.id, fields)) {
                         is ApiResult.Success -> { saveMsg = "✅ ${fields.size}টি field Firebase এ সংরক্ষিত!"; saveSuccess = true }
@@ -1137,10 +1156,7 @@ fun AdminQuestionEditDialog(
                 }
             } catch (e: Exception) { saveMsg = "❌ ${e.message}"; saveSuccess = false }
             isSaving = false
-            if (saveSuccess == true) {
-                kotlinx.coroutines.delay(1800)
-                onDismiss()
-            }
+            if (saveSuccess == true) { kotlinx.coroutines.delay(1500); onDismiss() }
         }
     }
 
@@ -1153,13 +1169,13 @@ fun AdminQuestionEditDialog(
         )
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.97f).fillMaxHeight(0.95f),
+            modifier = Modifier.fillMaxWidth(0.97f).fillMaxHeight(0.96f),
             shape    = RoundedCornerShape(20.dp),
             color    = MaterialTheme.colorScheme.surface
         ) {
             Column(Modifier.fillMaxSize()) {
 
-                // ── Header with Save button ──────────────────────────────
+                // ── Gradient Header ──────────────────────────────────────
                 Box(
                     Modifier.fillMaxWidth()
                         .background(androidx.compose.ui.graphics.Brush.horizontalGradient(
@@ -1168,215 +1184,252 @@ fun AdminQuestionEditDialog(
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Subject + SubTopic chips
                         Column(Modifier.weight(1f)) {
-                            Text("✏️ প্রশ্ন সম্পাদনা", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-                                color = Color.White, fontFamily = NotoSansBengali)
-                            Text("ID: ${item.id}  •  $sheet", fontSize = 10.sp,
-                                color = Color.White.copy(0.55f), fontFamily = NotoSansBengali)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (item.subject.isNotBlank())
+                                    AdminInfoChip("📚 ${item.subject}", Color(0xFFa78bfa))
+                                if (item.subTopic.isNotBlank())
+                                    AdminInfoChip("🏷️ ${item.subTopic}", Color(0xFF6ee7b7))
+                            }
+                            Text("ID: ${item.id}  •  $sheet", fontSize = 9.sp,
+                                color = Color.White.copy(0.45f), fontFamily = NotoSansBengali,
+                                modifier = Modifier.padding(top = 2.dp))
                         }
-
-                        // Save button — always visible, shows progress state
+                        // Save button
                         Surface(
                             onClick  = { if (!isSaving) doSave() },
                             enabled  = !isSaving,
                             shape    = RoundedCornerShape(12.dp),
                             color    = when {
-                                isSaving        -> Color.White.copy(0.5f)
+                                isSaving             -> Color.White.copy(0.5f)
                                 saveSuccess == true  -> greenOkClr
                                 saveSuccess == false -> Color(0xFFEF4444)
-                                else            -> Color.White.copy(0.92f)
+                                else                 -> Color.White.copy(0.92f)
                             }
                         ) {
-                            Row(
-                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                 when {
-                                    isSaving -> CircularProgressIndicator(
-                                        Modifier.size(14.dp), adminIndigo, strokeWidth = 2.dp)
-                                    saveSuccess == true  -> Text("✅", fontSize = 14.sp)
-                                    saveSuccess == false -> Text("❌", fontSize = 14.sp)
-                                    else -> Icon(Icons.Default.Save, null,
-                                        tint = adminIndigo, modifier = Modifier.size(15.dp))
+                                    isSaving -> CircularProgressIndicator(Modifier.size(13.dp), adminIndigo, strokeWidth = 2.dp)
+                                    saveSuccess == true  -> Text("✅", fontSize = 13.sp)
+                                    saveSuccess == false -> Text("❌", fontSize = 13.sp)
+                                    else -> Icon(Icons.Default.Save, null, tint = adminIndigo, modifier = Modifier.size(14.dp))
                                 }
                                 Text(
                                     when {
-                                        isSaving        -> "সংরক্ষণ..."
+                                        isSaving             -> "সংরক্ষণ..."
                                         saveSuccess == true  -> "সংরক্ষিত!"
                                         saveSuccess == false -> "আবার চেষ্টা"
-                                        else            -> "💾 সংরক্ষণ"
+                                        else                 -> "💾 সংরক্ষণ"
                                     },
                                     fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                                     fontFamily = NotoSansBengali,
-                                    color = when {
-                                        isSaving        -> adminIndigo
-                                        saveSuccess != null -> Color.White
-                                        else            -> adminIndigo
-                                    }
+                                    color = if (saveSuccess != null || isSaving) Color.White else adminIndigo
                                 )
                             }
                         }
-
-                        Spacer(Modifier.width(6.dp))
-                        IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(30.dp)) {
-                            Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(onClick = { if (!isSaving) onDismiss() }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
+
+                // ── Sticky Toolbar (always visible, acts on active field) ─
+                AdminStickyToolbar(
+                    activeFieldId   = activeFieldId,
+                    getFieldValue   = ::getFieldValue,
+                    setFieldValue   = ::setFieldValue,
+                    showPreviewFor  = showPreviewFor,
+                    onTogglePreview = { showPreviewFor = if (showPreviewFor == activeFieldId) null else activeFieldId },
+                    adminIndigo     = adminIndigo
+                )
 
                 // ── Save message banner ──────────────────────────────────
                 androidx.compose.animation.AnimatedVisibility(saveMsg.isNotBlank()) {
                     val ok = saveSuccess == true
-                    Surface(
-                        color    = if (ok) Color(0xFFDCFCE7) else Color(0xFFFEE2E2),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(saveMsg, Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    Surface(color = if (ok) Color(0xFFDCFCE7) else Color(0xFFFEE2E2), modifier = Modifier.fillMaxWidth()) {
+                        Text(saveMsg, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
                             color = if (ok) Color(0xFF166534) else Color(0xFF991B1B))
                     }
                 }
 
-                // ── All fields scrollable ────────────────────────────────
+                // ── Scrollable Fields ────────────────────────────────────
                 Column(
-                    Modifier.weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-
-                    // Info chips
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (item.subject.isNotBlank()) AdminInfoChip("📚 ${item.subject}", Color(0xFF4F46E5))
-                        if (item.subTopic.isNotBlank()) AdminInfoChip("🏷️ ${item.subTopic}", Color(0xFF059669))
+                    // Subject + SubTopic row (read-only info)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AdminReadOnlyField("📚 Subject", item.subject, Modifier.weight(1f))
+                        AdminReadOnlyField("🏷️ Sub-Topic", item.subTopic, Modifier.weight(1f))
                     }
 
                     // ── প্রশ্ন ──
-                    AdminSectionHeader("📝 প্রশ্ন", adminIndigo)
-                    AdminTextField("প্রশ্ন", editQuestion, { editQuestion = it }, 3)
+                    AdminCompactField(
+                        label        = "প্রশ্ন",
+                        fieldId      = "question",
+                        value        = editQuestion,
+                        onChange     = { editQuestion = it },
+                        minLines     = 2,
+                        isActive     = activeFieldId == "question",
+                        showPreview  = showPreviewFor == "question",
+                        onFocus      = { activeFieldId = "question" },
+                        adminIndigo  = adminIndigo
+                    )
 
-                    // ── Options (MCQ only) ──
+                    // ── MCQ Options ──
                     if (item.isMcq()) {
-                        AdminSectionHeader("🔘 Options", Color(0xFF7C3AED))
-                        listOf(
-                            "A" to editOptionA, "B" to editOptionB,
-                            "C" to editOptionC, "D" to editOptionD
-                        ).forEachIndexed { idx, (label, curVal) ->
-                            val isCorrect = curVal.trim().equals(editAnswer.trim(), ignoreCase = true)
-                            Surface(
-                                shape  = RoundedCornerShape(12.dp),
-                                color  = if (isCorrect) Color(0xFFF0FDF4) else Color(0xFFF8FAFC),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.5.dp, if (isCorrect) greenOkClr else Color(0xFFE2E8F0)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Box(
-                                            Modifier.size(24.dp).background(
-                                                if (isCorrect) greenOkClr else Color(0xFF7C3AED),
-                                                RoundedCornerShape(6.dp)
-                                            ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                                        }
-                                        if (isCorrect) {
-                                            Text("✅ সঠিক উত্তর", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                                                color = greenOkClr, fontFamily = NotoSansBengali)
-                                        }
-                                    }
-                                    AdminTextField("Option $label", curVal, { v ->
-                                        when(idx) { 0->editOptionA=v; 1->editOptionB=v; 2->editOptionC=v; else->editOptionD=v }
-                                    })
+                        // 2-column grid for options
+                        val opts = listOf(
+                            "optA" to editOptionA,
+                            "optB" to editOptionB,
+                            "optC" to editOptionC,
+                            "optD" to editOptionD
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(opts[0], opts[2]).forEach { (id, v) ->
+                                    val label = if (id == "optA") "A" else "C"
+                                    val isCorrect = v.trim().equals(editAnswer.trim(), ignoreCase = true)
+                                    AdminOptionField(
+                                        label = label, fieldId = id, value = v,
+                                        isCorrect = isCorrect,
+                                        isActive = activeFieldId == id,
+                                        showPreview = showPreviewFor == id,
+                                        onFocus = { activeFieldId = id },
+                                        onChange = { setFieldValue(id, it) },
+                                        adminIndigo = adminIndigo, greenOkClr = greenOkClr
+                                    )
+                                }
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(opts[1], opts[3]).forEach { (id, v) ->
+                                    val label = if (id == "optB") "B" else "D"
+                                    val isCorrect = v.trim().equals(editAnswer.trim(), ignoreCase = true)
+                                    AdminOptionField(
+                                        label = label, fieldId = id, value = v,
+                                        isCorrect = isCorrect,
+                                        isActive = activeFieldId == id,
+                                        showPreview = showPreviewFor == id,
+                                        onFocus = { activeFieldId = id },
+                                        onChange = { setFieldValue(id, it) },
+                                        adminIndigo = adminIndigo, greenOkClr = greenOkClr
+                                    )
                                 }
                             }
                         }
 
-                        // ── সঠিক উত্তর ──
-                        AdminSectionHeader("✅ সঠিক উত্তর", greenOkClr)
-                        AdminTextField("সঠিক উত্তর (option এর exact text)", editAnswer, { editAnswer = it })
+                        // সঠিক উত্তর (compact single line)
+                        AdminCompactField(
+                            label       = "✅ সঠিক উত্তর",
+                            fieldId     = "answer",
+                            value       = editAnswer,
+                            onChange    = { editAnswer = it },
+                            isActive    = activeFieldId == "answer",
+                            showPreview = showPreviewFor == "answer",
+                            onFocus     = { activeFieldId = "answer" },
+                            adminIndigo = adminIndigo,
+                            accentColor = greenOkClr
+                        )
                     } else {
-                        // Written answer
-                        AdminSectionHeader("✅ উত্তর", greenOkClr)
-                        AdminTextField("উত্তর", editAnswer, { editAnswer = it }, 2)
+                        AdminCompactField(
+                            label       = "✅ উত্তর",
+                            fieldId     = "answer",
+                            value       = editAnswer,
+                            onChange    = { editAnswer = it },
+                            minLines    = 2,
+                            isActive    = activeFieldId == "answer",
+                            showPreview = showPreviewFor == "answer",
+                            onFocus     = { activeFieldId = "answer" },
+                            adminIndigo = adminIndigo,
+                            accentColor = greenOkClr
+                        )
                     }
 
                     // ── ব্যাখ্যা ──
-                    AdminSectionHeader("💡 ব্যাখ্যা", Color(0xFFF59E0B))
-                    AdminTextField("বিস্তারিত ব্যাখ্যা", editExplanation, { editExplanation = it }, 3)
+                    AdminCompactField(
+                        label       = "💡 ব্যাখ্যা",
+                        fieldId     = "explanation",
+                        value       = editExplanation,
+                        onChange    = { editExplanation = it },
+                        minLines    = 2,
+                        isActive    = activeFieldId == "explanation",
+                        showPreview = showPreviewFor == "explanation",
+                        onFocus     = { activeFieldId = "explanation" },
+                        adminIndigo = adminIndigo,
+                        accentColor = Color(0xFFF59E0B)
+                    )
 
-                    // ── টেকনিক ──
-                    AdminSectionHeader("🧠 টেকনিক / নোট", Color(0xFF0EA5E9))
-                    AdminTextField("টেকনিক", editTechnique, { editTechnique = it }, 2)
+                    // ── টেকনিক + Audience — same row ──
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AdminCompactField(
+                            label       = "🧠 টেকনিক",
+                            fieldId     = "technique",
+                            value       = editTechnique,
+                            onChange    = { editTechnique = it },
+                            isActive    = activeFieldId == "technique",
+                            showPreview = showPreviewFor == "technique",
+                            onFocus     = { activeFieldId = "technique" },
+                            adminIndigo = adminIndigo,
+                            accentColor = Color(0xFF0EA5E9),
+                            modifier    = Modifier.weight(1f)
+                        )
 
-                    // ── Audience Tag ──
-                    AdminSectionHeader("🎯 Audience Tag", Color(0xFF8B5CF6))
-                    // Current selected label
-                    val currentAudienceLabel = ADMIN_AUDIENCE_LIST.find { it.first == editAudience }?.second
-                        ?: if (editAudience.isBlank()) "Job Seeker (default)" else editAudience
-
-                    Surface(
-                        onClick  = { audienceExpanded = !audienceExpanded },
-                        shape    = RoundedCornerShape(10.dp),
-                        color    = MaterialTheme.colorScheme.surfaceVariant,
-                        border   = androidx.compose.foundation.BorderStroke(
-                            1.5.dp, if (audienceExpanded) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("🎯", fontSize = 16.sp)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Audience", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF8B5CF6), fontFamily = NotoSansBengali)
-                                Text(currentAudienceLabel, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                        // Audience compact dropdown
+                        val curAudLabel = ADMIN_AUDIENCE_LIST.find { it.first == editAudience }?.second
+                            ?: if (editAudience.isBlank()) "Default" else editAudience
+                        Column(Modifier.weight(1f)) {
+                            Text("🎯 Audience", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF8B5CF6), fontFamily = NotoSansBengali,
+                                modifier = Modifier.padding(bottom = 4.dp))
+                            Surface(
+                                onClick  = { audienceExpanded = !audienceExpanded },
+                                shape    = RoundedCornerShape(10.dp),
+                                color    = MaterialTheme.colorScheme.surfaceVariant,
+                                border   = androidx.compose.foundation.BorderStroke(
+                                    1.5.dp, if (audienceExpanded) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text(curAudLabel, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                                    Icon(if (audienceExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(16.dp))
+                                }
                             }
-                            Icon(
-                                if (audienceExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(audienceExpanded) {
-                        Surface(
-                            shape  = RoundedCornerShape(10.dp),
-                            color  = MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                ADMIN_AUDIENCE_LIST.forEach { (tag, label) ->
-                                    val isSelected = editAudience == tag
-                                    Surface(
-                                        onClick = { editAudience = tag; audienceExpanded = false },
-                                        shape   = RoundedCornerShape(8.dp),
-                                        color   = if (isSelected) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.surface,
-                                        border  = if (isSelected) null else
-                                            androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            if (isSelected) {
-                                                Icon(Icons.Default.CheckCircle, null,
-                                                    tint = Color.White, modifier = Modifier.size(14.dp))
+                            androidx.compose.animation.AnimatedVisibility(audienceExpanded) {
+                                Surface(
+                                    shape  = RoundedCornerShape(10.dp),
+                                    color  = MaterialTheme.colorScheme.surfaceVariant,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                ) {
+                                    Column(Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        ADMIN_AUDIENCE_LIST.forEach { (tag, label) ->
+                                            val isSel = editAudience == tag
+                                            Surface(
+                                                onClick  = { editAudience = tag; audienceExpanded = false },
+                                                shape    = RoundedCornerShape(8.dp),
+                                                color    = if (isSel) Color(0xFF8B5CF6) else MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    if (isSel) Icon(Icons.Default.CheckCircle, null,
+                                                        tint = Color.White, modifier = Modifier.size(12.dp))
+                                                    Text(label, fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                                        fontWeight = if (isSel) FontWeight.ExtraBold else FontWeight.Normal,
+                                                        color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurface)
+                                                }
                                             }
-                                            Text(label, fontSize = 13.sp, fontFamily = NotoSansBengali,
-                                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
-                                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface)
                                         }
                                     }
                                 }
@@ -1384,32 +1437,238 @@ fun AdminQuestionEditDialog(
                         }
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(4.dp))
                 }
 
-                // ── Bottom: Cancel button ────────────────────────────────
-                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp) {
+                // ── Bottom Cancel ────────────────────────────────────────
+                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth(), shadowElevation = 6.dp) {
                     OutlinedButton(
                         onClick  = { if (!isSaving) onDismiss() },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                         shape    = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    }
+                    ) { Text("বাতিল", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
                 }
             }
         }
     }
 }
 
+// ── Sticky Toolbar — always on top, targets active field ─────────────────────
+@Composable
+private fun AdminStickyToolbar(
+    activeFieldId   : String,
+    getFieldValue   : (String) -> String,
+    setFieldValue   : (String, String) -> Unit,
+    showPreviewFor  : String?,
+    onTogglePreview : () -> Unit,
+    adminIndigo     : Color
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color    = MaterialTheme.colorScheme.surfaceVariant,
+        border   = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            // Tool buttons — icons + short labels
+            val toolItems = listOf(
+                Triple("B",    Icons.Default.FormatBold,          { v: String -> applyToolToField("<b>", "</b>", v) }),
+                Triple("I",    Icons.Default.FormatItalic,        { v: String -> applyToolToField("<i>", "</i>", v) }),
+                Triple("U",    Icons.Default.FormatUnderlined,    { v: String -> applyToolToField("<u>", "</u>", v) }),
+                Triple("HI",   Icons.Default.Highlight,           { v: String -> applyToolToField("<mark><b>", "</b></mark>", v) }),
+                Triple("LIST", Icons.Default.FormatListBulleted,  { v: String -> applyToolToField("<li>", "</li>", v) }),
+                Triple("$$",   Icons.Default.Functions,           { v: String -> "$v\$\$ " }),
+                Triple("x²",   Icons.Default.Superscript,         { v: String -> "$v\$x^2\$" }),
+                Triple("⊞",   Icons.Default.TableChart,          { v: String -> "$v\nশিরোনাম ; শিরোনাম\nতথ্য ; তথ্য" })
+            )
+
+            toolItems.forEach { (label, icon, transform) ->
+                val isSpecial = label == "HI"
+                Surface(
+                    onClick = {
+                        val cur = getFieldValue(activeFieldId)
+                        setFieldValue(activeFieldId, transform(cur))
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isSpecial) Color(0xFFFFF7ED) else MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, contentDescription = label,
+                            tint = when(label) {
+                                "HI"   -> Color(0xFF92400E)
+                                "$$", "x²" -> Color(0xFF2563EB)
+                                "LIST" -> Color(0xFF059669)
+                                "⊞"  -> Color(0xFF4F46E5)
+                                else   -> MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Preview toggle
+            val isPreviewing = showPreviewFor == activeFieldId
+            Surface(
+                onClick  = onTogglePreview,
+                shape    = RoundedCornerShape(8.dp),
+                color    = if (isPreviewing) adminIndigo.copy(0.12f) else Color.Transparent,
+                border   = androidx.compose.foundation.BorderStroke(1.dp,
+                    if (isPreviewing) adminIndigo else MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Default.Visibility, null,
+                        tint = if (isPreviewing) adminIndigo else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(13.dp))
+                    Text("Preview", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                        color = if (isPreviewing) adminIndigo else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+// helper — append to end (simple; full selection support needs TextFieldValue)
+private fun applyToolToField(open: String, close: String, current: String): String =
+    current + open + close
+
+// ── Compact field — label + outlined text field + optional preview ────────────
+@Composable
+private fun AdminCompactField(
+    label       : String,
+    fieldId     : String,
+    value       : String,
+    onChange    : (String) -> Unit,
+    minLines    : Int    = 1,
+    isActive    : Boolean,
+    showPreview : Boolean,
+    onFocus     : () -> Unit,
+    adminIndigo : Color,
+    accentColor : Color  = adminIndigo,
+    modifier    : Modifier = Modifier.fillMaxWidth()
+) {
+    val borderColor = when {
+        isActive -> accentColor
+        else     -> MaterialTheme.colorScheme.outlineVariant
+    }
+    Column(modifier) {
+        Text(label, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+            color = if (isActive) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = NotoSansBengali,
+            modifier = Modifier.padding(bottom = 3.dp))
+        OutlinedTextField(
+            value         = value,
+            onValueChange = onChange,
+            modifier      = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onFocus() },
+            minLines      = minLines,
+            shape         = RoundedCornerShape(10.dp),
+            colors        = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = accentColor,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                focusedContainerColor   = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+            ),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp)
+        )
+        // Live preview
+        androidx.compose.animation.AnimatedVisibility(showPreview && value.isNotBlank()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                shape    = RoundedCornerShape(8.dp),
+                color    = MaterialTheme.colorScheme.surfaceVariant,
+                border   = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(0.3f))
+            ) {
+                Text(parseRichAnnotated(value), Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    fontSize = 12.sp, fontFamily = NotoSansBengali,
+                    color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+// ── Option field — colored border if correct ──────────────────────────────────
+@Composable
+private fun AdminOptionField(
+    label       : String,
+    fieldId     : String,
+    value       : String,
+    isCorrect   : Boolean,
+    isActive    : Boolean,
+    showPreview : Boolean,
+    onFocus     : () -> Unit,
+    onChange    : (String) -> Unit,
+    adminIndigo : Color,
+    greenOkClr  : Color
+) {
+    val borderColor = when {
+        isCorrect -> greenOkClr
+        isActive  -> adminIndigo
+        else      -> MaterialTheme.colorScheme.outlineVariant
+    }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(bottom = 3.dp)) {
+            Box(
+                Modifier.size(20.dp).background(
+                    if (isCorrect) greenOkClr else Color(0xFF7C3AED), RoundedCornerShape(5.dp)
+                ), contentAlignment = Alignment.Center
+            ) { Text(label, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
+            if (isCorrect)
+                Text("✅ সঠিক", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                    color = greenOkClr, fontFamily = NotoSansBengali)
+        }
+        OutlinedTextField(
+            value         = value,
+            onValueChange = onChange,
+            modifier      = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) onFocus() },
+            minLines      = 1,
+            shape         = RoundedCornerShape(10.dp),
+            colors        = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor      = borderColor,
+                unfocusedBorderColor    = borderColor,
+                focusedContainerColor   = if (isCorrect) greenOkClr.copy(0.06f) else MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = if (isCorrect) greenOkClr.copy(0.06f) else MaterialTheme.colorScheme.surface
+            ),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 12.sp)
+        )
+    }
+}
+
+// ── Read-only info field ──────────────────────────────────────────────────────
+@Composable
+private fun AdminReadOnlyField(label: String, value: String, modifier: Modifier = Modifier) {
+    if (value.isBlank()) return
+    Column(modifier) {
+        Text(label, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 2.dp))
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(value, Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+        }
+    }
+}
+
 @Composable
 private fun AdminSectionHeader(title: String, color: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Row(verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(title, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+        modifier = Modifier.fillMaxWidth()) {
+        Text(title, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
             color = color, fontFamily = NotoSansBengali)
         HorizontalDivider(Modifier.weight(1f), color = color.copy(0.2f))
     }
@@ -1417,31 +1676,43 @@ private fun AdminSectionHeader(title: String, color: Color) {
 
 @Composable
 private fun AdminInfoChip(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = color.copy(0.1f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(0.3f))
-    ) {
-        Text(text, Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-            color = color, fontFamily = NotoSansBengali)
+    Surface(shape = RoundedCornerShape(20.dp), color = color.copy(0.18f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(0.4f))) {
+        Text(text, Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color, fontFamily = NotoSansBengali)
     }
 }
 
-// ── Inline formatting helper ─────────────────────────────────────
-// Supported markers:
-//   **text**  → Bold
-//   *text*    → Italic
-//   __text__  → Underline
-//   ++text++         → Larger size
-//   <b>text</b>     → Bold
-//   <i>text</i>     → Italic
-//   <u>text</u>     → Underline
-//   <mark><b>…      → Highlight + Bold
-//   <li>text</li>   → Bullet list item
-//   $$ / $x^2$      → shown as-is (math placeholder)
+// ── Tool definitions (kept for compatibility) ─────────────────────────────────
+private data class AdminTool(
+    val label     : String,
+    val emoji     : String   = "",
+    val open      : String   = "",
+    val close     : String   = "",
+    val insert    : String   = "",
+    val bgColor   : Long     = 0xFFFFFFFF,
+    val textColor : Long     = 0xFF4F46E5,
+    val isBold    : Boolean  = false,
+    val isItalic  : Boolean  = false,
+    val isUnder   : Boolean  = false
+)
+
+private val ADMIN_TOOLS = listOf(
+    AdminTool("B+HI", open="<mark><b>", close="</b></mark>", bgColor=0xFFFFF7ED, textColor=0xFF92400E, isBold=true),
+    AdminTool("B",    open="<b>",       close="</b>",        isBold=true),
+    AdminTool("I",    open="<i>",       close="</i>",        isItalic=true),
+    AdminTool("U",    open="<u>",       close="</u>",        isUnder=true),
+    AdminTool("A↑",   open="++",        close="++",          textColor=0xFF7C3AED),
+    AdminTool("LIST", open="<li>",      close="</li>",       textColor=0xFF059669),
+    AdminTool("$$",   insert="\$\$ ",              textColor=0xFF2563EB),
+    AdminTool("x²",   insert="\$x^2\$",            textColor=0xFF2563EB),
+    AdminTool("TABLE",insert="\nশিরোনাম ; শিরোনাম\nতথ্য ; তথ্য", textColor=0xFF1E293B, bgColor=0xFF1E293B)
+)
+
+
+
+// ── Rich text parser (used by preview) ───────────────────────────────────────
 internal fun parseRichAnnotated(raw: String, baseSizeSp: Float = 13f): AnnotatedString {
-    // Pre-process: strip <mark> wrapper (rendered as color highlight below via <b> inside)
     val cleaned = raw
         .replace("<mark><b>", "<hb>").replace("</b></mark>", "</hb>")
         .replace("<mark>",    "<hb>").replace("</mark>",     "</hb>")
@@ -1450,7 +1721,6 @@ internal fun parseRichAnnotated(raw: String, baseSizeSp: Float = 13f): Annotated
         var i = 0
         while (i < cleaned.length) {
             when {
-                // ── markdown-style ────────────────────────────────────────
                 cleaned.startsWith("**", i) -> {
                     val end = cleaned.indexOf("**", i + 2)
                     if (end == -1) { append(cleaned[i]); i++ }
@@ -1471,7 +1741,6 @@ internal fun parseRichAnnotated(raw: String, baseSizeSp: Float = 13f): Annotated
                     if (end == -1) { append(cleaned[i]); i++ }
                     else { withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(cleaned.substring(i+1,end)) }; i=end+1 }
                 }
-                // ── HTML-style (from toolbar) ─────────────────────────────
                 cleaned.startsWith("<hb>", i) -> {
                     val end = cleaned.indexOf("</hb>", i+4)
                     if (end == -1) { append(cleaned[i]); i++ }
@@ -1500,14 +1769,8 @@ internal fun parseRichAnnotated(raw: String, baseSizeSp: Float = 13f): Annotated
                 cleaned.startsWith("<li>", i) -> {
                     val end = cleaned.indexOf("</li>", i+4)
                     if (end == -1) { append(cleaned[i]); i++ }
-                    else {
-                        append("• ")
-                        append(cleaned.substring(i+4, end))
-                        append("\n")
-                        i = end + 5
-                    }
+                    else { append("• "); append(cleaned.substring(i+4, end)); append("\n"); i = end + 5 }
                 }
-                // ── skip closing tags that weren't matched ────────────────
                 cleaned.startsWith("</", i) -> {
                     val tagEnd = cleaned.indexOf('>', i)
                     i = if (tagEnd == -1) i+1 else tagEnd+1
@@ -1527,213 +1790,6 @@ private fun wrapSelection(tfv: TextFieldValue, open: String, close: String): Tex
     val newText  = txt.substring(0, start) + open + selected + close + txt.substring(end)
     val newCursor = if (start == end) start + open.length else end + open.length + close.length
     return TextFieldValue(newText, TextRange(newCursor))
-}
-
-// ── Tool definitions ─────────────────────────────────────────────────────────
-private data class AdminTool(
-    val label     : String,
-    val emoji     : String   = "",
-    val open      : String   = "",
-    val close     : String   = "",
-    val insert    : String   = "",   // insert-only (no wrap)
-    val bgColor   : Long     = 0xFFFFFFFF,
-    val textColor : Long     = 0xFF4F46E5,
-    val isBold    : Boolean  = false,
-    val isItalic  : Boolean  = false,
-    val isUnder   : Boolean  = false
-)
-
-private val ADMIN_TOOLS = listOf(
-    AdminTool("B+HI", open="<mark><b>", close="</b></mark>", bgColor=0xFFFFF7ED, textColor=0xFF92400E, isBold=true),
-    AdminTool("B",    open="<b>",       close="</b>",        isBold=true),
-    AdminTool("I",    open="<i>",       close="</i>",        isItalic=true),
-    AdminTool("U",    open="<u>",       close="</u>",        isUnder=true),
-    AdminTool("A↑",   open="++",        close="++",          textColor=0xFF7C3AED),
-    AdminTool("LIST", open="<li>",      close="</li>",       textColor=0xFF059669),
-    AdminTool("$$",   insert="\$\$ ",              textColor=0xFF2563EB),
-    AdminTool("x²",   insert="\$x^2\$",            textColor=0xFF2563EB),
-    AdminTool("TABLE",insert="\nশিরোনাম ; শিরোনাম\nতথ্য ; তথ্য", textColor=0xFF1E293B, bgColor=0xFF1E293B)
-)
-
-@Composable
-private fun AdminTextField(
-    label    : String,
-    value    : String,
-    onChange : (String) -> Unit,
-    minLines : Int    = 1,
-    hint     : String = ""
-) {
-    val adminIndigo = Color(0xFF4F46E5)
-    var tfv         by remember { mutableStateOf(TextFieldValue(value)) }
-    var showPreview by remember { mutableStateOf(false) }
-    var isFocused   by remember { mutableStateOf(false) }
-
-    LaunchedEffect(value) {
-        if (tfv.text != value) tfv = TextFieldValue(value, TextRange(value.length))
-    }
-
-    // ── apply a tool to current TextFieldValue ────────────────────────────────
-    fun applyTool(tool: AdminTool): TextFieldValue {
-        val txt   = tfv.text
-        val start = minOf(tfv.selection.start, tfv.selection.end)
-        val end   = maxOf(tfv.selection.start, tfv.selection.end)
-        return if (tool.insert.isNotEmpty()) {
-            // insert-only: put snippet at cursor
-            val newText   = txt.substring(0, start) + tool.insert + txt.substring(end)
-            val newCursor = start + tool.insert.length
-            TextFieldValue(newText, TextRange(newCursor))
-        } else {
-            // wrap selection (or insert tags at cursor if nothing selected)
-            val sel     = txt.substring(start, end)
-            val wrapped = tool.open + sel + tool.close
-            val newText = txt.substring(0, start) + wrapped + txt.substring(end)
-            val cursor  = if (start == end) start + tool.open.length
-                          else end + tool.open.length + tool.close.length
-            TextFieldValue(newText, TextRange(cursor))
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-
-        // ── Label row ────────────────────────────────────────────────────────
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isFocused) adminIndigo else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = NotoSansBengali)
-            // Preview toggle pill
-            Surface(
-                onClick  = { showPreview = !showPreview },
-                shape    = RoundedCornerShape(20.dp),
-                color    = if (showPreview) adminIndigo.copy(0.1f) else Color.Transparent,
-                border   = androidx.compose.foundation.BorderStroke(
-                    1.dp, if (showPreview) adminIndigo else Color(0xFFCBD5E1))
-            ) {
-                Text(
-                    if (showPreview) "👁 hide" else "👁 preview",
-                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    fontSize = 8.sp, fontWeight = FontWeight.ExtraBold,
-                    color = if (showPreview) adminIndigo else Color(0xFF94A3B8)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(4.dp))
-
-        // ── Toolbar — always visible ──────────────────────────────────────────
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape    = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
-            color    = Color(0xFFF8FAFC),
-            border   = androidx.compose.foundation.BorderStroke(
-                1.dp, if (isFocused) adminIndigo.copy(0.4f) else Color(0xFFE2E8F0))
-        ) {
-            LazyRow(
-                Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                items(ADMIN_TOOLS) { tool ->
-                    val isTableBtn = tool.label == "TABLE"
-                    Surface(
-                        onClick = {
-                            val updated = applyTool(tool)
-                            tfv = updated
-                            onChange(updated.text)
-                        },
-                        shape    = RoundedCornerShape(6.dp),
-                        color    = Color(tool.bgColor),
-                        border   = if (!isTableBtn)
-                            androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)) else null,
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Box(
-                            Modifier.padding(horizontal = if (tool.label.length > 2) 6.dp else 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isTableBtn) {
-                                // table icon special
-                                Text("⊞", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.ExtraBold)
-                            } else {
-                                Text(
-                                    tool.label,
-                                    fontSize   = 10.sp,
-                                    fontWeight = if (tool.isBold) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                    fontStyle  = if (tool.isItalic) FontStyle.Italic else FontStyle.Normal,
-                                    textDecoration = if (tool.isUnder) TextDecoration.Underline else TextDecoration.None,
-                                    color = Color(tool.textColor)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── TextField ─────────────────────────────────────────────────────────
-        OutlinedTextField(
-            value         = tfv,
-            onValueChange = { updated -> tfv = updated; onChange(updated.text) },
-            modifier      = Modifier.fillMaxWidth()
-                .onFocusChanged { isFocused = it.isFocused },
-            minLines      = minLines,
-            shape         = RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp),
-            colors        = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor   = adminIndigo,
-                unfocusedBorderColor = Color(0xFFE2E8F0)
-            ),
-            textStyle     = androidx.compose.ui.text.TextStyle(
-                fontFamily = NotoSansBengali, fontSize = 13.sp
-            ),
-            placeholder   = if (hint.isNotBlank()) {
-                { Text(hint, fontSize = 11.sp, color = Color(0xFFCBD5E1), fontFamily = NotoSansBengali) }
-            } else null
-        )
-
-        // ── Live Preview — shown when toggled or when field has rich tags ─────
-        val hasRichContent = tfv.text.contains(Regex("<[biu]|<mark|<li|\\$\\$|\\+\\+"))
-        androidx.compose.animation.AnimatedVisibility(showPreview || (hasRichContent && isFocused)) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                shape    = RoundedCornerShape(10.dp),
-                color    = MaterialTheme.colorScheme.surfaceVariant,
-                border   = androidx.compose.foundation.BorderStroke(1.dp, adminIndigo.copy(0.25f))
-            ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text("প্রিভিউ", fontSize = 8.sp, fontWeight = FontWeight.ExtraBold,
-                        color = adminIndigo.copy(0.6f), modifier = Modifier.padding(bottom = 4.dp))
-                    if (tfv.text.isNotBlank()) {
-                        Text(
-                            text       = parseRichAnnotated(tfv.text),
-                            fontSize   = 13.sp,
-                            fontFamily = NotoSansBengali,
-                            color      = MaterialTheme.colorScheme.onSurface,
-                            lineHeight = 20.sp
-                        )
-                    } else {
-                        Text("Live preview এখানে দেখাবে...", fontSize = 12.sp,
-                            color = Color(0xFFCBD5E1), fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdminInfoRow(label: String, value: String) {
-    if (value.isBlank()) return
-    Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════
