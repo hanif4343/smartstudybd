@@ -44,7 +44,9 @@ data class QuizUiState(
     val isAdmin        : Boolean         = false,
     val isReorderMode  : Boolean         = false,   // ▲▼ বাটন দেখানো হবে কিনা (admin টগল করে)
     val isSavingOrder  : Boolean         = false,
-    val orderSavedMsg  : String?         = null
+    val orderSavedMsg  : String?         = null,
+    // ── Pagination ──
+    val currentPage    : Int             = 0         // 0-based page index
 )
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
@@ -53,6 +55,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // সঠিক উত্তরে XP — written এ একটু বেশি (বেশি effort লাগে)
         private const val XP_PER_CORRECT_MCQ     = 2
         private const val XP_PER_CORRECT_WRITTEN = 3
+        const val PAGE_SIZE = 50   // প্রতি পৃষ্ঠায় প্রশ্নের সংখ্যা
     }
 
 
@@ -702,6 +705,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
 
+    /** Pagination: নির্দিষ্ট page-এ যাও */
+    fun goToPage(page: Int) {
+        val totalPages = (_state.value.questions.size + PAGE_SIZE - 1) / PAGE_SIZE
+        val safePage = page.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
+        _state.update { it.copy(currentPage = safePage) }
+    }
+
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
         val bookmarks = _state.value.bookmarkedIds
         val user      = session.getCurrentUser()
@@ -718,7 +728,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         _state.update {
             it.copy(questions = items, isQuizActive = mode != StudyMode.STUDY,
-                    showResult = false, result = null, answeredCount = 0, timerSec = 0)
+                    showResult = false, result = null, answeredCount = 0, timerSec = 0,
+                    currentPage = 0)
         }
         if (mode != StudyMode.STUDY) startTimer(items.size)
     }
