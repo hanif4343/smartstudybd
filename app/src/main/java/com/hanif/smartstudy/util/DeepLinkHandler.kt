@@ -18,15 +18,16 @@ import android.net.Uri
  *   data["tab"]        = "quiz" | "qbank" | "study"   (report/technique কোন tab থেকে)
  */
 data class DeepLinkAction(
-    val type       : Type,
-    val subject    : String? = null,
-    val query      : String? = null,
-    val questionId : String? = null,
-    val tab        : String? = null,   // "quiz" | "qbank" | "study"
-    val menuPage   : String? = null,   // "reports" | "techniques" | "stats" | "bookmarks"
-    val challengeId: String? = null
+    val type          : Type,
+    val subject       : String? = null,
+    val query         : String? = null,
+    val questionId    : String? = null,
+    val tab           : String? = null,
+    val menuPage      : String? = null,
+    val challengeId   : String? = null,
+    val routineItemId : String? = null   // Daily Routine item id → highlight on Home tab
 ) {
-    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, NONE }
+    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, ROUTINE, NONE }
 }
 
 fun Intent.parseDeepLink(): DeepLinkAction {
@@ -39,6 +40,12 @@ fun Intent.parseDeepLink(): DeepLinkAction {
 
     if (fcmUrl != null || fcmType != null) {
         return when {
+            // Routine reminder tap → go to Home, highlight the specific routine item
+            fcmType == "routine_reminder" -> {
+                val itemId = getStringExtra("routineItemId") ?: getStringExtra("item_id") ?: ""
+                DeepLinkAction(DeepLinkAction.Type.ROUTINE, routineItemId = itemId.ifBlank { null })
+            }
+
             // Challenge invite → go directly to Challenge tab
             fcmType == "challenge_invite" ->
                 DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
@@ -65,6 +72,10 @@ fun Intent.parseDeepLink(): DeepLinkAction {
                 DeepLinkAction(DeepLinkAction.Type.REPORTS, questionId = fcmQid, tab = fcmTab)
             fcmUrl == "challenge" ->
                 DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
+            fcmUrl == "routine" -> {
+                val itemId = getStringExtra("routineItemId") ?: getStringExtra("item_id") ?: ""
+                DeepLinkAction(DeepLinkAction.Type.ROUTINE, routineItemId = itemId.ifBlank { null })
+            }
             fcmUrl == "quiz"   -> DeepLinkAction(DeepLinkAction.Type.QUIZ,  questionId = fcmQid)
             fcmUrl == "qbank"  -> DeepLinkAction(DeepLinkAction.Type.QBANK, questionId = fcmQid)
             fcmUrl == "study"  -> DeepLinkAction(DeepLinkAction.Type.STUDY, questionId = fcmQid)
@@ -90,6 +101,7 @@ fun Intent.parseDeepLink(): DeepLinkAction {
         "reports"    -> DeepLinkAction(DeepLinkAction.Type.REPORTS)
         "techniques" -> DeepLinkAction(DeepLinkAction.Type.TECHNIQUES)
         "menu"       -> DeepLinkAction(DeepLinkAction.Type.MENU,       menuPage = path)
+        "routine"    -> DeepLinkAction(DeepLinkAction.Type.ROUTINE,    routineItemId = path)
         else         -> DeepLinkAction(DeepLinkAction.Type.NONE)
     }
 }
