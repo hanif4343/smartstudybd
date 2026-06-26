@@ -173,8 +173,13 @@ class RoutineItemReminderReceiver : BroadcastReceiver() {
         val body = if (subject.isNotBlank()) "$subject — এখনই পড়া শুরু করো! 📖" else "এখনই পড়া শুরু করো! 📖"
 
         val tapIntent = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_CLEAR_TOP },
+            context, requestCodeFor(itemId),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("type", "routine_reminder")
+                putExtra("routineItemId", itemId)
+                putExtra("url", "routine")
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
