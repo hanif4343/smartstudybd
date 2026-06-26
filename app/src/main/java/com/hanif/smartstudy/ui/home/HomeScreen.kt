@@ -23,6 +23,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
@@ -120,8 +129,10 @@ object ExamNotificationHelper {
 
 @Composable
 fun HomeScreen(
-    viewModel     : HomeViewModel = viewModel(),
-    quizViewModel : QuizViewModel? = null,
+    viewModel              : HomeViewModel = viewModel(),
+    quizViewModel          : QuizViewModel? = null,
+    highlightRoutineItemId : String? = null,
+    onRoutineItemHighlighted : () -> Unit = {},
     onSearchClick : () -> Unit = {},
     onTypingClick : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
@@ -176,6 +187,8 @@ fun HomeScreen(
             // Daily Goal feature removed
 
             DailyRoutineCard(
+                highlightRoutineItemId   = highlightRoutineItemId,
+                onRoutineItemHighlighted = onRoutineItemHighlighted,
                 onOpenStudy       = onOpenStudy,
                 onOpenInstantTest = onOpenInstantTest,
                 onOpenWeeklyTest  = onOpenWeeklyTest
@@ -380,6 +393,8 @@ private fun StatMini(icon: String, value: String, label: String, valueColor: Col
 @Composable
 fun DailyRoutineCard(
     vm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel(),
+    highlightRoutineItemId   : String? = null,
+    onRoutineItemHighlighted : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {}
@@ -389,6 +404,24 @@ fun DailyRoutineCard(
     var showAddDialog by remember { mutableStateOf(false) }
     var focusItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
     var reminderEditItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
+    // highlight state — set from deeplink, cleared after animation
+    var activeHighlightId by remember { mutableStateOf<String?>(null) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // Notification tap → scroll to item + pulse highlight
+    LaunchedEffect(highlightRoutineItemId, routine.items) {
+        val targetId = highlightRoutineItemId ?: return@LaunchedEffect
+        if (routine.items.isEmpty()) return@LaunchedEffect
+        val idx = routine.items.indexOfFirst { it.id == targetId }
+        if (idx >= 0) {
+            listState.animateScrollToItem(idx)
+            kotlinx.coroutines.delay(150)
+            activeHighlightId = targetId
+            kotlinx.coroutines.delay(3500)
+            activeHighlightId = null
+            onRoutineItemHighlighted()
+        }
+    }
 
     if (showAddDialog) {
         AddRoutineItemDialog(
@@ -459,17 +492,25 @@ fun DailyRoutineCard(
 
                 Spacer(Modifier.height(6.dp))
 
-                routine.items.forEach { item ->
-                    RoutineItemRow(
-                        item     = item,
-                        onToggle = { vm.toggleItem(item.id) },
-                        onRemove = { vm.removeItem(item.id) },
-                        onOpenFocus       = { focusItem = item },
-                        onEditReminder    = { reminderEditItem = item },
-                        onOpenStudy       = onOpenStudy,
-                        onOpenInstantTest = onOpenInstantTest,
-                        onOpenWeeklyTest  = onOpenWeeklyTest
-                    )
+                androidx.compose.foundation.lazy.LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 600.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    items(routine.items, key = { it.id }) { item ->
+                        val isHighlighted = item.id == activeHighlightId
+                        RoutineItemRow(
+                            item          = item,
+                            isHighlighted = isHighlighted,
+                            onToggle      = { vm.toggleItem(item.id) },
+                            onRemove      = { vm.removeItem(item.id) },
+                            onOpenFocus       = { focusItem = item },
+                            onEditReminder    = { reminderEditItem = item },
+                            onOpenStudy       = onOpenStudy,
+                            onOpenInstantTest = onOpenInstantTest,
+                            onOpenWeeklyTest  = onOpenWeeklyTest
+                        )
+                    }
                 }
             }
         }
@@ -478,9 +519,10 @@ fun DailyRoutineCard(
 
 @Composable
 private fun RoutineItemRow(
-    item     : com.hanif.smartstudy.data.model.RoutineItem,
-    onToggle : () -> Unit,
-    onRemove : () -> Unit,
+    item          : com.hanif.smartstudy.data.model.RoutineItem,
+    isHighlighted : Boolean = false,
+    onToggle      : () -> Unit,
+    onRemove      : () -> Unit,
     onOpenFocus       : () -> Unit = {},
     onEditReminder    : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
@@ -490,10 +532,49 @@ private fun RoutineItemRow(
     var showActionMenu by remember { mutableStateOf(false) }
     val hasSubject = item.subject.isNotBlank()
 
+    // ── Highlight pulse animation ─────────────────────────────────
+    val highlightTransition = rememberInfiniteTransition(label = "routineHighlight")
+    val highlightAlpha by highlightTransition.animateFloat(
+        initialValue = 0.0f,
+        targetValue  = if (isHighlighted) 0.28f else 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation  = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "hlAlpha"
+    )
+    val highlightScale by highlightTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue  = if (isHighlighted) 1.015f else 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation  = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "hlScale"
+    )
+    val hlBorderAlpha by highlightTransition.animateFloat(
+        initialValue = 0.0f,
+        targetValue  = if (isHighlighted) 0.9f else 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation  = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "hlBorderAlpha"
+    )
+    val primaryColor = MaterialTheme.colorScheme.primary
+
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .graphicsLayer(scaleX = highlightScale, scaleY = highlightScale)
+            .clip(RoundedCornerShape(10.dp))
+            .background(primaryColor.copy(alpha = highlightAlpha))
+            .then(
+                if (isHighlighted)
+                    Modifier.border(1.5.dp, primaryColor.copy(alpha = hlBorderAlpha), RoundedCornerShape(10.dp))
+                else Modifier
+            )
+            .padding(vertical = 6.dp, horizontal = if (isHighlighted) 4.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(
