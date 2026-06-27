@@ -122,23 +122,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // Simple single-phase load — zip65 এর মতো
-            val result = withTimeoutOrNull(30_000L) { repo.getContent() }
-                ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
+            // ── Stale-While-Revalidate ────────────────────────────────────────
+            // Cache থাকলে → instant subjects দেখাও
+            // Background এ → Firebase check করো, নতুন data এলে silently update করো
+            val result = withTimeoutOrNull(30_000L) {
+                repo.getContent(
+                    onBackgroundUpdate = { freshData ->
+                        // Background এ নতুন data এলে subjects silently update হবে
+                        viewModelScope.launch {
+                            Log.d("QuizVM", "Background update received: quiz=${freshData.quiz.size}")
+                            rebuildSubjects(freshData, newMode)
+                        }
+                    }
+                )
+            } ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি।")
 
             val content = (result as? DataState.Success)?.data ?: AppContent()
             val errMsg  = (result as? DataState.Error)?.message
+            val hasContent = !content.isEmpty()
 
-            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
+            Log.d("QuizVM", "setMode done: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
 
             _state.update {
                 it.copy(
-                    contentLoaded = !content.isEmpty(),
+                    contentLoaded = hasContent,
                     isLoading     = false,
-                    error         = if (content.isEmpty()) (errMsg ?: "Data empty") else null
+                    error         = if (!hasContent) (errMsg ?: "Data empty") else null
                 )
             }
-            rebuildSubjects(content, newMode)
+            if (hasContent) rebuildSubjects(content, newMode)
         }
     }
 

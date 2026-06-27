@@ -63,7 +63,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val quote        = MotivationalQuote.ofDay()
 
             // Content fetch
-            val contentState = repo.getContent(forceRefresh)
+            val contentState = repo.getContent(
+                forceRefresh = forceRefresh,
+                onBackgroundUpdate = { freshData ->
+                    // Background এ নতুন data এলে home screen silently update
+                    viewModelScope.launch { loadData(forceRefresh = false) }
+                }
+            )
             val content      = (contentState as? DataState.Success)?.data ?: AppContent()
             val isOffline    = (contentState as? DataState.Success)?.isOffline ?: false
             val fromCache    = (contentState as? DataState.Success)?.fromCache ?: false
