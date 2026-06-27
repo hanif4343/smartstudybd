@@ -122,55 +122,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // ── PHASE 0: Room-এ data আছে কিনা চেক করো ──────────────────────
-            // Room থেকে subject list instant আসে — Firebase call লাগে না
-            val hasRoomData = repo.hasRoomData()
-            if (hasRoomData) {
-                Log.d("QuizVM", "Phase 0: Room data found, loading subjects instantly")
-                val sheet = newMode.name
-                val subjectCounts = repo.getRoomSubjectCounts(sheet)
-                if (subjectCounts.isNotEmpty()) {
-                    // Room থেকে subject list দিয়ে state আপডেট করো
-                    val progressMap = loadProgressMap()
-                    val subjects = subjectCounts.map { sc ->
-                        SubjectEntry(name = sc.subject, totalQ = sc.count,
-                            doneQ = 0, subTopics = emptyList())
-                    }
-                    _state.update { it.copy(subjects = subjects, isLoading = false, error = null) }
-                    Log.d("QuizVM", "Phase 0 done: ${subjects.size} subjects from Room")
-                }
-            }
+            // Simple single-phase load — zip65 এর মতো
+            val result = withTimeoutOrNull(30_000L) { repo.getContent() }
+                ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
 
-            // ── PHASE 1: SubjectOrder + SubTopicOrder (Firebase fast) ────────
-            val quickResult = withTimeoutOrNull(15_000L) { repo.getSubjectsQuick() }
-            val quickContent = (quickResult as? DataState.Success)?.data
+            val content = (result as? DataState.Success)?.data ?: AppContent()
+            val errMsg  = (result as? DataState.Error)?.message
 
-            if (quickContent != null && (quickContent.subjectOrder.isNotEmpty() || quickContent.subTopicOrder.isNotEmpty())) {
-                Log.d("QuizVM", "Phase 1 done: subjects visible with order")
-                _state.update { it.copy(isLoading = false, error = null) }
-                rebuildSubjects(quickContent, newMode)
-            }
+            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
 
-            // ── PHASE 2: Full data background-এ load করো ────────────────────
-            // User subject/subtopic browse করার সময় questions চলে আসবে
-            val fullResult = withTimeoutOrNull(60_000L) { repo.getContent() }
-                ?: DataState.Error("টাইমআউট — ৬০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
-
-            val content = (fullResult as? DataState.Success)?.data ?: AppContent()
-            val errMsg  = (fullResult as? DataState.Error)?.message
-
-            Log.d("QuizVM", "Phase 2 done: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
-
-            val hasContent = !content.isEmpty()
             _state.update {
                 it.copy(
-                    contentLoaded = hasContent,
+                    contentLoaded = !content.isEmpty(),
                     isLoading     = false,
-                    error         = if (!hasContent && quickContent == null && !hasRoomData) (errMsg ?: "Data empty") else null
+                    error         = if (content.isEmpty()) (errMsg ?: "Data empty") else null
                 )
             }
-            // Full content এলে subject list আবার rebuild করো (updated order দিয়ে)
-            if (hasContent) rebuildSubjects(content, newMode)
+            rebuildSubjects(content, newMode)
         }
     }
 
