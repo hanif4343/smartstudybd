@@ -71,19 +71,20 @@ fun CoreScreen(
         state.showResult && state.result != null -> {
             // Show question list behind + result on top
             QuestionListScreen(
-                viewModel   = viewModel,
-                mode        = state.mode,
-                subject     = state.navPath.subject ?: "",
-                subTopic    = state.navPath.subTopic ?: "",
-                questions   = state.questions,
-                timerSec    = 0,
-                totalTime   = state.totalTimeSec,
-                answered    = state.answeredCount,
-                currentPage = state.currentPage,
-                onBack      = { viewModel.navigateBack() },
-                onSubmit    = {},
-                currentUser = currentUser,
-                onAdminEdit = onAdminEdit
+                viewModel      = viewModel,
+                mode           = state.mode,
+                subject        = state.navPath.subject ?: "",
+                subTopic       = state.navPath.subTopic ?: "",
+                questions      = state.questions,
+                timerSec       = 0,
+                totalTime      = state.totalTimeSec,
+                answered       = state.answeredCount,
+                currentPage    = state.currentPage,
+                totalQuestions = state.totalQuestions,
+                onBack         = { viewModel.navigateBack() },
+                onSubmit       = {},
+                currentUser    = currentUser,
+                onAdminEdit    = onAdminEdit
             )
             ResultModal(
                 result  = state.result!!,
@@ -101,21 +102,22 @@ fun CoreScreen(
         // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
             QuestionListScreen(
-                viewModel   = viewModel,
-                mode        = state.mode,
-                subject     = state.navPath.subject ?: "",
-                subTopic    = state.navPath.subTopic ?: "",
-                questions   = state.questions,
-                timerSec    = state.timerSec,
-                totalTime   = state.totalTimeSec,
-                answered    = state.answeredCount,
-                currentPage = state.currentPage,
-                onBack      = { viewModel.navigateBack() },
-                onSubmit    = { viewModel.submitQuiz() },
-                currentUser = currentUser,
+                viewModel           = viewModel,
+                mode                = state.mode,
+                subject             = state.navPath.subject ?: "",
+                subTopic            = state.navPath.subTopic ?: "",
+                questions           = state.questions,
+                timerSec            = state.timerSec,
+                totalTime           = state.totalTimeSec,
+                answered            = state.answeredCount,
+                currentPage         = state.currentPage,
+                totalQuestions      = state.totalQuestions,
+                onBack              = { viewModel.navigateBack() },
+                onSubmit            = { viewModel.submitQuiz() },
+                currentUser         = currentUser,
                 highlightQuestionId = state.highlightQuestionId,
                 onHighlightConsumed = { viewModel.consumeHighlight() },
-                onAdminEdit = onAdminEdit
+                onAdminEdit         = onAdminEdit
             )
         }
 
