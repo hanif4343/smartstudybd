@@ -37,6 +37,37 @@ class ContentRepository(private val context: Context) {
         fun clearMemCache() { _memCache = null }
     }
 
+    /**
+     * FAST PATH — Subject list দেখানোর জন্য।
+     * শুধু SubjectOrder + SubTopicOrder fetch করে — questions আসে না।
+     * Questions background-এ আলাদাভাবে আসবে।
+     */
+    suspend fun getSubjectsQuick(): DataState<AppContent> {
+        // Cache-এ subjects থাকলে সেটাই দাও (questions থাকুক বা না থাকুক)
+        _memCache?.let { mem ->
+            if (mem.subjectOrder.isNotEmpty() || mem.subTopicOrder.isNotEmpty()) {
+                Log.d("Repo", "getSubjectsQuick: cache hit")
+                return DataState.Success(mem, fromCache = true)
+            }
+        }
+        if (!isOnline()) {
+            val cached = cache.loadContent() ?: _memCache
+            return if (cached != null) DataState.Success(cached, fromCache = true, isOffline = true)
+            else DataState.Error("ইন্টারনেট সংযোগ নেই")
+        }
+        return when (val result = ContentFetchService.fetchSubjectsOnly()) {
+            is ContentResult.Success -> {
+                // শুধু subjectOrder/subTopicOrder মেমরিতে রাখি
+                // questions না আসা পর্যন্ত memCache এ questions empty থাকবে
+                val partial = result.data
+                _memCache = partial
+                Log.d("Repo", "getSubjectsQuick: Firebase OK")
+                DataState.Success(partial)
+            }
+            is ContentResult.Error -> DataState.Error(result.message)
+        }
+    }
+
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
         // REALTIME_DATA=true + online → সরাসরি Firebase, কোনো cache নয়
         val debugRealtime = BuildConfig.REALTIME_DATA && isOnline()
