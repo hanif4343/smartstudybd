@@ -72,6 +72,7 @@ fun QuestionListScreen(
     totalTime   : Int,
     answered    : Int,
     currentPage : Int,
+    totalQuestions: Int,   // Room থেকে মোট প্রশ্ন সংখ্যা (questions.size নয়)
     onBack      : () -> Unit,
     onSubmit    : () -> Unit,
     currentUser : com.hanif.smartstudy.data.model.User? = null,
@@ -80,10 +81,13 @@ fun QuestionListScreen(
     onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
 ) {
     val pageSize = QuizViewModel.PAGE_SIZE
-    val totalPages = (questions.size + pageSize - 1) / pageSize
+    // totalQuestions Room থেকে — questions.size শুধু current page এর count
+    val effectiveTotal = if (totalQuestions > 0) totalQuestions else questions.size
+    val totalPages = (effectiveTotal + pageSize - 1) / pageSize
     val safeCurrentPage = currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
     val pageOffset = safeCurrentPage * pageSize
-    val pagedQuestions = questions.subList(pageOffset, minOf(pageOffset + pageSize, questions.size))
+    // questions এখন শুধু current page এর data (Room থেকে loaded)
+    val pagedQuestions = questions   // already paged from Room
     val isLastPage = safeCurrentPage >= totalPages - 1
     val listState = rememberLazyListState()
     var reportIdx by remember { mutableStateOf(-1) }
@@ -167,7 +171,7 @@ fun QuestionListScreen(
                 // (Box layout এর নিচে আলাদাভাবে দেখানো হবে)
 
                 // Reading progress bar
-                ReadingProgressBar(current = readingIdx + 1, total = questions.size)
+                ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
 
                 // Question list
                 LazyColumn(
@@ -273,7 +277,7 @@ fun QuestionListScreen(
                     // প্রশ্ন নম্বর counter
                     Column {
                         Text(
-                            "${readingIdx + 1}/${questions.size}",
+                            "${readingIdx + 1}/$effectiveTotal",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
@@ -353,7 +357,7 @@ fun QuestionListScreen(
 
     // ── Submit confirmation dialog ──
     if (showSubmitDialog) {
-        val unanswered = questions.count { it.answerState is AnswerState.Unanswered }
+        val unanswered = effectiveTotal - answered
         AlertDialog(
             onDismissRequest = { showSubmitDialog = false },
             title = {
