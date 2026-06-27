@@ -22,6 +22,9 @@ import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.ContentResult
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaType
