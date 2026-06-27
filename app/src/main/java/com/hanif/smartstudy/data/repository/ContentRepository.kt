@@ -134,71 +134,67 @@ class ContentRepository(private val context: Context) {
         Log.d("Repo", "syncToRoom: done")
     }
 
-    suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
-        // REALTIME_DATA=true + online → সরাসরি Firebase, কোনো cache নয়
-        val debugRealtime = BuildConfig.REALTIME_DATA && isOnline()
+    // ── Stale-While-Revalidate ─────────────────────────────────────────────────
+    // Cache থাকলে সাথে সাথে return, background এ Firebase থেকে fresh data আনো।
+    // Callback দিয়ে নতুন data এলে ViewModel update করতে পারবে।
+    suspend fun getContent(
+        forceRefresh: Boolean = false,
+        onBackgroundUpdate: ((AppContent) -> Unit)? = null
+    ): DataState<AppContent> {
 
-        // In-memory cache hit — সবচেয়ে fast (DEBUG online-এ skip)
-        if (!forceRefresh && !debugRealtime) {
-            _memCache?.let { mem ->
-                if (!mem.isEmpty() && !mem.isStale()) {
-                    Log.d("Repo", "Memory cache hit: quiz=${mem.quiz.size}")
-                    return DataState.Success(mem, fromCache = true)
+        // ── Step 1: Cache থেকে instant data ──────────────────────────────
+        val cached = _memCache?.takeIf { !it.isEmpty() }
+            ?: cache.loadContent()?.takeIf { !it.isEmpty() }
+
+        if (cached != null && !forceRefresh) {
+            _memCache = cached
+            Log.d("Repo", "Cache hit: quiz=${cached.quiz.size} — background refresh শুরু")
+
+            // ── Step 2: Background এ Firebase check ───────────────────────
+            if (isOnline() && onBackgroundUpdate != null) {
+                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        when (val fresh = ContentFetchService.fetchAllContent()) {
+                            is ContentResult.Success -> {
+                                if (fresh.data.fetchedAt > cached.fetchedAt || fresh.data.quiz.size != cached.quiz.size) {
+                                    Log.d("Repo", "Background update: new data found, notifying UI")
+                                    _memCache = fresh.data
+                                    cache.saveContent(fresh.data)
+                                    syncToRoom(fresh.data)
+                                    onBackgroundUpdate(fresh.data)
+                                } else {
+                                    Log.d("Repo", "Background: data same, no update needed")
+                                }
+                            }
+                            is ContentResult.Error -> Log.w("Repo", "Background refresh failed: ${fresh.message}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("Repo", "Background refresh error: ${e.message}")
+                    }
                 }
             }
+
+            return DataState.Success(cached, fromCache = true)
         }
 
-        // mutex দিয়ে protect — concurrent calls এ একবারই fetch হবে
+        // ── Step 3: Cache নেই — Offline check ────────────────────────────
+        if (!isOnline()) {
+            return DataState.Error("ইন্টারনেট সংযোগ নেই এবং কোনো cache নেই")
+        }
+
+        // ── Step 4: প্রথমবার — Firebase থেকে fetch (mutex দিয়ে একবারই) ──
         return mutex.withLock {
-            // Double-check after lock (DEBUG online-এ skip)
-            if (!forceRefresh && !debugRealtime) {
-                _memCache?.let { mem ->
-                    if (!mem.isEmpty() && !mem.isStale()) {
-                        return@withLock DataState.Success(mem, fromCache = true)
-                    }
-                }
+            // Double check — অন্য coroutine এর মধ্যে fetch হয়ে গেছে কিনা
+            _memCache?.takeIf { !it.isEmpty() }?.let {
+                return@withLock DataState.Success(it, fromCache = true)
             }
 
-            // REALTIME mode এও: mutex এর ভিতরে full data থাকলে আর Firebase call করো না
-            // (একটা VM fetch করলে বাকিগুলো এখান থেকে পাবে — 3x Firebase call বন্ধ হবে)
-            if (debugRealtime && !forceRefresh) {
-                _memCache?.let { mem ->
-                    if (!mem.isEmpty()) {
-                        Log.d("Repo", "REALTIME: mutex cache hit — skipping duplicate Firebase call")
-                        return@withLock DataState.Success(mem, fromCache = true)
-                    }
-                }
-            }
-
-            // DataStore cache check (DEBUG online-এ skip)
-            if (!forceRefresh && !debugRealtime) {
-                val cached = cache.loadContent()
-                if (cached != null && !cached.isEmpty() && !cached.isStale()) {
-                    _memCache = cached
-                    Log.d("Repo", "DataStore cache hit: quiz=${cached.quiz.size}")
-                    return@withLock DataState.Success(cached, fromCache = true)
-                }
-            }
-
-            // Offline হলে যা আছে দাও
-            if (!isOnline()) {
-                val cached = cache.loadContent() ?: _memCache
-                return@withLock if (cached != null && !cached.isEmpty()) {
-                    _memCache = cached
-                    DataState.Success(cached, fromCache = true, isOffline = true)
-                } else {
-                    DataState.Error("ইন্টারনেট সংযোগ নেই")
-                }
-            }
-
-            // Network fetch
-            Log.d("Repo", if (debugRealtime) "REALTIME: Firebase থেকে fresh data নিচ্ছি..." else "Fetching from Firebase...")
+            Log.d("Repo", "First load: Firebase থেকে fetch করছি...")
             when (val result = ContentFetchService.fetchAllContent()) {
                 is ContentResult.Success -> {
                     Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
                     _memCache = result.data
                     cache.saveContent(result.data)
-                    // Room-এ save করো — পরের বার Room থেকে instant load
                     kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         syncToRoom(result.data)
                     }
@@ -206,13 +202,7 @@ class ContentRepository(private val context: Context) {
                 }
                 is ContentResult.Error -> {
                     Log.e("Repo", "Firebase error: ${result.message}")
-                    val stale = cache.loadContent() ?: _memCache
-                    if (stale != null && !stale.isEmpty()) {
-                        _memCache = stale
-                        DataState.Success(stale, fromCache = true)
-                    } else {
-                        DataState.Error(result.message)
-                    }
+                    DataState.Error(result.message)
                 }
             }
         }
