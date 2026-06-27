@@ -159,6 +159,17 @@ class ContentRepository(private val context: Context) {
                 }
             }
 
+            // REALTIME mode এও: mutex এর ভিতরে full data থাকলে আর Firebase call করো না
+            // (একটা VM fetch করলে বাকিগুলো এখান থেকে পাবে — 3x Firebase call বন্ধ হবে)
+            if (debugRealtime && !forceRefresh) {
+                _memCache?.let { mem ->
+                    if (!mem.isEmpty()) {
+                        Log.d("Repo", "REALTIME: mutex cache hit — skipping duplicate Firebase call")
+                        return@withLock DataState.Success(mem, fromCache = true)
+                    }
+                }
+            }
+
             // DataStore cache check (DEBUG online-এ skip)
             if (!forceRefresh && !debugRealtime) {
                 val cached = cache.loadContent()
