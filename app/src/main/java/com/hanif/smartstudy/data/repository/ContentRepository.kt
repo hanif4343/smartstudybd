@@ -8,7 +8,6 @@ import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
 import com.hanif.smartstudy.data.local.AppDatabase
-import com.hanif.smartstudy.data.local.EntityExtensions
 import com.hanif.smartstudy.data.local.toEntity
 import com.hanif.smartstudy.data.local.toQuestionItem
 import com.hanif.smartstudy.data.model.AppContent
