@@ -9,6 +9,8 @@ import com.hanif.smartstudy.data.model.QBankItem
 import com.hanif.smartstudy.data.model.QuizItem
 import com.hanif.smartstudy.data.model.StudyItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,6 +28,7 @@ object ContentFetchService {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val gson = CaseInsensitiveGson.instance
@@ -38,29 +41,68 @@ object ContentFetchService {
         return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
+    /**
+     * FAST PATH — শুধু SubjectOrder + SubTopicOrder fetch করে।
+     * এই দুটো ছোট node, খুব দ্রুত আসে।
+     * Subject list + SubTopic list দেখাতে এটুকুই যথেষ্ট।
+     * Questions এর জন্য fetchAllContent() আলাদাভাবে background-এ চলবে।
+     */
+    suspend fun fetchSubjectsOnly(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "=== FAST FETCH: SubjectOrder + SubTopicOrder only ===")
+        try {
+            coroutineScope {
+                val subjectOrderDeferred  = async { fetchSubjectOrder() }
+                val subTopicOrderDeferred = async { fetchSubTopicOrder() }
+                val subjectOrder  = subjectOrderDeferred.await()
+                val subTopicOrder = subTopicOrderDeferred.await()
+                Log.d(TAG, "FAST FETCH done: SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size}")
+                ContentResult.Success(AppContent(
+                    quiz = emptyList(), qbank = emptyList(), study = emptyList(),
+                    subjectOrder = subjectOrder, subTopicOrder = subTopicOrder,
+                    fetchedAt = 0L   // 0L মানে questions এখনো আসেনি
+                ))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchSubjectsOnly error: ${e.message}", e)
+            ContentResult.Error("Error: ${e.message}")
+        }
+    }
+
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "=== FETCH START ===")
+        Log.d(TAG, "=== FETCH START (parallel) ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
 
         try {
-            val quiz          = fetchSheet<QuizItem>("Quiz")
-            val qbank         = fetchSheet<QBankItem>("QBank")
-            val study         = fetchSheet<StudyItem>("Study")
-            val subjectOrder  = fetchSubjectOrder()
-            val subTopicOrder = fetchSubTopicOrder()
+            // সব ৫টা fetch একসাথে parallel — sequential এর বদলে
+            // আগে sequential ছিল: Quiz → QBank → Study → SubjectOrder → SubTopicOrder
+            // এখন সব একই সময়ে শুরু হয় → মোট সময় সবচেয়ে slow টার সমান
+            val result = coroutineScope {
+                val quizDeferred         = async { fetchSheet<QuizItem>("Quiz") }
+                val qbankDeferred        = async { fetchSheet<QBankItem>("QBank") }
+                val studyDeferred        = async { fetchSheet<StudyItem>("Study") }
+                val subjectOrderDeferred = async { fetchSubjectOrder() }
+                val subTopicOrderDeferred = async { fetchSubTopicOrder() }
 
-            Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size} ===")
+                val quiz          = quizDeferred.await()
+                val qbank         = qbankDeferred.await()
+                val study         = studyDeferred.await()
+                val subjectOrder  = subjectOrderDeferred.await()
+                val subTopicOrder = subTopicOrderDeferred.await()
 
-            if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
-                ContentResult.Error("Firebase থেকে data আসেনি (সব empty)")
-            } else {
-                ContentResult.Success(AppContent(
-                    quiz = quiz, qbank = qbank, study = study,
-                    subjectOrder = subjectOrder,
-                    subTopicOrder = subTopicOrder,
-                    fetchedAt = System.currentTimeMillis()
-                ))
+                Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size} ===")
+
+                if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
+                    ContentResult.Error("Firebase থেকে data আসেনি (সব empty)")
+                } else {
+                    ContentResult.Success(AppContent(
+                        quiz = quiz, qbank = qbank, study = study,
+                        subjectOrder = subjectOrder,
+                        subTopicOrder = subTopicOrder,
+                        fetchedAt = System.currentTimeMillis()
+                    ))
+                }
             }
+            result
         } catch (e: Exception) {
             Log.e(TAG, "fetchAllContent error: ${e.message}", e)
             ContentResult.Error("Error: ${e.message}")
