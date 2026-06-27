@@ -170,7 +170,6 @@ data class AppContent(
     // DEBUG build-এ সবসময় stale → online হলে সরাসরি Firebase (real-time data)।
     // Release build-এ 1 ঘণ্টা TTL (Firebase read কমায়, production-এ ঠিক আছে)।
     fun isStale(ttlMillis: Long = 60 * 60 * 1000L): Boolean {
-        if (BuildConfig.REALTIME_DATA) return true   // Real-time mode: সবসময় fresh Firebase data
         return fetchedAt == 0L || (System.currentTimeMillis() - fetchedAt) > ttlMillis
     }
 }
