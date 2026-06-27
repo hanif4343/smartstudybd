@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.TestHistoryCache
+import com.hanif.smartstudy.BuildConfig
+import kotlinx.coroutines.Dispatchers
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
@@ -28,6 +30,9 @@ data class QuizUiState(
     val isLoading     : Boolean          = true,
     val error         : String?          = null,
     val isQuizActive  : Boolean          = false,
+    // ── Room pagination ──
+    val totalQuestions: Int              = 0,    // এই subTopic-এ মোট কতটা প্রশ্ন (Room count)
+    val questionsLoading: Boolean        = false, // প্রশ্ন লোড হচ্ছে কিনা (page change এ)
     val timerSec      : Int              = 0,
     val totalTimeSec  : Int              = 0,
     val answeredCount : Int              = 0,
@@ -117,19 +122,36 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // ── PHASE 1: Subject list দ্রুত দেখাও ──────────────────────────────
-            // শুধু SubjectOrder + SubTopicOrder — ছোট data, ২-৩ সেকেন্ডে আসে
+            // ── PHASE 0: Room-এ data আছে কিনা চেক করো ──────────────────────
+            // Room থেকে subject list instant আসে — Firebase call লাগে না
+            val hasRoomData = repo.hasRoomData()
+            if (hasRoomData) {
+                Log.d("QuizVM", "Phase 0: Room data found, loading subjects instantly")
+                val sheet = newMode.name
+                val subjectCounts = repo.getRoomSubjectCounts(sheet)
+                if (subjectCounts.isNotEmpty()) {
+                    // Room থেকে subject list দিয়ে state আপডেট করো
+                    val progressMap = loadProgressMap()
+                    val subjects = subjectCounts.map { sc ->
+                        SubjectEntry(name = sc.subject, totalQ = sc.count,
+                            doneQ = 0, subTopics = emptyList())
+                    }
+                    _state.update { it.copy(subjects = subjects, isLoading = false, error = null) }
+                    Log.d("QuizVM", "Phase 0 done: ${subjects.size} subjects from Room")
+                }
+            }
+
+            // ── PHASE 1: SubjectOrder + SubTopicOrder (Firebase fast) ────────
             val quickResult = withTimeoutOrNull(15_000L) { repo.getSubjectsQuick() }
             val quickContent = (quickResult as? DataState.Success)?.data
 
             if (quickContent != null && (quickContent.subjectOrder.isNotEmpty() || quickContent.subTopicOrder.isNotEmpty())) {
-                // Subject list দেখাও — user এখনই navigate করতে পারবে
-                Log.d("QuizVM", "Phase 1 done: subjects visible")
+                Log.d("QuizVM", "Phase 1 done: subjects visible with order")
                 _state.update { it.copy(isLoading = false, error = null) }
                 rebuildSubjects(quickContent, newMode)
             }
 
-            // ── PHASE 2: Full data background-এ load করো ────────────────────────
+            // ── PHASE 2: Full data background-এ load করো ────────────────────
             // User subject/subtopic browse করার সময় questions চলে আসবে
             val fullResult = withTimeoutOrNull(60_000L) { repo.getContent() }
                 ?: DataState.Error("টাইমআউট — ৬০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
@@ -144,7 +166,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     contentLoaded = hasContent,
                     isLoading     = false,
-                    error         = if (!hasContent && quickContent == null) (errMsg ?: "Data empty") else null
+                    error         = if (!hasContent && quickContent == null && !hasRoomData) (errMsg ?: "Data empty") else null
                 )
             }
             // Full content এলে subject list আবার rebuild করো (updated order দিয়ে)
@@ -162,10 +184,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun navigateToSubTopic(subTopic: String) {
         val subject = _state.value.navPath.subject ?: return
-        _state.update { it.copy(navPath = NavPath(subject, subTopic)) }
+        _state.update { it.copy(navPath = NavPath(subject, subTopic), currentPage = 0) }
         viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            loadQuestions(content, subject, subTopic, _state.value.mode)
+            // Room-এ data আছে কিনা চেক করো
+            val sheet = _state.value.mode.name
+            val user  = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+
+            val roomCount = repo.getRoomTotalCount(sheet, subject, subTopic, tag)
+
+            if (roomCount > 0) {
+                // ── Room-first: instant load ──────────────────────────────────
+                Log.d("QuizVM", "Room hit: $roomCount questions for $subject/$subTopic")
+                loadQuestionsFromRoom(sheet, subject, subTopic, tag, page = 0)
+
+                // Background-এ Firebase sync (REALTIME_DATA=true হলে)
+                if (BuildConfig.REALTIME_DATA) {
+                    launch(Dispatchers.IO) {
+                        val content = (repo.getContent() as? DataState.Success)?.data
+                        if (content != null) loadQuestions(content, subject, subTopic, _state.value.mode)
+                    }
+                }
+            } else {
+                // ── Room-এ নেই → Firebase থেকে আনো ─────────────────────────
+                Log.d("QuizVM", "Room miss: fetching from Firebase for $subject/$subTopic")
+                val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                loadQuestions(content, subject, subTopic, _state.value.mode)
+            }
         }
     }
 
@@ -715,11 +762,67 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
 
-    /** Pagination: নির্দিষ্ট page-এ যাও */
+    /** Pagination: নির্দিষ্ট page-এ যাও — Room থেকে instant load */
     fun goToPage(page: Int) {
-        val totalPages = (_state.value.questions.size + PAGE_SIZE - 1) / PAGE_SIZE
+        val totalPages = (_state.value.totalQuestions + PAGE_SIZE - 1) / PAGE_SIZE
         val safePage = page.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
-        _state.update { it.copy(currentPage = safePage) }
+        if (safePage == _state.value.currentPage) return
+
+        val navPath  = _state.value.navPath
+        val subject  = navPath.subject ?: return
+        val subTopic = navPath.subTopic ?: return
+        val sheet    = _state.value.mode.name
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+
+        viewModelScope.launch {
+            loadQuestionsFromRoom(sheet, subject, subTopic, tag, safePage)
+        }
+    }
+
+    /**
+     * Room DB থেকে paginated questions load করো — instant, Firebase call নেই।
+     * goToPage() থেকেও এটা call হয়।
+     */
+    private suspend fun loadQuestionsFromRoom(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String,
+        page     : Int
+    ) {
+        _state.update { it.copy(questionsLoading = true) }
+
+        val total    = repo.getRoomTotalCount(sheet, subject, subTopic, tag)
+        val items    = repo.getRoomPagedQuestions(sheet, subject, subTopic, tag, page, PAGE_SIZE)
+        val bookmarks = _state.value.bookmarkedIds
+
+        val questions = items.map { q ->
+            q.copy(
+                isBookmarked = bookmarks.contains(q.id),
+                isWeakTopic  = isWeak(q.subTopic)
+            )
+        }.sortedBy { isMastered(it.id, _state.value.mode) }
+
+        Log.d("QuizVM", "loadQuestionsFromRoom: page=$page total=$total loaded=${questions.size}")
+
+        val mode = _state.value.mode
+        _state.update {
+            it.copy(
+                questions       = questions,
+                totalQuestions  = total,
+                currentPage     = page,
+                questionsLoading = false,
+                isQuizActive    = mode != StudyMode.STUDY,
+                showResult      = false,
+                result          = null,
+                answeredCount   = 0,
+                timerSec        = 0
+            )
+        }
+        if (mode != StudyMode.STUDY) startTimer(total)  // timer total প্রশ্ন দিয়ে
     }
 
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
