@@ -117,28 +117,38 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // 30 সেকেন্ড timeout
-            val result = withTimeoutOrNull(30_000L) { repo.getContent() }
-                ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
+            // ── PHASE 1: Subject list দ্রুত দেখাও ──────────────────────────────
+            // শুধু SubjectOrder + SubTopicOrder — ছোট data, ২-৩ সেকেন্ডে আসে
+            val quickResult = withTimeoutOrNull(15_000L) { repo.getSubjectsQuick() }
+            val quickContent = (quickResult as? DataState.Success)?.data
 
-            val content = (result as? DataState.Success)?.data ?: AppContent()
-            val errMsg  = (result as? DataState.Error)?.message
-
-            Log.d("QuizVM", "Content loaded for $newMode: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
-
-            val debugMsg = when {
-                content.isEmpty() -> "❌ Data empty! err=$errMsg quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
-                else -> "✅ quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}"
+            if (quickContent != null && (quickContent.subjectOrder.isNotEmpty() || quickContent.subTopicOrder.isNotEmpty())) {
+                // Subject list দেখাও — user এখনই navigate করতে পারবে
+                Log.d("QuizVM", "Phase 1 done: subjects visible")
+                _state.update { it.copy(isLoading = false, error = null) }
+                rebuildSubjects(quickContent, newMode)
             }
-            Log.d("QuizVM_DEBUG", debugMsg)
 
+            // ── PHASE 2: Full data background-এ load করো ────────────────────────
+            // User subject/subtopic browse করার সময় questions চলে আসবে
+            val fullResult = withTimeoutOrNull(60_000L) { repo.getContent() }
+                ?: DataState.Error("টাইমআউট — ৬০ সেকেন্ডে data আসেনি। Internet ও Secrets চেক করো।")
+
+            val content = (fullResult as? DataState.Success)?.data ?: AppContent()
+            val errMsg  = (fullResult as? DataState.Error)?.message
+
+            Log.d("QuizVM", "Phase 2 done: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size} err=$errMsg")
+
+            val hasContent = !content.isEmpty()
             _state.update {
                 it.copy(
-                    contentLoaded = !content.isEmpty(),
-                    error         = if (content.isEmpty()) (errMsg ?: "Data empty") else null
+                    contentLoaded = hasContent,
+                    isLoading     = false,
+                    error         = if (!hasContent && quickContent == null) (errMsg ?: "Data empty") else null
                 )
             }
-            rebuildSubjects(content, newMode)
+            // Full content এলে subject list আবার rebuild করো (updated order দিয়ে)
+            if (hasContent) rebuildSubjects(content, newMode)
         }
     }
 
