@@ -7,6 +7,10 @@ import android.util.Log
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
+import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.EntityExtensions
+import com.hanif.smartstudy.data.local.toEntity
+import com.hanif.smartstudy.data.local.toQuestionItem
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.ExamCountdown
 import com.hanif.smartstudy.data.model.GoalProgress
@@ -28,6 +32,8 @@ class ContentRepository(private val context: Context) {
     private val cache   = ContentCache(context)
     private val queue   = PendingQueue(context)
     private val session = SessionManager(context)
+    private val db      = AppDatabase.getInstance(context)
+    private val dao     = db.questionDao()
 
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
@@ -66,6 +72,64 @@ class ContentRepository(private val context: Context) {
             }
             is ContentResult.Error -> DataState.Error(result.message)
         }
+    }
+
+    // ── Room-based fast methods ──────────────────────────────────────────────
+
+    /** Room DB তে কোনো প্রশ্ন আছে কিনা */
+    suspend fun hasRoomData(): Boolean =
+        dao.countAll("QUIZ") > 0 || dao.countAll("STUDY") > 0 || dao.countAll("QBANK") > 0
+
+    /** Room থেকে subject count list — instant */
+    suspend fun getRoomSubjectCounts(sheet: String) = dao.getSubjectCounts(sheet)
+
+    /** Room থেকে subTopic count list — instant */
+    suspend fun getRoomSubTopicCounts(sheet: String, subject: String) =
+        dao.getSubTopicCounts(sheet, subject)
+
+    /**
+     * Room থেকে paginated questions — instant, Firebase লাগে না।
+     * audienceTag="" হলে সব দেখাবে, নইলে filter হবে।
+     */
+    suspend fun getRoomPagedQuestions(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String,
+        page     : Int,
+        pageSize : Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return if (tag.isBlank() || tag == "all") {
+            dao.getPagedQuestions(sheet, subject, subTopic, pageSize, offset)
+        } else {
+            dao.getPagedQuestionsFiltered(sheet, subject, subTopic, tag, pageSize, offset)
+        }.map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা subTopic-এর মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomTotalCount(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String
+    ): Int = if (tag.isBlank() || tag == "all") {
+        dao.countBySubTopic(sheet, subject, subTopic)
+    } else {
+        dao.countFiltered(sheet, subject, subTopic, tag)
+    }
+
+    /**
+     * Firebase থেকে fetch করে Room-এ save করো।
+     * Online sync — background-এ চলে।
+     */
+    suspend fun syncToRoom(content: AppContent) {
+        val now = System.currentTimeMillis()
+        Log.d("Repo", "syncToRoom: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
+        if (content.quiz.isNotEmpty())  dao.upsertAll(content.quiz.map  { it.toEntity(now) })
+        if (content.qbank.isNotEmpty()) dao.upsertAll(content.qbank.map { it.toEntity(now) })
+        if (content.study.isNotEmpty()) dao.upsertAll(content.study.map { it.toEntity(now) })
+        Log.d("Repo", "syncToRoom: done")
     }
 
     suspend fun getContent(forceRefresh: Boolean = false): DataState<AppContent> {
@@ -121,6 +185,10 @@ class ContentRepository(private val context: Context) {
                     Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
                     _memCache = result.data
                     cache.saveContent(result.data)
+                    // Room-এ save করো — পরের বার Room থেকে instant load
+                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        syncToRoom(result.data)
+                    }
                     DataState.Success(result.data)
                 }
                 is ContentResult.Error -> {
