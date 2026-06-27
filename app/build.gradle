@@ -2,6 +2,7 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'com.google.gms.google-services'
 apply plugin: 'com.google.firebase.crashlytics'
+apply plugin: 'com.google.devtools.ksp'
 
 // ── FCM service-account secrets (FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY)
 //    are read from environment variables (set by the GitHub Actions workflow) instead
@@ -136,6 +137,12 @@ dependencies {
 
     // ── Image picker ──
     implementation 'androidx.activity:activity-ktx:1.8.2'
+
+    // ── Room Database (SQLite) — offline-first, instant query ──
+    def room_version = "2.6.1"
+    implementation "androidx.room:room-runtime:$room_version"
+    implementation "androidx.room:room-ktx:$room_version"
+    ksp "androidx.room:room-compiler:$room_version"
 
     // ── Gemini AI ──
     implementation 'com.google.ai.client.generativeai:generativeai:0.9.0'
