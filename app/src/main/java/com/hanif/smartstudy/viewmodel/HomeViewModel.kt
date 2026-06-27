@@ -67,7 +67,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 forceRefresh = forceRefresh,
                 onBackgroundUpdate = { freshData ->
                     // Background এ নতুন data এলে home screen silently update
-                    viewModelScope.launch { loadData(forceRefresh = false) }
+                    viewModelScope.launch { loadHomeData(forceRefresh = false) }
                 }
             )
             val content      = (contentState as? DataState.Success)?.data ?: AppContent()
