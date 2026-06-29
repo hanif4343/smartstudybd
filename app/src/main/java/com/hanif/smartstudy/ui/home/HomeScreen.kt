@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.home
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1220,11 +1221,15 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
 
 @Composable
 fun WeeklyStreakCard(streak: StreakInfo) {
+    val isDark = isSystemInDarkTheme()
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Text("সাপ্তাহিক Streak", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                Badge(containerColor = Color(0xFFFFFBEB), contentColor = Amber) {
+                Badge(
+                    containerColor = if (isDark) Color(0xFF1C1400) else Color(0xFFFFFBEB),
+                    contentColor = Amber
+                ) {
                     Text("🔥 ${streak.streakDays} দিন", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
             }
             Spacer(Modifier.height(10.dp))
@@ -1237,8 +1242,19 @@ fun WeeklyStreakCard(streak: StreakInfo) {
 
 @Composable
 private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
-    val bg = when { day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA))); day.isDone -> Brush.linearGradient(listOf(Color(0xFFDCFCE7), Color(0xFFDCFCE7))); else -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF94A3B8))) }
-    val textColor = when { day.isToday -> Color.White; day.isDone -> Color(0xFF166534); else -> Color(0xFFCBD5E1) }
+    val isDark = isSystemInDarkTheme()
+    val doneBgStart = if (isDark) Color(0xFF052E16) else Color(0xFFDCFCE7)
+    val doneBgEnd   = if (isDark) Color(0xFF166534) else Color(0xFFBBF7D0)
+    val bg = when {
+        day.isToday -> Brush.linearGradient(listOf(PrimaryIndigo, Color(0xFF4338CA)))
+        day.isDone  -> Brush.linearGradient(listOf(doneBgStart, doneBgEnd))
+        else        -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF94A3B8)))
+    }
+    val textColor = when {
+        day.isToday -> Color.White
+        day.isDone  -> if (isDark) Color(0xFF4ADE80) else Color(0xFF166534)
+        else        -> Color(0xFFCBD5E1)
+    }
     val icon = when { day.isToday -> if (day.isDone) "🔥" else "📍"; day.isDone -> "✓"; else -> "" }
     Column(modifier.clip(RoundedCornerShape(10.dp)).background(bg).padding(vertical = 8.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 12.sp, lineHeight = 14.sp)
