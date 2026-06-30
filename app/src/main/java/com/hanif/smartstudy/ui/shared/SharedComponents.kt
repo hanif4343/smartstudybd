@@ -482,9 +482,6 @@ fun HighlightedSpeakingText(
         )
     }
 }
-        modifier   = modifier
-    )
-}
 
 @Composable
 fun QuestionText(text: String, modifier: Modifier = Modifier, ttsKey: String? = null) {
