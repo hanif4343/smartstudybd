@@ -5,6 +5,7 @@ import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -48,6 +53,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -200,7 +208,9 @@ fun QuestionCard(
                     if (mode == StudyMode.STUDY && displayQuestion.isNotBlank()) {
                         val ttsKey = "${item.id}_qa"
                         val speakingKey by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
+                        val pausedKey by com.hanif.smartstudy.util.TtsManager.pausedKey.collectAsState()
                         val isThisSpeaking = speakingKey == ttsKey
+                        val isThisPaused = pausedKey == ttsKey
                         val combinedText = buildString {
                             append(displayQuestion)
                             val ans = item.answer.ifBlank { item.explanation }
@@ -211,9 +221,17 @@ fun QuestionCard(
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
-                                if (isThisSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
-                                contentDescription = if (isThisSpeaking) "থামাও" else "প্রশ্ন ও উত্তর শুনো",
-                                tint = if (isThisSpeaking) Indigo600 else Color(0xFFCBD5E1),
+                                when {
+                                    isThisSpeaking -> Icons.Default.Pause
+                                    isThisPaused   -> Icons.Default.PlayArrow
+                                    else           -> Icons.Default.VolumeUp
+                                },
+                                contentDescription = when {
+                                    isThisSpeaking -> "পজ করো"
+                                    isThisPaused   -> "আবার চালু করো"
+                                    else           -> "প্রশ্ন ও উত্তর শুনো"
+                                },
+                                tint = if (isThisSpeaking || isThisPaused) Indigo600 else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -257,14 +275,20 @@ fun QuestionCard(
                     fontSize  = 15
                 )
             } else {
-                // সাধারণ প্রশ্ন — QuestionText (LaTeX support)
-                QuestionText(text = displayQuestion)
+                // সাধারণ প্রশ্ন — QuestionText (LaTeX support + Study mode এ word-highlight TTS)
+                QuestionText(
+                    text   = displayQuestion,
+                    ttsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
+                )
             }
 
-            // imageUrl field (separate Image field from Firebase)
+            // imageUrl field — comma separated multiple images support
             if (item.imageUrl.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                ZoomableImage(url = item.imageUrl)
+                val imgUrls = item.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                imgUrls.forEach { singleUrl ->
+                    Spacer(Modifier.height(6.dp))
+                    ZoomableImage(url = singleUrl)
+                }
             }
 
             // VisualURL field — আলাদাভাবে থাকলে (image/video/pdf লিংক)
@@ -322,19 +346,161 @@ fun QuestionCard(
     }
 }
 
+/**
+ * ── ইংরেজি শব্দ চিনে আলাদা annotation tag বসিয়ে দেয় ──
+ * AnnotatedString এর উপর "word" tag বসানো হয় শুধু ইংরেজি (A-Z/a-z ভিত্তিক) অংশে,
+ * যাতে ক্লিক করলে বোঝা যায় কোন শব্দে ট্যাপ হয়েছে এবং সেটার শুদ্ধ ইংরেজি
+ * উচ্চারণ আলাদাভাবে চালানো যায়।
+ */
+private val ENGLISH_WORD_REGEX = Regex("[A-Za-z][A-Za-z0-9.\\-]*")
+
+private fun annotateEnglishWords(builder: androidx.compose.ui.text.AnnotatedString.Builder, text: String) {
+    for (match in ENGLISH_WORD_REGEX.findAll(text)) {
+        builder.addStringAnnotation(
+            tag = "EN_WORD",
+            annotation = match.value,
+            start = match.range.first,
+            end = match.range.last + 1
+        )
+    }
+}
+
+/**
+ * ── সাধারণ Selectable + Tap-to-pronounce টেক্সট ──
+ * SelectionContainer দিয়ে wrap করা থাকে — তাই আঙুল চেপে ধরলে টেক্সট সিলেক্ট করা যায়,
+ * Android এর built-in selection toolbar এ Copy/Web Search/Share সব এমনিতেই আসে।
+ * এছাড়া কোনো ইংরেজি শব্দে ট্যাপ করলে সেই শব্দের শুদ্ধ ইংরেজি উচ্চারণ তাৎক্ষণিকভাবে শোনায়।
+ */
 @Composable
-fun QuestionText(text: String, modifier: Modifier = Modifier) {
+fun SelectableSmartText(
+    text: String,
+    modifier: Modifier = Modifier,
+    fontSize: Int = 15,
+    fontWeight: FontWeight = FontWeight.Bold,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    lineHeight: Int = fontSize + 7
+) {
+    val annotated = remember(text) {
+        buildAnnotatedString {
+            append(text)
+            annotateEnglishWords(this, text)
+        }
+    }
+    SelectionContainer(modifier = modifier) {
+        ClickableText(
+            text = annotated,
+            style = androidx.compose.ui.text.TextStyle(
+                fontSize   = fontSize.sp,
+                fontWeight = fontWeight,
+                fontFamily = NotoSansBengali,
+                color      = color,
+                lineHeight = lineHeight.sp
+            ),
+            onClick = { offset ->
+                annotated.getStringAnnotations("EN_WORD", offset, offset).firstOrNull()?.let { ann ->
+                    com.hanif.smartstudy.util.TtsManager.speakWord(ann.item)
+                }
+            }
+        )
+    }
+}
+
+/**
+ * ── Word-highlighting TTS Text ──
+ * TtsManager এর currentWordRange দেখে যেই word বলা হচ্ছে সেটা highlight করে।
+ * ইতিমধ্যে বলা অংশ হালকা রঙে (already spoken), বর্তমান word বোল্ড+রঙিন ভাবে
+ * (currently speaking), আর বাকি অংশ স্বাভাবিক রঙে দেখায়।
+ * key মিলে গেলে তবেই highlight করে — অন্য card এর speech এ এটা react করে না।
+ * SelectionContainer দিয়ে wrap করা — copy/web-search toolbar পাওয়া যায়, আর
+ * ইংরেজি শব্দে ট্যাপ করলে তার শুদ্ধ ইংরেজি উচ্চারণ আলাদাভাবে শোনায়।
+ */
+@Composable
+fun HighlightedSpeakingText(
+    text: String,
+    ttsKey: String,
+    modifier: Modifier = Modifier,
+    fontSize: Int = 15,
+    fontWeight: FontWeight = FontWeight.Bold,
+    baseColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    val activeKey by com.hanif.smartstudy.util.TtsManager.activeKeyFlow.collectAsState()
+    val wordRange by com.hanif.smartstudy.util.TtsManager.currentWordRange.collectAsState()
+    val isThisActive = activeKey == ttsKey
+
+    val annotated = remember(text, isThisActive, wordRange) {
+        buildAnnotatedString {
+            if (!isThisActive || wordRange == null) {
+                withStyle(SpanStyle(color = baseColor)) { append(text) }
+            } else {
+                val range = wordRange!!
+                val spokenEnd = range.first.coerceIn(0, text.length)
+                val highlightStart = range.first.coerceIn(0, text.length)
+                val highlightEnd = range.last.coerceIn(0, text.length)
+                // ইতিমধ্যে বলা অংশ — হালকা ফিকে রঙ (পড়া শেষ বোঝানোর জন্য)
+                if (spokenEnd > 0) {
+                    withStyle(SpanStyle(color = baseColor.copy(alpha = 0.38f))) {
+                        append(text.substring(0, spokenEnd))
+                    }
+                }
+                // বর্তমান word — হাইলাইট রঙ + bold + সামান্য background tint
+                if (highlightEnd > highlightStart) {
+                    withStyle(
+                        SpanStyle(
+                            color = Indigo600,
+                            fontWeight = FontWeight.ExtraBold,
+                            background = Indigo600.copy(alpha = 0.16f)
+                        )
+                    ) {
+                        append(text.substring(highlightStart, highlightEnd))
+                    }
+                }
+                // বাকি অংশ — যা এখনো বলা হয়নি, স্বাভাবিক রঙ
+                if (highlightEnd < text.length) {
+                    withStyle(SpanStyle(color = baseColor)) {
+                        append(text.substring(highlightEnd))
+                    }
+                }
+            }
+            annotateEnglishWords(this, text)
+        }
+    }
+
+    SelectionContainer(modifier = modifier) {
+        ClickableText(
+            text = annotated,
+            style = androidx.compose.ui.text.TextStyle(
+                fontSize   = fontSize.sp,
+                fontWeight = fontWeight,
+                fontFamily = NotoSansBengali,
+                lineHeight = (fontSize + 7).sp
+            ),
+            onClick = { offset ->
+                annotated.getStringAnnotations("EN_WORD", offset, offset).firstOrNull()?.let { ann ->
+                    com.hanif.smartstudy.util.TtsManager.speakWord(ann.item)
+                }
+            }
+        )
+    }
+}
+        modifier   = modifier
+    )
+}
+
+@Composable
+fun QuestionText(text: String, modifier: Modifier = Modifier, ttsKey: String? = null) {
     val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
     if (hasLatex) {
+        // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
         MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 300.dp))
+    } else if (ttsKey != null) {
+        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 15)
     } else {
-        Text(
+        SelectableSmartText(
             text       = text,
-            fontSize   = 15.sp,
+            fontSize   = 15,
             fontWeight = FontWeight.Bold,
             color      = MaterialTheme.colorScheme.onSurface,
-            fontFamily = NotoSansBengali,
-            lineHeight = 22.sp,
+            lineHeight = 22,
             modifier   = modifier
         )
     }
@@ -382,6 +548,9 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val isDark = isSystemInDarkTheme()
+    val correctBg = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
+    val wrongBg   = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (n, text) ->
@@ -389,9 +558,9 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
             val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
             val bg = when {
                 answered == null        -> surfaceColor
-                isSelected && answered.isCorrect  -> Color(0xFFF0FDF4)
-                isSelected && !answered.isCorrect -> Color(0xFFFFF1F2)
-                !isSelected && isCorrectOpt && answered != null -> Color(0xFFF0FDF4)
+                isSelected && answered.isCorrect  -> correctBg
+                isSelected && !answered.isCorrect -> wrongBg
+                !isSelected && isCorrectOpt && answered != null -> correctBg
                 else -> surfaceVariantColor
             }
             val border = when {
@@ -451,10 +620,16 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 
     if (submitted != null) {
         val isCorrect = submitted.isCorrect
+        val isDark = isSystemInDarkTheme()
         Card(
             shape  = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (isCorrect) Color(0xFFF0FDF4) else Color(0xFFFFF1F2)
+                containerColor = when {
+                    isCorrect && isDark  -> Color(0xFF052E16)
+                    isCorrect            -> Color(0xFFF0FDF4)
+                    !isCorrect && isDark -> Color(0xFF3D1010)
+                    else                 -> Color(0xFFFFF1F2)
+                }
             ),
             border = BorderStroke(1.dp, if (isCorrect) GreenOk else RedWrong)
         ) {
@@ -502,18 +677,19 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 
 @Composable
 fun AnswerBox(text: String) {
+    val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)),
         border = BorderStroke(1.5.dp, GreenOk)
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF166534), fontFamily = NotoSansBengali)
+                color = if (isDark) Color(0xFF4ADE80) else Color(0xFF166534), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = Color(0xFF14532D),
+                textColor = if (isDark) Color(0xFF86EFAC) else Color(0xFF14532D),
                 fontSize  = 13
             )
         }
@@ -522,18 +698,19 @@ fun AnswerBox(text: String) {
 
 @Composable
 fun ExplanationBox(text: String) {
+    val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F9FF)),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF0C2340) else Color(0xFFF0F9FF)),
         border = BorderStroke(1.dp, Color(0xFF38BDF8))
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("ব্যাখ্যা:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF0369A1), fontFamily = NotoSansBengali)
+                color = if (isDark) Color(0xFF38BDF8) else Color(0xFF0369A1), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = Color(0xFF0C4A6E),
+                textColor = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0C4A6E),
                 fontSize  = 12
             )
         }
@@ -542,18 +719,19 @@ fun ExplanationBox(text: String) {
 
 @Composable
 fun TechniqueBox(text: String) {
+    val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF1C1400) else Color(0xFFFFFBEB)),
         border = BorderStroke(1.5.dp, AmberWarn)
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("💡 টেকনিক:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF92400E), fontFamily = NotoSansBengali)
+                color = if (isDark) Color(0xFFFBBF24) else Color(0xFF92400E), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = Color(0xFF78350F),
+                textColor = if (isDark) Color(0xFFFCD34D) else Color(0xFF78350F),
                 fontSize  = 12
             )
         }
