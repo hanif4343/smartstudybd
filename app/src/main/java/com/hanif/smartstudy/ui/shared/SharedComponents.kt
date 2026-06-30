@@ -315,15 +315,9 @@ fun QuestionCard(
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
                 if (mode == StudyMode.STUDY) {
-                    // answer TTS উপরের একক বাটনেই handle হচ্ছে — combinedText এর মধ্যে
-                    // উত্তরের অংশ কোথা থেকে শুরু সেই offset হিসাব করে highlight পাঠানো হচ্ছে
-                    val qaTtsKey = "${item.id}_qa"
-                    val ans = item.answer.ifBlank { item.explanation }
-                    val ansOffset = displayQuestion.length + "। উত্তর। ".length
-                    AnswerBox(text = ans, ttsKey = qaTtsKey, ttsOffset = ansOffset)
-                } else {
-                    AnswerBox(text = item.answer)
+                    // answer TTS উপরের একক বাটনেই handle হচ্ছে
                 }
+                AnswerBox(text = item.answer)
             }
 
             // explanation — studyNoQ তে empty, নাহলে দেখাও
@@ -423,26 +417,21 @@ fun HighlightedSpeakingText(
     modifier: Modifier = Modifier,
     fontSize: Int = 15,
     fontWeight: FontWeight = FontWeight.Bold,
-    baseColor: Color = MaterialTheme.colorScheme.onSurface,
-    // combinedText (যেটা TtsManager আসলে পড়ছে) এর মধ্যে এই অংশটা কোথা থেকে শুরু হয়েছে —
-    // যেমন উত্তরের অংশ প্রশ্নের পরে শুরু হয়, তাই তার offset = প্রশ্ন+\"। উত্তর। \" এর length
-    offset: Int = 0
+    baseColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val activeKey by com.hanif.smartstudy.util.TtsManager.activeKeyFlow.collectAsState()
     val wordRange by com.hanif.smartstudy.util.TtsManager.currentWordRange.collectAsState()
     val isThisActive = activeKey == ttsKey
 
-    val annotated = remember(text, isThisActive, wordRange, offset) {
+    val annotated = remember(text, isThisActive, wordRange) {
         buildAnnotatedString {
             if (!isThisActive || wordRange == null) {
                 withStyle(SpanStyle(color = baseColor)) { append(text) }
             } else {
                 val range = wordRange!!
-                val relStart = range.first - offset
-                val relEnd = range.last - offset
-                val spokenEnd = relStart.coerceIn(0, text.length)
-                val highlightStart = relStart.coerceIn(0, text.length)
-                val highlightEnd = relEnd.coerceIn(0, text.length)
+                val spokenEnd = range.first.coerceIn(0, text.length)
+                val highlightStart = range.first.coerceIn(0, text.length)
+                val highlightEnd = range.last.coerceIn(0, text.length)
                 // ইতিমধ্যে বলা অংশ — হালকা ফিকে রঙ (পড়া শেষ বোঝানোর জন্য)
                 if (spokenEnd > 0) {
                     withStyle(SpanStyle(color = baseColor.copy(alpha = 0.38f))) {
@@ -680,9 +669,8 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 }
 
 @Composable
-fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0) {
+fun AnswerBox(text: String) {
     val isDark = isSystemInDarkTheme()
-    val answerColor = if (isDark) Color(0xFF86EFAC) else Color(0xFF14532D)
     Card(
         shape  = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)),
@@ -692,26 +680,11 @@ fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0) {
             Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                 color = if (isDark) Color(0xFF4ADE80) else Color(0xFF166534), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
-            // LaTeX/লিংক না থাকলে আর ttsKey দেওয়া থাকলে — word-highlight TTS সহ দেখাও,
-            // আগের মতই সবুজ রঙ বজায় রেখে। নাহলে আগের মতোই RichContentText.
-            val hasRich = text.contains("\\") || text.contains("$") || text.contains("http") ||
-                text.contains(".jpg") || text.contains(".png") || text.contains(".pdf") || text.contains("youtu")
-            if (ttsKey != null && !hasRich) {
-                HighlightedSpeakingText(
-                    text       = text,
-                    ttsKey     = ttsKey,
-                    offset     = ttsOffset,
-                    fontSize   = 13,
-                    fontWeight = FontWeight.Normal,
-                    baseColor  = answerColor
-                )
-            } else {
-                RichContentText(
-                    text      = text,
-                    textColor = answerColor,
-                    fontSize  = 13
-                )
-            }
+            RichContentText(
+                text      = text,
+                textColor = if (isDark) Color(0xFF86EFAC) else Color(0xFF14532D),
+                fontSize  = 13
+            )
         }
     }
 }
