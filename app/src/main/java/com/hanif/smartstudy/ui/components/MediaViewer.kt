@@ -225,13 +225,15 @@ fun RichContentText(
             when (seg) {
                 is MediaSegment.PlainText -> {
                     if (seg.text.isNotBlank()) {
-                        Text(
-                            text       = parseRichAnnotated(seg.text, fontSize.toFloat()),
-                            color      = textColor,
-                            fontSize   = fontSize.sp,
-                            fontFamily = NotoSansBengali,
-                            lineHeight  = (fontSize + 6).sp
-                        )
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text       = parseRichAnnotated(seg.text, fontSize.toFloat()),
+                                color      = textColor,
+                                fontSize   = fontSize.sp,
+                                fontFamily = NotoSansBengali,
+                                lineHeight  = (fontSize + 6).sp
+                            )
+                        }
                     }
                 }
                 is MediaSegment.ImageLink -> {
