@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.home
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,9 +26,8 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.delay
 
 private val WR_RedMain   = Color(0xFFDC2626)
-private val WR_RedLight  = Color(0xFFFFF1F2)
-private val WR_RedBorder = Color(0xFFFECACA)
 private val WR_Green     = Color(0xFF10B981)
+// WR_RedLight / WR_RedBorder → isSystemInDarkTheme() দিয়ে dynamic নেওয়া হয়
 // WR_TextMain → MaterialTheme.colorScheme.onSurface
 // WR_TextGray → MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -233,11 +233,14 @@ private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
                 )
             }
         }
+        val isDark = isSystemInDarkTheme()
+        val wrRedLight  = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
+        val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else Color(0xFFFECACA)
         Box(
             modifier         = Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(WR_RedLight)
-                .border(1.dp, WR_RedBorder, RoundedCornerShape(12.dp))
+                .background(wrRedLight)
+                .border(1.dp, wrRedBorder, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -269,12 +272,15 @@ private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
         wrongCount == 2 -> Color(0xFFF97316)
         else            -> Color(0xFFF59E0B)
     }
+    val isDark = isSystemInDarkTheme()
+    val wrRedLight  = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
+    val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else Color(0xFFFECACA)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(WR_RedLight)
-            .border(1.dp, WR_RedBorder, RoundedCornerShape(10.dp))
+            .background(wrRedLight)
+            .border(1.dp, wrRedBorder, RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -357,13 +363,14 @@ private fun WRPracticeItem(
             else            -> Color(0xFFF59E0B)
         }
 
+        val isDark = isSystemInDarkTheme()
         Card(
             modifier  = Modifier.fillMaxWidth(),
             shape     = RoundedCornerShape(14.dp),
             colors    = CardDefaults.cardColors(
                 containerColor = when {
-                    isCorrect  -> Color(0xFFF0FDF4)
-                    isAnswered -> Color(0xFFFFF1F2)
+                    isCorrect  -> if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
+                    isAnswered -> if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
                     else       -> MaterialTheme.colorScheme.surfaceVariant
                 }
             ),
@@ -437,7 +444,10 @@ private fun WRPracticeItem(
 
                 QuestionText(text = q.question)
 
-                if (q.imageUrl.isNotBlank()) ZoomableImage(url = q.imageUrl)
+                if (q.imageUrl.isNotBlank()) {
+                    val imgUrls = q.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    imgUrls.forEach { ZoomableImage(url = it) }
+                }
 
                 if (q.isMcq()) {
                     McqOptions(item = q, onAnswer = onMcqAnswer)
@@ -459,7 +469,7 @@ private fun WRPracticeItem(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFDCFCE7))
+                            .background(if (isDark) Color(0xFF052E16) else Color(0xFFDCFCE7))
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
