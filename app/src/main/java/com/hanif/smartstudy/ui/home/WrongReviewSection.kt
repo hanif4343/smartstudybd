@@ -3,7 +3,6 @@ package com.hanif.smartstudy.ui.home
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.shared.*
+import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.delay
 
@@ -231,7 +231,7 @@ private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
                 )
             }
         }
-        val isDark = isSystemInDarkTheme()
+        val isDark = LocalDarkMode.current.value
         val wrRedLight  = if (isDark) Color(0xFF3D1010) else WR_RedLight
         val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else WR_RedBorder
         Box(
@@ -270,7 +270,7 @@ private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
         wrongCount == 2 -> Color(0xFFF97316)
         else            -> Color(0xFFF59E0B)
     }
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     val wrRedLight  = if (isDark) Color(0xFF3D1010) else WR_RedLight
     val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else WR_RedBorder
     Row(
@@ -361,7 +361,7 @@ private fun WRPracticeItem(
             else            -> Color(0xFFF59E0B)
         }
 
-        val isDark = isSystemInDarkTheme()
+        val isDark = LocalDarkMode.current.value
         Card(
             modifier  = Modifier.fillMaxWidth(),
             shape     = RoundedCornerShape(14.dp),
