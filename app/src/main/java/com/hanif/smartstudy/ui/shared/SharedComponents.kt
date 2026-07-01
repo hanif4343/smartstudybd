@@ -314,10 +314,8 @@ fun QuestionCard(
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
-                if (mode == StudyMode.STUDY) {
-                    // answer TTS উপরের একক বাটনেই handle হচ্ছে
-                }
-                AnswerBox(text = item.answer)
+                val answerTtsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
+                AnswerBox(text = item.answer, ttsKey = answerTtsKey)
             }
 
             // explanation — studyNoQ তে empty, নাহলে দেখাও
@@ -669,8 +667,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 }
 
 @Composable
-fun AnswerBox(text: String) {
-    val isDark = isSystemInDarkTheme()
+fun AnswerBox(text: String, ttsKey: String? = null) {
     Card(
         shape  = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -680,11 +677,21 @@ fun AnswerBox(text: String) {
             Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
                 color = GreenOk, fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
-            RichContentText(
-                text      = text,
-                textColor = MaterialTheme.colorScheme.onSurface,
-                fontSize  = 13
-            )
+            if (ttsKey != null) {
+                HighlightedSpeakingText(
+                    text      = text,
+                    ttsKey    = ttsKey,
+                    fontSize  = 13,
+                    fontWeight = FontWeight.Normal,
+                    baseColor = MaterialTheme.colorScheme.onSurface
+                )
+            } else {
+                RichContentText(
+                    text      = text,
+                    textColor = MaterialTheme.colorScheme.onSurface,
+                    fontSize  = 13
+                )
+            }
         }
     }
 }
