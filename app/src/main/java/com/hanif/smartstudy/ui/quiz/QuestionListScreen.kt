@@ -183,6 +183,15 @@ fun QuestionListScreen(
                     itemsIndexed(pagedQuestions, key = { _, q -> q.id }) { localIdx, q ->
                         val globalIdx = pageOffset + localIdx
                         val isHighlighted = q.id == activeHighlightId
+                        // ── Study mode-এ "পড়া হয়েছে" টিক দিলে আইটেম লিস্টের নিচে চলে যায় —
+                        //    animateItemPlacement() দিয়ে এই পজিশন-চেঞ্জটা হালকা স্মূথ এনিমেশনে
+                        //    হয়, পুরো স্ক্রিন/স্ক্রল জাম্প করে না, বাকি আইটেমগুলো নিজ জায়গায়
+                        //    স্মূথভাবে সরে আসে আর পরের প্রশ্নটা এমনিতেই ভেসে ওঠে ──
+                        Box(
+                            modifier = Modifier.animateItemPlacement(
+                                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                            )
+                        ) {
                         if (isHighlighted) {
                             // ── Report-resolved glow highlight ─────────────────
                             val hlTransition = rememberInfiniteTransition(label = "reportResolvedHL")
@@ -239,6 +248,7 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit
                         )
+                        }
                         }
                     }
                 }
