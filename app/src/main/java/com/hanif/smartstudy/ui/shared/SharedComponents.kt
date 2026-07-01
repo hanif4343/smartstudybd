@@ -5,7 +5,6 @@ import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +40,7 @@ import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
+import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -579,7 +579,7 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     val correctBg = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
     val wrongBg   = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
 
@@ -651,7 +651,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 
     if (submitted != null) {
         val isCorrect = submitted.isCorrect
-        val isDark = isSystemInDarkTheme()
+        val isDark = LocalDarkMode.current.value
         Card(
             shape  = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
@@ -739,7 +739,7 @@ fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0) {
 
 @Composable
 fun ExplanationBox(text: String) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     Card(
         shape  = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -760,7 +760,7 @@ fun ExplanationBox(text: String) {
 
 @Composable
 fun TechniqueBox(text: String) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     Card(
         shape  = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
