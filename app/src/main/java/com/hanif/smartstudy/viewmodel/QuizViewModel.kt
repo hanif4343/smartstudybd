@@ -566,6 +566,28 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(bookmarkedIds = current, questions = updatedQuestions) }
     }
 
+    private fun isStudyDone(qId: String): Boolean {
+        if (qId.isBlank()) return false
+        return prefs.getStringSet("study_done_ids", emptySet())?.contains(qId) == true
+    }
+
+    /**
+     * Study মোডের টিকমার্ক বাটন — ক্লিক করলে "পড়া হয়েছে" হিসেবে সেভ হয় এবং
+     * একই লিস্টের নিচে চলে যায় (quiz এর mastered question sink করার মতো)।
+     * হাইড হয় না, শুধু নিচে সরে যায় — আবার ক্লিক করলে টিক উঠে যাবে (toggle)।
+     */
+    fun toggleStudyDone(qId: String) {
+        if (qId.isBlank()) return
+        val current = prefs.getStringSet("study_done_ids", mutableSetOf())!!.toMutableSet()
+        if (current.contains(qId)) current.remove(qId) else current.add(qId)
+        prefs.edit().putStringSet("study_done_ids", current).apply()
+
+        val updated = _state.value.questions
+            .map { q -> if (q.id == qId) q.copy(isStudyDone = current.contains(qId)) else q }
+            .sortedBy { it.isStudyDone }   // done আইটেম নিচে, বাকিগুলো আগের ক্রম বজায় থাকবে (stable sort)
+        _state.update { it.copy(questions = updated) }
+    }
+
     fun updateReadingIndex(index: Int) {
         _state.update { it.copy(readingIndex = index) }
     }
@@ -782,9 +804,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val questions = items.map { q ->
             q.copy(
                 isBookmarked = bookmarks.contains(q.id),
-                isWeakTopic  = isWeak(q.subTopic)
+                isWeakTopic  = isWeak(q.subTopic),
+                isStudyDone  = isStudyDone(q.id)
             )
-        }.sortedBy { isMastered(it.id, _state.value.mode) }
+        }.sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
 
         Log.d("QuizVM", "loadQuestionsFromRoom: page=$page total=$total loaded=${questions.size}")
 
@@ -814,10 +837,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
             StudyMode.QBANK -> filtered.qbank.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQBankItem(it) }
             StudyMode.STUDY -> filtered.study.filter { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromStudyItem(it) }
-        }.map { it.copy(isBookmarked = bookmarks.contains(it.id), isWeakTopic = isWeak(it.subTopic)) }
+        }.map {
+            it.copy(
+                isBookmarked = bookmarks.contains(it.id),
+                isWeakTopic  = isWeak(it.subTopic),
+                isStudyDone  = isStudyDone(it.id)
+            )
+        }
             // আগে সঠিক হয়েছে এমন (mastered) প্রশ্নগুলো এই সাবটপিকে সবার নিচে শুরু হবে —
             // নতুন/ভুল করা প্রশ্নগুলো উপরে থাকবে, যাতে আগে সেগুলোর দিকেই নজর যায়
-            .sortedBy { isMastered(it.id, mode) }
+            // Study mode এ টিকমার্ক দেওয়া (পড়া হয়ে গেছে) আইটেমও একইভাবে নিচে যাবে
+            .sortedBy { isMastered(it.id, mode) || it.isStudyDone }
 
         _state.update {
             it.copy(questions = items, isQuizActive = mode != StudyMode.STUDY,
