@@ -100,6 +100,11 @@ object TtsManager {
                 tts?.setLanguage(if (isBanglaAvailable) Locale("bn", "BD") else Locale.US)
                 isReady = true
                 tts?.setSpeechRate(0.95f)
+
+                // বাংলা voice এর gender বের করে same gender এর English voice খুঁজি,
+                // যাতে বাংলা→English switch এ voice gender না বদলায়
+                findMatchingEnglishVoice()
+
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
 
@@ -158,6 +163,38 @@ object TtsManager {
     fun isBanglaSupported(): Boolean = isBanglaAvailable
     fun isReadyNow(): Boolean = isReady
 
+    // বাংলা voice এর gender এর সাথে মেলে এমন English voice — voice switch এ gender অপরিবর্তিত রাখে
+    private var matchingEnglishVoice: android.speech.tts.Voice? = null
+
+    private fun findMatchingEnglishVoice() {
+        val engine = tts ?: return
+        try {
+            val currentVoice = engine.voice ?: return
+            val currentGender = currentVoice.features
+                ?.firstOrNull { it.startsWith("gender") }
+                ?: "gender:male" // default assume male (বাংলা সাধারণত male)
+            val isMale = !currentGender.contains("female")
+
+            val englishVoices = engine.voices
+                ?.filter { v ->
+                    (v.locale.language == "en") &&
+                    !v.isNetworkConnectionRequired &&
+                    v.quality >= android.speech.tts.Voice.QUALITY_NORMAL
+                } ?: emptyList()
+
+            // same gender এর voice খোঁজো, না পেলে যেকোনো English voice নাও
+            matchingEnglishVoice = englishVoices.firstOrNull { v ->
+                val genderFeature = v.features?.firstOrNull { it.startsWith("gender") } ?: ""
+                if (isMale) !genderFeature.contains("female")
+                else genderFeature.contains("female")
+            } ?: englishVoices.firstOrNull()
+
+            Log.d(TAG, "Bangla voice: ${currentVoice.name}, English voice matched: ${matchingEnglishVoice?.name}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Voice matching failed: ${e.message}")
+        }
+    }
+
     /**
      * টেক্সটকে বাংলা ও ইংরেজি অংশে ভাগ করে — যেন প্রতিটা অংশ তার নিজের
      * ভাষার voice দিয়ে শুদ্ধভাবে পড়া যায়। সংখ্যা/যতিচিহ্ন বর্তমান ভাষার
@@ -208,10 +245,16 @@ object TtsManager {
             } else seg.text
             if (textToSpeak.isBlank()) continue
 
-            val locale = if (seg.isEnglish && isEnglishAvailable) Locale.US
-                         else if (isBanglaAvailable) Locale("bn", "BD")
-                         else Locale.US
-            engine.language = locale
+            if (seg.isEnglish && isEnglishAvailable) {
+                // matched English voice (same gender) ব্যবহার করো — না পেলে locale fallback
+                if (matchingEnglishVoice != null) {
+                    engine.voice = matchingEnglishVoice
+                } else {
+                    engine.language = Locale.US
+                }
+            } else {
+                engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
+            }
 
             val mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
             engine.speak(textToSpeak, mode, null, "$UTTERANCE_PREFIX$i")
@@ -313,11 +356,12 @@ object TtsManager {
         val engine = tts ?: return
         if (!isReady || word.isBlank()) return
         val isEnglish = Regex("^[A-Za-z0-9.\\-]+$").matches(word.trim())
-        val locale = if (isEnglish && isEnglishAvailable) Locale.US
-                     else if (isBanglaAvailable) Locale("bn", "BD")
-                     else Locale.US
-        engine.stop()
-        engine.language = locale
+        if (isEnglish && isEnglishAvailable) {
+            if (matchingEnglishVoice != null) engine.voice = matchingEnglishVoice
+            else engine.language = Locale.US
+        } else {
+            engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
+        }
         engine.speak(word.trim(), TextToSpeech.QUEUE_FLUSH, null, "smartstudy_word_tap")
     }
 
