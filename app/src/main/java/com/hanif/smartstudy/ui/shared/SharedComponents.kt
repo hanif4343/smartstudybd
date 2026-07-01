@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -145,6 +146,7 @@ fun QuestionCard(
     onMcqAnswer    : (Int) -> Unit,
     onWritten      : (String) -> Int,
     onBookmark     : () -> Unit,
+    onStudyDone    : () -> Unit = {},
     onReport       : () -> Unit,
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
@@ -239,6 +241,18 @@ fun QuestionCard(
                             tint     = if (item.isBookmarked) AmberWarn else Color(0xFFCBD5E1),
                             modifier = Modifier.size(18.dp)
                         )
+                    }
+                    // ── 📖 "পড়া হয়েছে" টিকমার্ক — শুধু Study mode এ। ক্লিক করলে
+                    // লিস্টের নিচে চলে যাবে, হাইড হবে না। আবার ক্লিক করলে টিক উঠে যাবে ──
+                    if (mode == StudyMode.STUDY) {
+                        IconButton(onClick = onStudyDone, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                if (item.isStudyDone) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                                contentDescription = if (item.isStudyDone) "পড়া হয়েছে" else "পড়া হয়েছে চিহ্নিত করো",
+                                tint     = if (item.isStudyDone) GreenOk else Color(0xFFCBD5E1),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     IconButton(onClick = onReport, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Flag, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
