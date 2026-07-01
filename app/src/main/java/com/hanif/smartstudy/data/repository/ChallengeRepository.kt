@@ -75,18 +75,35 @@ class ChallengeRepository {
         wagerXp       : Int = 0
     ): String? {
         return try {
+            val creatorPhone = creator.phone
+            if (creatorPhone.isNullOrBlank()) {
+                Log.e(TAG, "createChallenge: creator has no phone, aborting")
+                return null
+            }
+            // যেসব invitee-র phone নেই (incomplete profile) তাদের বাদ দাও —
+            // একজনের ভুল ডেটার জন্য যেন বাকি সবার challenge তৈরি বন্ধ না হয়ে যায়
+            val validInvitees = invitees.filter { !it.phone.isNullOrBlank() }
+            if (validInvitees.size != invitees.size) {
+                Log.w(TAG, "createChallenge: skipped ${invitees.size - validInvitees.size} invitee(s) with missing phone")
+            }
+            if (validInvitees.isEmpty()) {
+                Log.e(TAG, "createChallenge: no valid invitees, aborting")
+                return null
+            }
+
             val id  = challengesRef.push().key ?: return null
             val now = System.currentTimeMillis()
 
             val participants = mutableMapOf<String, ChallengeParticipant>()
-            participants[creator.phone!!.firebaseKey()] = ChallengeParticipant(
-                phone  = creator.phone,
+            participants[creatorPhone.firebaseKey()] = ChallengeParticipant(
+                phone  = creatorPhone,
                 name   = creator.displayName(),
                 status = "ACCEPTED"
             )
-            invitees.forEach { u ->
-                participants[u.phone!!.firebaseKey()] = ChallengeParticipant(
-                    phone  = u.phone,
+            validInvitees.forEach { u ->
+                val uPhone = u.phone!!  // filter দিয়ে আগেই নিশ্চিত করা হয়েছে non-blank
+                participants[uPhone.firebaseKey()] = ChallengeParticipant(
+                    phone  = uPhone,
                     name   = u.displayName(),
                     status = "INVITED"
                 )
@@ -94,7 +111,7 @@ class ChallengeRepository {
 
             val challenge = Challenge(
                 id            = id,
-                creatorPhone  = creator.phone,
+                creatorPhone  = creatorPhone,
                 creatorName   = creator.displayName(),
                 subject       = subject,
                 subTopic      = subTopic,
@@ -109,11 +126,11 @@ class ChallengeRepository {
 
             challengesRef.child(id).setValue(challengeToMap(challenge)).await()
 
-            invitees.forEach { u ->
+            validInvitees.forEach { u ->
                 writeInviteNotification(u.phone!!, ChallengeInvite(
                     challengeId   = id,
                     creatorName   = creator.displayName(),
-                    creatorPhone  = creator.phone,
+                    creatorPhone  = creatorPhone,
                     subject       = subject,
                     questionCount = questionCount,
                     timeLimitSec  = timeLimitSec,
@@ -610,18 +627,29 @@ class ChallengeRepository {
         questionIds   : List<String>
     ): String? {
         return try {
+            val creatorPhone = creator.phone
+            if (creatorPhone.isNullOrBlank()) {
+                Log.e(TAG, "createGhostChallenge: creator has no phone, aborting")
+                return null
+            }
+            val validInvitees = invitees.filter { !it.phone.isNullOrBlank() }
+            if (validInvitees.size != invitees.size) {
+                Log.w(TAG, "createGhostChallenge: skipped ${invitees.size - validInvitees.size} invitee(s) with missing phone")
+            }
+
             val id  = challengesRef.push().key ?: return null
             val now = System.currentTimeMillis()
 
             val participants = mutableMapOf<String, ChallengeParticipant>()
-            participants[creator.phone!!.firebaseKey()] = ChallengeParticipant(
-                phone  = creator.phone,
+            participants[creatorPhone.firebaseKey()] = ChallengeParticipant(
+                phone  = creatorPhone,
                 name   = creator.displayName(),
                 status = "ACCEPTED"
             )
-            invitees.forEach { u ->
-                participants[u.phone!!.firebaseKey()] = ChallengeParticipant(
-                    phone  = u.phone,
+            validInvitees.forEach { u ->
+                val uPhone = u.phone!!  // filter দিয়ে আগেই নিশ্চিত করা হয়েছে non-blank
+                participants[uPhone.firebaseKey()] = ChallengeParticipant(
+                    phone  = uPhone,
                     name   = u.displayName(),
                     status = "INVITED"
                 )
@@ -629,7 +657,7 @@ class ChallengeRepository {
 
             val challenge = Challenge(
                 id            = id,
-                creatorPhone  = creator.phone,
+                creatorPhone  = creatorPhone,
                 creatorName   = creator.displayName(),
                 subject       = subject,
                 subTopic      = subTopic,
