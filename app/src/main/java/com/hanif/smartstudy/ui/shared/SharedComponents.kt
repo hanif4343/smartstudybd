@@ -673,16 +673,16 @@ fun AnswerBox(text: String) {
     val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.5.dp, GreenOk)
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isDark) Color(0xFF4ADE80) else Color(0xFF166534), fontFamily = NotoSansBengali)
+                color = GreenOk, fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = if (isDark) Color(0xFF86EFAC) else Color(0xFF14532D),
+                textColor = MaterialTheme.colorScheme.onSurface,
                 fontSize  = 13
             )
         }
@@ -694,16 +694,16 @@ fun ExplanationBox(text: String) {
     val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF0C2340) else Color(0xFFF0F9FF)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, Color(0xFF38BDF8))
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("ব্যাখ্যা:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isDark) Color(0xFF38BDF8) else Color(0xFF0369A1), fontFamily = NotoSansBengali)
+                color = Color(0xFF38BDF8), fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0C4A6E),
+                textColor = MaterialTheme.colorScheme.onSurface,
                 fontSize  = 12
             )
         }
@@ -715,16 +715,16 @@ fun TechniqueBox(text: String) {
     val isDark = isSystemInDarkTheme()
     Card(
         shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF1C1400) else Color(0xFFFFFBEB)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.5.dp, AmberWarn)
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("💡 টেকনিক:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isDark) Color(0xFFFBBF24) else Color(0xFF92400E), fontFamily = NotoSansBengali)
+                color = AmberWarn, fontFamily = NotoSansBengali)
             Spacer(Modifier.height(4.dp))
             RichContentText(
                 text      = text,
-                textColor = if (isDark) Color(0xFFFCD34D) else Color(0xFF78350F),
+                textColor = MaterialTheme.colorScheme.onSurface,
                 fontSize  = 12
             )
         }
