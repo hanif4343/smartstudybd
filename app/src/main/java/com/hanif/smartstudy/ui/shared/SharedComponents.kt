@@ -168,6 +168,13 @@ fun QuestionCard(
             val displayQuestion = if (studyNoQ) (item.explanation.ifBlank { item.answer }) else item.question
             val displayExplanation = if (studyNoQ) "" else item.explanation
 
+            // TTS তে প্রশ্ন + উত্তর একটাই স্পিচে জোড়া লাগানো হয় (combinedText, নিচে দেখুন),
+            // তাই AnswerBox কে জানাতে হবে সে ওই মিলিত টেক্সটের কোন char-position থেকে শুরু —
+            // নাহলে highlight ভুল জায়গায় (এলোমেলোভাবে) হয়
+            val ttsSeparator = "। উত্তর। "
+            val ttsAnswerText = item.answer.ifBlank { item.explanation }
+            val ttsAnswerOffset = displayQuestion.length + ttsSeparator.length
+
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -211,8 +218,7 @@ fun QuestionCard(
                         val isThisPaused = pausedKey == ttsKey
                         val combinedText = buildString {
                             append(displayQuestion)
-                            val ans = item.answer.ifBlank { item.explanation }
-                            if (ans.isNotBlank()) { append("। উত্তর। "); append(ans) }
+                            if (ttsAnswerText.isNotBlank()) { append(ttsSeparator); append(ttsAnswerText) }
                         }
                         IconButton(
                             onClick = { com.hanif.smartstudy.util.TtsManager.speak(combinedText, ttsKey) },
@@ -329,7 +335,7 @@ fun QuestionCard(
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
                 val answerTtsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
-                AnswerBox(text = item.answer, ttsKey = answerTtsKey)
+                AnswerBox(text = item.answer, ttsKey = answerTtsKey, ttsOffset = ttsAnswerOffset)
             }
 
             // explanation — studyNoQ তে empty, নাহলে দেখাও
@@ -429,43 +435,63 @@ fun HighlightedSpeakingText(
     modifier: Modifier = Modifier,
     fontSize: Int = 15,
     fontWeight: FontWeight = FontWeight.Bold,
-    baseColor: Color = MaterialTheme.colorScheme.onSurface
+    baseColor: Color = MaterialTheme.colorScheme.onSurface,
+    // এই text টুকরাটা সম্পূর্ণ spoken (combined question+answer) টেক্সটের কোন
+    // চরিত্র-অবস্থান থেকে শুরু হয়েছে — যাতে global word-range কে সঠিকভাবে
+    // এই local text এর সাপেক্ষে বসানো যায় (নাহলে answer box এ এলোমেলো হাইলাইট হয়)
+    spokenOffset: Int = 0
 ) {
     val activeKey by com.hanif.smartstudy.util.TtsManager.activeKeyFlow.collectAsState()
     val wordRange by com.hanif.smartstudy.util.TtsManager.currentWordRange.collectAsState()
     val isThisActive = activeKey == ttsKey
 
-    val annotated = remember(text, isThisActive, wordRange) {
+    val annotated = remember(text, isThisActive, wordRange, spokenOffset) {
         buildAnnotatedString {
-            if (!isThisActive || wordRange == null) {
+            val range = wordRange
+            if (!isThisActive || range == null) {
                 withStyle(SpanStyle(color = baseColor)) { append(text) }
             } else {
-                val range = wordRange!!
-                val spokenEnd = range.first.coerceIn(0, text.length)
-                val highlightStart = range.first.coerceIn(0, text.length)
-                val highlightEnd = range.last.coerceIn(0, text.length)
-                // ইতিমধ্যে বলা অংশ — হালকা ফিকে রঙ (পড়া শেষ বোঝানোর জন্য)
-                if (spokenEnd > 0) {
-                    withStyle(SpanStyle(color = baseColor.copy(alpha = 0.38f))) {
-                        append(text.substring(0, spokenEnd))
+                // global word-range কে এই box এর local coordinate এ আনা হলো
+                val localStart = range.first - spokenOffset
+                val localEnd   = range.last  - spokenOffset
+
+                when {
+                    // এখনো এই box এর অংশ বলা শুরু হয়নি (আগে অন্য অংশ — যেমন প্রশ্ন — বলা হচ্ছে)
+                    localEnd <= 0 -> {
+                        withStyle(SpanStyle(color = baseColor)) { append(text) }
                     }
-                }
-                // বর্তমান word — হাইলাইট রঙ + bold + সামান্য background tint
-                if (highlightEnd > highlightStart) {
-                    withStyle(
-                        SpanStyle(
-                            color = Indigo600,
-                            fontWeight = FontWeight.ExtraBold,
-                            background = Indigo600.copy(alpha = 0.16f)
-                        )
-                    ) {
-                        append(text.substring(highlightStart, highlightEnd))
+                    // এই box এর অংশ বলা ইতিমধ্যে শেষ (এখন পরের অংশ — যেমন উত্তর — বলা হচ্ছে)
+                    localStart >= text.length -> {
+                        withStyle(SpanStyle(color = baseColor.copy(alpha = 0.38f))) { append(text) }
                     }
-                }
-                // বাকি অংশ — যা এখনো বলা হয়নি, স্বাভাবিক রঙ
-                if (highlightEnd < text.length) {
-                    withStyle(SpanStyle(color = baseColor)) {
-                        append(text.substring(highlightEnd))
+                    // এই box এর ভেতরেই এখন বলা হচ্ছে — সঠিক word টুকু হাইলাইট করো
+                    else -> {
+                        val highlightStart = localStart.coerceIn(0, text.length)
+                        val highlightEnd   = localEnd.coerceIn(0, text.length)
+                        // ইতিমধ্যে বলা অংশ — হালকা ফিকে রঙ (পড়া শেষ বোঝানোর জন্য)
+                        if (highlightStart > 0) {
+                            withStyle(SpanStyle(color = baseColor.copy(alpha = 0.38f))) {
+                                append(text.substring(0, highlightStart))
+                            }
+                        }
+                        // বর্তমান word — হাইলাইট রঙ + bold + সামান্য background tint
+                        if (highlightEnd > highlightStart) {
+                            withStyle(
+                                SpanStyle(
+                                    color = Indigo600,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    background = Indigo600.copy(alpha = 0.16f)
+                                )
+                            ) {
+                                append(text.substring(highlightStart, highlightEnd))
+                            }
+                        }
+                        // বাকি অংশ — যা এখনো বলা হয়নি, স্বাভাবিক রঙ
+                        if (highlightEnd < text.length) {
+                            withStyle(SpanStyle(color = baseColor)) {
+                                append(text.substring(highlightEnd))
+                            }
+                        }
                     }
                 }
             }
@@ -492,13 +518,13 @@ fun HighlightedSpeakingText(
 }
 
 @Composable
-fun QuestionText(text: String, modifier: Modifier = Modifier, ttsKey: String? = null) {
+fun QuestionText(text: String, modifier: Modifier = Modifier, ttsKey: String? = null, ttsOffset: Int = 0) {
     val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
     if (hasLatex) {
         // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
         MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 300.dp))
     } else if (ttsKey != null) {
-        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 15)
+        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 15, spokenOffset = ttsOffset)
     } else {
         SelectableSmartText(
             text       = text,
@@ -681,7 +707,7 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
 }
 
 @Composable
-fun AnswerBox(text: String, ttsKey: String? = null) {
+fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0) {
     Card(
         shape  = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -697,7 +723,8 @@ fun AnswerBox(text: String, ttsKey: String? = null) {
                     ttsKey    = ttsKey,
                     fontSize  = 13,
                     fontWeight = FontWeight.Normal,
-                    baseColor = MaterialTheme.colorScheme.onSurface
+                    baseColor = MaterialTheme.colorScheme.onSurface,
+                    spokenOffset = ttsOffset
                 )
             } else {
                 RichContentText(
