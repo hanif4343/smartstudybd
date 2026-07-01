@@ -101,6 +101,10 @@ object TtsManager {
                 isReady = true
                 tts?.setSpeechRate(0.95f)
 
+                // ── ডিফল্ট engine voice প্রায়ই female হয় — female voice বাদ দিয়ে
+                // একটা male/non-female বাংলা voice খুঁজে সেট করা হলো ──
+                findMaleBanglaVoice()
+
                 // বাংলা voice এর gender বের করে same gender এর English voice খুঁজি,
                 // যাতে বাংলা→English switch এ voice gender না বদলায়
                 findMatchingEnglishVoice()
@@ -165,6 +169,33 @@ object TtsManager {
 
     // বাংলা voice এর gender এর সাথে মেলে এমন English voice — voice switch এ gender অপরিবর্তিত রাখে
     private var matchingEnglishVoice: android.speech.tts.Voice? = null
+
+    // engine এর ডিফল্ট বাংলা voice সাধারণত female — female বাদ দিয়ে বেছে নেওয়া male/non-female voice
+    private var maleBanglaVoice: android.speech.tts.Voice? = null
+
+    /** বাংলা ভাষার সব voice-এর মধ্যে থেকে female বাদ দিয়ে একটা voice বেছে engine তে সেট করে */
+    private fun findMaleBanglaVoice() {
+        val engine = tts ?: return
+        try {
+            val banglaVoices = engine.voices
+                ?.filter { v ->
+                    v.locale.language == "bn" &&
+                    !v.isNetworkConnectionRequired &&
+                    v.quality >= android.speech.tts.Voice.QUALITY_NORMAL
+                } ?: emptyList()
+
+            // gender ফিচারে "female" নেই এমন voice আগে খোঁজো (male অথবা unspecified)
+            maleBanglaVoice = banglaVoices.firstOrNull { v ->
+                val genderFeature = v.features?.firstOrNull { it.startsWith("gender") } ?: ""
+                !genderFeature.contains("female")
+            } ?: banglaVoices.firstOrNull()
+
+            maleBanglaVoice?.let { engine.voice = it }
+            Log.d(TAG, "Bangla voice selected (female avoided): ${maleBanglaVoice?.name}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Bangla voice selection failed: ${e.message}")
+        }
+    }
 
     private fun findMatchingEnglishVoice() {
         val engine = tts ?: return
@@ -253,7 +284,11 @@ object TtsManager {
                     engine.language = Locale.US
                 }
             } else {
-                engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
+                if (maleBanglaVoice != null) {
+                    engine.voice = maleBanglaVoice
+                } else {
+                    engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
+                }
             }
 
             val mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
@@ -360,7 +395,8 @@ object TtsManager {
             if (matchingEnglishVoice != null) engine.voice = matchingEnglishVoice
             else engine.language = Locale.US
         } else {
-            engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
+            if (maleBanglaVoice != null) engine.voice = maleBanglaVoice
+            else engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
         }
         engine.speak(word.trim(), TextToSpeech.QUEUE_FLUSH, null, "smartstudy_word_tap")
     }
