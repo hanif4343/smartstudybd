@@ -42,7 +42,9 @@ object RemoteLogger {
     @Volatile private var phone   : String = "guest"
     @Volatile private var initialized = false
     private val seq = AtomicInteger(0)
-    private val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+    // sdf ইচ্ছাকৃতভাবে instance field না — SimpleDateFormat thread-safe না, আর
+    // flushBlocking() একাধিক থ্রেড (crash handler + normal flush) থেকে চলতে পারে।
+    // তাই ব্যবহারের জায়গাতেই (flushBlocking) নতুন করে বানানো হয়।
 
     private val buffer = Collections.synchronizedList(mutableListOf<JSONObject>())
 
@@ -124,7 +126,7 @@ object RemoteLogger {
                     kotlinx.coroutines.runBlocking { FirebaseTokenProvider.getToken() }
                 }.getOrDefault("")
                 val safePhone = phone.replace(Regex("[.#$\\[\\]/]"), "_")
-                val today = sdf.format(Date())
+                val today = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date())
                 val patch = JSONObject()
                 toSend.forEach { entry ->
                     val key = "${entry.optLong("ts")}_${seq.incrementAndGet()}"
