@@ -3,7 +3,6 @@ package com.hanif.smartstudy.ui.home
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +50,7 @@ import androidx.lifecycle.Lifecycle
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.shared.*
+import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
@@ -1221,7 +1221,7 @@ private fun GoalSetDialog(current: Int, onSet: (Int) -> Unit, onDismiss: () -> U
 
 @Composable
 fun WeeklyStreakCard(streak: StreakInfo) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     Card(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), CardDefaults.cardColors(MaterialTheme.colorScheme.surface), CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -1242,7 +1242,7 @@ fun WeeklyStreakCard(streak: StreakInfo) {
 
 @Composable
 private fun StreakDot(day: StreakDay, modifier: Modifier = Modifier) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalDarkMode.current.value
     val doneBgStart = if (isDark) Color(0xFF052E16) else Color(0xFFDCFCE7)
     val doneBgEnd   = if (isDark) Color(0xFF166534) else Color(0xFFBBF7D0)
     val bg = when {
