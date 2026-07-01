@@ -45,7 +45,8 @@ data class QuestionItem(
     // Runtime state
     val answerState : AnswerState = AnswerState.Unanswered,
     val isBookmarked: Boolean     = false,
-    val isWeakTopic : Boolean     = false
+    val isWeakTopic : Boolean     = false,
+    val isStudyDone : Boolean     = false   // Study mode: "পড়া হয়েছে" টিকমার্ক — লিস্টের নিচে যাবে, হাইড হবে না
 ) {
     fun isWritten() = questionType.lowercase().trim() == "written"
     fun isStudy()   = questionType.lowercase().trim() == "study"
