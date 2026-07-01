@@ -22,6 +22,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -61,6 +62,7 @@ private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
     } catch (_: Exception) { }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionListScreen(
     viewModel   : QuizViewModel,
