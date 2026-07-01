@@ -26,10 +26,8 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import kotlinx.coroutines.delay
 
 private val WR_RedMain   = Color(0xFFDC2626)
-private val WR_Green     = Color(0xFF10B981)
-// WR_RedLight / WR_RedBorder → isSystemInDarkTheme() দিয়ে dynamic নেওয়া হয়
-// WR_TextMain → MaterialTheme.colorScheme.onSurface
-// WR_TextGray → MaterialTheme.colorScheme.onSurfaceVariant
+private val WR_RedLight  = Color(0xFFFFF1F2)   // original light pink (light mode)
+private val WR_RedBorder = Color(0xFFFECACA)   // original light pink border (light mode)
 
 @Composable
 fun WrongReviewSection(
@@ -234,8 +232,8 @@ private fun WRHeader(totalCount: Int, activeCount: Int, practiceMode: Boolean) {
             }
         }
         val isDark = isSystemInDarkTheme()
-        val wrRedLight  = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
-        val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else Color(0xFFFECACA)
+        val wrRedLight  = if (isDark) Color(0xFF3D1010) else WR_RedLight
+        val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else WR_RedBorder
         Box(
             modifier         = Modifier
                 .clip(RoundedCornerShape(12.dp))
@@ -273,8 +271,8 @@ private fun WRPreviewItem(q: QuestionItem, wrongCount: Int) {
         else            -> Color(0xFFF59E0B)
     }
     val isDark = isSystemInDarkTheme()
-    val wrRedLight  = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
-    val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else Color(0xFFFECACA)
+    val wrRedLight  = if (isDark) Color(0xFF3D1010) else WR_RedLight
+    val wrRedBorder = if (isDark) Color(0xFF7F1D1D) else WR_RedBorder
     Row(
         modifier = Modifier
             .fillMaxWidth()
