@@ -84,6 +84,9 @@ fun AdminPage(
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
             // Auto-load debug log phone list when tab 7 opens
             LaunchedEffect(tab) { if (tab == 7) vm.loadDebugLogPhones() }
+            // Sync ট্যাব (⏳ Sync) খোলার সময় প্রতিবার fresh করে নাও — যাতে
+            // এইমাত্র করা offline edit-ও সাথে সাথে দেখা যায়
+            LaunchedEffect(tab) { if (tab == 8) vm.loadPendingEdits() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
