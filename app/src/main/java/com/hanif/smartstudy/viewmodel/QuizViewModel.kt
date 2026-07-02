@@ -576,6 +576,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * একই লিস্টের নিচে চলে যায় (quiz এর mastered question sink করার মতো)।
      * হাইড হয় না, শুধু নিচে সরে যায় — আবার ক্লিক করলে টিক উঠে যাবে (toggle)।
      */
+    /**
+     * Study মোডের টিকমার্ক বাটন — ক্লিক করলে "পড়া হয়েছে" হিসেবে সেভ হয়।
+     * এখনই লিস্টে নিচে সরানো হয় না (তাহলে স্ক্রিন স্ক্রল করে নিচে চলে যায় এবং
+     * ইউজারকে আবার উপরে স্ক্রল করে আসতে হয়) — শুধু চেকমার্কটা টিক হয়ে যাবে,
+     * এই সাবটপিক পরের বার আবার ওপেন করলে (loadQuestions/loadQuestionsFromRoom)
+     * তখন done আইটেমগুলো স্বয়ংক্রিয়ভাবে লিস্টের নিচে চলে যাবে।
+     */
     fun toggleStudyDone(qId: String) {
         if (qId.isBlank()) return
         val current = prefs.getStringSet("study_done_ids", mutableSetOf())!!.toMutableSet()
@@ -584,7 +591,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         val updated = _state.value.questions
             .map { q -> if (q.id == qId) q.copy(isStudyDone = current.contains(qId)) else q }
-            .sortedBy { it.isStudyDone }   // done আইটেম নিচে, বাকিগুলো আগের ক্রম বজায় থাকবে (stable sort)
+            // এখানে reorder করা হচ্ছে না ইচ্ছাকৃতভাবে — position অপরিবর্তিত থাকবে
         _state.update { it.copy(questions = updated) }
     }
 
