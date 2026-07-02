@@ -36,6 +36,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
+import com.hanif.smartstudy.data.local.LocalTechniqueStore
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.components.RichContentText
@@ -786,7 +787,9 @@ fun UserTechniqueSection(
 ) {
     if (questionId.isBlank() || currentUser == null) return
 
+    val context        = LocalContext.current
     val scope          = rememberCoroutineScope()
+    val myPhone        = currentUser.phone ?: ""
     var techniques     by remember(questionId) { mutableStateOf<List<UserTechnique>>(emptyList()) }
     var isLoading      by remember(questionId) { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
@@ -794,25 +797,25 @@ fun UserTechniqueSection(
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
 
+    // ── remote (পাবলিক/অনুমোদিত) + লোকাল (নিজের প্রাইভেট, ফোনে সেভ থাকা) টেকনিক একসাথে মার্জ করো ──
+    suspend fun loadAll(): List<UserTechnique> {
+        val local  = LocalTechniqueStore.getForQuestion(context, questionId, myPhone)
+        val res    = FirebaseDataService.fetchTechniquesForQuestion(questionId, myPhone)
+        val remote = if (res is ApiResult.Success<*>) {
+            @Suppress("UNCHECKED_CAST")
+            (res.data as List<UserTechnique>).filter { it.userId != myPhone || it.isPublic }
+        } else emptyList() // অফলাইনে/নেটওয়ার্ক এরর হলেও লোকাল প্রাইভেট টেকনিক দেখাতে বাধা নেই
+        return (local + remote).sortedByDescending { it.timestamp }
+    }
+
     LaunchedEffect(questionId) {
         isLoading = true
-        // ফিক্সড: ApiResult.Success টাইপ সেফটি ফিক্সড
-        val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-        if (res is ApiResult.Success<*>) {
-            @Suppress("UNCHECKED_CAST")
-            techniques = res.data as List<UserTechnique>
-        }
+        techniques = loadAll()
         isLoading = false
     }
 
     fun refresh() {
-        scope.launch {
-            val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, currentUser.phone ?: "")
-            if (res is ApiResult.Success<*>) {
-                @Suppress("UNCHECKED_CAST")
-                techniques = res.data as List<UserTechnique>
-            }
-        }
+        scope.launch { techniques = loadAll() }
     }
 
     Column {
@@ -878,7 +881,11 @@ fun UserTechniqueSection(
                     onEdit      = { editTarget = t; showAddDialog = true },
                     onDelete    = {
                         scope.launch {
-                            FirebaseDataService.deleteTechnique(questionId, t.id)
+                            if (LocalTechniqueStore.isLocalId(t.id)) {
+                                LocalTechniqueStore.delete(context, t.id)
+                            } else {
+                                FirebaseDataService.deleteTechnique(questionId, t.id)
+                            }
                             refresh()
                             feedbackMsg = "টেকনিক মুছে ফেলা হয়েছে"
                         }
@@ -895,21 +902,62 @@ fun UserTechniqueSection(
             onSave      = { text, isPublic ->
                 scope.launch {
                     val target = editTarget
-                    if (target == null) {
-                        FirebaseDataService.saveTechnique(
-                            questionId = questionId,
-                            userId     = currentUser.phone ?: "",
-                            userName   = currentUser.displayName(),
-                            text       = text,
-                            isPublic   = isPublic
-                        )
-                        feedbackMsg = if (isPublic)
-                            "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
-                        else "✅ প্রাইভেট টেকনিক সেভ হয়েছে।"
+
+                    if (!isPublic) {
+                        // ── প্রাইভেট টেকনিক: সরাসরি ফোনেই সেভ, ইন্টারনেট লাগে না ──
+                        if (target == null) {
+                            LocalTechniqueStore.add(
+                                context    = context,
+                                questionId = questionId,
+                                userId     = myPhone,
+                                userName   = currentUser.displayName(),
+                                text       = text
+                            )
+                        } else if (LocalTechniqueStore.isLocalId(target.id)) {
+                            LocalTechniqueStore.update(context, target.id, text)
+                        } else {
+                            // আগে পাবলিক ছিল, এখন প্রাইভেট করা হচ্ছে: রিমোট থেকে সরিয়ে ফোনে নিয়ে আসো
+                            FirebaseDataService.deleteTechnique(questionId, target.id)
+                            LocalTechniqueStore.add(
+                                context    = context,
+                                questionId = questionId,
+                                userId     = myPhone,
+                                userName   = currentUser.displayName(),
+                                text       = text
+                            )
+                        }
+                        feedbackMsg = "✅ প্রাইভেট টেকনিক আপনার ফোনে সেভ হয়েছে।"
                     } else {
-                        FirebaseDataService.updateTechnique(questionId, target.id, text, isPublic)
-                        feedbackMsg = "✅ আপডেট হয়েছে!"
+                        // ── পাবলিক টেকনিক: এডমিন অনুমোদনের জন্য সার্ভারে পাঠাতে হয়, তাই ইন্টারনেট লাগবে ──
+                        val res = if (target == null || LocalTechniqueStore.isLocalId(target.id)) {
+                            if (target != null) LocalTechniqueStore.delete(context, target.id)
+                            FirebaseDataService.saveTechnique(
+                                questionId = questionId,
+                                userId     = myPhone,
+                                userName   = currentUser.displayName(),
+                                text       = text,
+                                isPublic   = true
+                            )
+                        } else {
+                            FirebaseDataService.updateTechnique(questionId, target.id, text, true)
+                        }
+
+                        feedbackMsg = if (res is ApiResult.Success<*>) {
+                            "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
+                        } else {
+                            // নেটওয়ার্ক না থাকলে হারিয়ে না যায় — সাময়িকভাবে ফোনে প্রাইভেট হিসেবে রেখে দাও
+                            LocalTechniqueStore.add(
+                                context    = context,
+                                questionId = questionId,
+                                userId     = myPhone,
+                                userName   = currentUser.displayName(),
+                                text       = text
+                            )
+                            "⚠️ ইন্টারনেট সংযোগ নেই, তাই আপাতত প্রাইভেট হিসেবে ফোনে সেভ হয়েছে। " +
+                                "নেট আসলে আবার এডিট করে 'পাবলিক' করে দিন।"
+                        }
                     }
+
                     refresh()
                     showAddDialog = false
                     editTarget = null
