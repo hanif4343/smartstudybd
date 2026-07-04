@@ -58,6 +58,7 @@ fun SubjectListScreen(
     error      : String?   = null,
     onSubject  : (String) -> Unit,
     onMockZone : () -> Unit,
+    onModelTestZone : () -> Unit = {},
     // ── Admin: ইনলাইন ক্রম সাজানো ──
     isAdmin       : Boolean        = false,
     isReorderMode : Boolean        = false,
@@ -180,6 +181,25 @@ fun SubjectListScreen(
                     Text("🏆 বিষয় ভিত্তিক মক টেস্ট", fontSize = 14.sp,
                         fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
                         modifier = Modifier.padding(vertical = 6.dp))
+                }
+            }
+        }
+
+        // ── Model Test — Mock Test-এর মতোই একটা কম্প্যাক্ট গ্লোবাল বাটন, সব মোডেই (Study সহ) —
+        // ট্যাপ করলে subject picker খুলবে, বেশি জায়গা নেয় না (স্লিম আউটলাইন বাটন) ──
+        if (subjects.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(if (mode == StudyMode.STUDY) 4.dp else 6.dp))
+                OutlinedButton(
+                    onClick  = onModelTestZone,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)),
+                    border   = BorderStroke(1.4.dp, Color(0xFF059669))
+                ) {
+                    Text("🏆 মডেল টেস্ট", fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                        modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
         }
