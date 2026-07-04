@@ -23,6 +23,9 @@ class ContentCache(private val context: Context) {
         val KEY_STUDY_JSON    = stringPreferencesKey("cache_study_json")
         val KEY_QUIZ_JSON     = stringPreferencesKey("cache_quiz_json")
         val KEY_QBANK_JSON    = stringPreferencesKey("cache_qbank_json")
+        // Model Test — subject অনুযায়ী ফিক্সড টেস্টগুলো ফোনের লোকাল স্টোরেজে থাকে,
+        // যাতে বারবার Firebase থেকে আনতে না হয় (offline-এও Model Test list দেখা যায়)
+        val KEY_MODELTESTS_JSON = stringPreferencesKey("cache_modeltests_json")
         val KEY_CACHE_TIME    = longPreferencesKey("cache_fetched_at")
 
         val KEY_TODAY_STUDY   = intPreferencesKey("today_study_min")
@@ -41,6 +44,7 @@ class ContentCache(private val context: Context) {
             prefs[KEY_STUDY_JSON] = gson.toJson(content.study)
             prefs[KEY_QUIZ_JSON]  = gson.toJson(content.quiz)
             prefs[KEY_QBANK_JSON] = gson.toJson(content.qbank)
+            prefs[KEY_MODELTESTS_JSON] = gson.toJson(content.modelTests)
             prefs[KEY_CACHE_TIME] = content.fetchedAt
         }
     }
@@ -55,18 +59,25 @@ class ContentCache(private val context: Context) {
             // কোনো cache নেই বা পুরানো version
             if (fetchedAt == 0L || savedVersion < CACHE_VERSION) return null
 
-            val studyJson = prefs[KEY_STUDY_JSON] ?: "[]"
-            val quizJson  = prefs[KEY_QUIZ_JSON]  ?: "[]"
-            val qbankJson = prefs[KEY_QBANK_JSON] ?: "[]"
+            val studyJson  = prefs[KEY_STUDY_JSON] ?: "[]"
+            val quizJson   = prefs[KEY_QUIZ_JSON]  ?: "[]"
+            val qbankJson  = prefs[KEY_QBANK_JSON] ?: "[]"
+            val modelTestsJson = prefs[KEY_MODELTESTS_JSON] ?: "{}"
 
             val studyType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.StudyItem?>>() {}.type
             val quizType  = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QuizItem?>>() {}.type
             val qbankType = object : com.google.gson.reflect.TypeToken<List<com.hanif.smartstudy.data.model.QBankItem?>>() {}.type
+            val modelTestsType = object : com.google.gson.reflect.TypeToken<Map<String, List<com.hanif.smartstudy.data.model.ModelTestMeta>>>() {}.type
+
+            val modelTests: Map<String, List<com.hanif.smartstudy.data.model.ModelTestMeta>> = try {
+                gson.fromJson(modelTestsJson, modelTestsType) ?: emptyMap()
+            } catch (e: Exception) { emptyMap() }
 
             AppContent(
                 study     = (gson.fromJson<List<com.hanif.smartstudy.data.model.StudyItem?>>(studyJson, studyType) ?: emptyList()).filterNotNull(),
                 quiz      = (gson.fromJson<List<com.hanif.smartstudy.data.model.QuizItem?>>(quizJson,  quizType)  ?: emptyList()).filterNotNull(),
                 qbank     = (gson.fromJson<List<com.hanif.smartstudy.data.model.QBankItem?>>(qbankJson, qbankType) ?: emptyList()).filterNotNull(),
+                modelTests = modelTests,
                 fetchedAt = fetchedAt
             )
         } catch (e: Exception) { null }
@@ -83,6 +94,7 @@ class ContentCache(private val context: Context) {
             prefs.remove(KEY_STUDY_JSON)
             prefs.remove(KEY_QUIZ_JSON)
             prefs.remove(KEY_QBANK_JSON)
+            prefs.remove(KEY_MODELTESTS_JSON)
             prefs[KEY_CACHE_TIME] = 0L
         }
     }
