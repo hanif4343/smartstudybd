@@ -74,7 +74,24 @@ fun ResultModal(
             contentPadding      = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Score ring
+            // Score ring — Model Test-এর written (ungraded) হলে score না দেখিয়ে "জমা হয়েছে" বার্তা
+            if (result.recorded > 0) {
+                item {
+                    Spacer(Modifier.height(16.dp))
+                    Text("✍️", fontSize = 44.sp)
+                    Text("উত্তর জমা হয়েছে", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                        textAlign = TextAlign.Center)
+                    Text(
+                        "মোট ${result.total}টির মধ্যে ${result.recorded}টি প্রশ্নের উত্তর সংরক্ষিত হয়েছে — " +
+                        "লিখিত উত্তর অটো-চেক হয় না, এডমিন পরে দেখে যাচাই করবে",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali, textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp, start = 8.dp, end = 8.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                }
+            } else {
             item {
                 Spacer(Modifier.height(8.dp))
                 ScoreRing(pct = result.pct)
@@ -87,6 +104,7 @@ fun ResultModal(
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
                     textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(16.dp))
+            }
             }
 
             // Stats row
