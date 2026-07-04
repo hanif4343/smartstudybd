@@ -41,6 +41,11 @@ data class QuizUiState(
     val isMockZone    : Boolean          = false,
     val mockConfig    : MockTestConfig   = MockTestConfig(),
     // ── Model Test (এডমিন-কিউরেটেড, ফিক্সড) ──
+    // ── Model Test (এডমিন-কিউরেটেড, ফিক্সড) ──
+    // Mock Test-এর মতোই একটা গ্লোবাল এন্ট্রি — Study/Quiz/QBank subject list-এর নিচে বাটন,
+    // ট্যাপ করলে প্রথমে subject picker, তারপর সেই subject-এর test list
+    val isModelTestSubjectPicker : Boolean              = false,
+    val modelTestSubjectList     : List<Pair<String,Int>> = emptyList(),  // subject -> কতগুলো টেস্ট আছে
     val isModelTestZone      : Boolean            = false,   // Model Test list (test 1,2,3...) দেখানো হচ্ছে
     val modelTestSubject     : String             = "",
     val modelTests           : List<ModelTestMeta> = emptyList(),
@@ -284,10 +289,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val path = _state.value.navPath
         timerJob?.cancel()
         when {
-            // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subTopic list এ ফিরে যাও
+            // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subject picker এ ফিরে যাও
             _state.value.isModelTestZone -> _state.update {
                 it.copy(isModelTestZone = false, modelTests = emptyList(),
-                         modelTestSubject = "", pendingModelTestType = null)
+                         modelTestSubject = "", pendingModelTestType = null,
+                         isModelTestSubjectPicker = true)
+            }
+            // Model Test subject picker খোলা ছিল → পুরোপুরি বন্ধ, বেস subject list এ ফিরে যাও
+            _state.value.isModelTestSubjectPicker -> _state.update {
+                it.copy(isModelTestSubjectPicker = false, modelTestSubjectList = emptyList())
             }
             _state.value.isMockZone -> _state.update {
                 it.copy(isMockZone = false, navPath = NavPath(), isQuizActive = false,
@@ -341,6 +351,33 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Study/Quiz/QBank subject list-এর নিচে "🏆 মডেল টেস্ট" বাটনে ট্যাপ করলে কল হয় (Mock Test-এর মতোই
+     * একটা গ্লোবাল এন্ট্রি পয়েন্ট) — যে subject-গুলোতে অন্তত ১টা Model Test আছে এবং ইউজারের audience
+     * tag অনুযায়ী দেখা যায়, সেগুলোর তালিকা দেখায়।
+     */
+    fun openModelTestPicker() {
+        _state.update { it.copy(isModelTestSubjectPicker = true, modelTestSubjectList = emptyList()) }
+        viewModelScope.launch {
+            val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val filtered = content.forUser(user, adminTag)
+            // পুরা অ্যাপে audience tag অনুযায়ী যেভাবে ডেটা ফিল্টার হয় ঠিক সেভাবেই —
+            // ইউজার যে subject-গুলো আসলে দেখতে পারে (Quiz/QBank/Study যেকোনো sheet-এ) তার তালিকা
+            val visibleSubjects = (filtered.quiz.map { it.subject } +
+                                    filtered.qbank.map { it.subject } +
+                                    filtered.study.map { it.subject }).toSet()
+
+            val list = content.modelTests
+                .filterKeys { it.isNotBlank() && it in visibleSubjects }
+                .map { (subj, tests) -> subj to tests.size }
+                .sortedBy { it.first }
+
+            _state.update { it.copy(modelTestSubjectList = list) }
+        }
+    }
+
     // ═════════════════════════════════════════════════════════
     // Model Test — এডমিন-কিউরেটেড, ফিক্সড, সবার জন্য একই।
     // Study ও QBank দুই মোডেই subTopic list এ একটা virtual card হিসেবে দেখায়
@@ -350,7 +387,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     /** Study/QBank subTopic list থেকে "মডেল টেস্ট" কার্ডে ট্যাপ করলে কল হয় */
     fun openModelTestZone(subject: String) {
         _state.update {
-            it.copy(isModelTestZone = true, modelTestSubject = subject, pendingModelTestType = null)
+            it.copy(isModelTestZone = true, isModelTestSubjectPicker = false,
+                     modelTestSubject = subject, pendingModelTestType = null)
         }
         viewModelScope.launch {
             val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
@@ -804,17 +842,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
 
-        // ── Model Test virtual card — Study ও QBank দুই জায়গাতেই একই সোর্স
-        // (Firebase: ModelTests/{subject}) থেকে আসে, তালিকার সবার উপরে বসে ──
-        val modelTests = content.modelTests[subject].orEmpty()
-        val finalSubTopics = if (modelTests.isNotEmpty() && mode != StudyMode.QUIZ) {
-            listOf(SubTopicEntry(
-                name = "মডেল টেস্ট", subject = subject, totalQ = 0, doneQ = 0,
-                isModelTest = true, modelTestCount = modelTests.size
-            )) + subTopics
-        } else subTopics
-
-        _state.update { it.copy(subTopics = finalSubTopics) }
+        // Model Test আগে এখানে subtopic list-এর ভেতর virtual card হিসেবে বসতো — এখন Mock Test-এর
+        // মতোই subject list-এর নিচে একটা গ্লোবাল বাটন থেকে (openModelTestPicker) অ্যাক্সেস হয়,
+        // তাই এখানে আর ইনজেক্ট করা হয় না।
+        _state.update { it.copy(subTopics = subTopics) }
     }
 
     // ═════════════════════════════════════════════════════════
