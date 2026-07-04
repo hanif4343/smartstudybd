@@ -40,6 +40,13 @@ data class QuizUiState(
     val showResult    : Boolean          = false,
     val isMockZone    : Boolean          = false,
     val mockConfig    : MockTestConfig   = MockTestConfig(),
+    // ── Model Test (এডমিন-কিউরেটেড, ফিক্সড) ──
+    val isModelTestZone      : Boolean            = false,   // Model Test list (test 1,2,3...) দেখানো হচ্ছে
+    val modelTestSubject     : String             = "",
+    val modelTests           : List<ModelTestMeta> = emptyList(),
+    val pendingModelTestType : ModelTestMeta?      = null,    // type=="both" হলে MCQ/Written bottom sheet এর জন্য
+    val activeModelTest      : ModelTestMeta?      = null,    // বর্তমানে চলমান/সদ্য-শেষ Model Test — back/retry নেভিগেশনের জন্য
+    val activeModelTestType  : String?             = null,
     val readingIndex  : Int              = 0,
     val bookmarkedIds : Set<String>      = emptySet(),
     val weakTopics    : List<WeakTopic>  = emptyList(),
@@ -277,22 +284,42 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val path = _state.value.navPath
         timerJob?.cancel()
         when {
+            // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subTopic list এ ফিরে যাও
+            _state.value.isModelTestZone -> _state.update {
+                it.copy(isModelTestZone = false, modelTests = emptyList(),
+                         modelTestSubject = "", pendingModelTestType = null)
+            }
             _state.value.isMockZone -> _state.update {
                 it.copy(isMockZone = false, navPath = NavPath(), isQuizActive = false,
                         result = null, showResult = false, timerSec = 0)
             }
             _state.value.showResult -> {
+                val fromModelTest = _state.value.activeModelTest != null
                 _state.update {
                     it.copy(showResult = false, isQuizActive = false, result = null,
-                            navPath = NavPath(path.subject), timerSec = 0)
+                            navPath = NavPath(path.subject), timerSec = 0,
+                            activeModelTest = null, activeModelTestType = null)
                 }
-                // উত্তর দেওয়ার পর progress আপডেট হয়েছে — subTopic list রিফ্রেশ করো
+                // উত্তর দেওয়ার পর progress আপডেট হয়েছে — সঠিক লিস্টে ফিরে যাও
                 if (path.subject != null) {
-                    viewModelScope.launch {
-                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                        rebuildSubTopics(content, path.subject, _state.value.mode)
+                    if (fromModelTest) {
+                        openModelTestZone(path.subject)
+                    } else {
+                        viewModelScope.launch {
+                            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                            rebuildSubTopics(content, path.subject, _state.value.mode)
+                        }
                     }
                 }
+            }
+            // Model Test চলাকালীন (submit না করে) back চাপলে → subTopic list না, Model Test list এ ফিরে যাও
+            _state.value.activeModelTest != null && path.subTopic != null -> {
+                val subj = path.subject
+                _state.update {
+                    it.copy(navPath = NavPath(subj), isQuizActive = false,
+                             activeModelTest = null, activeModelTestType = null)
+                }
+                if (subj != null) openModelTestZone(subj)
             }
             path.subTopic != null -> {
                 _state.update { it.copy(navPath = NavPath(path.subject)) }
@@ -312,6 +339,83 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
             else -> {}
         }
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // Model Test — এডমিন-কিউরেটেড, ফিক্সড, সবার জন্য একই।
+    // Study ও QBank দুই মোডেই subTopic list এ একটা virtual card হিসেবে দেখায়
+    // (rebuildSubTopics দ্রষ্টব্য), এখানে ট্যাপ করলে এই zone খোলে।
+    // ═════════════════════════════════════════════════════════
+
+    /** Study/QBank subTopic list থেকে "মডেল টেস্ট" কার্ডে ট্যাপ করলে কল হয় */
+    fun openModelTestZone(subject: String) {
+        _state.update {
+            it.copy(isModelTestZone = true, modelTestSubject = subject, pendingModelTestType = null)
+        }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            _state.update { it.copy(modelTests = content.modelTests[subject].orEmpty()) }
+        }
+    }
+
+    /** Model Test list থেকে একটা টেস্টে ট্যাপ — type "both" হলে MCQ/Written bottom sheet দেখাও */
+    fun selectModelTest(test: ModelTestMeta) {
+        if (test.type == "both") {
+            _state.update { it.copy(pendingModelTestType = test) }
+        } else {
+            startModelTest(test, test.type)
+        }
+    }
+
+    fun dismissModelTestTypePicker() {
+        _state.update { it.copy(pendingModelTestType = null) }
+    }
+
+    /** Model Test শুরু করো — questionIds ("sheet|id") resolve করে audience-filtered pool থেকে প্রশ্ন বসাও */
+    fun startModelTest(test: ModelTestMeta, chosenType: String) {
+        viewModelScope.launch {
+            val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val filtered = content.forUser(user, adminTag)
+
+            val quizPool  = filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }.associateBy { it.sourceKey() }
+            val qbankPool = filtered.qbank.map { QuestionItem.fromQBankItem(it) }.associateBy { it.sourceKey() }
+            // Study sheet-এর প্রশ্নে option নেই — Model Test-এ এলে সবসময় "written" হিসেবে ধরা হয়
+            val studyPool = filtered.study.map { QuestionItem.fromStudyItem(it).copy(questionType = "written") }
+                .associateBy { it.sourceKey() }
+
+            // admin যে ক্রমে ঠিক করে দিয়েছে সেই ক্রমেই resolve করা হয়
+            val resolved = test.questionIds.mapNotNull { key -> quizPool[key] ?: qbankPool[key] ?: studyPool[key] }
+            val typeFiltered = if (test.type == "both") {
+                resolved.filter { if (chosenType == "written") it.isWritten() else it.isMcq() }
+            } else resolved
+
+            val questions = typeFiltered.map { it.copy(isWeakTopic = isWeak(it.subTopic)) }
+
+            _state.update {
+                it.copy(
+                    isModelTestZone      = false,
+                    pendingModelTestType = null,
+                    questions            = questions,
+                    isQuizActive         = true,
+                    showResult           = false,
+                    result               = null,
+                    answeredCount        = 0,
+                    navPath              = NavPath(test.subject, test.displayTitle()),
+                    activeModelTest      = test,
+                    activeModelTestType  = chosenType
+                )
+            }
+            startTimer(questions.size)
+        }
+    }
+
+    /** ResultModal-এর "আবার চেষ্টা" — Model Test হলে একই টেস্ট আবার শুরু করে */
+    fun retryModelTest() {
+        val mt = _state.value.activeModelTest ?: return
+        val type = _state.value.activeModelTestType ?: (if (mt.type == "both") "mcq" else mt.type)
+        startModelTest(mt, type)
     }
 
     fun openMockZone() {
@@ -428,6 +532,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun answerWritten(questionIndex: Int, userText: String): Int {
         val questions = _state.value.questions.toMutableList()
         val q = questions.getOrNull(questionIndex) ?: return 0
+
+        // ── Model Test-এর written প্রশ্নে auto-match হয় না — শুধু রেকর্ড করে রাখা হয় ──
+        val activeModelTest = _state.value.activeModelTest
+        if (activeModelTest != null) {
+            questions[questionIndex] = q.copy(answerState = AnswerState.WrittenRecorded(userText))
+            _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+            markProgress(q.id, _state.value.mode)
+            viewModelScope.launch {
+                repo.saveModelTestWrittenAnswer(
+                    subject      = activeModelTest.subject,
+                    testNumber   = activeModelTest.testNumber,
+                    questionKey  = q.sourceKey(),
+                    questionText = q.question,
+                    userText     = userText
+                )
+            }
+            return 100  // UI-কে "সংরক্ষিত হয়েছে" দেখানোর সিগন্যাল — সঠিক/ভুল বিচার নয়
+        }
+
         val matchPct = fuzzyMatch(userText, q.answer)
         val isCorrect = matchPct >= 70
         questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
@@ -458,13 +581,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val questions  = _state.value.questions
         val totalTime  = _state.value.totalTimeSec
         val elapsed    = totalTime - _state.value.timerSec
-        var correct = 0; var wrong = 0; var skipped = 0
+        var correct = 0; var wrong = 0; var skipped = 0; var recorded = 0
         val subjectMap = mutableMapOf<String, SubjectScore>()
 
         questions.forEach { q ->
             when (val a = q.answerState) {
                 is AnswerState.McqSelected      -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenSubmitted -> { if (a.isCorrect) correct++ else wrong++ }
+                is AnswerState.WrittenRecorded  -> { recorded++ }   // Model Test written — গ্রেডিং হয়নি, শুধু জমা হয়েছে
                 else -> skipped++
             }
             val subj = q.subject.ifBlank { "অন্যান্য" }
@@ -474,7 +598,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val xp = correct * 5 + (correct - wrong).coerceAtLeast(0) * 2
-        val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap)
+        val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap, recorded)
         _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
 
         // ── "এখন টেস্ট দাও" (Mock Test) রেজাল্ট হিস্ট্রিতে জমা রাখো ──
@@ -679,7 +803,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                           doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
         }
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
-        _state.update { it.copy(subTopics = subTopics) }
+
+        // ── Model Test virtual card — Study ও QBank দুই জায়গাতেই একই সোর্স
+        // (Firebase: ModelTests/{subject}) থেকে আসে, তালিকার সবার উপরে বসে ──
+        val modelTests = content.modelTests[subject].orEmpty()
+        val finalSubTopics = if (modelTests.isNotEmpty() && mode != StudyMode.QUIZ) {
+            listOf(SubTopicEntry(
+                name = "মডেল টেস্ট", subject = subject, totalQ = 0, doneQ = 0,
+                isModelTest = true, modelTestCount = modelTests.size
+            )) + subTopics
+        } else subTopics
+
+        _state.update { it.copy(subTopics = finalSubTopics) }
     }
 
     // ═════════════════════════════════════════════════════════
