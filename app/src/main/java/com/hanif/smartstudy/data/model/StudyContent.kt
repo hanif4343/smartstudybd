@@ -40,7 +40,9 @@ data class QuizItem(
     @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Image")         val imageUrl     : String? = null,
-    @SerializedName("VisualURL")     val visualUrl    : String? = null
+    @SerializedName("VisualURL")     val visualUrl    : String? = null,
+    // Model Test সিলেকশন অ্যালগরিদমের জন্য — এডমিন ম্যানুয়ালি "গুরুত্বপূর্ণ" ফ্ল্যাগ বসাতে পারবে
+    @SerializedName("important")     val important    : Boolean? = null
 )
 
 data class QBankItem(
@@ -59,7 +61,10 @@ data class QBankItem(
     @SerializedName("Year")          val year         : String? = null,
     @SerializedName("Exam_Name")     val examName     : String? = null,
     @SerializedName("Image")         val imageUrl     : String? = null,
-    @SerializedName("VisualURL")     val visualUrl    : String? = null
+    @SerializedName("VisualURL")     val visualUrl    : String? = null,
+    // QBank-এ একাধিক Year/Exam-এ repeat হওয়া প্রশ্ন auto-important ধরা হয় (ContentRepository তে),
+    // তবে এডমিন চাইলে ম্যানুয়ালিও ফ্ল্যাগ বসাতে পারবে — এই ফিল্ড সেটার জন্য
+    @SerializedName("important")     val important    : Boolean? = null
 )
 
 // ── Gson case-insensitive + multi-alias adapter ──
@@ -124,6 +129,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             k == "audiencetags" || k == "audience_tags" -> "AudienceTags"
             // technique
             k == "technique"                        -> "technique"
+            // Model Test: গুরুত্বপূর্ণ প্রশ্ন ফ্ল্যাগ
+            k == "important" || k == "is_important"
+                || k == "isimportant"                -> "important"
             // qbank specific
             k == "year"                             -> "Year"
             k == "exam_name" || k == "examname"
@@ -154,6 +162,9 @@ data class AppContent(
     // subTopic এর সিরিয়াল — mode + tag + subject তিনটো দিয়েই আলাদা আলাদা ক্রম থাকে।
     // key: mode name → tag → subject name → (subTopic name → serial)। not-set হলে শেষে যায়।
     val subTopicOrder: Map<String, Map<String, Map<String, Map<String, Int>>>> = emptyMap(),
+    // ── Model Test — এডমিন-কিউরেটেড, ফিক্সড। Firebase: ModelTests/{subject}/{testNumber}
+    // key: subject name → ওই subject-এর সব Model Test (testNumber অনুযায়ী)
+    val modelTests  : Map<String, List<ModelTestMeta>> = emptyMap(),
     val fetchedAt   : Long              = 0L
 ) {
     fun isEmpty()  = study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()
