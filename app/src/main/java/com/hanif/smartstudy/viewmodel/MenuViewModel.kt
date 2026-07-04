@@ -124,6 +124,9 @@ data class MenuUiState(
     // Subject/SubTopic Rename
     val isRenaming        : Boolean          = false,
     val renameMsg         : String?          = null,
+    // Model Test bulk-generate (Admin)
+    val isGeneratingModelTest : Boolean      = false,
+    val modelTestGenMsg       : String?      = null,
     // ── Subject/SubTopic taxonomy (dropdown suggestions এর জন্য) ──
     // key: sheet ("Quiz"/"QBank"/"Study") → distinct subject list
     val adminSubjectsBySheet  : Map<String, List<String>> = emptyMap(),
@@ -958,6 +961,102 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearRenameMsg() { _state.update { it.copy(renameMsg = null) } }
+
+    // ── Admin: Model Test Bulk-Generate ───────────────────────
+    // Subject সিলেক্ট করে + কতগুলো Model Test + প্রতিটায় কতগুলো প্রশ্ন দিলে
+    // Quiz+QBank pool থেকে ModelTestGenerator অ্যালগরিদম দিয়ে সিলেক্ট করে
+    // সরাসরি Firebase-এ "ModelTests/{subject}" নোডে লিখে দেয়।
+    fun adminGenerateModelTests(subject: String, count: Int, perTest: Int, type: String) {
+        if (!_state.value.isAdmin) return
+        if (subject.isBlank() || count <= 0 || perTest <= 0) {
+            _state.update { it.copy(modelTestGenMsg = "❌ Subject/সংখ্যা ঠিকভাবে দিন") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isGeneratingModelTest = true, modelTestGenMsg = null) }
+            try {
+                val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                val content = (repo.getContent(forceRefresh = true) as?
+                    com.hanif.smartstudy.data.repository.DataState.Success)?.data
+                    ?: throw Exception("কনটেন্ট লোড ব্যর্থ")
+
+                val quizItems  = content.quiz.filter  { it.subject == subject }
+                val qbankItems = content.qbank.filter { it.subject == subject }
+                // Study sheet-এর প্রশ্নে কোনো MCQ option থাকে না (শুধু প্রশ্ন+উত্তর) —
+                // তাই এটা কেবল written/both টাইপ টেস্টেই পুলে ঢোকে, mcq-only টেস্টে না
+                val studyItems = if (type == "mcq") emptyList()
+                                 else content.study.filter { it.subject == subject }
+                if (quizItems.isEmpty() && qbankItems.isEmpty() && studyItems.isEmpty()) {
+                    throw Exception("\"$subject\" বিষয়ে কোনো প্রশ্ন পাওয়া যায়নি (Quiz/QBank/Study sheet)")
+                }
+
+                // ── Auto-important detection: QBank-এ একই প্রশ্ন একাধিক আলাদা Year/Exam এ
+                // repeat হয়ে থাকলে সেটাকে "গুরুত্বপূর্ণ" ধরা হয়। এডমিনের ম্যানুয়াল
+                // important:true ফ্ল্যাগ (QuestionItem.isImportant থেকে) এমনিতেই থাকবে।
+                val repeatKeyOf: (String?) -> String = { q -> q?.trim()?.lowercase().orEmpty() }
+                val repeatCount = qbankItems
+                    .groupBy { repeatKeyOf(it.question) }
+                    .filterKeys { it.isNotBlank() }
+                    .mapValues { (_, items) ->
+                        items.mapNotNull { q -> "${q.year.orEmpty()}|${q.examName.orEmpty()}" }.toSet().size
+                    }
+
+                val pool = quizItems.map { com.hanif.smartstudy.data.model.QuestionItem.fromQuizItem(it) } +
+                    qbankItems.map { q ->
+                        val item = com.hanif.smartstudy.data.model.QuestionItem.fromQBankItem(q)
+                        val autoImportant = (repeatCount[repeatKeyOf(q.question)] ?: 0) > 1
+                        if (autoImportant && !item.isImportant) item.copy(isImportant = true) else item
+                    } +
+                    // Study-এর প্রশ্নকে সবসময় "written" ধরা হয় (option না থাকায়) — Model Test-এ
+                    // এলে ফ্রি-টেক্সট আকারে আসবে, উত্তর অটো-চেক না, এডমিন পরে দেখবে
+                    studyItems.map { s ->
+                        com.hanif.smartstudy.data.model.QuestionItem.fromStudyItem(s).copy(questionType = "written")
+                    }
+
+                // Audience preset অনুযায়ী প্রশ্নের ধরন — mcq/written/both
+                val filteredPool = when (type) {
+                    "mcq"     -> pool.filter { it.isMcq() }
+                    "written" -> pool.filter { it.isWritten() }
+                    else      -> pool
+                }
+                if (filteredPool.isEmpty()) {
+                    throw Exception("এই ধরনের ($type) কোনো প্রশ্ন \"$subject\" বিষয়ে নেই")
+                }
+
+                val result = com.hanif.smartstudy.util.ModelTestGenerator.generate(filteredPool, count, perTest)
+                if (result.tests.isEmpty() || result.tests.all { it.questionKeys.isEmpty() }) {
+                    throw Exception(result.warning ?: "প্রশ্ন সিলেক্ট করা যায়নি")
+                }
+
+                val payload = mutableMapOf<String, Any?>()
+                result.tests.forEach { t ->
+                    payload[t.testNumber.toString()] = mapOf(
+                        "title"      to "মডেল টেস্ট ${t.testNumber}",
+                        "type"       to type,
+                        "totalMarks" to t.questionKeys.size,
+                        "createdAt"  to System.currentTimeMillis(),
+                        "questions"  to t.questionKeys.mapIndexed { idx, k -> idx.toString() to k }.toMap()
+                    )
+                }
+                fbSet("ModelTests/${Uri.encode(subject)}", payload)
+
+                cache.clearCache()
+                com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+
+                val warnSuffix = result.warning?.let { "\n$it" } ?: ""
+                _state.update { it.copy(
+                    isGeneratingModelTest = false,
+                    modelTestGenMsg = "✅ \"$subject\"-এ ${result.tests.size}টি Model Test তৈরি হয়েছে$warnSuffix",
+                    contentEditVersion = it.contentEditVersion + 1
+                )}
+            } catch (e: Exception) {
+                _state.update { it.copy(isGeneratingModelTest = false,
+                    modelTestGenMsg = "❌ ব্যর্থ: ${e.message}") }
+            }
+        }
+    }
+
+    fun clearModelTestGenMsg() { _state.update { it.copy(modelTestGenMsg = null) } }
 
     // ── Toast clear ───────────────────────────────────────────
 
