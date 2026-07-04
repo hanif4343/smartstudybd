@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -363,6 +364,46 @@ class ContentRepository(private val context: Context) {
         markTodayActivity()
         if (!isOnline()) queue.enqueueStudyProgress(phone, minutes, topic)
         SyncWorker.scheduleOneTime(context)
+    }
+
+    /**
+     * Model Test-এ written উত্তর অটো-চেক (matchPct) হয় না — ইউজার যেভাবে লিখেছে ঠিক সেভাবেই
+     * Firebase-এ সংরক্ষণ করা হয়, যাতে এডমিন "পরে" (আলাদা রিভিউ স্ক্রিন থেকে) নিজে যাচাই করে দেখতে পারে।
+     * best-effort write (offline queue নেই) — নেট না থাকলে/fail হলে silently skip করে, quiz flow ব্লক হয় না।
+     */
+    suspend fun saveModelTestWrittenAnswer(
+        subject: String, testNumber: Int, questionKey: String,
+        questionText: String, userText: String
+    ) {
+        val phone = session.getCurrentUser()?.phone ?: return
+        try {
+            withContext(Dispatchers.IO) {
+                val token = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+                if (token.isBlank()) return@withContext
+                val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val safeSubject = android.net.Uri.encode(subject)
+                val safePhone   = android.net.Uri.encode(phone)
+                val safeQKey    = android.net.Uri.encode(questionKey)
+                val url = "$base/ModelTestSubmissions/$safeSubject/$testNumber/$safePhone/$safeQKey.json?auth=$token"
+                val gson2 = com.google.gson.Gson()
+                val body = gson2.toJson(mapOf(
+                    "question"    to questionText,
+                    "userAnswer"  to userText,
+                    "submittedAt" to System.currentTimeMillis()
+                ))
+                val httpClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                httpClient.newCall(
+                    okhttp3.Request.Builder().url(url)
+                        .put(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute().close()
+            }
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "saveModelTestWrittenAnswer failed: ${e.message}")
+        }
     }
 
     // ── Admin edit এর পরে in-memory + disk cache সরাসরি patch করো ──
