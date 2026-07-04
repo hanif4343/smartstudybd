@@ -370,6 +370,7 @@ fun SubTopicListScreen(
     subTopics  : List<SubTopicEntry>,
     onSubTopic : (String) -> Unit,
     onBack     : () -> Unit,
+    onModelTest : (String) -> Unit = {},   // "মডেল টেস্ট" ভার্চুয়াল কার্ডে ট্যাপ করলে — subject পাস হয়
     // ── Admin: ইনলাইন ক্রম সাজানো ──
     isAdmin       : Boolean        = false,
     isReorderMode : Boolean        = false,
@@ -430,8 +431,8 @@ fun SubTopicListScreen(
                     itemsIndexed(subTopics) { idx, st ->
                         QBankTopicCard(
                             st = st,
-                            onClick = { onSubTopic(st.name) },
-                            reorderEnabled = reorderEnabled,
+                            onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
+                            reorderEnabled = reorderEnabled && !st.isModelTest,
                             isFirst = idx == 0,
                             isLast  = idx == subTopics.lastIndex,
                             onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
@@ -444,8 +445,8 @@ fun SubTopicListScreen(
             itemsIndexed(subTopics) { idx, st ->
                 SubTopicCard(
                     st = st,
-                    onClick = { onSubTopic(st.name) },
-                    reorderEnabled = reorderEnabled,
+                    onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
+                    reorderEnabled = reorderEnabled && !st.isModelTest,
                     isFirst = idx == 0,
                     isLast  = idx == subTopics.lastIndex,
                     onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
@@ -469,6 +470,32 @@ private fun SubTopicCard(
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
     val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
+    if (st.isModelTest) {
+        Card(
+            modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clickable { onClick() },
+            shape     = RoundedCornerShape(14.dp),
+            colors    = CardDefaults.cardColors(containerColor = Color(0xFF059669).copy(alpha = 0.10f)),
+            elevation = CardDefaults.cardElevation(1.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("🏆", fontSize = 20.sp)
+                Column(Modifier.weight(1f)) {
+                    Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF059669), fontFamily = NotoSansBengali)
+                    Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
+                        color = mutedColor, fontFamily = NotoSansBengali)
+                }
+                Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFF059669),
+                    modifier = Modifier.size(12.dp))
+            }
+        }
+        return
+    }
 
     Card(
         modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
@@ -524,6 +551,24 @@ private fun QBankTopicCard(
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
     val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
+    if (st.isModelTest) {
+        Card(
+            modifier  = Modifier.fillMaxWidth().clickable { onClick() },
+            shape     = RoundedCornerShape(14.dp),
+            colors    = CardDefaults.cardColors(containerColor = Color(0xFF059669).copy(alpha = 0.10f)),
+            elevation = CardDefaults.cardElevation(1.dp)
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("🏆", fontSize = 20.sp)
+                Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF059669), fontFamily = NotoSansBengali, maxLines = 2)
+                Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
+                    color = mutedColor, fontFamily = NotoSansBengali)
+            }
+        }
+        return
+    }
 
     Card(
         modifier  = Modifier.fillMaxWidth()
