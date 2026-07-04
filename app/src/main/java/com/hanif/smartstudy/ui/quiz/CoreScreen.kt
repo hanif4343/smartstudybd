@@ -49,6 +49,7 @@ fun CoreScreen(
     // depth 0 (subject list) হলে consume করি না — MainScreen এর BackHandler HOME এ নেবে
     val isInsideNav = state.isMockZone ||
                       state.isModelTestZone ||
+                      state.isModelTestSubjectPicker ||
                       state.showResult ||
                       state.navPath.depth() > 0
     BackHandler(enabled = isInsideNav) {
@@ -65,6 +66,15 @@ fun CoreScreen(
                 onSetLimit     = { viewModel.setMockLimit(it) },
                 onStart        = { viewModel.startMock() },
                 onBack         = { viewModel.navigateBack() }
+            )
+        }
+
+        // ── Model Test — Subject Picker (Mock Test-এর মতো গ্লোবাল এন্ট্রি) ──
+        state.isModelTestSubjectPicker -> {
+            ModelTestSubjectPickerScreen(
+                subjects = state.modelTestSubjectList,
+                onSelect = { viewModel.openModelTestZone(it) },
+                onBack   = { viewModel.navigateBack() }
             )
         }
 
@@ -173,6 +183,7 @@ fun CoreScreen(
                 error      = state.error,
                 onSubject  = { viewModel.navigateToSubject(it) },
                 onMockZone = { viewModel.openMockZone() },
+                onModelTestZone = { viewModel.openModelTestPicker() },
                 isAdmin         = state.isAdmin,
                 isReorderMode   = state.isReorderMode,
                 isSavingOrder   = state.isSavingOrder,
