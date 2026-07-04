@@ -647,10 +647,31 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
 @Composable
 fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
     val submitted = item.answerState as? AnswerState.WrittenSubmitted
+    val recorded  = item.answerState as? AnswerState.WrittenRecorded
     var text by remember { mutableStateOf("") }
     var matchPct by remember { mutableStateOf(0) }
 
-    if (submitted != null) {
+    if (recorded != null) {
+        // Model Test-এর written প্রশ্ন — অটো-চেক নেই, শুধু "সংরক্ষিত হয়েছে" দেখাও
+        val isDark = LocalDarkMode.current.value
+        Card(
+            shape  = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isDark) Color(0xFF0C2A24) else Color(0xFFF0FDF4)
+            ),
+            border = BorderStroke(1.dp, Color(0xFF059669))
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("✅ উত্তর সংরক্ষিত হয়েছে", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF059669), fontFamily = NotoSansBengali)
+                if (recorded.userText.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("তোমার উত্তর: ${recorded.userText}", fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, lineHeight = 16.sp)
+                }
+            }
+        }
+    } else if (submitted != null) {
         val isCorrect = submitted.isCorrect
         val isDark = LocalDarkMode.current.value
         Card(
