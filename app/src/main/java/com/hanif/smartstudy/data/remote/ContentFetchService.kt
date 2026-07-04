@@ -82,14 +82,16 @@ object ContentFetchService {
                 val studyDeferred        = async { fetchSheet<StudyItem>("Study") }
                 val subjectOrderDeferred = async { fetchSubjectOrder() }
                 val subTopicOrderDeferred = async { fetchSubTopicOrder() }
+                val modelTestsDeferred   = async { fetchModelTests() }
 
                 val quiz          = quizDeferred.await()
                 val qbank         = qbankDeferred.await()
                 val study         = studyDeferred.await()
                 val subjectOrder  = subjectOrderDeferred.await()
                 val subTopicOrder = subTopicOrderDeferred.await()
+                val modelTests    = modelTestsDeferred.await()
 
-                Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size} ===")
+                Log.d(TAG, "=== RESULT: Quiz=${quiz.size} QBank=${qbank.size} Study=${study.size} SubjectOrder=${subjectOrder.size} SubTopicOrder=${subTopicOrder.size} ModelTests=${modelTests.size} ===")
 
                 if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
                     ContentResult.Error("Firebase থেকে data আসেনি (সব empty)")
@@ -98,6 +100,7 @@ object ContentFetchService {
                         quiz = quiz, qbank = qbank, study = study,
                         subjectOrder = subjectOrder,
                         subTopicOrder = subTopicOrder,
+                        modelTests = modelTests,
                         fetchedAt = System.currentTimeMillis()
                     ))
                 }
@@ -248,6 +251,56 @@ object ContentFetchService {
             emptyMap()
         }
     }
+
+    /**
+     * Model Test — "ModelTests" node থেকে, subject ভিত্তিক।
+     * গঠন: { "Bangla": { "1": {title, type, totalMarks, createdAt, questions:{"0":"Quiz|123", ...}}, "2": {...} }, ... }
+     * Return type: Map<subject, List<ModelTestMeta>> (testNumber অনুযায়ী sorted)
+     */
+    private suspend fun fetchModelTests(): Map<String, List<com.hanif.smartstudy.data.model.ModelTestMeta>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authParam()
+                val url  = "$BASE_URL/ModelTests.json$auth"
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (body.isBlank() || body == "null") return@withContext emptyMap()
+                val root = com.google.gson.JsonParser.parseString(body).asJsonObject
+
+                root.entrySet().mapNotNull { (subject, subjVal) ->
+                    if (!subjVal.isJsonObject) return@mapNotNull null
+                    val tests = subjVal.asJsonObject.entrySet().mapNotNull { (testNumKey, testVal) ->
+                        if (!testVal.isJsonObject) return@mapNotNull null
+                        try {
+                            val t = testVal.asJsonObject
+                            val testNumber = testNumKey.toIntOrNull() ?: return@mapNotNull null
+                            val questionIds = t.getAsJsonObject("questions")?.entrySet()
+                                ?.sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }
+                                ?.mapNotNull { it.value?.takeIf { v -> v.isJsonPrimitive }?.asString }
+                                ?: t.getAsJsonArray("questions")?.mapNotNull {
+                                    it?.takeIf { v -> v.isJsonPrimitive }?.asString
+                                }
+                                ?: emptyList()
+                            com.hanif.smartstudy.data.model.ModelTestMeta(
+                                subject     = subject,
+                                testNumber  = testNumber,
+                                title       = t.get("title")?.asString ?: "",
+                                type        = t.get("type")?.asString ?: "both",
+                                totalMarks  = t.get("totalMarks")?.asInt ?: questionIds.size,
+                                questionIds = questionIds,
+                                createdAt   = t.get("createdAt")?.asLong ?: 0L
+                            )
+                        } catch (e: Exception) { null }
+                    }.sortedBy { it.testNumber }
+                    if (tests.isEmpty()) null else subject to tests
+                }.toMap()
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchModelTests error: ${e.message}")
+                emptyMap()
+            }
+        }
 
     private suspend inline fun <reified T> fetchSheet(sheet: String): List<T> =
         withContext(Dispatchers.IO) {
