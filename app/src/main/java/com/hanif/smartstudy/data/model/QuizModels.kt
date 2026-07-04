@@ -20,6 +20,9 @@ sealed class AnswerState {
     object Unanswered : AnswerState()
     data class McqSelected(val option: Int, val isCorrect: Boolean) : AnswerState()
     data class WrittenSubmitted(val userText: String, val matchPct: Int, val isCorrect: Boolean) : AnswerState()
+    // Model Test-এর written প্রশ্নে অটো-চেক (matchPct) হয় না — ইউজার যেভাবে লিখেছে ঠিক
+    // সেভাবেই সংরক্ষিত থাকে, এডমিন পরে দেখে যাচাই করবে
+    data class WrittenRecorded(val userText: String) : AnswerState()
     object Skipped : AnswerState()
 }
 
@@ -46,11 +49,18 @@ data class QuestionItem(
     val answerState : AnswerState = AnswerState.Unanswered,
     val isBookmarked: Boolean     = false,
     val isWeakTopic : Boolean     = false,
-    val isStudyDone : Boolean     = false   // Study mode: "পড়া হয়েছে" টিকমার্ক — লিস্টের নিচে যাবে, হাইড হবে না
+    val isStudyDone : Boolean     = false,  // Study mode: "পড়া হয়েছে" টিকমার্ক — লিস্টের নিচে যাবে, হাইড হবে না
+    // ── Model Test এর জন্য ──
+    val isImportant  : Boolean    = false,  // admin ম্যানুয়াল ফ্ল্যাগ / বা একাধিক Year-এ repeat হওয়ায় auto-detected
+    val sourceSheet  : String     = ""      // "Quiz" | "QBank" | "Study" — কোন sheet থেকে এসেছে
 ) {
     fun isWritten() = questionType.lowercase().trim() == "written"
     fun isStudy()   = questionType.lowercase().trim() == "study"
     fun isMcq()     = !isWritten() && !isStudy()
+
+    // "sheet|id" ফরম্যাটে ইউনিক কী — Model Test এ Quiz আর QBank দুই সোর্স মিক্স হয়,
+    // তাই শুধু id দিয়ে ইউনিক না-ও হতে পারে (দুই sheet-এ একই index/key থাকা সম্ভব)
+    fun sourceKey() = "$sourceSheet|$id"
 
     companion object {
         fun fromStudyItem(s: StudyItem) = QuestionItem(
@@ -66,7 +76,8 @@ data class QuestionItem(
             technique    = s.technique ?: "",
             questionType = s.questionType?.lowercase()?.trim() ?: "study",
             audienceTags = s.audienceTags ?: "",
-            visualUrl    = s.visualUrl ?: ""
+            visualUrl    = s.visualUrl ?: "",
+            sourceSheet  = "Study"
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
             id           = q.id ?: "",
@@ -82,7 +93,9 @@ data class QuestionItem(
             technique    = "",
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
             audienceTags = q.audienceTags ?: "",
-            visualUrl    = q.visualUrl ?: ""
+            visualUrl    = q.visualUrl ?: "",
+            isImportant  = q.important == true,
+            sourceSheet  = "Quiz"
         )
         fun fromQBankItem(q: QBankItem) = QuestionItem(
             id           = q.id ?: "",
@@ -99,7 +112,9 @@ data class QuestionItem(
             audienceTags = q.audienceTags ?: "",
             year         = q.year ?: "",
             examName     = q.examName ?: "",
-            visualUrl    = q.visualUrl ?: ""
+            visualUrl    = q.visualUrl ?: "",
+            isImportant  = q.important == true,
+            sourceSheet  = "QBank"
         )
     }
 }
@@ -119,9 +134,30 @@ data class SubTopicEntry(
     val subject   : String,
     val totalQ    : Int,
     val doneQ     : Int,
-    val isWeak    : Boolean = false
+    val isWeak    : Boolean = false,
+    // ── Model Test: এটা আসল subTopic না, বরং subTopic list-এর মধ্যে বসানো একটা
+    // virtual/special card যেটা ট্যাপ করলে ওই subject এর Model Test list খোলে।
+    // Study ও QBank দুই জায়গাতেই একই সোর্স (Firebase: ModelTests/{subject}) থেকে আসে।
+    val isModelTest     : Boolean = false,
+    val modelTestCount  : Int     = 0       // কতগুলো Model Test আছে ওই subject-এ (সাবটাইটেলে দেখানোর জন্য)
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
+}
+
+// ── Model Test — এডমিন-কিউরেটেড, ফিক্সড, সবার জন্য একই ──
+// Firebase: ModelTests/{subject}/{testNumber} → {title, type, totalMarks, createdAt, questions:{...}}
+// questionIds প্রতিটা এন্ট্রি "sheet|id" ফরম্যাটে থাকে (sheet="Quiz"/"QBank") — দুই সোর্স থেকে প্রশ্ন মিক্স করা যায় বলে।
+data class ModelTestMeta(
+    val subject     : String       = "",
+    val testNumber  : Int          = 0,
+    val title       : String       = "",
+    val type        : String       = "both",   // "mcq" | "written" | "both" — অডিয়েন্স/এডমিন প্রি-সেট
+    val totalMarks  : Int          = 0,        // সবসময় পূর্ণমান — ইউজার বদলাতে পারবে না
+    val questionIds : List<String> = emptyList(),
+    val createdAt   : Long         = 0L
+) {
+    fun displayTitle() = title.ifBlank { "মডেল টেস্ট $testNumber" }
+    fun hasType(t: String) = type == "both" || type == t
 }
 
 // ── Quiz/Result ──
@@ -132,7 +168,10 @@ data class QuizResult(
     val skipped      : Int,
     val timeTakenSec : Int,
     val xpEarned     : Int,
-    val subjectBreakdown: Map<String, SubjectScore> = emptyMap()
+    val subjectBreakdown: Map<String, SubjectScore> = emptyMap(),
+    // Model Test-এর written প্রশ্নে অটো-চেক হয় না — কতগুলো উত্তর "সংরক্ষিত" হয়েছে
+    // (সঠিক/ভুল বিচার না করে) সেটা এখানে থাকে, এডমিন পরে যাচাই করবে
+    val recorded     : Int = 0
 ) {
     val pct: Int get() = if (total > 0) (correct * 100) / total else 0
     val emoji: String get() = when {
