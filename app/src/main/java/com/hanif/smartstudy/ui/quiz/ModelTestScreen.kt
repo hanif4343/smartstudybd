@@ -24,6 +24,88 @@ private val ModelGreen = Color(0xFF059669)
 private val ModelGreenDark = Color(0xFF065F46)
 
 // ─────────────────────────────────────────────────────────
+// Model Test — Subject Picker (Mock Test-এর মতো গ্লোবাল এন্ট্রি পয়েন্ট)
+// Study/Quiz/QBank subject list-এর নিচে "🏆 মডেল টেস্ট" বাটনে ট্যাপ করলে এটা খোলে —
+// শুধু সেই subject-গুলো দেখায় যেখানে অন্তত ১টা Model Test আছে (audience tag-ভিত্তিক
+// ফিল্টারিং ইতিমধ্যে ViewModel-এ হয়ে গেছে, তাই এখানে যা আসে তাই দেখানো হয়)।
+// ─────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModelTestSubjectPickerScreen(
+    subjects : List<Pair<String, Int>>,   // subject -> কতগুলো টেস্ট
+    onSelect : (String) -> Unit,
+    onBack   : () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text("🏆 মডেল টেস্ট", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                        fontFamily = NotoSansBengali)
+                },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
+        }
+    ) { padding ->
+        if (subjects.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🏆", fontSize = 40.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("এখনো কোনো বিষয়ে মডেল টেস্ট যোগ করা হয়নি", fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+                }
+            }
+            return@Scaffold
+        }
+
+        LazyColumn(
+            modifier            = Modifier.fillMaxSize().padding(padding),
+            contentPadding      = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Text(
+                    "যে বিষয়ে মডেল টেস্ট দিতে চান সেটা বেছে নিন",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+            items(subjects, key = { it.first }) { (subject, count) ->
+                Card(
+                    modifier  = Modifier.fillMaxWidth().clickable { onSelect(subject) },
+                    shape     = RoundedCornerShape(16.dp),
+                    colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            Modifier.size(42.dp).clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(ModelGreen, ModelGreenDark))),
+                            contentAlignment = Alignment.Center
+                        ) { Text("🏆", fontSize = 18.sp) }
+                        Column(Modifier.weight(1f)) {
+                            Text(subject, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                            Text("${count}টি মডেল টেস্ট", fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                        }
+                        Icon(Icons.Default.ArrowForwardIos, null, tint = ModelGreen, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(30.dp)) }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
 // Model Test — টেস্ট লিস্ট (1, 2, 3 ... N)
 // ─────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
