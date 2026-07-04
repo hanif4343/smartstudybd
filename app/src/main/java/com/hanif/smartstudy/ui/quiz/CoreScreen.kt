@@ -48,6 +48,7 @@ fun CoreScreen(
     // Back handler: depth > 0 বা isMockZone বা showResult হলে ভেতরে handle করো
     // depth 0 (subject list) হলে consume করি না — MainScreen এর BackHandler HOME এ নেবে
     val isInsideNav = state.isMockZone ||
+                      state.isModelTestZone ||
                       state.showResult ||
                       state.navPath.depth() > 0
     BackHandler(enabled = isInsideNav) {
@@ -65,6 +66,23 @@ fun CoreScreen(
                 onStart        = { viewModel.startMock() },
                 onBack         = { viewModel.navigateBack() }
             )
+        }
+
+        // ── Model Test Zone (এডমিন-কিউরেটেড, ফিক্সড টেস্ট লিস্ট) ──
+        state.isModelTestZone -> {
+            ModelTestListScreen(
+                subject    = state.modelTestSubject,
+                tests      = state.modelTests,
+                onSelect   = { viewModel.selectModelTest(it) },
+                onBack     = { viewModel.navigateBack() }
+            )
+            if (state.pendingModelTestType != null) {
+                ModelTestTypeSheet(
+                    test      = state.pendingModelTestType!!,
+                    onPick    = { type -> viewModel.startModelTest(state.pendingModelTestType!!, type) },
+                    onDismiss = { viewModel.dismissModelTestTypePicker() }
+                )
+            }
         }
 
         // ── Result Modal ──
@@ -89,11 +107,17 @@ fun CoreScreen(
             ResultModal(
                 result  = state.result!!,
                 onRetry = {
-                    // Same topic reload
-                    val subj = state.navPath.subject ?: return@ResultModal
-                    val st   = state.navPath.subTopic ?: return@ResultModal
-                    viewModel.navigateBack()
-                    viewModel.navigateToSubTopic(st)
+                    if (state.activeModelTest != null) {
+                        viewModel.retryModelTest()
+                    } else {
+                        // Same topic reload
+                        val subj = state.navPath.subject
+                        val st   = state.navPath.subTopic
+                        if (subj != null && st != null) {
+                            viewModel.navigateBack()
+                            viewModel.navigateToSubTopic(st)
+                        }
+                    }
                 },
                 onHome  = { viewModel.navigateBack() }
             )
@@ -124,11 +148,12 @@ fun CoreScreen(
         // ── SubTopic List (depth 1) ──
         state.navPath.depth() == 1 -> {
             SubTopicListScreen(
-                subject    = state.navPath.subject ?: "",
-                mode       = state.mode,
-                subTopics  = state.subTopics,
-                onSubTopic = { viewModel.navigateToSubTopic(it) },
-                onBack     = { viewModel.navigateBack() },
+                subject     = state.navPath.subject ?: "",
+                mode        = state.mode,
+                subTopics   = state.subTopics,
+                onSubTopic  = { viewModel.navigateToSubTopic(it) },
+                onModelTest = { viewModel.openModelTestZone(it) },
+                onBack      = { viewModel.navigateBack() },
                 isAdmin         = state.isAdmin,
                 isReorderMode   = state.isReorderMode,
                 isSavingOrder   = state.isSavingOrder,
