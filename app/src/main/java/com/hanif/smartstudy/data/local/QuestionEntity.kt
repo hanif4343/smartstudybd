@@ -33,6 +33,8 @@ data class QuestionEntity(
     val optionD     : String = "",
     val answer      : String = "",
     val explanation : String = "",
+    // ব্যাখ্যা Public নাকি Private (শুধু Admin) — ডিফল্ট Public
+    val explanationIsPublic: Boolean = true,
     val technique   : String = "",
     val questionType: String = "mcq",
     val audienceTags: String = "",
