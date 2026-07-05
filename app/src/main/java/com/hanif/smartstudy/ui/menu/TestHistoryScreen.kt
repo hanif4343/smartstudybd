@@ -129,8 +129,10 @@ private fun EmptyHistoryState(modifier: Modifier = Modifier) {
 @Composable
 private fun SummaryCard(history: List<TestHistoryEntry>) {
     val totalTests = history.size
-    val avgPct     = if (history.isNotEmpty()) history.sumOf { it.pct } / history.size else 0
-    val bestPct    = history.maxOfOrNull { it.pct } ?: 0
+    // ungraded (written Model Test) এন্ট্রির pct সবসময় ০ — গড়/সর্বোচ্চ স্কোর হিসাবে ওগুলো বাদ
+    val gradedOnly = history.filter { !it.isUngraded }
+    val avgPct     = if (gradedOnly.isNotEmpty()) gradedOnly.sumOf { it.pct } / gradedOnly.size else 0
+    val bestPct    = gradedOnly.maxOfOrNull { it.pct } ?: 0
     val totalXp    = history.sumOf { it.xpEarned }
 
     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
@@ -175,23 +177,33 @@ private fun TestHistoryCard(
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // Score circle
+                // Score circle — Model Test-এর written (ungraded) হলে %-এর বদলে "✍️ জমা" দেখায়
                 Box(
                     Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(scoreColor.copy(0.12f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("${entry.pct}%", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = scoreColor, fontFamily = NotoSansBengali)
-                        Text(entry.gradeEmoji, fontSize = 10.sp)
+                        if (entry.isUngraded) {
+                            Text("✍️", fontSize = 16.sp)
+                            Text("জমা", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = scoreColor, fontFamily = NotoSansBengali)
+                        } else {
+                            Text("${entry.pct}%", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = scoreColor, fontFamily = NotoSansBengali)
+                            Text(entry.gradeEmoji, fontSize = 10.sp)
+                        }
                     }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        entry.topics.joinToString(", "),
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
-                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (entry.isModelTest) {
+                            Text("🏆 ", fontSize = 12.sp)
+                        }
+                        Text(
+                            entry.topics.joinToString(", "),
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                     Text(
                         "${entry.modeLabel} • ${dateFmt.format(Date(entry.timestamp))}",
                         fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
@@ -206,12 +218,20 @@ private fun TestHistoryCard(
 
             // Quick stats row
             Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MiniStat("✅", "${entry.correct}", "সঠিক", Green500)
-                MiniStat("❌", "${entry.wrong}", "ভুল", Red500)
-                MiniStat("⏭", "${entry.skipped}", "বাদ", MaterialTheme.colorScheme.onSurfaceVariant)
-                MiniStat("⏱", formatTime(entry.timeTakenSec), "সময়", Indigo600)
-                MiniStat("⭐", "${entry.xpEarned}", "XP", Amber500)
+            if (entry.isUngraded) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    MiniStat("📝", "${entry.recorded}", "জমা হয়েছে", Indigo600)
+                    MiniStat("⏱", formatTime(entry.timeTakenSec), "সময়", Indigo600)
+                    MiniStat("💬", "রিভিউ বাকি", "স্ট্যাটাস", Amber500)
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    MiniStat("✅", "${entry.correct}", "সঠিক", Green500)
+                    MiniStat("❌", "${entry.wrong}", "ভুল", Red500)
+                    MiniStat("⏭", "${entry.skipped}", "বাদ", MaterialTheme.colorScheme.onSurfaceVariant)
+                    MiniStat("⏱", formatTime(entry.timeTakenSec), "সময়", Indigo600)
+                    MiniStat("⭐", "${entry.xpEarned}", "XP", Amber500)
+                }
             }
 
             // Subject breakdown — expanded অবস্থায়
