@@ -38,6 +38,8 @@ data class QuestionItem(
     val optionD     : String  = "",
     val answer      : String  = "",      // correct answer text / correct option text
     val explanation : String  = "",
+    // ব্যাখ্যা Public (সবাই দেখবে) নাকি Private (শুধু Admin দেখবে) — ডিফল্ট Public
+    val explanationIsPublic: Boolean = true,
     val technique   : String  = "",
     val questionType: String  = "mcq",   // "mcq" | "written"
     val audienceTags: String  = "",
@@ -73,6 +75,7 @@ data class QuestionItem(
             answer       = (s.correct ?: s.answer) ?: "",
             // index: expRaw = getVal(i,'explanation'), ansRaw fallback
             explanation  = (s.explanation ?: s.answer) ?: "",
+            explanationIsPublic = (s.explanationVisibility?.lowercase()?.trim() != "private"),
             technique    = s.technique ?: "",
             questionType = s.questionType?.lowercase()?.trim() ?: "study",
             audienceTags = s.audienceTags ?: "",
@@ -90,6 +93,7 @@ data class QuestionItem(
             optionD      = q.optionD ?: "",
             answer       = q.answer ?: "",
             explanation  = q.explanation ?: "",
+            explanationIsPublic = (q.explanationVisibility?.lowercase()?.trim() != "private"),
             technique    = "",
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
             audienceTags = q.audienceTags ?: "",
@@ -108,6 +112,7 @@ data class QuestionItem(
             optionD      = q.optionD ?: "",
             answer       = q.answer ?: "",
             explanation  = q.explanation ?: "",
+            explanationIsPublic = (q.explanationVisibility?.lowercase()?.trim() != "private"),
             questionType = q.questionType?.lowercase()?.trim() ?: "mcq",
             audienceTags = q.audienceTags ?: "",
             year         = q.year ?: "",
@@ -117,21 +122,13 @@ data class QuestionItem(
             sourceSheet  = "QBank"
         )
 
-        // Study-র ছোট-উত্তরের প্রশ্ন থেকে auto-generate করা MCQ (distractor অন্য প্রশ্নের
-        // আসল উত্তর থেকে ধার করা) — admin panel-এ প্রিভিউ কনফার্মের পর Model Test pool-এ যোগ হয়
-        fun fromStudyMcqCandidate(subject: String, c: com.hanif.smartstudy.util.StudyMcqGenerator.Candidate) = QuestionItem(
-            id           = c.studyId,
-            subject      = subject,
-            subTopic     = c.subTopic,
-            question     = c.question,
-            optionA      = c.options.getOrElse(0) { "" },
-            optionB      = c.options.getOrElse(1) { "" },
-            optionC      = c.options.getOrElse(2) { "" },
-            optionD      = c.options.getOrElse(3) { "" },
-            answer       = c.correctAnswer,
-            questionType = "mcq",
-            sourceSheet  = "StudyMcq"
-        )
+        // NOTE: আগে এখানে fromStudyMcqCandidate() নামে একটা ফাংশন ছিল যেটা
+        // com.hanif.smartstudy.util.StudyMcqGenerator.Candidate টাইপ ব্যবহার করত —
+        // কিন্তু StudyMcqGenerator ক্লাসটা প্রজেক্টে কখনো তৈরি হয়নি এবং ফাংশনটা
+        // কোথাও কল ও হতো না (Model Test-এ Study-MCQ আসলে QuizViewModel.startModelTest()
+        // এ সরাসরি test.inlineMcq থেকে বসানো হয়, sourceSheet = "StudyMcq")।
+        // Unresolved reference build error এর কারণ ছিল এটাই — অব্যবহৃত/অসম্পূর্ণ
+        // ফাংশনটা মুছে ফেলা হলো।
     }
 }
 
