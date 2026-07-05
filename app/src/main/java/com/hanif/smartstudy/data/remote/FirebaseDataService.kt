@@ -239,7 +239,8 @@ object FirebaseDataService {
         userId    : String,
         userName  : String,
         text      : String,
-        isPublic  : Boolean
+        isPublic  : Boolean,
+        type      : String = "technique"
     ): ApiResult<String> {
         return withContext(Dispatchers.IO) {
             try {
@@ -253,6 +254,7 @@ object FirebaseDataService {
                     addProperty("isPublic",   isPublic)
                     addProperty("status",     "pending")
                     addProperty("timestamp",  System.currentTimeMillis())
+                    addProperty("type",       type)
                 }
                 val body     = obj.toString().toRequestBody("application/json".toMediaType())
                 val req      = Request.Builder().url(url).post(body).build()
@@ -262,7 +264,7 @@ object FirebaseDataService {
                 resp.close()
 
                 if (isPublic) {
-                    notifyAdmin(event = "technique", userName = userName, userPhone = userId, extra = text.take(60))
+                    notifyAdmin(event = if (type == "explanation") "explanation" else "technique", userName = userName, userPhone = userId, extra = text.take(60))
                 }
                 ApiResult.Success(pushKey)
             } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
@@ -273,7 +275,8 @@ object FirebaseDataService {
         questionId: String,
         pushKey   : String,
         text      : String,
-        isPublic  : Boolean
+        isPublic  : Boolean,
+        type      : String = "technique"
     ): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
@@ -284,6 +287,7 @@ object FirebaseDataService {
                     addProperty("isPublic",  isPublic)
                     addProperty("status",    if (isPublic) "pending" else "approved")
                     addProperty("timestamp", System.currentTimeMillis())
+                    addProperty("type",      type)
                 }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).patch(body).build()
