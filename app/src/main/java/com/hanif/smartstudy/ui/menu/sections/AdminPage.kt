@@ -569,6 +569,8 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
     var optD        by remember { mutableStateOf("") }
     var answer      by remember { mutableStateOf("") }
     var explanation by remember { mutableStateOf("") }
+    // ব্যাখ্যা ডিফল্ট Public (সবাই দেখবে) — চাইলে Private (শুধু Admin) করা যাবে
+    var explanationPublic by remember { mutableStateOf(true) }
     var technique   by remember { mutableStateOf("") }
     var audience    by remember { mutableStateOf("") }
     var isMcq       by remember { mutableStateOf(true) }
@@ -582,7 +584,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
         if (isOk) {
             kotlinx.coroutines.delay(2000)
             question = ""; optA = ""; optB = ""; optC = ""; optD = ""
-            answer = ""; explanation = ""; technique = ""
+            answer = ""; explanation = ""; technique = ""; explanationPublic = true
             vm.clearAddQuestionMsg()
         }
     }
@@ -650,6 +652,30 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
             AdminTabField("✅ উত্তর *", answer, { answer = it }, 2)
         }
         AdminTabField("💡 ব্যাখ্যা", explanation, { explanation = it }, 2)
+
+        // ── ব্যাখ্যা Public/Private টগল — ডিফল্ট Public ──
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (explanationPublic) Icons.Default.Public else Icons.Default.Lock,
+                null,
+                tint = if (explanationPublic) Color(0xFF10B981) else Color(0xFFF59E0B),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("ব্যাখ্যার ভিজিবিলিটি", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(
+                    if (explanationPublic) "Public — সবাই দেখতে পাবে" else "Private — শুধু Admin দেখতে পাবে",
+                    fontFamily = NotoSansBengali, fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = explanationPublic, onCheckedChange = { explanationPublic = it })
+        }
+
         AdminTabField("🧠 টেকনিক", technique, { technique = it }, 2)
 
         // Audience dropdown
@@ -685,6 +711,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
             onClick = {
                 val fields = mutableMapOf("subject" to subject, "sub_topic" to subTopic,
                     "question" to question, "correct" to answer, "explanation" to explanation,
+                    "explanationVisibility" to if (explanationPublic) "public" else "private",
                     "technique" to technique, "AudienceTags" to audience,
                     "type" to if (isMcq) "mcq" else "written")
                 if (isMcq) {
