@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -873,7 +874,7 @@ fun UserTechniqueSection(
                     )
                     Spacer(Modifier.width(2.dp))
                     Text(
-                        if (expanded) "টেকনিক লুকাও" else "🧠 ${techniques.size}টি ইউজার টেকনিক",
+                        if (expanded) "লুকাও" else "🧠 ${techniques.size}টি ইউজার কনটেন্ট",
                         fontSize = 11.sp, color = OrangeTech, fontFamily = NotoSansBengali,
                         fontWeight = FontWeight.Bold
                     )
@@ -882,14 +883,18 @@ fun UserTechniqueSection(
                 Spacer(Modifier.width(1.dp))
             }
 
-            TextButton(
+            // ── "টেকনিক যোগ করুন" টেক্সট বাটনের জায়গায় ছোট "+" আইকন —
+            // ট্যাপ করলে পপআপে ব্যাখ্যা/টেকনিক দুইটাই যোগ করার সুযোগ থাকে ──
+            Surface(
                 onClick  = { showAddDialog = true },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                shape    = CircleShape,
+                color    = Indigo600.copy(alpha = 0.12f),
+                modifier = Modifier.size(26.dp)
             ) {
-                Icon(Icons.Default.Add, null, tint = Indigo600, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(2.dp))
-                Text("টেকনিক যোগ করুন", fontSize = 10.sp, color = Indigo600,
-                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Add, contentDescription = "ব্যাখ্যা/টেকনিক যোগ করুন",
+                        tint = Indigo600, modifier = Modifier.size(16.dp))
+                }
             }
         }
 
@@ -937,19 +942,21 @@ fun UserTechniqueSection(
         AddTechniqueDialog(
             existing    = editTarget,
             onDismiss   = { showAddDialog = false; editTarget = null },
-            onSave      = { text, isPublic ->
+            onSave      = { text, isPublic, type ->
                 scope.launch {
-                    val target = editTarget
+                    val target  = editTarget
+                    val typeLbl = if (type == "explanation") "ব্যাখ্যা" else "টেকনিক"
 
                     if (!isPublic) {
-                        // ── প্রাইভেট টেকনিক: সরাসরি ফোনেই সেভ, ইন্টারনেট লাগে না ──
+                        // ── প্রাইভেট: সরাসরি ফোনেই সেভ, ইন্টারনেট লাগে না ──
                         if (target == null) {
                             LocalTechniqueStore.add(
                                 context    = context,
                                 questionId = questionId,
                                 userId     = myPhone,
                                 userName   = currentUser.displayName(),
-                                text       = text
+                                text       = text,
+                                type       = type
                             )
                         } else if (LocalTechniqueStore.isLocalId(target.id)) {
                             LocalTechniqueStore.update(context, target.id, text)
@@ -961,12 +968,13 @@ fun UserTechniqueSection(
                                 questionId = questionId,
                                 userId     = myPhone,
                                 userName   = currentUser.displayName(),
-                                text       = text
+                                text       = text,
+                                type       = type
                             )
                         }
-                        feedbackMsg = "✅ প্রাইভেট টেকনিক আপনার ফোনে সেভ হয়েছে।"
+                        feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
                     } else {
-                        // ── পাবলিক টেকনিক: এডমিন অনুমোদনের জন্য সার্ভারে পাঠাতে হয়, তাই ইন্টারনেট লাগবে ──
+                        // ── পাবলিক: এডমিন অনুমোদনের জন্য সার্ভারে পাঠাতে হয়, তাই ইন্টারনেট লাগবে ──
                         val res = if (target == null || LocalTechniqueStore.isLocalId(target.id)) {
                             if (target != null) LocalTechniqueStore.delete(context, target.id)
                             FirebaseDataService.saveTechnique(
@@ -974,10 +982,11 @@ fun UserTechniqueSection(
                                 userId     = myPhone,
                                 userName   = currentUser.displayName(),
                                 text       = text,
-                                isPublic   = true
+                                isPublic   = true,
+                                type       = type
                             )
                         } else {
-                            FirebaseDataService.updateTechnique(questionId, target.id, text, true)
+                            FirebaseDataService.updateTechnique(questionId, target.id, text, true, type)
                         }
 
                         feedbackMsg = if (res is ApiResult.Success<*>) {
@@ -989,7 +998,8 @@ fun UserTechniqueSection(
                                 questionId = questionId,
                                 userId     = myPhone,
                                 userName   = currentUser.displayName(),
-                                text       = text
+                                text       = text,
+                                type       = type
                             )
                             "⚠️ ইন্টারনেট সংযোগ নেই, তাই আপাতত প্রাইভেট হিসেবে ফোনে সেভ হয়েছে। " +
                                 "নেট আসলে আবার এডিট করে 'পাবলিক' করে দিন।"
@@ -1036,6 +1046,22 @@ private fun UserTechniqueCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // টাইপ ব্যাজ — ব্যাখ্যা না টেকনিক
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (technique.isExplanation()) Color(0xFF0EA5E9).copy(alpha = 0.14f)
+                                else AmberWarn.copy(alpha = 0.14f)
+                            )
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            if (technique.isExplanation()) "💡 ব্যাখ্যা" else "🧠 টেকনিক",
+                            fontSize = 8.sp, fontWeight = FontWeight.ExtraBold,
+                            fontFamily = NotoSansBengali,
+                            color = if (technique.isExplanation()) Color(0xFF0369A1) else Color(0xFF92400E)
+                        )
+                    }
                     Text(
                         if (isOwn) "🙋 আমার" else "👤 ${technique.userName}",
                         fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
@@ -1109,10 +1135,13 @@ private fun UserTechniqueCard(
 private fun AddTechniqueDialog(
     existing  : UserTechnique?,
     onDismiss : () -> Unit,
-    onSave    : (text: String, isPublic: Boolean) -> Unit
+    onSave    : (text: String, isPublic: Boolean, type: String) -> Unit
 ) {
     var text     by remember(existing) { mutableStateOf(existing?.text ?: "") }
     var isPublic by remember(existing) { mutableStateOf(existing?.isPublic ?: false) }
+    // ── ব্যাখ্যা না টেকনিক — কোনটা যোগ/এডিট করা হচ্ছে ──
+    var type     by remember(existing) { mutableStateOf(existing?.type ?: "technique") }
+    val isEditingExisting = existing != null
 
     // Dark mode aware colors
     val cardBg    = MaterialTheme.colorScheme.surface
@@ -1128,10 +1157,43 @@ private fun AddTechniqueDialog(
         ) {
             Column(Modifier.padding(20.dp)) {
                 Text(
-                    if (existing == null) "💡 নতুন টেকনিক যোগ করুন" else "✏️ টেকনিক সম্পাদনা",
+                    if (existing == null) "✍️ নতুন কনটেন্ট যোগ করুন" else "✏️ সম্পাদনা",
                     fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
                     color = onCardBg, fontFamily = NotoSansBengali
                 )
+                Spacer(Modifier.height(12.dp))
+
+                // ── ব্যাখ্যা | টেকনিক — দুই পাশে টাইপ বাছাইয়ের ট্যাব ──
+                // নতুন যোগ করার সময় বাছাই করা যায়; এডিটের সময় টাইপ পরিবর্তন করা হয় না
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(subBg)
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    listOf("explanation" to "💡 ব্যাখ্যা", "technique" to "🧠 টেকনিক").forEach { (tId, label) ->
+                        val selected = type == tId
+                        Surface(
+                            onClick  = { if (!isEditingExisting) type = tId },
+                            shape    = RoundedCornerShape(8.dp),
+                            color    = if (selected) Indigo600 else Color.Transparent,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                label,
+                                fontSize   = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = NotoSansBengali,
+                                color      = if (selected) Color.White else onCardBg,
+                                textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier   = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
 
                 OutlinedTextField(
@@ -1139,7 +1201,7 @@ private fun AddTechniqueDialog(
                     onValueChange = { text = it },
                     placeholder   = {
                         Text(
-                            "এখানে টেকনিক লিখুন...",
+                            if (type == "explanation") "এখানে আপনার ব্যাখ্যা লিখুন..." else "এখানে টেকনিক লিখুন...",
                             fontFamily = NotoSansBengali,
                             fontSize   = 13.sp,
                             color      = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1209,7 +1271,7 @@ private fun AddTechniqueDialog(
                         Text("বাতিল", fontFamily = NotoSansBengali)
                     }
                     Button(
-                        onClick  = { if (text.trim().isNotBlank()) onSave(text.trim(), isPublic) },
+                        onClick  = { if (text.trim().isNotBlank()) onSave(text.trim(), isPublic, type) },
                         enabled  = text.trim().isNotBlank(),
                         modifier = Modifier.weight(1f),
                         shape    = RoundedCornerShape(10.dp),
@@ -1407,6 +1469,19 @@ fun AdminQuestionEditDialog(
     val adminIndigo = Color(0xFF4F46E5)
     val greenOkClr  = Color(0xFF10B981)
 
+    // ── কুইক-নেভ: প্রশ্ন/ক/খ/গ/ঘ/উত্তর/ব্যাখ্যা/টেকনিক ট্যাব ধরে সরাসরি সেই ফিল্ডে স্ক্রল ──
+    val fieldsScrollState   = rememberScrollState()
+    var fieldsContainerTop  by remember { mutableStateOf(0f) }
+    val fieldPositions      = remember { mutableStateMapOf<String, Float>() }
+    fun jumpToField(id: String) {
+        activeFieldId = id
+        val target = fieldPositions[id] ?: return
+        scope.launch {
+            val y = (target - fieldsContainerTop + fieldsScrollState.value - 8f).toInt().coerceAtLeast(0)
+            fieldsScrollState.animateScrollTo(y)
+        }
+    }
+
     // Map fieldId → state getter/setter
     fun getFieldValue(id: String) = when(id) {
         "question"    -> editQuestion
@@ -1555,6 +1630,44 @@ fun AdminQuestionEditDialog(
                     adminIndigo     = adminIndigo
                 )
 
+                // ── কুইক-নেভ ট্যাব: প্রশ্ন/ক/খ/গ/ঘ/উত্তর/ব্যাখ্যা/টেকনিক — ট্যাপ করলে
+                //    সরাসরি সেই ফিল্ডে স্ক্রল হয়ে যাবে, যা দরকার সেটাই এডিট করা যাবে ──
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val navTabs = buildList {
+                        add("question" to "প্রশ্ন")
+                        if (item.isMcq()) {
+                            add("optA" to "ক"); add("optB" to "খ")
+                            add("optC" to "গ"); add("optD" to "ঘ")
+                        }
+                        add("answer" to "উত্তর")
+                        add("explanation" to "💡 ব্যাখ্যা")
+                        add("technique" to "🧠 টেকনিক")
+                    }
+                    navTabs.forEach { (id, label) ->
+                        val isSel = activeFieldId == id
+                        Surface(
+                            onClick  = { jumpToField(id) },
+                            shape    = RoundedCornerShape(20.dp),
+                            color    = if (isSel) adminIndigo else MaterialTheme.colorScheme.surface,
+                            border   = androidx.compose.foundation.BorderStroke(
+                                1.dp, if (isSel) adminIndigo else MaterialTheme.colorScheme.outlineVariant
+                            )
+                        ) {
+                            Text(
+                                label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                                fontFamily = NotoSansBengali,
+                                color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
                 // ── Save message banner ──────────────────────────────────
                 androidx.compose.animation.AnimatedVisibility(saveMsg.isNotBlank()) {
                     val ok = saveSuccess == true
@@ -1567,7 +1680,9 @@ fun AdminQuestionEditDialog(
 
                 // ── Scrollable Fields ────────────────────────────────────
                 Column(
-                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp),
+                    Modifier.weight(1f).verticalScroll(fieldsScrollState)
+                        .onGloballyPositioned { fieldsContainerTop = it.positionInWindow().y }
+                        .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     // Subject + SubTopic row (read-only info)
@@ -1586,7 +1701,10 @@ fun AdminQuestionEditDialog(
                         isActive     = activeFieldId == "question",
                         showPreview  = showPreviewFor == "question",
                         onFocus      = { activeFieldId = "question" },
-                        adminIndigo  = adminIndigo
+                        adminIndigo  = adminIndigo,
+                        modifier     = Modifier.fillMaxWidth().onGloballyPositioned {
+                            fieldPositions["question"] = it.positionInWindow().y
+                        }
                     )
 
                     // ── MCQ Options ──
@@ -1603,6 +1721,7 @@ fun AdminQuestionEditDialog(
                                 listOf(opts[0], opts[2]).forEach { (id, v) ->
                                     val label = if (id == "optA") "A" else "C"
                                     val isCorrect = v.trim().equals(editAnswer.trim(), ignoreCase = true)
+                                    Box(Modifier.onGloballyPositioned { fieldPositions[id] = it.positionInWindow().y }) {
                                     AdminOptionField(
                                         label = label, fieldId = id, value = v,
                                         isCorrect = isCorrect,
@@ -1612,12 +1731,14 @@ fun AdminQuestionEditDialog(
                                         onChange = { setFieldValue(id, it) },
                                         adminIndigo = adminIndigo, greenOkClr = greenOkClr
                                     )
+                                    }
                                 }
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 listOf(opts[1], opts[3]).forEach { (id, v) ->
                                     val label = if (id == "optB") "B" else "D"
                                     val isCorrect = v.trim().equals(editAnswer.trim(), ignoreCase = true)
+                                    Box(Modifier.onGloballyPositioned { fieldPositions[id] = it.positionInWindow().y }) {
                                     AdminOptionField(
                                         label = label, fieldId = id, value = v,
                                         isCorrect = isCorrect,
@@ -1627,6 +1748,7 @@ fun AdminQuestionEditDialog(
                                         onChange = { setFieldValue(id, it) },
                                         adminIndigo = adminIndigo, greenOkClr = greenOkClr
                                     )
+                                    }
                                 }
                             }
                         }
@@ -1641,7 +1763,10 @@ fun AdminQuestionEditDialog(
                             showPreview = showPreviewFor == "answer",
                             onFocus     = { activeFieldId = "answer" },
                             adminIndigo = adminIndigo,
-                            accentColor = greenOkClr
+                            accentColor = greenOkClr,
+                            modifier    = Modifier.fillMaxWidth().onGloballyPositioned {
+                                fieldPositions["answer"] = it.positionInWindow().y
+                            }
                         )
                     } else {
                         AdminCompactField(
@@ -1654,7 +1779,10 @@ fun AdminQuestionEditDialog(
                             showPreview = showPreviewFor == "answer",
                             onFocus     = { activeFieldId = "answer" },
                             adminIndigo = adminIndigo,
-                            accentColor = greenOkClr
+                            accentColor = greenOkClr,
+                            modifier    = Modifier.fillMaxWidth().onGloballyPositioned {
+                                fieldPositions["answer"] = it.positionInWindow().y
+                            }
                         )
                     }
 
@@ -1669,7 +1797,10 @@ fun AdminQuestionEditDialog(
                         showPreview = showPreviewFor == "explanation",
                         onFocus     = { activeFieldId = "explanation" },
                         adminIndigo = adminIndigo,
-                        accentColor = Color(0xFFF59E0B)
+                        accentColor = Color(0xFFF59E0B),
+                        modifier    = Modifier.fillMaxWidth().onGloballyPositioned {
+                            fieldPositions["explanation"] = it.positionInWindow().y
+                        }
                     )
 
                     // ── ব্যাখ্যা Public/Private টগল — ডিফল্ট Public ──
@@ -1706,7 +1837,9 @@ fun AdminQuestionEditDialog(
                             onFocus     = { activeFieldId = "technique" },
                             adminIndigo = adminIndigo,
                             accentColor = Color(0xFF0EA5E9),
-                            modifier    = Modifier.weight(1f)
+                            modifier    = Modifier.weight(1f).onGloballyPositioned {
+                                fieldPositions["technique"] = it.positionInWindow().y
+                            }
                         )
 
                         // Audience compact dropdown
