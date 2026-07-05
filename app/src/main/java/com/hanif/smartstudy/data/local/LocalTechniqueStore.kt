@@ -37,7 +37,8 @@ object LocalTechniqueStore {
         questionId: String,
         userId    : String,
         userName  : String,
-        text      : String
+        text      : String,
+        type      : String = "technique"
     ): UserTechnique {
         val technique = UserTechnique(
             id         = LOCAL_ID_PREFIX + UUID.randomUUID().toString(),
@@ -46,8 +47,9 @@ object LocalTechniqueStore {
             userName   = userName,
             text       = text,
             isPublic   = false,
-            status     = "approved", // প্রাইভেট টেকনিক নিজে থেকেই দেখা যায়, অনুমোদন লাগে না
-            timestamp  = System.currentTimeMillis()
+            status     = "approved", // প্রাইভেট টেকনিক/ব্যাখ্যা নিজে থেকেই দেখা যায়, অনুমোদন লাগে না
+            timestamp  = System.currentTimeMillis(),
+            type       = type
         )
         val all = getAll(context).toMutableList()
         all.add(technique)
