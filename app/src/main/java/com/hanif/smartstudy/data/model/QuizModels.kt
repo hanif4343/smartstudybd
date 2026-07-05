@@ -116,6 +116,22 @@ data class QuestionItem(
             isImportant  = q.important == true,
             sourceSheet  = "QBank"
         )
+
+        // Study-র ছোট-উত্তরের প্রশ্ন থেকে auto-generate করা MCQ (distractor অন্য প্রশ্নের
+        // আসল উত্তর থেকে ধার করা) — admin panel-এ প্রিভিউ কনফার্মের পর Model Test pool-এ যোগ হয়
+        fun fromStudyMcqCandidate(subject: String, c: com.hanif.smartstudy.util.StudyMcqGenerator.Candidate) = QuestionItem(
+            id           = c.studyId,
+            subject      = subject,
+            subTopic     = c.subTopic,
+            question     = c.question,
+            optionA      = c.options.getOrElse(0) { "" },
+            optionB      = c.options.getOrElse(1) { "" },
+            optionC      = c.options.getOrElse(2) { "" },
+            optionD      = c.options.getOrElse(3) { "" },
+            answer       = c.correctAnswer,
+            questionType = "mcq",
+            sourceSheet  = "StudyMcq"
+        )
     }
 }
 
@@ -154,11 +170,26 @@ data class ModelTestMeta(
     val type        : String       = "both",   // "mcq" | "written" | "both" — অডিয়েন্স/এডমিন প্রি-সেট
     val totalMarks  : Int          = 0,        // সবসময় পূর্ণমান — ইউজার বদলাতে পারবে না
     val questionIds : List<String> = emptyList(),
-    val createdAt   : Long         = 0L
+    val createdAt   : Long         = 0L,
+    // Study-র ছোট-উত্তরের প্রশ্ন থেকে auto-generate করা MCQ — এগুলোর options/answer কোনো
+    // স্থায়ী Quiz/QBank আইটেমে নেই (সিন্থেটিক), তাই ফুল ডেটা এখানেই ইনলাইন সেভ থাকে,
+    // sourceKey (যেমন "StudyMcq|abc") দিয়ে questionIds থেকে ম্যাপ হয়
+    val inlineMcq   : Map<String, InlineMcqQuestion> = emptyMap()
 ) {
     fun displayTitle() = title.ifBlank { "মডেল টেস্ট $testNumber" }
     fun hasType(t: String) = type == "both" || type == t
 }
+
+// Study থেকে auto-generate করা MCQ-র সিন্থেটিক ডেটা (distractor অন্য প্রশ্নের আসল উত্তর থেকে ধার করা)
+data class InlineMcqQuestion(
+    val question : String = "",
+    val optionA  : String = "",
+    val optionB  : String = "",
+    val optionC  : String = "",
+    val optionD  : String = "",
+    val answer   : String = "",
+    val subTopic : String = ""
+)
 
 // ── Quiz/Result ──
 data class QuizResult(
