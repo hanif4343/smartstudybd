@@ -9,11 +9,14 @@ data class UserTechnique(
     val text        : String = "",
     val isPublic    : Boolean = false,
     val status      : String = "pending", // "pending" | "approved" | "rejected"
-    val timestamp   : Long   = 0L
+    val timestamp   : Long   = 0L,
+    val type        : String = "technique" // "technique" | "explanation" — ইউজার কোনটা যোগ করেছে
 ) {
-    fun isPending()  = status == "pending"
-    fun isApproved() = status == "approved"
-    fun isRejected() = status == "rejected"
+    fun isPending()      = status == "pending"
+    fun isApproved()     = status == "approved"
+    fun isRejected()     = status == "rejected"
+    fun isExplanation()  = type == "explanation"
+    fun isTechnique()    = type != "explanation"
 
     companion object {
         fun fromMap(id: String, map: Map<String, Any>): UserTechnique = UserTechnique(
@@ -24,7 +27,8 @@ data class UserTechnique(
             text       = map["text"]?.toString()       ?: "",
             isPublic   = map["isPublic"]?.toString()?.toBooleanStrictOrNull() ?: false,
             status     = map["status"]?.toString()     ?: "pending",
-            timestamp  = map["timestamp"]?.toString()?.toLongOrNull() ?: 0L
+            timestamp  = map["timestamp"]?.toString()?.toLongOrNull() ?: 0L,
+            type       = map["type"]?.toString()       ?: "technique"
         )
     }
 }
