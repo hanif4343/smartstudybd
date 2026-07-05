@@ -423,8 +423,19 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val studyPool = filtered.study.map { QuestionItem.fromStudyItem(it).copy(questionType = "written") }
                 .associateBy { it.sourceKey() }
 
-            // admin যে ক্রমে ঠিক করে দিয়েছে সেই ক্রমেই resolve করা হয়
-            val resolved = test.questionIds.mapNotNull { key -> quizPool[key] ?: qbankPool[key] ?: studyPool[key] }
+            // admin যে ক্রমে ঠিক করে দিয়েছে সেই ক্রমেই resolve করা হয় — সাধারণ Quiz/QBank/Study
+            // আইটেম live content থেকে resolve হয়, কিন্তু Study থেকে auto-generate করা MCQ
+            // (distractor ধার করা) সিন্থেটিক বলে test.inlineMcq থেকে সরাসরি বসানো হয়
+            val resolved = test.questionIds.mapNotNull { key ->
+                quizPool[key] ?: qbankPool[key] ?: studyPool[key] ?: test.inlineMcq[key]?.let { inline ->
+                    QuestionItem(
+                        id = key, subject = test.subject, subTopic = inline.subTopic,
+                        question = inline.question, optionA = inline.optionA, optionB = inline.optionB,
+                        optionC = inline.optionC, optionD = inline.optionD, answer = inline.answer,
+                        questionType = "mcq", sourceSheet = "StudyMcq"
+                    )
+                }
+            }
             val typeFiltered = if (test.type == "both") {
                 resolved.filter { if (chosenType == "written") it.isWritten() else it.isMcq() }
             } else resolved
