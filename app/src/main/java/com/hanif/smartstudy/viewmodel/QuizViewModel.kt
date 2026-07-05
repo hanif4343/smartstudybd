@@ -40,6 +40,9 @@ data class QuizUiState(
     val showResult    : Boolean          = false,
     val isMockZone    : Boolean          = false,
     val mockConfig    : MockTestConfig   = MockTestConfig(),
+    // টাইমার শেষ হয়ে অটো-সাবমিট হওয়ার সময় written প্রশ্নে টাইপ-করা-কিন্তু-submit-না-করা
+    // ড্রাফট টেক্সট হারিয়ে না যাওয়ার জন্য — key: QuestionItem.sourceKey()
+    val writtenDrafts : Map<String, String> = emptyMap(),
     // ── Model Test (এডমিন-কিউরেটেড, ফিক্সড) ──
     // ── Model Test (এডমিন-কিউরেটেড, ফিক্সড) ──
     // Mock Test-এর মতোই একটা গ্লোবাল এন্ট্রি — Study/Quiz/QBank subject list-এর নিচে বাটন,
@@ -625,9 +628,28 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         return matchPct
     }
 
+    fun updateWrittenDraft(key: String, text: String) {
+        _state.update { it.copy(writtenDrafts = it.writtenDrafts + (key to text)) }
+    }
+
     fun submitQuiz() {
         timerJob?.cancel()
-        val questions  = _state.value.questions
+
+        // ── স্ট্রিক্ট টাইমার: সময় শেষ হয়ে অটো-সাবমিট হয়ে গেলেও যেসব written প্রশ্নে
+        // ইউজার টাইপ করছিল কিন্তু এখনো "উত্তর জমা দিন" চাপেনি, তাদের ড্রাফট টেক্সট
+        // এখানে finalize করে ফেলা হয় — কোনো লেখা হারিয়ে যায় না ──
+        val drafts = _state.value.writtenDrafts
+        if (drafts.isNotEmpty()) {
+            _state.value.questions.forEachIndexed { idx, q ->
+                if (q.answerState is AnswerState.Unanswered && q.isWritten()) {
+                    drafts[q.sourceKey()]?.takeIf { it.isNotBlank() }?.let { draftText ->
+                        answerWritten(idx, draftText)
+                    }
+                }
+            }
+        }
+
+        val questions  = _state.value.questions   // draft-finalize এর পর আপডেটেড লিস্ট রি-রিড
         val totalTime  = _state.value.totalTimeSec
         val elapsed    = totalTime - _state.value.timerSec
         var correct = 0; var wrong = 0; var skipped = 0; var recorded = 0
@@ -665,6 +687,20 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels))
+            }
+        }
+
+        // ── Model Test রেজাল্ট হিস্ট্রিতে জমা রাখো — কবে দিয়েছিল, কত স্কোর, progress ট্র্যাক করার জন্য ──
+        val mt = _state.value.activeModelTest
+        if (mt != null && result.total > 0) {
+            viewModelScope.launch {
+                historyCache.addEntry(
+                    result.toHistoryEntry(
+                        mode   = _state.value.mode.name,
+                        topics = listOf("${mt.subject} — ${mt.displayTitle()}"),
+                        source = "model_test"
+                    )
+                )
             }
         }
 
