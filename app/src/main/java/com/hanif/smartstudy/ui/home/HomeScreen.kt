@@ -67,6 +67,7 @@ import com.hanif.smartstudy.receiver.ReminderReceiver
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import android.widget.Toast
 import kotlinx.coroutines.delay
 
 private val PrimaryIndigo = Color(0xFF4F46E5)
@@ -532,6 +533,7 @@ private fun RoutineItemRow(
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
     val hasSubject = item.subject.isNotBlank()
+    val ctx = LocalContext.current
 
     // ── Highlight pulse animation ─────────────────────────────────
     val highlightTransition = rememberInfiniteTransition(label = "routineHighlight")
@@ -586,7 +588,17 @@ private fun RoutineItemRow(
         Column(
             Modifier
                 .weight(1f)
-                .then(if (hasSubject) Modifier.clickable { onOpenFocus() } else Modifier)
+                .clickable {
+                    if (hasSubject) {
+                        onOpenFocus()
+                    } else {
+                        Toast.makeText(
+                            ctx,
+                            "এই আইটেমে কোনো বিষয় যুক্ত নেই — তাই এখানে পড়ার কিছু নেই। ⏰ আইকনে ট্যাপ করে রিমাইন্ডার সেট করতে পারো।",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
         ) {
             Text(
                 item.title,
