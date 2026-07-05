@@ -22,6 +22,7 @@ import com.hanif.smartstudy.service.SmartStudyFirebaseService
 import com.hanif.smartstudy.ui.navigation.SmartStudyNavGraph
 import com.hanif.smartstudy.ui.shared.AchievementPopup
 import com.hanif.smartstudy.ui.shared.OfflineBanner
+import com.hanif.smartstudy.ui.shared.ProvideSmartTextToolbar
 import com.hanif.smartstudy.ui.shared.StreakPopup
 import com.hanif.smartstudy.ui.theme.*
 import android.Manifest
@@ -180,6 +181,10 @@ class MainActivity : ComponentActivity() {
             var streakCount        by remember { mutableStateOf(0) }
 
             SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
+                // ── টেক্সট সিলেকশন টুলবার (Copy/Select all/Share/Web Search/Read Aloud) ──
+                // পুরো অ্যাপের রুটে একবার wrap করলেই সব স্ক্রিনের SelectionContainer এ
+                // এই ৫টা অপশনই আসবে — আলাদা করে প্রতিটা স্ক্রিন এডিট করার দরকার নেই।
+                ProvideSmartTextToolbar {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize()) {
 
@@ -207,6 +212,7 @@ class MainActivity : ComponentActivity() {
                             onDismiss   = { pendingAchievement = null }
                         )
                     }
+                }
                 }
             }
 
