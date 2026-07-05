@@ -16,9 +16,17 @@ data class TestHistoryEntry(
     val skipped       : Int                       = 0,
     val timeTakenSec  : Int                       = 0,
     val xpEarned      : Int                       = 0,
-    val subjectBreakdown: Map<String, SubjectScore> = emptyMap()
+    val subjectBreakdown: Map<String, SubjectScore> = emptyMap(),
+    // "" = সাধারণ Quiz/QBank/Study টেস্ট, "model_test" = এডমিন-কিউরেটেড Model Test
+    val source        : String                    = "",
+    // Model Test-এর written প্রশ্নে অটো-চেক হয় না — কতগুলো উত্তর গ্রেড না করেই "সংরক্ষিত" হয়েছে
+    val recorded      : Int                       = 0
 ) {
     val pct: Int get() = if (total > 0) (correct * 100) / total else 0
+
+    val isModelTest: Boolean get() = source == "model_test"
+    // written model test-এ correct/wrong/pct অর্থহীন — শুধু "কতগুলো জমা হয়েছে" দেখানো হবে
+    val isUngraded: Boolean get() = isModelTest && recorded > 0
 
     val modeLabel: String get() = when (mode) {
         "QBANK" -> "প্রশ্নভান্ডার"
@@ -27,14 +35,15 @@ data class TestHistoryEntry(
     }
 
     val gradeEmoji: String get() = when {
-        pct >= 80 -> "🏆"
-        pct >= 60 -> "👏"
-        pct >= 40 -> "💪"
-        else      -> "📚"
+        isUngraded -> "✍️"
+        pct >= 80   -> "🏆"
+        pct >= 60   -> "👏"
+        pct >= 40   -> "💪"
+        else        -> "📚"
     }
 }
 
-fun QuizResult.toHistoryEntry(mode: String, topics: List<String>): TestHistoryEntry = TestHistoryEntry(
+fun QuizResult.toHistoryEntry(mode: String, topics: List<String>, source: String = ""): TestHistoryEntry = TestHistoryEntry(
     id              = "test_${System.currentTimeMillis()}",
     timestamp       = System.currentTimeMillis(),
     mode            = mode,
@@ -45,5 +54,7 @@ fun QuizResult.toHistoryEntry(mode: String, topics: List<String>): TestHistoryEn
     skipped         = skipped,
     timeTakenSec    = timeTakenSec,
     xpEarned        = xpEarned,
-    subjectBreakdown = subjectBreakdown
+    subjectBreakdown = subjectBreakdown,
+    source          = source,
+    recorded        = recorded
 )
