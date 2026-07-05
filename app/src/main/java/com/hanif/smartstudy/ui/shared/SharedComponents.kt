@@ -146,6 +146,7 @@ fun QuestionCard(
     totalCount     : Int       = 0,
     onMcqAnswer    : (Int) -> Unit,
     onWritten      : (String) -> Int,
+    onWrittenDraft : (String) -> Unit = {},
     onBookmark     : () -> Unit,
     onStudyDone    : () -> Unit = {},
     onReport       : () -> Unit,
@@ -321,7 +322,7 @@ fun QuestionCard(
                     McqOptions(item = item, onAnswer = onMcqAnswer)
                 }
                 item.isWritten() && mode != StudyMode.STUDY -> {
-                    WrittenInput(item = item, onSubmit = onWritten)
+                    WrittenInput(item = item, onSubmit = onWritten, onDraftChange = onWrittenDraft)
                 }
                 else -> {}
             }
@@ -645,7 +646,7 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
 }
 
 @Composable
-fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
+fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int, onDraftChange: (String) -> Unit = {}) {
     val submitted = item.answerState as? AnswerState.WrittenSubmitted
     val recorded  = item.answerState as? AnswerState.WrittenRecorded
     var text by remember { mutableStateOf("") }
@@ -704,7 +705,9 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int) {
     } else {
         OutlinedTextField(
             value         = text,
-            onValueChange = { text = it },
+            // টাইমার শেষ হয়ে অটো-সাবমিট হয়ে গেলেও এই ড্রাফট টেক্সট হারিয়ে না যাক —
+            // প্রতি কি-স্ট্রোকে ViewModel-এ জমা রাখা হয় (submit বাটন চাপার আগেই)
+            onValueChange = { text = it; onDraftChange(it) },
             modifier      = Modifier.fillMaxWidth(),
             minLines      = 2,
             maxLines      = 5,
