@@ -340,10 +340,24 @@ fun QuestionCard(
                 AnswerBox(text = item.answer, ttsKey = answerTtsKey, ttsOffset = ttsAnswerOffset)
             }
 
-            // explanation — studyNoQ তে empty, নাহলে দেখাও
-            if (showAnswerBox && displayExplanation.isNotBlank() && displayExplanation != item.answer) {
+            // explanation — studyNoQ তে empty, নাহলে দেখাও।
+            // Private ব্যাখ্যা শুধু Admin দেখতে পাবে — সাধারণ ইউজারের কাছে হাইড থাকবে।
+            val canSeeExplanation = item.explanationIsPublic || currentUser?.isAdmin() == true
+            if (showAnswerBox && canSeeExplanation && displayExplanation.isNotBlank() && displayExplanation != item.answer) {
                 Spacer(Modifier.height(6.dp))
                 ExplanationBox(text = displayExplanation)
+                if (!item.explanationIsPublic) {
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Lock, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Private — শুধু আপনি (Admin) দেখছেন",
+                            fontSize = 9.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B)
+                        )
+                    }
+                }
             }
 
             if (showAnswerBox && item.technique.isNotBlank()) {
@@ -1377,6 +1391,7 @@ fun AdminQuestionEditDialog(
     var editOptionD     by remember { mutableStateOf(item.optionD) }
     var editAnswer      by remember { mutableStateOf(item.answer) }
     var editExplanation by remember { mutableStateOf(item.explanation) }
+    var editExplanationPublic by remember { mutableStateOf(item.explanationIsPublic) }
     var editTechnique   by remember { mutableStateOf(item.technique) }
     var editAudience    by remember { mutableStateOf(item.audienceTags) }
     var audienceExpanded by remember { mutableStateOf(false) }
@@ -1423,6 +1438,8 @@ fun AdminQuestionEditDialog(
                 val fields = mutableMapOf<String, String>()
                 if (editQuestion    != item.question)     fields["question"]     = editQuestion
                 if (editExplanation != item.explanation)  fields["explanation"]  = editExplanation
+                if (editExplanationPublic != item.explanationIsPublic)
+                    fields["explanationVisibility"] = if (editExplanationPublic) "public" else "private"
                 if (editTechnique   != item.technique)    fields["technique"]    = editTechnique
                 if (editAudience    != item.audienceTags) fields["AudienceTags"] = editAudience
                 if (editAnswer      != item.answer) { fields["correct"] = editAnswer; fields["answer"] = editAnswer }
@@ -1654,6 +1671,28 @@ fun AdminQuestionEditDialog(
                         adminIndigo = adminIndigo,
                         accentColor = Color(0xFFF59E0B)
                     )
+
+                    // ── ব্যাখ্যা Public/Private টগল — ডিফল্ট Public ──
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (editExplanationPublic) Icons.Default.Public else Icons.Default.Lock,
+                            null,
+                            tint = if (editExplanationPublic) Color(0xFF10B981) else Color(0xFFF59E0B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (editExplanationPublic) "Public — সবাই দেখবে" else "Private — শুধু Admin দেখবে",
+                            fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(checked = editExplanationPublic, onCheckedChange = { editExplanationPublic = it })
+                    }
 
                     // ── টেকনিক + Audience — same row ──
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
