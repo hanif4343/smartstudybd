@@ -19,6 +19,8 @@ data class StudyItem(
     // Firebase তে correct field — index.html getVal(i,'correct') এর মতো
     @SerializedName("correct")       val correct      : String? = null,
     @SerializedName("explanation")   val explanation  : String? = null,
+    // ব্যাখ্যা "public" (সবাই দেখবে, ডিফল্ট) বা "private" (শুধু Admin দেখবে)
+    @SerializedName("explanationVisibility") val explanationVisibility: String? = null,
     @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
@@ -36,6 +38,8 @@ data class QuizItem(
     @SerializedName("option4")       val optionD      : String? = null,
     @SerializedName("correct")       val answer       : String? = null,
     @SerializedName("explanation")   val explanation  : String? = null,
+    // ব্যাখ্যা "public" (সবাই দেখবে, ডিফল্ট) বা "private" (শুধু Admin দেখবে)
+    @SerializedName("explanationVisibility") val explanationVisibility: String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
@@ -56,6 +60,8 @@ data class QBankItem(
     @SerializedName("option4")       val optionD      : String? = null,
     @SerializedName("correct")       val answer       : String? = null,
     @SerializedName("explanation")   val explanation  : String? = null,
+    // ব্যাখ্যা "public" (সবাই দেখবে, ডিফল্ট) বা "private" (শুধু Admin দেখবে)
+    @SerializedName("explanationVisibility") val explanationVisibility: String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Year")          val year         : String? = null,
@@ -122,6 +128,10 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             k == "answer"                           -> "answer"
             // explanation
             k == "explanation"                      -> "explanation"
+            // explanation public/private ফ্ল্যাগ — বিভিন্ন সম্ভাব্য কলাম-নাম
+            k == "explanationvisibility" || k == "explanation_visibility"
+                || k == "explanation_public" || k == "explanationpublic"
+                || k == "explanation visibility"     -> "explanationVisibility"
             // question type
             k == "question type" || k == "question_type"
                 || k == "questiontype"              -> "Question Type"
