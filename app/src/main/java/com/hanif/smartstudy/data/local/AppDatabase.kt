@@ -7,7 +7,10 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [QuestionEntity::class],
-    version  = 1,
+    // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
+    // (ব্যাখ্যা Public/Private ফিচার) — fallbackToDestructiveMigration() থাকায়
+    // পুরনো ক্যাশ শুধু আবার Firebase থেকে রিফ্রেশ হবে, কোনো ক্র্যাশ হবে না।
+    version  = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
