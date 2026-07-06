@@ -54,6 +54,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var session: SessionManager
     private var sessionStartMs = 0L
 
+    // Notification tap থেকে আসা deep link — mutableState হওয়ায় warm-start এ
+    // (app আগে থেকেই খোলা থাকা অবস্থায় notification tap) onNewIntent থেকে
+    // আপডেট হলেও Compose recomposition ট্রিগার হয়ে ঠিক জায়গায় নিয়ে যায়।
+    private val pendingDeepLink = mutableStateOf(DeepLinkAction(DeepLinkAction.Type.NONE))
+
     // Google Sign-In
     private lateinit var googleSignInClient: GoogleSignInClient
     private var googleSignInCallback: ((email: String, name: String, photoUrl: String, idToken: String) -> Unit)? = null
@@ -132,9 +137,14 @@ class MainActivity : ComponentActivity() {
         // রিমাইন্ডার নির্ভরযোগ্য করতে: exact-alarm permission নিশ্চিত করো (Android 12+)
         // এটা না থাকলে SCHEDULE_EXACT_ALARM declare করা সত্ত্বেও alarm silently দেরিতে/বাদ পড়ে যেতে পারে,
         // বিশেষ করে vivo/Xiaomi/Oppo-র মতো aggressive battery-management OEM-এ।
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // NOTE: আগে এটা প্রতিবার app খোলার সময় চেক হত, ফলে permission না দেওয়া পর্যন্ত
+        // প্রতি লঞ্চেই Settings এ চলে যেত — এটাই "app opening slow" মনে হওয়ার একটা বড় কারণ ছিল।
+        // এখন থেকে শুধু জীবনে একবারই জিজ্ঞেস করা হবে (SettingsScreen এ রিমাইন্ডার অন করার
+        // সময় প্রয়োজনে আবার সরাসরি জিজ্ঞেস করা হয়, তাই এখানে বারবার দরকার নেই)।
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !session.hasAskedExactAlarmPermission()) {
             val am = getSystemService(ALARM_SERVICE) as AlarmManager
             if (!am.canScheduleExactAlarms()) {
+                session.setAskedExactAlarmPermission()
                 try {
                     startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                         data = Uri.parse("package:$packageName")
@@ -148,20 +158,24 @@ class MainActivity : ComponentActivity() {
         // ব্যাটারি অপ্টিমাইজেশন থেকে app-কে বাদ রাখার অনুরোধ — vivo (FuntouchOS/OriginOS) সহ
         // অনেক OEM background-এ app বন্ধ থাকলে নিজে থেকেই scheduled alarm cancel করে দেয়।
         // এটা exempt না করলে রিমাইন্ডার মাঝে মাঝে বাজবে না, যদিও কোড সঠিকভাবে alarm set করেছে।
-        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
-        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-            try {
-                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                })
-            } catch (e: Exception) {
-                Log.e("BatteryOpt", "Could not request battery optimization exemption", e)
+        // (উপরের নোটের মতো — এটাও এখন জীবনে একবারই জিজ্ঞেস করা হয়, প্রতি app-open এ নয়)
+        if (!session.hasAskedBatteryOptPermission()) {
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                session.setAskedBatteryOptPermission()
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                } catch (e: Exception) {
+                    Log.e("BatteryOpt", "Could not request battery optimization exemption", e)
+                }
             }
         }
 
         NotificationPollWorker.schedule(this)
 
-        val deepLink = intent?.parseDeepLink() ?: DeepLinkAction(DeepLinkAction.Type.NONE)
+        pendingDeepLink.value = intent?.parseDeepLink() ?: DeepLinkAction(DeepLinkAction.Type.NONE)
 
         setContent {
             val darkFlow  = remember { session.darkModeFlow() }
@@ -191,7 +205,7 @@ class MainActivity : ComponentActivity() {
                         val toastState = rememberToastState()
 
                         SmartStudyNavGraph(
-                            deepLink              = deepLink,
+                            deepLink              = pendingDeepLink.value,
                             onAchievementUnlocked = { ach -> pendingAchievement = ach },
                             onStreakUpdated        = { streak ->
                                 if (streak > 0) { streakCount = streak; showStreak = true }
@@ -220,6 +234,15 @@ class MainActivity : ComponentActivity() {
                 StreakPopup(streak = streakCount, onDismiss = { showStreak = false })
             }
         }
+    }
+
+    // ── App আগে থেকেই খোলা থাকা অবস্থায় notification tap হলে এখানে intent আসে।
+    //    onCreate পুনরায় কল হয় না বলে আগে deep-link data হারিয়ে যেত এবং notification
+    //    এ ক্লিক করলে app শুধু foreground এ চলে আসত, কোথাও নিয়ে যেত না। ──
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDeepLink.value = intent.parseDeepLink()
     }
 
     override fun onResume() {
