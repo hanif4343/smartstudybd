@@ -62,6 +62,7 @@ data class QBankItem(
     @SerializedName("explanation")   val explanation  : String? = null,
     // ব্যাখ্যা "public" (সবাই দেখবে, ডিফল্ট) বা "private" (শুধু Admin দেখবে)
     @SerializedName("explanationVisibility") val explanationVisibility: String? = null,
+    @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
     @SerializedName("Year")          val year         : String? = null,
