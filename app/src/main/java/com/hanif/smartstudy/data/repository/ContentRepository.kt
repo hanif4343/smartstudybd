@@ -41,7 +41,9 @@ class ContentRepository(private val context: Context) {
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
         @Volatile private var _memCache: AppContent? = null
+        @Volatile private var _lastBgRefreshAt: Long = 0L
         private val mutex = Mutex()
+        private const val BG_REFRESH_MIN_GAP_MS = 60_000L // একই সেশনে বারবার getContent() কল হলেও ৬০ সেকেন্ডে একবারের বেশি Firebase hit না করার জন্য
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
     }
@@ -152,7 +154,14 @@ class ContentRepository(private val context: Context) {
             Log.d("Repo", "Cache hit: quiz=${cached.quiz.size} — background refresh শুরু")
 
             // ── Step 2: Background এ Firebase check ───────────────────────
-            if (isOnline() && onBackgroundUpdate != null) {
+            // আগে এটা শুধু onBackgroundUpdate callback দিলেই চলত — ফলে Quiz/QBank/Study/
+            // Routine/Menu থেকে getContent() কল হলে (কোনো callback ছাড়াই) কখনো refresh-ই
+            // হতো না, শুধু Home screen খুললেই হতো। তাই admin কোনো প্রশ্নে explanation
+            // যোগ/এডিট করলে সেটা student app-এ আসতে Home screen খোলা লাগত। এখন
+            // অনলাইন থাকলেই সবসময় background refresh হবে, callback থাকুক বা না থাকুক।
+            val now = System.currentTimeMillis()
+            if (isOnline() && (onBackgroundUpdate != null || now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS)) {
+                _lastBgRefreshAt = now
                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     try {
                         when (val fresh = ContentFetchService.fetchAllContent()) {
@@ -162,7 +171,7 @@ class ContentRepository(private val context: Context) {
                                     _memCache = fresh.data
                                     cache.saveContent(fresh.data)
                                     syncToRoom(fresh.data)
-                                    onBackgroundUpdate(fresh.data)
+                                    onBackgroundUpdate?.invoke(fresh.data)
                                 } else {
                                     Log.d("Repo", "Background: data same, no update needed")
                                 }
