@@ -388,7 +388,7 @@ fun QuestionCard(
             // explanation — studyNoQ তে empty, নাহলে দেখাও।
             // Private ব্যাখ্যা শুধু Admin দেখতে পাবে — সাধারণ ইউজারের কাছে হাইড থাকবে।
             val canSeeExplanation = item.explanationIsPublic || currentUser?.isAdmin() == true
-            if (showAnswerBox && canSeeExplanation && displayExplanation.isNotBlank() && displayExplanation != item.answer) {
+            if (showAnswerBox && canSeeExplanation && displayExplanation.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 ExplanationBox(
                     text   = displayExplanation,
