@@ -455,7 +455,7 @@ private fun WRPracticeItem(
 
                 if (isAnswered) {
                     if (q.answer.isNotBlank()) AnswerBox(text = q.answer)
-                    if (q.explanation.isNotBlank() && q.explanation != q.answer) {
+                    if (q.explanation.isNotBlank()) {
                         ExplanationBox(text = q.explanation)
                     }
                     if (q.technique.isNotBlank()) TechniqueBox(text = q.technique)
