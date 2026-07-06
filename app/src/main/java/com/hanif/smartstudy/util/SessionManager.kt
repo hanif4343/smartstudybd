@@ -75,6 +75,12 @@ class SessionManager(private val context: Context) {
 
         // Admin: audience tag switch
         val KEY_ADMIN_AUDIENCE_TAG = stringPreferencesKey("admin_audience_tag")
+
+        // App-open এ Settings-redirect শুধু একবারই দেখানোর জন্য — বারবার app
+        // খুললেই exact-alarm/battery-optimization এর Settings পেজে চলে যাওয়া
+        // "app opening slow" মনে হওয়ার একটা বড় কারণ ছিল।
+        val KEY_ASKED_EXACT_ALARM  = booleanPreferencesKey("asked_exact_alarm")
+        val KEY_ASKED_BATTERY_OPT  = booleanPreferencesKey("asked_battery_opt")
     }
 
     // ── User ──────────────────────────────────────────────────
@@ -149,6 +155,24 @@ class SessionManager(private val context: Context) {
 
     suspend fun setOnboardingDone() {
         context.dataStore.edit { it[KEY_OB_DONE] = true }
+    }
+
+    // ── App-open permission prompts (শুধু একবার দেখানোর জন্য) ────
+
+    fun hasAskedExactAlarmPermission(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_ASKED_EXACT_ALARM] ?: false
+    }
+
+    fun setAskedExactAlarmPermission() = runBlocking {
+        context.dataStore.edit { it[KEY_ASKED_EXACT_ALARM] = true }
+    }
+
+    fun hasAskedBatteryOptPermission(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_ASKED_BATTERY_OPT] ?: false
+    }
+
+    fun setAskedBatteryOptPermission() = runBlocking {
+        context.dataStore.edit { it[KEY_ASKED_BATTERY_OPT] = true }
     }
 
     // ── Daily Goal ────────────────────────────────────────────
