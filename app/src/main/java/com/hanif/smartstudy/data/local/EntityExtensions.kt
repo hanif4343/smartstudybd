@@ -41,6 +41,7 @@ fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     answer       = answer ?: "",
     explanation  = explanation ?: "",
     explanationIsPublic = (explanationVisibility?.lowercase()?.trim() != "private"),
+    technique    = technique ?: "",
     questionType = questionType ?: "mcq",
     audienceTags = audienceTags ?: "",
     year         = year ?: "",
