@@ -94,7 +94,19 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                 return if (jsonElement.isJsonObject) {
                     val normalized = com.google.gson.JsonObject()
                     jsonElement.asJsonObject.entrySet().forEach { (k, v) ->
-                        normalized.add(normalizeKey(k), v)
+                        val nk = normalizeKey(k)
+                        val existing = normalized.get(nk)
+                        // FIX: Firebase-এ একই ফিল্ডের capital ও lowercase দুই ভ্যারিয়েন্ট একসাথে
+                        // থাকতে পারে (যেমন "Explanation" আসল কনটেন্ট নিয়ে, আর পাশাপাশি খালি
+                        // "explanation")। lowercase() করার পর দুটোই একই normalized key-তে পড়ে,
+                        // এবং আগে যেটা পরে আসত সেটা আগেরটাকে ওভাররাইট করে ফেলত — এমনকি খালি হলেও।
+                        // এখন: blank ভ্যালু কখনো আগের non-blank ভ্যালুকে ওভাররাইট করবে না।
+                        when {
+                            existing == null                                 -> normalized.add(nk, v)
+                            isBlankJsonValue(existing) && !isBlankJsonValue(v) -> normalized.add(nk, v)
+                            !isBlankJsonValue(existing)                      -> { /* keep existing non-blank value */ }
+                            else                                              -> normalized.add(nk, v)
+                        }
                     }
                     delegate.fromJsonTree(normalized)
                 } else {
@@ -102,6 +114,15 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                 }
             }
         }
+    }
+
+    // একটা JsonElement "blank" কিনা চেক করে — null, JsonNull, বা খালি/স্পেস-শুধু string হলে true
+    private fun isBlankJsonValue(el: com.google.gson.JsonElement?): Boolean {
+        if (el == null || el.isJsonNull) return true
+        if (el.isJsonPrimitive && el.asJsonPrimitive.isString) {
+            return el.asString.isBlank()
+        }
+        return false
     }
 
     // Firebase field names → @SerializedName canonical keys
