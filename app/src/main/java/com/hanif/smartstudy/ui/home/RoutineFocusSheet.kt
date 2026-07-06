@@ -370,7 +370,7 @@ private fun MiniQuizSection(
 
         if (answered != null) {
             Spacer(Modifier.height(8.dp))
-            if (!q.explanation.isBlank() && q.explanation != q.answer) {
+            if (!q.explanation.isBlank()) {
                 Text(
                     "💡 " + q.explanation,
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
