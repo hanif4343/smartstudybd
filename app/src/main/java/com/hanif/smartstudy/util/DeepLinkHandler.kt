@@ -70,6 +70,11 @@ fun Intent.parseDeepLink(): DeepLinkAction {
                 DeepLinkAction(DeepLinkAction.Type.TECHNIQUES, questionId = fcmQid, tab = fcmTab)
             fcmUrl == "reports"    || fcmType == "admin_report"    ->
                 DeepLinkAction(DeepLinkAction.Type.REPORTS, questionId = fcmQid, tab = fcmTab)
+            // অন্য যেকোনো admin_* একটিভিটি (explanation, feedback ইত্যাদি) — এখনো
+            // কোনো নির্দিষ্ট case নেই এমন সব notification যেন dead-tap না হয়ে
+            // অন্তত Menu > Admin panel এ নিয়ে যায়
+            fcmUrl == "admin" || fcmType?.startsWith("admin_") == true ->
+                DeepLinkAction(DeepLinkAction.Type.TECHNIQUES, questionId = fcmQid, tab = fcmTab)
             fcmUrl == "challenge" ->
                 DeepLinkAction(DeepLinkAction.Type.CHALLENGE, challengeId = fcmChallengeId)
             fcmUrl == "routine" -> {
