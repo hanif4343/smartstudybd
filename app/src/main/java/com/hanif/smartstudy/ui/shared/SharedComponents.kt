@@ -125,12 +125,12 @@ fun AdminBoxEditIcon(tint: Color, onClick: () -> Unit) {
 //    সহজে চোখে পড়ে ও চাপা যায়)। ক্লিক করলে টিক টগল হয়, তালিকার নিচে চলে যাবে ──
 @Composable
 fun StudyDoneCheckIcon(done: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(28.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.size(56.dp)) {
         Icon(
             if (done) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
             contentDescription = if (done) "পড়া হয়েছে" else "পড়া হয়েছে চিহ্নিত করো",
             tint     = if (done) GreenOk else Color(0xFFCBD5E1),
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(40.dp)
         )
     }
 }
