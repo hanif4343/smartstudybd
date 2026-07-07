@@ -50,6 +50,20 @@ data class FocusModeState(
         return true
     }
 
+    /**
+     * ফোকাস মোড নিজে থেকে কবে বন্ধ হবে — পরীক্ষার পরের দিন, বা ৭ দিনের hard-cap,
+     * যেটা আগে আসে। Menu প্যানেলে "কবে অটো বন্ধ হবে" দেখানোর জন্য।
+     * enabled না থাকলে বা কোনো তথ্য না থাকলে null।
+     */
+    fun autoOffDateMillis(): Long? {
+        if (!enabled) return null
+        val examCutoff  = if (examDateMillis > 0L) startOfDay(examDateMillis) + DAY_MS else null
+        val hardCapDate = if (activatedAtMillis > 0L)
+            startOfDay(activatedAtMillis) + FocusModeConfig.MAX_ACTIVE_DAYS * DAY_MS
+        else null
+        return listOfNotNull(examCutoff, hardCapDate).minOrNull()
+    }
+
     companion object {
         private const val DAY_MS = 24 * 60 * 60 * 1000L
 
@@ -118,5 +132,8 @@ class FocusModeStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[KEY_ENABLED] = false
         }
+        // Part ৪ — ব্যাকগ্রাউন্ড রিমাইন্ডার চেইন থাকলে সাথে সাথেই বাতিল করো,
+        // পরের alarm ফায়ার হওয়া পর্যন্ত অপেক্ষা করতে হবে না।
+        com.hanif.smartstudy.receiver.FocusReminderReceiver.cancel(context)
     }
 }
