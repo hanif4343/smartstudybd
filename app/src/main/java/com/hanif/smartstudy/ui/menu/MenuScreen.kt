@@ -225,6 +225,7 @@ fun MainMenuScreen(
                     currentTag = state.adminViewingTag,
                     onSwitch   = { vm.adminSwitchAudienceTag(it) }
                 )
+                com.hanif.smartstudy.focus.FocusModePanel()
             }
 
             MenuGroup("❓ অন্যান্য") {
