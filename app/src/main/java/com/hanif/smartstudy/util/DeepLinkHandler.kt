@@ -27,7 +27,7 @@ data class DeepLinkAction(
     val challengeId   : String? = null,
     val routineItemId : String? = null   // Daily Routine item id → highlight on Home tab
 ) {
-    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, ROUTINE, NONE }
+    enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, ROUTINE, FOCUS, NONE }
 }
 
 fun Intent.parseDeepLink(): DeepLinkAction {
@@ -44,6 +44,12 @@ fun Intent.parseDeepLink(): DeepLinkAction {
             fcmType == "routine_reminder" -> {
                 val itemId = getStringExtra("routineItemId") ?: getStringExtra("item_id") ?: ""
                 DeepLinkAction(DeepLinkAction.Type.ROUTINE, routineItemId = itemId.ifBlank { null })
+            }
+
+            // ফোকাস মোড ব্যাকগ্রাউন্ড রিমাইন্ডার tap → সরাসরি ফোকাস-সাবজেক্টের Study স্ক্রিনে (Part ৪)
+            fcmType == "focus_reminder" -> {
+                val subj = getStringExtra("subject")
+                DeepLinkAction(DeepLinkAction.Type.FOCUS, subject = subj?.ifBlank { null })
             }
 
             // Challenge invite → go directly to Challenge tab
