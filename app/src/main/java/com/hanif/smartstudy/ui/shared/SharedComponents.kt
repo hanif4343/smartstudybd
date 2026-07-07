@@ -5,6 +5,7 @@ import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +45,14 @@ import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.theme.NordicSage
+import com.hanif.smartstudy.ui.theme.NordicSageTint
+import com.hanif.smartstudy.ui.theme.NordicBlue
+import com.hanif.smartstudy.ui.theme.NordicBlueTint
+import com.hanif.smartstudy.ui.theme.NordicClay
+import com.hanif.smartstudy.ui.theme.NordicClayTint
+import com.hanif.smartstudy.ui.theme.NordicInk
+import com.hanif.smartstudy.ui.theme.NordicMuted
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.draw.shadow
@@ -822,85 +831,174 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int, onDraftChange: (
     }
 }
 
+// ────────────────────────────────────────────────────────────────
+// "Nordic Pastel" ইনফো-বক্স টেমপ্লেট — উত্তর / ব্যাখ্যা / টেকনিক
+// তিনটাই একই কাঠামো শেয়ার করে, শুধু রং আর আইকন বদলায়:
+//   ● বর্ডার-বিহীন, সফট-ফিল করা পেস্টেল ব্যাকগ্রাউন্ড (border দিয়ে "আলাদা" করার
+//     বদলে হালকা রঙের container ব্যবহার করা হয়েছে — এটাই Nordic/Scandinavian
+//     ডিজাইনের মূল কৌশল: contrast না বাড়িয়ে soft tonal separation)
+//   ● বাম পাশে ছোট circular icon-badge (রঙের ভরাট বৃত্তে সাদা আইকন) —
+//     টেক্সট-লেবেলের বদলে আইকন হওয়ায় স্ক্যান করা সহজ হয়
+//   ● 16dp corner radius — 12dp এর চেয়ে বেশি বৃত্তাকার, নরম/friendly অনুভূতি দেয়
+//   ● heading + body এর মধ্যে alpha-tuned রঙ — heading পূর্ণ-স্যাচুরেশন accent,
+//     body টেক্সট থিমের onSurface (soft charcoal, pure black নয়)
+//
+// ── collapsible support ──
+//   collapsible = true হলে পুরো হেডার রো-টা একটা বাটন হয়ে যায়:
+//   ট্যাপ করলে expanded টগল হয়। ডিফল্ট অবস্থায় (startExpanded = false)
+//   শুধু হেডার (আইকন-ব্যাজ + লেখা + নিচমুখী ▾ chevron) দেখা যায়,
+//   ভেতরের content() হাইড থাকে — যতক্ষণ না ইউজার ট্যাপ করছে।
+//   এই আচরণ Admin/সাধারণ — সব ইউজারের জন্য সমান।
+// ────────────────────────────────────────────────────────────────
+@Composable
+private fun NordicInfoBox(
+    heading       : String,
+    icon          : androidx.compose.ui.graphics.vector.ImageVector,
+    accent        : Color,
+    tint          : Color,
+    onEdit        : (() -> Unit)?,
+    collapsible   : Boolean = false,
+    startExpanded : Boolean = true,
+    content       : @Composable () -> Unit
+) {
+    var expanded by remember { mutableStateOf(startExpanded) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "explanationChevron"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = tint
+    ) {
+        Column(
+            Modifier
+                .then(
+                    if (collapsible)
+                        Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { expanded = !expanded }
+                    else Modifier
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(accent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(icon, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        heading, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        color = accent, fontFamily = NotoSansBengali
+                    )
+                    if (collapsible) {
+                        Spacer(Modifier.width(4.dp))
+                        // ── এই ▾ চিহ্নটাই বাটন — নিচের দিকে মুখ করা থাকে যাতে বোঝা
+                        //    যায় চাপলে এর নিচে ব্যাখ্যা খুলবে; খোলা থাকলে উপরে ঘুরে যায় ──
+                        Icon(
+                            Icons.Default.KeyboardArrowDown, null,
+                            tint = accent,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = chevronRotation }
+                        )
+                    }
+                }
+                if (onEdit != null) AdminBoxEditIcon(accent, onEdit)
+            }
+            AnimatedVisibility(visible = !collapsible || expanded) {
+                Column {
+                    Spacer(Modifier.height(6.dp))
+                    content()
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0, onEdit: (() -> Unit)? = null) {
-    Card(
-        shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.5.dp, GreenOk)
+    NordicInfoBox(
+        heading = "উত্তর",
+        icon    = Icons.Default.CheckCircle,
+        accent  = NordicSage,
+        tint    = NordicSageTint,
+        onEdit  = onEdit
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("উত্তর:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                    color = GreenOk, fontFamily = NotoSansBengali)
-                if (onEdit != null) AdminBoxEditIcon(GreenOk, onEdit)
-            }
-            Spacer(Modifier.height(4.dp))
-            if (ttsKey != null) {
-                HighlightedSpeakingText(
-                    text      = text,
-                    ttsKey    = ttsKey,
-                    fontSize  = 13,
-                    fontWeight = FontWeight.Normal,
-                    baseColor = MaterialTheme.colorScheme.onSurface,
-                    spokenOffset = ttsOffset
-                )
-            } else {
-                RichContentText(
-                    text      = text,
-                    textColor = MaterialTheme.colorScheme.onSurface,
-                    fontSize  = 13
-                )
-            }
+        if (ttsKey != null) {
+            HighlightedSpeakingText(
+                text      = text,
+                ttsKey    = ttsKey,
+                fontSize  = 13,
+                fontWeight = FontWeight.Medium,
+                baseColor = NordicInk,
+                spokenOffset = ttsOffset
+            )
+        } else {
+            RichContentText(
+                text      = text,
+                textColor = NordicInk,
+                fontSize  = 13
+            )
         }
     }
 }
 
+// ── ব্যাখ্যা বক্স — ডিফল্টভাবে বন্ধ/হাইড থাকে, শুধু হেডার-বাটনটা দেখা যায়।
+//    Admin/সাধারণ ইউজার — সবার জন্য একই আচরণ (হাইড হওয়াটা privacy না, UX toggle)। ──
 @Composable
 fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null) {
-    val isDark = LocalDarkMode.current.value
-    Card(
-        shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, Color(0xFF38BDF8))
+    NordicInfoBox(
+        heading       = "ব্যাখ্যা",
+        icon          = Icons.Default.MenuBook,
+        accent        = NordicBlue,
+        tint          = NordicBlueTint,
+        onEdit        = onEdit,
+        collapsible   = true,
+        startExpanded = false
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("ব্যাখ্যা:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF38BDF8), fontFamily = NotoSansBengali)
-                if (onEdit != null) AdminBoxEditIcon(Color(0xFF38BDF8), onEdit)
-            }
-            Spacer(Modifier.height(4.dp))
-            RichContentText(
-                text      = text,
-                textColor = MaterialTheme.colorScheme.onSurface,
-                fontSize  = 12
-            )
-        }
+        RichContentText(
+            text      = text,
+            textColor = NordicMuted,
+            fontSize  = 12
+        )
     }
 }
 
+// ── টেকনিক বক্স — ব্যাখ্যার মতোই কোলাপসিবল, ডিফল্ট বন্ধ, বাটনে চাপলে খোলে।
+//    খালি/ফাঁকা টেকনিক থাকলে এই ফাংশনই কল হয় না — কল-সাইটে আগে থেকেই
+//    `item.technique.isNotBlank()` চেক করা আছে, তাই টেকনিক না থাকলে
+//    বাটনও দেখা যাবে না (স্বয়ংক্রিয়ভাবেই)। ──
 @Composable
 fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null) {
-    val isDark = LocalDarkMode.current.value
-    Card(
-        shape  = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.5.dp, AmberWarn)
+    if (text.isBlank()) return
+    NordicInfoBox(
+        heading       = "মনে রাখার টেকনিক",
+        icon          = Icons.Default.Lightbulb,
+        accent        = NordicClay,
+        tint          = NordicClayTint,
+        onEdit        = onEdit,
+        collapsible   = true,
+        startExpanded = false
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("💡 টেকনিক:", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                    color = AmberWarn, fontFamily = NotoSansBengali)
-                if (onEdit != null) AdminBoxEditIcon(AmberWarn, onEdit)
-            }
-            Spacer(Modifier.height(4.dp))
-            RichContentText(
-                text      = text,
-                textColor = MaterialTheme.colorScheme.onSurface,
-                fontSize  = 12
-            )
-        }
+        RichContentText(
+            text      = text,
+            textColor = NordicClay,
+            fontSize  = 12
+        )
     }
 }
 
