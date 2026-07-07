@@ -28,22 +28,42 @@ val Slate800   = Color(0xFF1E293B)
 val Slate900   = Color(0xFF0F172A)
 val White      = Color(0xFFFFFFFF)
 
+// ── Nordic Pastel palette ───────────────────────────────────────
+// Scandinavian-inspired: মিউটেড sage green, dusty blue, warm cream,
+// soft terracotta accent — কোনো harsh/vivid রং নেই, সব "washed out" পেস্টেল টোন।
+val NordicSage      = Color(0xFF7C9885)   // primary — dusty sage green
+val NordicSageDeep  = Color(0xFF5F7A68)   // darker sage (dark-mode primary base)
+val NordicSageTint  = Color(0xFFE4EDE6)   // primaryContainer — pale sage wash
+val NordicBlue       = Color(0xFF7E97B3)  // secondary — dusty/slate blue
+val NordicBlueTint   = Color(0xFFE9EEF4)  // ব্যাখ্যা বক্সের ফিল
+val NordicClay       = Color(0xFFCE8E63)  // tertiary — warm terracotta/clay
+val NordicClayTint   = Color(0xFFF7E9DA)  // মনে রাখার টেকনিক বক্সের ফিল
+val NordicCream      = Color(0xFFF7F5F0)  // background — warm off-white
+val NordicSurface    = Color(0xFFFFFFFF)
+val NordicInk        = Color(0xFF3B3F3A)  // onBackground/onSurface — সফট চারকোল (pure black নয়)
+val NordicMuted      = Color(0xFF7A8177)  // secondary text
+val NordicRose       = Color(0xFFC97B7B)  // মিউটেড error/wrong (পেস্টেল, harsh red নয়)
+val NordicDarkBg     = Color(0xFF23272A)  // dark-mode background — cool charcoal
+val NordicDarkSurf   = Color(0xFF2C3130)  // dark-mode surface
+
 // ── Font ──────────────────────────────────────────────────────
 val NotoSansBengali = FontFamily.Default
 
-// ── 4 theme definitions ───────────────────────────────────────
+// ── 5 theme definitions ───────────────────────────────────────
 enum class AppTheme(val label: String, val emoji: String) {
     INDIGO("ইন্ডিগো", "💜"),
     TEAL("টিল", "🩵"),
     ROSE("রোজ", "❤️"),
-    AMBER("অ্যাম্বার", "🧡")
+    AMBER("অ্যাম্বার", "🧡"),
+    NORDIC("নর্ডিক প্যাস্টেল", "🌿")
 }
 
 fun themeFromString(s: String): AppTheme = when (s.lowercase()) {
-    "teal"  -> AppTheme.TEAL
-    "rose"  -> AppTheme.ROSE
-    "amber" -> AppTheme.AMBER
-    else    -> AppTheme.INDIGO
+    "teal"   -> AppTheme.TEAL
+    "rose"   -> AppTheme.ROSE
+    "amber"  -> AppTheme.AMBER
+    "nordic" -> AppTheme.NORDIC
+    else     -> AppTheme.INDIGO
 }
 
 private fun lightColors(theme: AppTheme) = when (theme) {
@@ -67,6 +87,15 @@ private fun lightColors(theme: AppTheme) = when (theme) {
         secondary = Rose600, onSecondary = White, tertiary = Teal600,
         background = Slate100, onBackground = Slate800, surface = White, onSurface = Slate800, error = Red500
     )
+    // ── Nordic Pastel — কোমল, ওয়াশড-আউট Scandinavian টোন ──
+    AppTheme.NORDIC -> lightColorScheme(
+        primary = NordicSage, onPrimary = White, primaryContainer = NordicSageTint,
+        secondary = NordicBlue, onSecondary = White, tertiary = NordicClay,
+        background = NordicCream, onBackground = NordicInk,
+        surface = NordicSurface, onSurface = NordicInk,
+        surfaceVariant = NordicSageTint, onSurfaceVariant = NordicMuted,
+        error = NordicRose
+    )
 }
 
 private fun darkColors(theme: AppTheme) = when (theme) {
@@ -89,6 +118,15 @@ private fun darkColors(theme: AppTheme) = when (theme) {
         primary = Color(0xFFFBBF24), onPrimary = Slate900, primaryContainer = Color(0xFF92400E),
         secondary = Color(0xFFFB7185), onSecondary = Slate900, tertiary = Teal600,
         background = Slate900, onBackground = Slate100, surface = Slate800, onSurface = Slate100, error = Red500
+    )
+    // ── Nordic Pastel (dark) — sage কিছুটা হালকা করা হয়েছে যাতে ডার্ক ব্যাকগ্রাউন্ডে ভেসে থাকে ──
+    AppTheme.NORDIC -> darkColorScheme(
+        primary = Color(0xFF9DBBA5), onPrimary = NordicDarkBg, primaryContainer = NordicSageDeep,
+        secondary = Color(0xFFA9BDD3), onSecondary = NordicDarkBg, tertiary = Color(0xFFDFA679),
+        background = NordicDarkBg, onBackground = Color(0xFFE7E7E2),
+        surface = NordicDarkSurf, onSurface = Color(0xFFE7E7E2),
+        surfaceVariant = Color(0xFF343A37), onSurfaceVariant = Color(0xFFB7BEB4),
+        error = Color(0xFFD99B9B)
     )
 }
 
