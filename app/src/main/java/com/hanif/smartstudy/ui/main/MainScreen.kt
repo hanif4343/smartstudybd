@@ -175,6 +175,10 @@ fun MainScreen(
                 currentTab = BottomTab.HOME
                 pendingRoutineItemId = deepLink.routineItemId
             }
+            DeepLinkAction.Type.FOCUS      -> {
+                currentTab = BottomTab.STUDY
+                deepLink.subject?.let { studyViewModel.navigateToSubject(it) }
+            }
             DeepLinkAction.Type.NONE       -> {}
         }
     }
@@ -199,6 +203,14 @@ fun MainScreen(
             if (fs.isEffectivelyActive()) focusWarning = fs
         }
     }
+
+    // Part ৩ — লাইভ ফোকাস স্টেট, Home/চ্যালেঞ্জ/Menu ট্যাপ ইন্টারসেপ্ট করার জন্য।
+    // Study/QBank/Quiz/Wrong Review/Model Test — এদের ক্ষেত্রে কখনোই ব্যবহৃত হয় না।
+    val focusState by focusStore.stateFlow.collectAsStateWithLifecycle(
+        initialValue = com.hanif.smartstudy.focus.FocusModeState()
+    )
+    var pendingFocusNudgeTab by remember { mutableStateOf<BottomTab?>(null) }
+    val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE, BottomTab.MENU) }
 
     if (showSearch) {
         val activeVm = when (currentTab) {
@@ -230,7 +242,13 @@ fun MainScreen(
                 BottomTab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = currentTab == tab,
-                        onClick  = { currentTab = tab },
+                        onClick  = {
+                            if (tab in focusNudgeTabs && focusState.isEffectivelyActive()) {
+                                pendingFocusNudgeTab = tab
+                            } else {
+                                currentTab = tab
+                            }
+                        },
                         icon     = {
                             BadgedBox(badge = {
                                 if (tab == BottomTab.CHALLENGE && pendingInvites > 0) {
@@ -309,7 +327,6 @@ fun MainScreen(
             } // Box
         } // Column
     }
-    }
 
     focusWarning?.let { fs ->
         com.hanif.smartstudy.focus.FocusWarningOverlay(
@@ -321,6 +338,23 @@ fun MainScreen(
                 focusWarning = null
             },
             onDismiss = { focusWarning = null }
+        )
+    }
+
+    pendingFocusNudgeTab?.let { targetTab ->
+        com.hanif.smartstudy.focus.FocusNudgeSheet(
+            subject   = focusState.subject,
+            onResume  = {
+                currentTab = BottomTab.STUDY
+                studyViewModel.navigateToSubject(focusState.subject)
+                pendingFocusNudgeTab = null
+            },
+            onTurnOff = {
+                scope.launch { focusStore.deactivate() }
+                currentTab = targetTab
+                pendingFocusNudgeTab = null
+            },
+            onDismiss = { pendingFocusNudgeTab = null }
         )
     }
     } // Box (focus overlay wrapper)
