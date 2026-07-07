@@ -494,6 +494,26 @@ private fun StudyContentCard(study: StudyItem) {
     val speakingKey by com.hanif.smartstudy.util.TtsManager.speakingKey.collectAsState()
     val pausedKey by com.hanif.smartstudy.util.TtsManager.pausedKey.collectAsState()
 
+    val questionText = study.question
+    val answerText   = study.answer ?: study.correct
+    val hasQuestion  = !questionText.isNullOrBlank()
+    val hasAnswer    = !answerText.isNullOrBlank()
+
+    // 🔊 প্রশ্ন + উত্তর — এখন একটাই বাটন, একটাই স্পিচে দুটোই বলবে
+    // (SharedComponents.kt এর QuestionCard-এর combinedText প্যাটার্ন অনুসরণ করা হলো)
+    val qaKey = "${cardKey}_qa"
+    val ttsSeparator = "। উত্তর। "
+    val combinedText = buildString {
+        if (hasQuestion) append(questionText)
+        if (hasAnswer) {
+            if (hasQuestion) append(ttsSeparator)
+            append(answerText)
+        }
+    }
+    val answerOffset = if (hasQuestion) questionText!!.length + ttsSeparator.length else 0
+    val isSpeaking = speakingKey == qaKey
+    val isPaused   = pausedKey == qaKey
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -503,12 +523,10 @@ private fun StudyContentCard(study: StudyItem) {
     ) {
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Default.MenuBook, null, tint = PrimaryIndigo, modifier = Modifier.size(18.dp))
-            val questionText = study.question
-            val qKey = "${cardKey}_q"
-            if (!questionText.isNullOrBlank()) {
+            if (hasQuestion) {
                 com.hanif.smartstudy.ui.shared.HighlightedSpeakingText(
-                    text       = questionText,
-                    ttsKey     = qKey,
+                    text       = questionText!!,
+                    ttsKey     = qaKey,
                     fontSize   = 14,
                     fontWeight = FontWeight.SemiBold,
                     baseColor  = Slate800,
@@ -516,18 +534,16 @@ private fun StudyContentCard(study: StudyItem) {
                 )
             } else {
                 Text(
-                    study.question ?: "",
+                    questionText ?: "",
                     fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Slate800,
                     fontFamily = NotoSansBengali,
                     modifier = Modifier.weight(1f)
                 )
             }
-            // 🔊 প্রশ্ন শুনো — play/pause/resume
-            if (!questionText.isNullOrBlank()) {
-                val isSpeaking = speakingKey == qKey
-                val isPaused = pausedKey == qKey
+            // 🔊 একটাই বাটন — প্রশ্ন থাকলে এখানে বসে, প্রশ্ন+উত্তর দুটোই বলে (play/pause/resume)
+            if (hasQuestion && combinedText.isNotBlank()) {
                 IconButton(
-                    onClick = { com.hanif.smartstudy.util.TtsManager.speak(questionText, qKey) },
+                    onClick = { com.hanif.smartstudy.util.TtsManager.speak(combinedText, qaKey) },
                     modifier = Modifier.size(26.dp)
                 ) {
                     Icon(
@@ -539,7 +555,7 @@ private fun StudyContentCard(study: StudyItem) {
                         contentDescription = when {
                             isSpeaking -> "পজ করো"
                             isPaused   -> "আবার চালু করো"
-                            else       -> "প্রশ্ন শুনো"
+                            else       -> "প্রশ্ন ও উত্তর শুনো"
                         },
                         tint = if (isSpeaking || isPaused) PrimaryIndigo else Color(0xFFCBD5E1),
                         modifier = Modifier.size(16.dp)
@@ -547,49 +563,48 @@ private fun StudyContentCard(study: StudyItem) {
                 }
             }
         }
-        val answerText = study.answer ?: study.correct
-        if (!answerText.isNullOrBlank()) {
+        if (hasAnswer) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val aKey = "${cardKey}_a"
                 if (expanded) {
                     com.hanif.smartstudy.ui.shared.HighlightedSpeakingText(
-                        text       = answerText,
-                        ttsKey     = aKey,
-                        fontSize   = 13,
-                        fontWeight = FontWeight.Normal,
-                        baseColor  = Color(0xFF475569),
-                        modifier   = Modifier.weight(1f)
+                        text         = answerText!!,
+                        ttsKey       = qaKey,
+                        fontSize     = 13,
+                        fontWeight   = FontWeight.Normal,
+                        baseColor    = Color(0xFF475569),
+                        spokenOffset = answerOffset,
+                        modifier     = Modifier.weight(1f)
                     )
                 } else {
                     Text(
-                        answerText,
+                        answerText ?: "",
                         fontSize = 13.sp, color = Color(0xFF475569), fontFamily = NotoSansBengali,
                         maxLines = 4,
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // 🔊 উত্তর শুনো — play/pause/resume
-                val isAnswerSpeaking = speakingKey == aKey
-                val isAnswerPaused = pausedKey == aKey
-                IconButton(
-                    onClick = { com.hanif.smartstudy.util.TtsManager.speak(answerText, aKey) },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        when {
-                            isAnswerSpeaking -> Icons.Default.Pause
-                            isAnswerPaused   -> Icons.Default.PlayArrow
-                            else             -> Icons.Default.VolumeUp
-                        },
-                        contentDescription = when {
-                            isAnswerSpeaking -> "পজ করো"
-                            isAnswerPaused   -> "আবার চালু করো"
-                            else             -> "উত্তর শুনো"
-                        },
-                        tint = if (isAnswerSpeaking || isAnswerPaused) PrimaryIndigo else Color(0xFF94A3B8),
-                        modifier = Modifier.size(14.dp)
-                    )
+                // প্রশ্ন না থাকলে (শুধু উত্তর আছে) — একমাত্র বাটনটা এখানে বসবে
+                if (!hasQuestion && combinedText.isNotBlank()) {
+                    IconButton(
+                        onClick = { com.hanif.smartstudy.util.TtsManager.speak(combinedText, qaKey) },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            when {
+                                isSpeaking -> Icons.Default.Pause
+                                isPaused   -> Icons.Default.PlayArrow
+                                else       -> Icons.Default.VolumeUp
+                            },
+                            contentDescription = when {
+                                isSpeaking -> "পজ করো"
+                                isPaused   -> "আবার চালু করো"
+                                else       -> "প্রশ্ন ও উত্তর শুনো"
+                            },
+                            tint = if (isSpeaking || isPaused) PrimaryIndigo else Color(0xFF94A3B8),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
         }
