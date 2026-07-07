@@ -488,7 +488,15 @@ private val AUDIENCE_TAGS = listOf(
     "Class 12"  to "📚 Class 12",
     "Class 11"  to "📚 Class 11",
     "Class 10"  to "📚 Class 10",
-    "Class 9"   to "📚 Class 9"
+    "Class 9"   to "📚 Class 9",
+    "Class 8"   to "📚 Class 8",
+    "Class 7"   to "📚 Class 7",
+    "Class 6"   to "📚 Class 6",
+    "Class 5"   to "📚 Class 5",
+    "Class 4"   to "📚 Class 4",
+    "Class 3"   to "📚 Class 3",
+    "Class 2"   to "📚 Class 2",
+    "Class 1"   to "📚 Class 1"
 )
 
 @Composable
