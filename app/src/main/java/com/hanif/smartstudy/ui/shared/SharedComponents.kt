@@ -120,6 +120,21 @@ fun AdminBoxEditIcon(tint: Color, onClick: () -> Unit) {
     }
 }
 
+// ── "পড়া হয়েছে" চেকমার্ক — এখন উপরের আইকন-রো তে না থেকে, উত্তর বক্সের
+//    হেডারে এডিট বাটনের পাশে বসে (Admin edit icon-এর চেয়ে একটু বড়, যাতে
+//    সহজে চোখে পড়ে ও চাপা যায়)। ক্লিক করলে টিক টগল হয়, তালিকার নিচে চলে যাবে ──
+@Composable
+fun StudyDoneCheckIcon(done: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(28.dp)) {
+        Icon(
+            if (done) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+            contentDescription = if (done) "পড়া হয়েছে" else "পড়া হয়েছে চিহ্নিত করো",
+            tint     = if (done) GreenOk else Color(0xFFCBD5E1),
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
 @Composable
 fun TimerBar(
     timerSec  : Int,
@@ -291,18 +306,6 @@ fun QuestionCard(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    // ── 📖 "পড়া হয়েছে" টিকমার্ক — শুধু Study mode এ। ক্লিক করলে
-                    // লিস্টের নিচে চলে যাবে, হাইড হবে না। আবার ক্লিক করলে টিক উঠে যাবে ──
-                    if (mode == StudyMode.STUDY) {
-                        IconButton(onClick = onStudyDone, modifier = Modifier.size(28.dp)) {
-                            Icon(
-                                if (item.isStudyDone) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
-                                contentDescription = if (item.isStudyDone) "পড়া হয়েছে" else "পড়া হয়েছে চিহ্নিত করো",
-                                tint     = if (item.isStudyDone) GreenOk else Color(0xFFCBD5E1),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
                     IconButton(onClick = onReport, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Flag, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
                     }
@@ -387,11 +390,20 @@ fun QuestionCard(
                 Spacer(Modifier.height(8.dp))
                 val answerTtsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
                 AnswerBox(
-                    text     = item.answer,
-                    ttsKey   = answerTtsKey,
-                    ttsOffset = ttsAnswerOffset,
-                    onEdit   = if (isAdminUser) ({ activeEditField = "answer" }) else null
+                    text        = item.answer,
+                    ttsKey      = answerTtsKey,
+                    ttsOffset   = ttsAnswerOffset,
+                    onEdit      = if (isAdminUser) ({ activeEditField = "answer" }) else null,
+                    isStudyDone = item.isStudyDone,
+                    onStudyDone = if (mode == StudyMode.STUDY) onStudyDone else null
                 )
+            } else if (mode == StudyMode.STUDY) {
+                // ── উত্তর বক্স না থাকলেও (যেমন studyNoQ বা খালি answer) "পড়া হয়েছে"
+                // চেকমার্কটা যেন হারিয়ে না যায়, তাই একই জায়গায় আলাদাভাবে দেখানো হলো ──
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    StudyDoneCheckIcon(done = item.isStudyDone, onClick = onStudyDone)
+                }
             }
 
             // explanation — studyNoQ তে empty, নাহলে দেখাও।
@@ -400,8 +412,9 @@ fun QuestionCard(
             if (showAnswerBox && canSeeExplanation && displayExplanation.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 ExplanationBox(
-                    text   = displayExplanation,
-                    onEdit = if (isAdminUser) ({ activeEditField = "explanation" }) else null
+                    text    = displayExplanation,
+                    onEdit  = if (isAdminUser) ({ activeEditField = "explanation" }) else null,
+                    isAdmin = isAdminUser
                 )
                 if (!item.explanationIsPublic) {
                     Spacer(Modifier.height(2.dp))
@@ -420,8 +433,9 @@ fun QuestionCard(
             if (showAnswerBox && item.technique.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 TechniqueBox(
-                    text   = item.technique,
-                    onEdit = if (isAdminUser) ({ activeEditField = "technique" }) else null
+                    text    = item.technique,
+                    onEdit  = if (isAdminUser) ({ activeEditField = "technique" }) else null,
+                    isAdmin = isAdminUser
                 )
             }
 
@@ -859,6 +873,7 @@ private fun NordicInfoBox(
     onEdit        : (() -> Unit)?,
     collapsible   : Boolean = false,
     startExpanded : Boolean = true,
+    extraAction   : (@Composable () -> Unit)? = null,
     content       : @Composable () -> Unit
 ) {
     var expanded by remember { mutableStateOf(startExpanded) }
@@ -917,7 +932,10 @@ private fun NordicInfoBox(
                         )
                     }
                 }
-                if (onEdit != null) AdminBoxEditIcon(accent, onEdit)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onEdit != null) AdminBoxEditIcon(accent, onEdit)
+                    if (extraAction != null) extraAction()
+                }
             }
             AnimatedVisibility(visible = !collapsible || expanded) {
                 Column {
@@ -930,13 +948,21 @@ private fun NordicInfoBox(
 }
 
 @Composable
-fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0, onEdit: (() -> Unit)? = null) {
+fun AnswerBox(
+    text        : String,
+    ttsKey      : String? = null,
+    ttsOffset   : Int = 0,
+    onEdit      : (() -> Unit)? = null,
+    isStudyDone : Boolean = false,
+    onStudyDone : (() -> Unit)? = null
+) {
     NordicInfoBox(
         heading = "উত্তর",
         icon    = Icons.Default.CheckCircle,
         accent  = NordicSage,
         tint    = NordicSageTint,
-        onEdit  = onEdit
+        onEdit  = onEdit,
+        extraAction = if (onStudyDone != null) ({ StudyDoneCheckIcon(isStudyDone, onStudyDone) }) else null
     ) {
         if (ttsKey != null) {
             HighlightedSpeakingText(
@@ -957,18 +983,18 @@ fun AnswerBox(text: String, ttsKey: String? = null, ttsOffset: Int = 0, onEdit: 
     }
 }
 
-// ── ব্যাখ্যা বক্স — ডিফল্টভাবে বন্ধ/হাইড থাকে, শুধু হেডার-বাটনটা দেখা যায়।
-//    Admin/সাধারণ ইউজার — সবার জন্য একই আচরণ (হাইড হওয়াটা privacy না, UX toggle)। ──
+// ── ব্যাখ্যা বক্স — সাধারণ ইউজারের জন্য ডিফল্টভাবে বন্ধ/হাইড থাকে, বাটনে
+//    চাপলে খোলে। এডমিনের জন্য সবসময় খোলা থাকবে — বাটনের দরকার নেই। ──
 @Composable
-fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null) {
+fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
     NordicInfoBox(
         heading       = "ব্যাখ্যা",
         icon          = Icons.Default.MenuBook,
         accent        = NordicBlue,
         tint          = NordicBlueTint,
         onEdit        = onEdit,
-        collapsible   = true,
-        startExpanded = false
+        collapsible   = !isAdmin,
+        startExpanded = isAdmin
     ) {
         RichContentText(
             text      = text,
@@ -978,12 +1004,13 @@ fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null) {
     }
 }
 
-// ── টেকনিক বক্স — ব্যাখ্যার মতোই কোলাপসিবল, ডিফল্ট বন্ধ, বাটনে চাপলে খোলে।
+// ── টেকনিক বক্স — সাধারণ ইউজারের জন্য ব্যাখ্যার মতোই কোলাপসিবল, ডিফল্ট বন্ধ।
+//    এডমিনের জন্য সবসময় খোলা থাকবে — বাটনের দরকার নেই।
 //    খালি/ফাঁকা টেকনিক থাকলে এই ফাংশনই কল হয় না — কল-সাইটে আগে থেকেই
 //    `item.technique.isNotBlank()` চেক করা আছে, তাই টেকনিক না থাকলে
 //    বাটনও দেখা যাবে না (স্বয়ংক্রিয়ভাবেই)। ──
 @Composable
-fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null) {
+fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
     if (text.isBlank()) return
     NordicInfoBox(
         heading       = "মনে রাখার টেকনিক",
@@ -991,8 +1018,8 @@ fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null) {
         accent        = NordicClay,
         tint          = NordicClayTint,
         onEdit        = onEdit,
-        collapsible   = true,
-        startExpanded = false
+        collapsible   = !isAdmin,
+        startExpanded = isAdmin
     ) {
         RichContentText(
             text      = text,
