@@ -127,6 +127,11 @@ fun SubjectListScreen(
             item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
         }
 
+        // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, শুধু Admin-দের জন্য ──
+        if (mode == StudyMode.STUDY && isAdmin && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+            item { com.hanif.smartstudy.focus.FocusTodayCard(subjects = subjects.map { it.name }) }
+        }
+
         // (দুর্বল টপিক শুধু Profile/Stats পেজে দেখাবে)
 
         // Loading
