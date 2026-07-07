@@ -137,36 +137,43 @@ fun WrongReviewSection(
 
             } else {
                 // Practice mode — active প্রশ্নগুলো দেখাও
+                // activeItems.forEach { (q, wrongCount) -> ... } তে key(q.id) দেওয়া
+                // জরুরি — নাহলে কোনো একটা প্রশ্ন সঠিক হয়ে লিস্ট থেকে বাদ পড়লে,
+                // Compose position-ভিত্তিক remember/animation state ব্যবহার করে,
+                // ফলে ভুল প্রশ্নে hide-animation লেগে যায় (একটার বদলে দুইটা হাইড
+                // হওয়া, আবার ফিরে আসা — এটাই সেই বাগ)।
                 activeItems.forEach { (q, wrongCount) ->
-                    val localState = localAnswers[q.id] ?: AnswerState.Unanswered
-                    WRPracticeItem(
-                        q               = q.copy(answerState = localState),
-                        wrongCount      = wrongCount,
-                        onMcqAnswer     = { selectedOpt ->
-                            val optText = when (selectedOpt) {
-                                1 -> q.optionA; 2 -> q.optionB
-                                3 -> q.optionC; 4 -> q.optionD; else -> ""
+                    key(q.id) {
+                        val localState = localAnswers[q.id] ?: AnswerState.Unanswered
+                        WRPracticeItem(
+                            q               = q.copy(answerState = localState),
+                            wrongCount      = wrongCount,
+                            onMcqAnswer     = { selectedOpt ->
+                                val optText = when (selectedOpt) {
+                                    1 -> q.optionA; 2 -> q.optionB
+                                    3 -> q.optionC; 4 -> q.optionD; else -> ""
+                                }
+                                val isCorrect = optText.trim().equals(q.answer.trim(), ignoreCase = true)
+                                localAnswers[q.id] = AnswerState.McqSelected(selectedOpt, isCorrect)
+                                onAnswerMcq(q.id, selectedOpt)
+                                if (isCorrect) {
+                                    onRemoveCorrect(q.id)
+                                }
+                            },
+                            onWrittenAnswer = { text ->
+                                val pct = onAnswerWritten(q.id, text)
+                                val isCorrect = pct >= 70
+                                localAnswers[q.id] = AnswerState.WrittenSubmitted(text, pct, isCorrect)
+                                if (isCorrect) onRemoveCorrect(q.id)
+                                pct
+                            },
+                            onHide = {
+                                if (q.id !in correctIds) {
+                                    correctIds.add(q.id)
+                                }
                             }
-                            val isCorrect = optText.trim().equals(q.answer.trim(), ignoreCase = true)
-                            localAnswers[q.id] = AnswerState.McqSelected(selectedOpt, isCorrect)
-                            onAnswerMcq(q.id, selectedOpt)
-                            if (isCorrect) {
-                                onRemoveCorrect(q.id)
-                            }
-                        },
-                        onWrittenAnswer = { text ->
-                            val pct = onAnswerWritten(q.id, text)
-                            val isCorrect = pct >= 70
-                            localAnswers[q.id] = AnswerState.WrittenSubmitted(text, pct, isCorrect)
-                            if (isCorrect) onRemoveCorrect(q.id)
-                            pct
-                        },
-                        onHide = {
-                            if (q.id !in correctIds) {
-                                correctIds.add(q.id)
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
 
                 // বন্ধ করুন বাটন
