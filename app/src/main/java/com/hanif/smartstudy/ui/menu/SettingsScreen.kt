@@ -123,18 +123,26 @@ fun SettingsScreen(
             // ── Theme color ──
             SettingsCard("🎨 থিম রঙ") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("৪টি থিম থেকে বেছে নিন", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        AppTheme.entries.forEach { theme ->
-                            ThemeChip(
-                                theme     = theme,
-                                selected  = state.appTheme == theme,
-                                onClick   = { vm.setTheme(theme) },
-                                modifier  = Modifier.weight(1f)
-                            )
+                    Text("৫টি থিম থেকে বেছে নিন", fontFamily = NotoSansBengali, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                    // ৫টি থিম একসারিতে সংকুচিত হয়ে যেত, তাই ৩ + ২ — দুই সারিতে ভাগ করা হয়েছে
+                    val themeRows = AppTheme.entries.chunked(3)
+                    themeRows.forEach { rowThemes ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowThemes.forEach { theme ->
+                                ThemeChip(
+                                    theme     = theme,
+                                    selected  = state.appTheme == theme,
+                                    onClick   = { vm.setTheme(theme) },
+                                    modifier  = Modifier.weight(1f)
+                                )
+                            }
+                            // শেষ সারিতে কম চিপ থাকলে খালি জায়গা রেখে alignment ঠিক রাখা হয়
+                            repeat(3 - rowThemes.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -463,6 +471,7 @@ fun ThemeChip(
         AppTheme.TEAL   -> Teal600
         AppTheme.ROSE   -> Rose600
         AppTheme.AMBER  -> Amber500
+        AppTheme.NORDIC -> NordicSage
     }
 
     Surface(
