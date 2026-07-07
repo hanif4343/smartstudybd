@@ -40,6 +40,10 @@ import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
 import com.hanif.smartstudy.ui.ads.StickyBottomBannerView
 import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.theme.AppTheme
+import com.hanif.smartstudy.ui.theme.LocalAppTheme
+import com.hanif.smartstudy.ui.theme.NordicSage
+import com.hanif.smartstudy.ui.theme.NordicSageDeep
 import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 
@@ -272,6 +276,13 @@ fun QuestionListScreen(
 
         // ── Floating bottom bar — question counter + submit ──
         if (questions.isNotEmpty()) {
+            // Nordic Pastel থিমে গাঢ় ইন্ডিগো গ্র্যাডিয়েন্টের বদলে সফট ডাবল-সেজ
+            // গ্র্যাডিয়েন্ট — বাকি ইন্টারফেসের সাথে টোন মিলিয়ে রাখা হয়।
+            val isNordic = LocalAppTheme.current.value == AppTheme.NORDIC
+            val barBrush = if (isNordic)
+                Brush.horizontalGradient(listOf(NordicSageDeep, NordicSage))
+            else
+                Brush.horizontalGradient(listOf(Color(0xFF1E1B4B), Color(0xFF4F46E5)))
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -283,9 +294,7 @@ fun QuestionListScreen(
                         .fillMaxWidth()
                         .shadow(8.dp, RoundedCornerShape(28.dp))
                         .clip(RoundedCornerShape(28.dp))
-                        .background(
-                            Brush.horizontalGradient(listOf(Color(0xFF1E1B4B), Color(0xFF4F46E5)))
-                        )
+                        .background(barBrush)
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
