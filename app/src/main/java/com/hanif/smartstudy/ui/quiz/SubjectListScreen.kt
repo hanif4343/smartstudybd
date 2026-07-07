@@ -25,6 +25,13 @@ import com.hanif.smartstudy.ui.shared.SubjectListSkeleton
 import com.hanif.smartstudy.ui.shared.ErrorState
 import com.hanif.smartstudy.ui.shared.EmptyState
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.theme.AppTheme
+import com.hanif.smartstudy.ui.theme.LocalAppTheme
+import com.hanif.smartstudy.ui.theme.NordicSageTint
+import com.hanif.smartstudy.ui.theme.NordicBlueTint
+import com.hanif.smartstudy.ui.theme.NordicClayTint
+import com.hanif.smartstudy.ui.theme.NordicInk
+import com.hanif.smartstudy.ui.theme.NordicMuted
 
 // subject icon map
 private val subjectIcons = mapOf(
@@ -72,11 +79,24 @@ fun SubjectListScreen(
         StudyMode.QBANK -> "Question Bank"
         StudyMode.STUDY -> "Study"
     }
-    val modeColor = when (mode) {
+
+    // ── Nordic Pastel থিম চালু থাকলে হেডার vivid gradient না হয়ে
+    //    soft pastel wash + গাঢ় ইঙ্ক টেক্সট হয় (স্ক্রিনশটের "ক বিভাগ" বার-এর মতো) ──
+    val isNordic  = LocalAppTheme.current.value == AppTheme.NORDIC
+    val modeColor = if (isNordic) {
+        val flat = when (mode) {
+            StudyMode.QUIZ  -> NordicSageTint
+            StudyMode.QBANK -> NordicBlueTint
+            StudyMode.STUDY -> NordicClayTint
+        }
+        Brush.linearGradient(listOf(flat, flat))
+    } else when (mode) {
         StudyMode.QUIZ  -> Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF7C3AED)))
         StudyMode.QBANK -> Brush.linearGradient(listOf(Color(0xFF0891B2), Color(0xFF0E7490)))
         StudyMode.STUDY -> Brush.linearGradient(listOf(Color(0xFF059669), Color(0xFF047857)))
     }
+    val headerTextColor = if (isNordic) NordicInk else Color.White
+    val headerSubTextColor = if (isNordic) NordicMuted else Color.White.copy(0.65f)
 
     LazyColumn(
         modifier            = Modifier.fillMaxSize(),
@@ -92,8 +112,8 @@ fun SubjectListScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(modeLabel, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Color.White, fontFamily = NotoSansBengali)
-                        Text("বিষয় বেছে নিন", fontSize = 12.sp, color = Color.White.copy(0.65f),
+                            color = headerTextColor, fontFamily = NotoSansBengali)
+                        Text("বিষয় বেছে নিন", fontSize = 12.sp, color = headerSubTextColor,
                             fontFamily = NotoSansBengali)
                     }
                     if (isAdmin) {
