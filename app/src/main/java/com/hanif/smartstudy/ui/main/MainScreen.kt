@@ -189,6 +189,17 @@ fun MainScreen(
         }
     }
 
+    // ── ফোকাস মোড: অ্যাপ খোলার সাথে সাথে (একবারই, cold-open এ) ফোকাস মোড চালু
+    // থাকলে warning overlay দেখাও। সম্পূর্ণ hook — মূল লজিক focus প্যাকেজে। ──
+    val focusStore = remember { com.hanif.smartstudy.focus.FocusModeStore(context) }
+    var focusWarning by remember { mutableStateOf<com.hanif.smartstudy.focus.FocusModeState?>(null) }
+    LaunchedEffect(Unit) {
+        if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+            val fs = focusStore.getState()
+            if (fs.isEffectivelyActive()) focusWarning = fs
+        }
+    }
+
     if (showSearch) {
         val activeVm = when (currentTab) {
             BottomTab.QUIZ  -> quizViewModel
@@ -212,6 +223,7 @@ fun MainScreen(
         return
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -297,4 +309,19 @@ fun MainScreen(
             } // Box
         } // Column
     }
+    }
+
+    focusWarning?.let { fs ->
+        com.hanif.smartstudy.focus.FocusWarningOverlay(
+            subject  = fs.subject,
+            daysLeft = fs.daysUntilExam(),
+            onStart  = {
+                currentTab = BottomTab.STUDY
+                studyViewModel.navigateToSubject(fs.subject)
+                focusWarning = null
+            },
+            onDismiss = { focusWarning = null }
+        )
+    }
+    } // Box (focus overlay wrapper)
 }
