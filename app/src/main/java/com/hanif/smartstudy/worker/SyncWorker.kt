@@ -37,6 +37,14 @@ class SyncWorker(
         .build()
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করে রাখলে — WorkManager-এর নিজের
+        // network constraint পাশ কাটিয়ে হলেও এই worker কোনো Firebase কল করবে না।
+        // Pending queue অক্ষত থাকবে, offline mode বন্ধ হলে পরের sync-এ সব চলে যাবে।
+        if (com.hanif.smartstudy.util.SessionManager(applicationContext).isOfflineMode()) {
+            Log.d(TAG, "SyncWorker skipped — offline mode is manually ON")
+            return@withContext Result.success()
+        }
+
         Log.d(TAG, "SyncWorker started")
         var allSuccess = true
 
