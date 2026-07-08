@@ -26,6 +26,24 @@ object FirebaseDataService {
         return if (token.isNotBlank()) "?auth=$token" else ""
     }
 
+    /**
+     * Admin কোনো question/subject/tag এডিট বা যোগ করলে "/meta/updatedAt" আপডেট করো।
+     * অন্য সব ডিভাইস (SyncWorker + ContentRepository) এই ছোট ভ্যালুটা চেক করেই বুঝে নেয়
+     * নতুন কনটেন্ট আছে কিনা — পুরো Quiz/QBank/Study বারবার না টেনেই। এটা ব্যর্থ হলেও
+     * মূল edit operation-কে fail করানো ঠিক না, তাই এক্সেপশন silently log করে রাখা হয়।
+     */
+    suspend fun touchMetaUpdatedAt() {
+        try {
+            val auth = authQuery()
+            val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/meta/updatedAt.json$auth"
+            val body = System.currentTimeMillis().toString()
+                .toRequestBody("application/json".toMediaType())
+            client.newCall(Request.Builder().url(url).put(body).build()).execute().close()
+        } catch (e: Exception) {
+            android.util.Log.w("FirebaseDataService", "touchMetaUpdatedAt failed: ${e.message}")
+        }
+    }
+
     // ── নিরাপদ Firebase node parsing ──────────────────────────
     // Firebase Realtime Database REST API: কোনো node-এর child key গুলো sparse/সব numeric
     // (যেমন "0","1","2"...) হলে Firebase সেটাকে {"0":..,"1":..} object এর বদলে raw JSON
@@ -426,8 +444,10 @@ object FirebaseDataService {
             android.util.Log.d("AdminEdit", "Response: $code | $respBody")
             com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "Response: $code | body=${respBody.take(200)}")
             resp.close()
-            if (resp.isSuccessful) ApiResult.Success(Unit)
-            else {
+            if (resp.isSuccessful) {
+                touchMetaUpdatedAt()
+                ApiResult.Success(Unit)
+            } else {
                 com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "FAILED: $code — $respBody")
                 ApiResult.Error("Firebase error: $code — $respBody")
             }
@@ -469,6 +489,7 @@ object FirebaseDataService {
                         com.google.gson.JsonParser.parseString(respBody)
                             .asJsonObject.get("name")?.asString ?: ""
                     } catch (e: Exception) { "" }
+                    touchMetaUpdatedAt()
                     ApiResult.Success(pushKey)
                 } else ApiResult.Error("Firebase error: ${resp.code}")
             } catch (e: Exception) { ApiResult.Error(e.message ?: "Add failed") }
@@ -628,6 +649,7 @@ object FirebaseDataService {
                 if (resp.isSuccessful) updated++
                 resp.close()
             }
+            if (updated > 0) touchMetaUpdatedAt()
             ApiResult.Success(updated)
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Bulk update failed") }
     }
@@ -693,6 +715,7 @@ object FirebaseDataService {
 
             if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
             if (totalUpdated == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
+            touchMetaUpdatedAt()
             ApiResult.Success(totalUpdated)
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
     }
