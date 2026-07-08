@@ -27,6 +27,8 @@ class ContentCache(private val context: Context) {
         // যাতে বারবার Firebase থেকে আনতে না হয় (offline-এও Model Test list দেখা যায়)
         val KEY_MODELTESTS_JSON = stringPreferencesKey("cache_modeltests_json")
         val KEY_CACHE_TIME    = longPreferencesKey("cache_fetched_at")
+        // Firebase "/meta/updatedAt" থেকে আসা সার্ভার টাইমস্ট্যাম্প — লাস্ট সেভ করা কনটেন্টের সাথে মেলানো হয়
+        val KEY_REMOTE_UPDATED_AT = longPreferencesKey("cache_remote_updated_at")
 
         val KEY_TODAY_STUDY   = intPreferencesKey("today_study_min")
         val KEY_WEEK_STUDY    = intPreferencesKey("week_study_min")
@@ -46,6 +48,7 @@ class ContentCache(private val context: Context) {
             prefs[KEY_QBANK_JSON] = gson.toJson(content.qbank)
             prefs[KEY_MODELTESTS_JSON] = gson.toJson(content.modelTests)
             prefs[KEY_CACHE_TIME] = content.fetchedAt
+            prefs[KEY_REMOTE_UPDATED_AT] = content.remoteUpdatedAt
         }
     }
 
@@ -78,7 +81,8 @@ class ContentCache(private val context: Context) {
                 quiz      = (gson.fromJson<List<com.hanif.smartstudy.data.model.QuizItem?>>(quizJson,  quizType)  ?: emptyList()).filterNotNull(),
                 qbank     = (gson.fromJson<List<com.hanif.smartstudy.data.model.QBankItem?>>(qbankJson, qbankType) ?: emptyList()).filterNotNull(),
                 modelTests = modelTests,
-                fetchedAt = fetchedAt
+                fetchedAt = fetchedAt,
+                remoteUpdatedAt = prefs[KEY_REMOTE_UPDATED_AT] ?: 0L
             )
         } catch (e: Exception) { null }
     }
@@ -96,6 +100,7 @@ class ContentCache(private val context: Context) {
             prefs.remove(KEY_QBANK_JSON)
             prefs.remove(KEY_MODELTESTS_JSON)
             prefs[KEY_CACHE_TIME] = 0L
+            prefs[KEY_REMOTE_UPDATED_AT] = 0L
         }
     }
 
