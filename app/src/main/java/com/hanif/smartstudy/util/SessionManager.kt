@@ -24,6 +24,11 @@ class SessionManager(private val context: Context) {
         val KEY_THEME_COLOR      = stringPreferencesKey("theme_color")   // "indigo"|"teal"|"rose"|"amber"
         val KEY_OB_DONE          = booleanPreferencesKey("ob_done")
         val KEY_SOUND_OFF        = booleanPreferencesKey("sound_off")
+        // Study মোডে "শুধু প্রশ্ন দেখ" ফিচার — চালু থাকলে উত্তর/ব্যাখ্যা/টেকনিক
+        // ডিফল্টভাবে লুকানো থাকে, "উত্তর দেখুন" বাটনে চাপলে তবেই দেখা যায়।
+        // টগল বাটনটা Study screen-এর নিজের টপবারেই থাকে (Settings/Menu-তে নয়),
+        // কিন্তু পছন্দটা এখানে persist করা থাকে যাতে পরের বার Study খুললেও মনে থাকে।
+        val KEY_STUDY_REVEAL_MODE = booleanPreferencesKey("study_reveal_mode")
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
@@ -148,6 +153,16 @@ class SessionManager(private val context: Context) {
 
     suspend fun setSoundOff(off: Boolean) {
         context.dataStore.edit { it[KEY_SOUND_OFF] = off }
+    }
+
+    // ── Study: "শুধু প্রশ্ন দেখ" মোড ──────────────────────────
+
+    fun isStudyRevealMode(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_STUDY_REVEAL_MODE] ?: false
+    }
+
+    suspend fun setStudyRevealMode(on: Boolean) {
+        context.dataStore.edit { it[KEY_STUDY_REVEAL_MODE] = on }
     }
 
     // ── Offline mode (ম্যানুয়াল বাটন — Firebase সম্পূর্ণ বন্ধ) ───
