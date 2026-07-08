@@ -59,20 +59,36 @@ class SyncWorker(
         // 5+ বার fail হলে drop করো
         queue.dropFailed()
 
-        // ── 2. Content refresh (cache stale থাকলে) ──
+        // ── 2. Content refresh (শুধু সার্ভারে আসলেই নতুন কিছু থাকলে) ──
+        // আগে শুধু TTL (1 ঘণ্টা) দেখেই পুরো Quiz+QBank+Study রিফেচ হতো — কনটেন্ট বদলাক
+        // বা না বদলাক। এখন প্রথমে ছোট "/meta/updatedAt" চেক করা হয়; সেটা লাস্ট সেভ করা
+        // remoteUpdatedAt এর চেয়ে নতুন হলে তবেই পুরো ডেটা টানা হয়। meta node না থাকলে
+        // (পুরনো/আনসাপোর্টেড ডেটাবেস) TTL fallback ব্যবহার হয়, যাতে ডেটা কখনো একদম আটকে না থাকে।
         val cached = cache.loadContent()
-        if (cached == null || cached.isStale()) {
-            Log.d(TAG, "Content is stale, refreshing...")
+        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt()
+        val needsRefresh = when {
+            cached == null -> true
+            remoteUpdatedAt > 0L -> remoteUpdatedAt > cached.remoteUpdatedAt
+            else -> cached.isStale(FALLBACK_TTL_MILLIS)
+        }
+
+        if (needsRefresh) {
+            Log.d(TAG, "Content refresh needed (remote=$remoteUpdatedAt, cachedRemote=${cached?.remoteUpdatedAt})")
             when (val result = ContentFetchService.fetchAllContent()) {
                 is ContentResult.Success -> {
-                    cache.saveContent(result.data)
-                    Log.d(TAG, "Content refreshed: Study=${result.data.study.size}")
+                    val toSave = result.data.copy(
+                        remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
+                    )
+                    cache.saveContent(toSave)
+                    Log.d(TAG, "Content refreshed: Study=${toSave.study.size}")
                 }
                 is ContentResult.Error -> {
                     Log.w(TAG, "Content refresh failed: ${result.message}")
                     allSuccess = false
                 }
             }
+        } else {
+            Log.d(TAG, "Content unchanged on server, skipping full refetch")
         }
 
         if (allSuccess) Result.success() else Result.retry()
@@ -222,15 +238,35 @@ class SyncWorker(
             val respBody = resp.body?.string() ?: ""
             resp.close()
             Log.d(TAG, "syncAdminEdit $sheet/$questionId → $code $respBody")
-            resp.isSuccessful
+            val ok = resp.isSuccessful
+            // অফলাইনে করা admin edit sync হলে meta touch করো, নইলে অন্য ডিভাইস বুঝবে না নতুন কনটেন্ট আছে
+            if (ok) touchMeta(secret, base)
+            ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminEdit error: ${e.message}")
             false
         }
     }
 
+    // অফলাইনে করা admin edit sync হওয়ার পর "/meta/updatedAt" আপডেট করে দেয়, যাতে অন্য
+    // ডিভাইসের lightweight check এই edit-টা ধরতে পারে (touchMetaUpdatedAt এর ছোট সংস্করণ)।
+    private suspend fun touchMeta(secret: String, base: String) {
+        try {
+            val url  = "$base/meta/updatedAt.json?auth=$secret"
+            val body = System.currentTimeMillis().toString().toRequestBody("application/json".toMediaType())
+            client.newCall(Request.Builder().url(url).put(body).build()).execute().close()
+        } catch (e: Exception) {
+            Log.w(TAG, "touchMeta failed: ${e.message}")
+        }
+    }
+
     companion object {
         const val WORK_NAME = "SmartStudySyncWork"
+
+        // meta node না থাকলে (পুরনো ডেটাবেস) safety-net TTL — 12 ঘণ্টা।
+        // আগে 1 ঘণ্টা ছিল, যেটা meta-check না থাকা অবস্থায় প্রতি ঘণ্টায় পুরো
+        // Quiz+QBank+Study রিফেচ করাতো, কনটেন্ট বদলাক বা না বদলাক।
+        private const val FALLBACK_TTL_MILLIS = 12 * 60 * 60 * 1000L
 
         // ── Internet আসলে একবার run ──
         fun scheduleOneTime(context: Context) {
@@ -247,20 +283,28 @@ class SyncWorker(
                 .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
 
-        // ── প্রতি ১ ঘণ্টায় periodic content refresh (TTL এর সাথে মিলিয়ে) ──
+        // ── প্রতি ৬ ঘণ্টায় periodic content refresh ──
+        // আগে ১ ঘণ্টা ছিল, TTL-ও ১ ঘণ্টা — ফলে অ্যাপ চালু/ব্যাকগ্রাউন্ডে থাকলেই প্রতি ঘণ্টায়
+        // পুরো Quiz+QBank+Study রিফেচ হতো, কনটেন্ট বদলাক বা না বদলাক। এখন meta/updatedAt
+        // চেক থাকায় বেশিরভাগ রান-এ আসলে কিছুই ডাউনলোড হবে না (শুধু ছোট meta node চেক হবে),
+        // তাই ৬ ঘণ্টায় নামিয়ে আনলেও bandwidth নষ্ট হবে না, বরং কমবে।
         fun schedulePeriodic(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .build()
 
+            // FIX: আগে KEEP পলিসি ছিল — মানে যাদের ফোনে আগেই ১ ঘণ্টার periodic work
+            // enqueue হয়ে গেছে, তাদের জন্য নতুন ৬-ঘণ্টার শিডিউল কখনো কার্যকর হতো না
+            // (app update করলেও আগের schedule-ই থেকে যেত)। UPDATE পলিসি দিলে বিদ্যমান
+            // request-এর constraints/interval নতুন করে বসে যায়।
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(
                     "${WORK_NAME}_periodic",
-                    ExistingPeriodicWorkPolicy.KEEP,
+                    ExistingPeriodicWorkPolicy.UPDATE,
                     request
                 )
         }
