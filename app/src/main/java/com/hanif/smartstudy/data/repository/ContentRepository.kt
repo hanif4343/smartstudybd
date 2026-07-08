@@ -137,6 +137,81 @@ class ContentRepository(private val context: Context) {
         Log.d("Repo", "syncToRoom: done")
     }
 
+    // ── Delta/Incremental sync ──────────────────────────────────────────────────
+    // meta/updatedAt বেড়েছে মানে কোথাও কিছু বদলেছে — কিন্তু সেটা ধরতে পুরো ১০ হাজার
+    // প্রশ্ন আবার ডাউনলোড করার দরকার নেই। এখানে শুধু "updatedAt > lastSync" এমন row
+    // গুলো আনা হয় (delta), আর সেগুলো দিয়ে existing cache/Room patch করা হয়।
+    // মাঝে মাঝে (FULL_RESYNC_INTERVAL_MS পার হলে) পুরো refetch হয় — যাতে কেউ প্রশ্ন
+    // মুছে ফেললে (delta query যেটা ধরতে পারে না) সেটাও সব ডিভাইসে ঠিক হয়ে যায়।
+    private suspend fun applyIncrementalOrFullSync(
+        cached: AppContent,
+        remoteUpdatedAt: Long,
+        onBackgroundUpdate: ((AppContent) -> Unit)?
+    ) {
+        val lastFullSync = cache.getLastFullSync()
+        val now = System.currentTimeMillis()
+        val needsFullResync = lastFullSync == 0L || (now - lastFullSync) > ContentCache.FULL_RESYNC_INTERVAL_MS
+
+        if (needsFullResync) {
+            Log.d("Repo", "Periodic full resync due (deletion/edge-case reconcile)")
+            when (val fresh = ContentFetchService.fetchAllContent()) {
+                is ContentResult.Success -> {
+                    val toSave = fresh.data.copy(remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now)
+                    _memCache = toSave
+                    cache.saveContent(toSave)
+                    cache.markFullSyncDone(toSave.fetchedAt)
+                    syncToRoom(toSave)
+                    onBackgroundUpdate?.invoke(toSave)
+                }
+                is ContentResult.Error -> Log.w("Repo", "Full resync failed: ${fresh.message}")
+            }
+            return
+        }
+
+        val sinceQuiz  = (cache.getQuizLastSync()  - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+        val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+        val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+
+        when (val delta = ContentFetchService.fetchIncrementalContent(sinceQuiz, sinceQBank, sinceStudy)) {
+            is ContentResult.Success -> {
+                val d = delta.data
+                val hasQuestionChanges = d.quiz.isNotEmpty() || d.qbank.isNotEmpty() || d.study.isNotEmpty()
+                Log.d("Repo", "Delta sync: quiz+${d.quiz.size} qbank+${d.qbank.size} study+${d.study.size}")
+
+                val merged = cached.copy(
+                    quiz          = mergeById(cached.quiz,  d.quiz)  { it.id },
+                    qbank         = mergeById(cached.qbank, d.qbank) { it.id },
+                    study         = mergeById(cached.study, d.study) { it.id },
+                    subjectOrder  = d.subjectOrder,
+                    subTopicOrder = d.subTopicOrder,
+                    modelTests    = d.modelTests,
+                    fetchedAt     = now,
+                    remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
+                )
+                _memCache = merged
+                cache.saveContent(merged)
+                // পরের delta query যাতে একই পুরনো since দিয়ে না চলে — checkpoint সবসময় এগিয়ে রাখি
+                cache.setSyncCheckpoints(now, now, now)
+
+                if (hasQuestionChanges) {
+                    // Room-এ শুধু বদলানো/নতুন row গুলোই upsert করি — পুরো ১০ হাজার row আবার লেখার দরকার নেই
+                    syncToRoom(AppContent(quiz = d.quiz, qbank = d.qbank, study = d.study))
+                }
+                onBackgroundUpdate?.invoke(merged)
+            }
+            is ContentResult.Error -> Log.w("Repo", "Delta sync failed: ${delta.message}")
+        }
+    }
+
+    /** existing list-এ changed/new item গুলো id দিয়ে merge করে — id মিললে replace, না মিললে যোগ */
+    private fun <T> mergeById(existing: List<T>, changed: List<T>, idOf: (T) -> String?): List<T> {
+        if (changed.isEmpty()) return existing
+        val map = LinkedHashMap<String, T>()
+        existing.forEach { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
+        changed.forEach  { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
+        return map.values.toList()
+    }
+
     // ── Stale-While-Revalidate ─────────────────────────────────────────────────
     // Cache থাকলে সাথে সাথে return, background এ Firebase থেকে fresh data আনো।
     // Callback দিয়ে নতুন data এলে ViewModel update করতে পারবে।
@@ -170,26 +245,10 @@ class ContentRepository(private val context: Context) {
                         val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt()
                         val serverHasNewer = remoteUpdatedAt == 0L || remoteUpdatedAt > cached.remoteUpdatedAt
                         if (!serverHasNewer) {
-                            Log.d("Repo", "Background: meta unchanged, skipping full refetch")
+                            Log.d("Repo", "Background: meta unchanged, skipping refetch")
                             return@launch
                         }
-                        when (val fresh = ContentFetchService.fetchAllContent()) {
-                            is ContentResult.Success -> {
-                                if (fresh.data.fetchedAt > cached.fetchedAt || fresh.data.quiz.size != cached.quiz.size) {
-                                    Log.d("Repo", "Background update: new data found, notifying UI")
-                                    val toSave = fresh.data.copy(
-                                        remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
-                                    )
-                                    _memCache = toSave
-                                    cache.saveContent(toSave)
-                                    syncToRoom(toSave)
-                                    onBackgroundUpdate?.invoke(toSave)
-                                } else {
-                                    Log.d("Repo", "Background: data same, no update needed")
-                                }
-                            }
-                            is ContentResult.Error -> Log.w("Repo", "Background refresh failed: ${fresh.message}")
-                        }
+                        applyIncrementalOrFullSync(cached, remoteUpdatedAt, onBackgroundUpdate)
                     } catch (e: Exception) {
                         Log.e("Repo", "Background refresh error: ${e.message}")
                     }
@@ -217,6 +276,9 @@ class ContentRepository(private val context: Context) {
                     Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
                     _memCache = result.data
                     cache.saveContent(result.data)
+                    // পুরো fetch সফল — এখন থেকে পরের sync গুলো delta/incremental হবে,
+                    // তাই checkpoint "এখন" এ সেট করে রাখি।
+                    cache.markFullSyncDone(result.data.fetchedAt)
                     kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         syncToRoom(result.data)
                     }
