@@ -1,47 +1,185 @@
 {
   "rules": {
-    ".read": "auth != null",
+    ".read": false,
     ".write": false,
 
-    "Quiz":   { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
-    "QBank":  { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
-    "Study":  { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
+    "Quiz": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["updatedAt"]
+    },
+    "QBank": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["updatedAt"]
+    },
+    "Study": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["updatedAt"]
+    },
 
     "SubjectOrder": {
+      ".read": "auth != null",
       "$mode": {
         "$tag": {
           ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+          "$subject": {
+            ".validate": "newData.isNumber()"
+          }
+        }
+      }
+    },
+    "SubTopicOrder": {
+      ".read": "auth != null",
+      "$mode": {
+        "$tag": {
+          ".read": "auth != null",
+          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+          "$subject": {
+            "$subTopic": {
+              ".validate": "newData.isNumber()"
+            }
+          }
         }
       }
     },
 
-    "SubTopicOrder": {
-      "$mode": {
-        "$tag": {
-          ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
-        }
-      }
+    "ModelTests": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+    },
+    "ModelTestSubmissions": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
     },
 
     "Users": {
       ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["Phone", "phone"],
       "$userId": {
         ".write": "auth != null && (auth.uid === $userId || root.child('Users').child(auth.uid).child('isAdmin').val() === true)"
       }
     },
 
-    "Reports": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+    "users": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["Phone", "phone"]
+    },
+
+    "AdminFCMTokens": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "Challenges": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "Invites": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "MatchHistory": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$myPhone": {
+        "$opponentPhone": {
+          ".indexOn": ["playedAt"]
+        }
+      }
+    },
+    "WeekendBattles": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "Buddies": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "BuddyProgress": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "BuddyRequests": {
+      ".read": "auth != null",
       ".write": "auth != null"
     },
 
     "Notifications": {
+      ".read": "auth != null",
+      ".write": "auth != null",
       "$phone": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".read": "auth != null"
       }
+    },
+
+    "Reports": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null",
+      "$reportId": {
+        ".validate": "newData.hasChildren(['questionId','issue','timestamp','status'])",
+        "questionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "question":   { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "issue":      { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "userName":   { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "userPhone":  { ".validate": "newData.isString() && newData.val().length <= 20 && newData.val().matches(/^[+0-9]*$/)" },
+        "tab":        { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "qsheet":     { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "timestamp":  { ".validate": "newData.isNumber()" },
+        "status":     { ".validate": "newData.isString() && newData.val().length <= 20" },
+        "$other":     { ".validate": false }
+      }
+    },
+
+    "QuizAnswers": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+    "StudyLog": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+
+    "broadcasts": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+    },
+
+    "AdminAppLogcat": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "AdminNotifHistory": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "DebugLogs": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+
+    "Routine": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+    },
+
+    "UserContent": {
+      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".write": "auth != null"
+    },
+    "Techniques": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "UserTechniques": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
 
     "meta": {
@@ -49,11 +187,6 @@
       "updatedAt": {
         ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
       }
-    },
-
-    "UserTechniques": {
-      ".read": "auth != null",
-      ".write": "auth != null"
     }
   }
 }
