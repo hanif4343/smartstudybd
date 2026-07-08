@@ -3,9 +3,9 @@
     ".read": "auth != null",
     ".write": false,
 
-    "Quiz":   { ".read": "auth != null", ".write": false },
-    "QBank":  { ".read": "auth != null", ".write": false },
-    "Study":  { ".read": "auth != null", ".write": false },
+    "Quiz":   { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
+    "QBank":  { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
+    "Study":  { ".read": "auth != null", ".write": false, ".indexOn": ["updatedAt"] },
 
     "SubjectOrder": {
       "$mode": {
