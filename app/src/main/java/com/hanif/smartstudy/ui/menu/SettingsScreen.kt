@@ -98,6 +98,40 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
+            // ── অফলাইন মোড (Firebase disconnect) ──
+            SettingsCard("🔌 অফলাইন মোড") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Firebase সংযোগ", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (state.isOfflineMode) "বন্ধ আছে — সব লোকালি সেভ হচ্ছে" else "চালু আছে",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = if (state.isOfflineMode) Color(0xFFDC2626)
+                                        else MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(
+                            checked         = state.isOfflineMode,
+                            onCheckedChange = { vm.setOfflineMode(it) }
+                        )
+                    }
+                    if (state.isOfflineMode) {
+                        Text(
+                            "⚠️ এই মোডে থাকা অবস্থায় নতুন কোনো ডাটা Firebase-এ read/write হবে না। " +
+                            "যা কিছু করবেন সব ফোনেই (লোকাল স্টোরেজে) সেভ থাকবে। পরে বন্ধ করলে জমে থাকা " +
+                            "পরিবর্তনগুলো আবার নিজে থেকেই Firebase-এ সিঙ্ক হয়ে যাবে।",
+                            fontFamily = NotoSansBengali, fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
+                        )
+                    }
+                }
+            }
+
             // ── Dark mode ──
             SettingsCard("🌙 ডার্ক মোড") {
                 Row(
