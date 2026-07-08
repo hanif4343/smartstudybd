@@ -73,25 +73,90 @@ class SyncWorker(
         }
 
         if (needsRefresh) {
-            Log.d(TAG, "Content refresh needed (remote=$remoteUpdatedAt, cachedRemote=${cached?.remoteUpdatedAt})")
-            when (val result = ContentFetchService.fetchAllContent()) {
-                is ContentResult.Success -> {
-                    val toSave = result.data.copy(
-                        remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
-                    )
-                    cache.saveContent(toSave)
-                    Log.d(TAG, "Content refreshed: Study=${toSave.study.size}")
+            if (cached == null) {
+                // কখনো fetch হয়নি — এই একবারই পুরো ডাউনলোড লাগবে
+                Log.d(TAG, "No cache yet — full fetch")
+                when (val result = ContentFetchService.fetchAllContent()) {
+                    is ContentResult.Success -> {
+                        val toSave = result.data.copy(
+                            remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
+                        )
+                        cache.saveContent(toSave)
+                        cache.markFullSyncDone(toSave.fetchedAt)
+                        Log.d(TAG, "Content refreshed (full): Study=${toSave.study.size}")
+                    }
+                    is ContentResult.Error -> {
+                        Log.w(TAG, "Content refresh failed: ${result.message}")
+                        allSuccess = false
+                    }
                 }
-                is ContentResult.Error -> {
-                    Log.w(TAG, "Content refresh failed: ${result.message}")
-                    allSuccess = false
+            } else {
+                // ── DELTA SYNC — শুধু "updatedAt > lastSync" এমন row গুলো আনো, পুরো ১০,০০০
+                // প্রশ্ন না — এটাই ৬-ঘণ্টার periodic run এ bandwidth বাঁচানোর মূল অংশ ──
+                val lastFullSync = cache.getLastFullSync()
+                val now = System.currentTimeMillis()
+                val needsFullResync = lastFullSync == 0L ||
+                    (now - lastFullSync) > ContentCache.FULL_RESYNC_INTERVAL_MS
+
+                if (needsFullResync) {
+                    Log.d(TAG, "Periodic full resync due (deletion/edge-case reconcile)")
+                    when (val result = ContentFetchService.fetchAllContent()) {
+                        is ContentResult.Success -> {
+                            val toSave = result.data.copy(
+                                remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
+                            )
+                            cache.saveContent(toSave)
+                            cache.markFullSyncDone(toSave.fetchedAt)
+                            Log.d(TAG, "Content refreshed (full resync): Study=${toSave.study.size}")
+                        }
+                        is ContentResult.Error -> {
+                            Log.w(TAG, "Full resync failed: ${result.message}")
+                            allSuccess = false
+                        }
+                    }
+                } else {
+                    val sinceQuiz  = (cache.getQuizLastSync()  - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+                    val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+                    val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
+
+                    when (val delta = ContentFetchService.fetchIncrementalContent(sinceQuiz, sinceQBank, sinceStudy)) {
+                        is ContentResult.Success -> {
+                            val d = delta.data
+                            Log.d(TAG, "Delta sync: quiz+${d.quiz.size} qbank+${d.qbank.size} study+${d.study.size}")
+                            val merged = cached.copy(
+                                quiz          = mergeById(cached.quiz,  d.quiz)  { it.id },
+                                qbank         = mergeById(cached.qbank, d.qbank) { it.id },
+                                study         = mergeById(cached.study, d.study) { it.id },
+                                subjectOrder  = d.subjectOrder,
+                                subTopicOrder = d.subTopicOrder,
+                                modelTests    = d.modelTests,
+                                fetchedAt     = now,
+                                remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
+                            )
+                            cache.saveContent(merged)
+                            cache.setSyncCheckpoints(now, now, now)
+                        }
+                        is ContentResult.Error -> {
+                            Log.w(TAG, "Delta sync failed: ${delta.message}")
+                            allSuccess = false
+                        }
+                    }
                 }
             }
         } else {
-            Log.d(TAG, "Content unchanged on server, skipping full refetch")
+            Log.d(TAG, "Content unchanged on server, skipping refetch")
         }
 
         if (allSuccess) Result.success() else Result.retry()
+    }
+
+    /** existing list-এ changed/new item গুলো id দিয়ে merge করে — id মিললে replace, না মিললে যোগ */
+    private fun <T> mergeById(existing: List<T>, changed: List<T>, idOf: (T) -> String?): List<T> {
+        if (changed.isEmpty()) return existing
+        val map = LinkedHashMap<String, T>()
+        existing.forEach { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
+        changed.forEach  { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
+        return map.values.toList()
     }
 
     private suspend fun syncAction(action: com.hanif.smartstudy.data.local.PendingAction): Boolean {
@@ -228,6 +293,7 @@ class SyncWorker(
 
             val jsonObj = com.google.gson.JsonObject().apply {
                 fields.forEach { (k, v) -> addProperty(k, v) }
+                addProperty("updatedAt", System.currentTimeMillis())
             }
             val body = jsonObj.toString()
                 .toRequestBody("application/json".toMediaType())
