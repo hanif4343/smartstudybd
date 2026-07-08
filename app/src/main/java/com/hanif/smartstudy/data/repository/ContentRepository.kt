@@ -546,6 +546,10 @@ class ContentRepository(private val context: Context) {
     fun getPendingQueueCount() = kotlinx.coroutines.flow.flow { emit(queue.count()) }
 
     fun isOnline(): Boolean {
+        // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — নেট থাকলেও Firebase-কে
+        // "অনলাইন নেই" হিসেবে ট্রিট করা হয়, ফলে সব read/write লোকাল
+        // cache/queue দিয়েই সার্ভ হয় (bandwidth/quota একদম বাঁচে)।
+        if (session.isOfflineMode()) return false
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
         val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
