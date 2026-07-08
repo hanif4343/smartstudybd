@@ -55,6 +55,7 @@ data class MenuUiState(
     val isDarkMode      : Boolean            = false,
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
+    val isOfflineMode   : Boolean            = false,
     val isReminderOn    : Boolean            = false,
     val reminderHour    : Int                = 20,
     val reminderMinute  : Int                = 0,
@@ -208,6 +209,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val isDark     = session.isDarkMode()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
+            val offlineOn  = session.isOfflineMode()
             val remOn      = session.isReminderOn()
             val remH       = session.getReminderHour()
             val remM       = session.getReminderMinute()
@@ -257,6 +259,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isDarkMode     = isDark,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
+                    isOfflineMode  = offlineOn,
                     isReminderOn   = remOn,
                     reminderHour   = remH,
                     reminderMinute = remM,
@@ -292,6 +295,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     adminViewingTag = adminTag
                 )
             }
+
+            // অফলাইন মোড অন থাকলে এখান থেকে আর কোনো Firebase কল হবে না —
+            // localUser দিয়েই UI চলবে, উপরের state.update এতেই যথেষ্ট।
+            if (offlineOn) return@launch
 
             // Firebase থেকে fresh user fetch করো (reducedUi সহ সব latest data)
             if (!localUser?.phone.isNullOrEmpty()) {
@@ -392,6 +399,25 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setSoundOff(off)
             _state.update { it.copy(isSoundOff = off) }
+        }
+    }
+
+    // ── Offline mode (Firebase disconnect বাটন) ───────────────
+    // অন করলে: কোনো নতুন Firebase read/write হবে না, সব লোকাল Room/DataStore
+    // cache থেকে সার্ভ হবে, pending changes queue-তেই জমা থাকবে।
+    // বন্ধ করলে: পরের সুবিধাজনক মুহূর্তে (app খোলা/reopen বা periodic sync-এ)
+    // সব pending change আবার Firebase-এ sync হয়ে যাবে — কিছু হারাবে না।
+    fun setOfflineMode(on: Boolean) {
+        viewModelScope.launch {
+            session.setOfflineMode(on)
+            _state.update { it.copy(isOfflineMode = on, toast = if (on)
+                "📴 অফলাইন মোড চালু — Firebase-এ কোনো ডাটা যাবে না, সব লোকালি সেভ হবে"
+            else
+                "☁️ অফলাইন মোড বন্ধ — Firebase সিঙ্ক আবার চালু হচ্ছে") }
+            if (!on) {
+                // অফলাইন মোড বন্ধ হওয়া মাত্র pending queue sync চালু করে দাও
+                com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication())
+            }
         }
     }
 
@@ -1069,6 +1095,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private fun saveUserToFirebase(user: User) {
         val phone = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
         viewModelScope.launch {
+            if (session.isOfflineMode()) return@launch
             try {
                 val update = mutableMapOf<String, Any?>()
                 user.name?.let    { update["Name"]    = it }
@@ -1084,6 +1111,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private fun saveProfileToFirebase(user: User) {
         val phone = user.phone?.replace("+", "").orEmpty().ifEmpty { return }
         viewModelScope.launch {
+            if (session.isOfflineMode()) return@launch
             try {
                 val update = mutableMapOf<String, Any?>()
                 user.name?.let      { if (it.isNotBlank()) update["Name"]       = it }
