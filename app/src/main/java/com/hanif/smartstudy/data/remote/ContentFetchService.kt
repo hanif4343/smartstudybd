@@ -68,6 +68,31 @@ object ContentFetchService {
         }
     }
 
+    /**
+     * LIGHTWEIGHT CHECK — শুধু "/meta/updatedAt" (একটা ছোট নাম্বার) fetch করে, পুরো
+     * Quiz/QBank/Study নয়। Admin কোনো প্রশ্ন এডিট/যোগ করলেই এই ভ্যালু বাড়ে
+     * (FirebaseDataService.touchMetaUpdatedAt দেখুন)। SyncWorker ও ContentRepository
+     * এটা দিয়ে আগে চেক করে নেয় — সার্ভারে আসলেই নতুন কিছু আছে কিনা — তারপর দরকার
+     * হলেই শুধু পুরো কনটেন্ট আবার ডাউনলোড করে। এতে বেকার বারবার পুরো Quiz+QBank+Study
+     * রিফেচ হয়ে bandwidth নষ্ট হয় না।
+     * Node না থাকলে বা error হলে 0L রিটার্ন করে (caller তখন পুরনো TTL-fallback ব্যবহার করবে)।
+     */
+    suspend fun fetchMetaUpdatedAt(): Long = withContext(Dispatchers.IO) {
+        try {
+            val auth = authParam()
+            val url  = "$BASE_URL/meta/updatedAt.json$auth"
+            val req  = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            if (body.isBlank() || body == "null") 0L
+            else body.trim().toDoubleOrNull()?.toLong() ?: 0L
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchMetaUpdatedAt error: ${e.message}")
+            0L
+        }
+    }
+
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
         Log.d(TAG, "=== FETCH START (parallel) ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
