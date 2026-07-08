@@ -93,6 +93,116 @@ object ContentFetchService {
         }
     }
 
+    /**
+     * DELTA/INCREMENTAL FETCH — পুরো sheet না টেনে, শুধু "updatedAt > since" এমন row
+     * গুলো আনে (Firebase RTDB এর orderBy+startAt query দিয়ে, filter সার্ভার-সাইডে হয়,
+     * তাই bandwidth শুধু বদলানো/নতুন row গুলোর সমান খরচ হয়)।
+     *
+     * since = 0L হলে (কখনো sync হয়নি) পুরো sheet ফেরত আসবে — caller-দের উচিত সেক্ষেত্রে
+     * এমনিতেই fetchAllContent() ব্যবহার করা, এটা শুধু true delta case-এর জন্য।
+     */
+    private suspend inline fun <reified T> fetchSheetChangedSince(sheet: String, since: Long): List<T> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = FirebaseTokenProvider.getToken()
+                val authQ = if (auth.isNotBlank()) "&auth=$auth" else ""
+                // orderBy="updatedAt" → percent-encoded quotes লাগবে। startAt শুধু সেই row গুলোই
+                // আনবে যাদের updatedAt ফিল্ড আছে এবং since এর চেয়ে বেশি/সমান — পুরনো row যেগুলোতে
+                // updatedAt ফিল্ডই নেই, সেগুলো এমনিতেই বাদ পড়বে (তারা আগেই full sync-এ এসে গেছে)।
+                val url = "$BASE_URL/$sheet.json?orderBy=%22updatedAt%22&startAt=$since$authQ"
+                Log.d(TAG, "Delta fetch $sheet since=$since")
+
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+
+                if (body.isBlank() || body == "null") return@withContext emptyList()
+
+                val trimmed = body.trim()
+                val items: List<T> = when {
+                    trimmed.startsWith("[") -> {
+                        val arr = com.google.gson.JsonParser.parseString(trimmed).asJsonArray
+                        arr.mapIndexedNotNull { idx, el ->
+                            try {
+                                if (el != null && el.isJsonObject) {
+                                    val obj2 = el.asJsonObject.deepCopy()
+                                    obj2.addProperty("id", idx.toString())
+                                    gson.fromJson(obj2, T::class.java)
+                                } else null
+                            } catch (e: Exception) { null }
+                        }
+                    }
+                    trimmed.startsWith("{") -> {
+                        val obj = gson.fromJson(trimmed, JsonObject::class.java)
+                        if (obj.has("error")) {
+                            Log.e(TAG, "$sheet delta Firebase error: ${obj.get("error")}")
+                            return@withContext emptyList()
+                        }
+                        obj.entrySet().mapNotNull { (key, v) ->
+                            try {
+                                if (v.isJsonObject) {
+                                    val obj2 = v.asJsonObject.deepCopy()
+                                    obj2.addProperty("id", key)
+                                    gson.fromJson(obj2, T::class.java)
+                                } else null
+                            } catch (e: Exception) { null }
+                        }
+                    }
+                    else -> emptyList()
+                }
+                Log.d(TAG, "$sheet delta parsed: ${items.size} changed row(s)")
+                items
+            } catch (e: Exception) {
+                Log.w(TAG, "fetchSheetChangedSince<$sheet> error: ${e.message}")
+                emptyList()
+            }
+        }
+
+    data class IncrementalContent(
+        val quiz  : List<QuizItem>  = emptyList(),
+        val qbank : List<QBankItem> = emptyList(),
+        val study : List<StudyItem> = emptyList(),
+        val subjectOrder : Map<String, Map<String, Map<String, Int>>> = emptyMap(),
+        val subTopicOrder: Map<String, Map<String, Map<String, Map<String, Int>>>> = emptyMap(),
+        val modelTests   : Map<String, List<com.hanif.smartstudy.data.model.ModelTestMeta>> = emptyMap()
+    )
+
+    /**
+     * তিনটা sheet-এই একসাথে delta fetch চালায় (parallel), সাথে SubjectOrder/SubTopicOrder/
+     * ModelTests — এই তিনটা ছোট node বলে প্রতিবারই পুরোটা রিফ্রেশ করা bandwidth-এ কোনো সমস্যা করে না।
+     */
+    suspend fun fetchIncrementalContent(
+        sinceQuiz : Long,
+        sinceQBank: Long,
+        sinceStudy: Long
+    ): ContentResult<IncrementalContent> = withContext(Dispatchers.IO) {
+        try {
+            coroutineScope {
+                val quizDeferred         = async { fetchSheetChangedSince<QuizItem>("Quiz", sinceQuiz) }
+                val qbankDeferred        = async { fetchSheetChangedSince<QBankItem>("QBank", sinceQBank) }
+                val studyDeferred        = async { fetchSheetChangedSince<StudyItem>("Study", sinceStudy) }
+                val subjectOrderDeferred = async { fetchSubjectOrder() }
+                val subTopicOrderDeferred = async { fetchSubTopicOrder() }
+                val modelTestsDeferred   = async { fetchModelTests() }
+
+                val result = IncrementalContent(
+                    quiz          = quizDeferred.await(),
+                    qbank         = qbankDeferred.await(),
+                    study         = studyDeferred.await(),
+                    subjectOrder  = subjectOrderDeferred.await(),
+                    subTopicOrder = subTopicOrderDeferred.await(),
+                    modelTests    = modelTestsDeferred.await()
+                )
+                Log.d(TAG, "=== DELTA RESULT: Quiz=${result.quiz.size} QBank=${result.qbank.size} Study=${result.study.size} (changed only) ===")
+                ContentResult.Success(result)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchIncrementalContent error: ${e.message}", e)
+            ContentResult.Error("Error: ${e.message}")
+        }
+    }
+
     suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
         Log.d(TAG, "=== FETCH START (parallel) ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
