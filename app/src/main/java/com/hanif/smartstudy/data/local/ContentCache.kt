@@ -30,6 +30,23 @@ class ContentCache(private val context: Context) {
         // Firebase "/meta/updatedAt" থেকে আসা সার্ভার টাইমস্ট্যাম্প — লাস্ট সেভ করা কনটেন্টের সাথে মেলানো হয়
         val KEY_REMOTE_UPDATED_AT = longPreferencesKey("cache_remote_updated_at")
 
+        // ── Delta/incremental sync per-sheet checkpoint ──
+        // প্রতিটা sheet-এ সর্বশেষ কবে পর্যন্ত (device epoch millis) sync করা হয়েছে — পরের বার
+        // শুধু এর চেয়ে নতুন (updatedAt বেশি) row গুলোই আনা হবে, পুরো sheet না।
+        val KEY_QUIZ_LAST_SYNC   = longPreferencesKey("quiz_last_sync")
+        val KEY_QBANK_LAST_SYNC  = longPreferencesKey("qbank_last_sync")
+        val KEY_STUDY_LAST_SYNC  = longPreferencesKey("study_last_sync")
+        // সব sheet সবশেষ কবে "পুরোপুরি" (full) sync হয়েছিল — deletion/edge-case reconcile
+        // করার জন্য মাঝে মাঝে (নিচে FULL_RESYNC_INTERVAL_MS) পুরো refetch করা হবে,
+        // কারণ delta sync শুধু edit/add ধরে, কেউ প্রশ্ন মুছে ফেললে সেটা delta তে বোঝা যায় না।
+        val KEY_LAST_FULL_SYNC   = longPreferencesKey("last_full_sync")
+        // clock-skew buffer — admin আর syncing ডিভাইসের ঘড়িতে সামান্য পার্থক্য থাকতে পারে,
+        // তাই delta query-তে since থেকে এই বাফারটা বিয়োগ করে একটু আগে থেকে চাওয়া হয়,
+        // যাতে সীমানার কাছাকাছি সময়ের কোনো edit বাদ না পড়ে যায়।
+        const val CLOCK_SKEW_BUFFER_MS = 3 * 60_000L
+        // প্রতি ৩ দিনে একবার পুরো sheet পুনরায় refetch (safety net) — deletion ধরার জন্য
+        const val FULL_RESYNC_INTERVAL_MS = 3 * 24 * 60 * 60_000L
+
         val KEY_TODAY_STUDY   = intPreferencesKey("today_study_min")
         val KEY_WEEK_STUDY    = intPreferencesKey("week_study_min")
         val KEY_TOTAL_STUDY   = intPreferencesKey("total_study_min")
@@ -49,6 +66,31 @@ class ContentCache(private val context: Context) {
             prefs[KEY_MODELTESTS_JSON] = gson.toJson(content.modelTests)
             prefs[KEY_CACHE_TIME] = content.fetchedAt
             prefs[KEY_REMOTE_UPDATED_AT] = content.remoteUpdatedAt
+        }
+    }
+
+    // ── Delta sync checkpoints — getter/setter ──────────────────────────────
+    suspend fun getQuizLastSync(): Long  = context.dataStore.data.first()[KEY_QUIZ_LAST_SYNC]  ?: 0L
+    suspend fun getQBankLastSync(): Long = context.dataStore.data.first()[KEY_QBANK_LAST_SYNC] ?: 0L
+    suspend fun getStudyLastSync(): Long = context.dataStore.data.first()[KEY_STUDY_LAST_SYNC] ?: 0L
+    suspend fun getLastFullSync(): Long  = context.dataStore.data.first()[KEY_LAST_FULL_SYNC]  ?: 0L
+
+    /** delta sync সফল হওয়ার পর প্রতিটা sheet এর checkpoint আলাদাভাবে আপডেট করো */
+    suspend fun setSyncCheckpoints(quizAt: Long, qbankAt: Long, studyAt: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_QUIZ_LAST_SYNC]  = quizAt
+            prefs[KEY_QBANK_LAST_SYNC] = qbankAt
+            prefs[KEY_STUDY_LAST_SYNC] = studyAt
+        }
+    }
+
+    /** পুরো (full) fetchAllContent() সফল হলে — সব checkpoint একসাথে "এখন" এ সেট করো */
+    suspend fun markFullSyncDone(at: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_QUIZ_LAST_SYNC]  = at
+            prefs[KEY_QBANK_LAST_SYNC] = at
+            prefs[KEY_STUDY_LAST_SYNC] = at
+            prefs[KEY_LAST_FULL_SYNC]  = at
         }
     }
 
