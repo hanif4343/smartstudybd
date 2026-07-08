@@ -197,7 +197,13 @@ data class AppContent(
     // ── Model Test — এডমিন-কিউরেটেড, ফিক্সড। Firebase: ModelTests/{subject}/{testNumber}
     // key: subject name → ওই subject-এর সব Model Test (testNumber অনুযায়ী)
     val modelTests  : Map<String, List<ModelTestMeta>> = emptyMap(),
-    val fetchedAt   : Long              = 0L
+    val fetchedAt   : Long              = 0L,
+    // Firebase "/meta/updatedAt" থেকে আসা সার্ভার-সাইড টাইমস্ট্যাম্প — admin কোনো কিছু
+    // এডিট করলেই এই ভ্যালু বাড়ে। এটা দিয়ে বোঝা যায় local cache আসলেই stale কিনা,
+    // শুধু TTL সময় পার হয়েছে বলেই পুরো Quiz/QBank/Study আবার ডাউনলোড করা লাগে না।
+    // মান 0L মানে meta node পাওয়া যায়নি (পুরনো data বা network সমস্যা) — সেক্ষেত্রে
+    // TTL-ভিত্তিক fallback ব্যবহার হয়।
+    val remoteUpdatedAt: Long           = 0L
 ) {
     fun isEmpty()  = study.isEmpty() && quiz.isEmpty() && qbank.isEmpty()
 
