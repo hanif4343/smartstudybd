@@ -44,6 +44,13 @@
       }
     },
 
+    "meta": {
+      ".read": "auth != null",
+      "updatedAt": {
+        ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+      }
+    },
+
     "UserTechniques": {
       ".read": "auth != null",
       ".write": "auth != null"
