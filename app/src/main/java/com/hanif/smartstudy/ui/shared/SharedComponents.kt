@@ -206,6 +206,7 @@ fun QuestionCard(
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
+    studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
@@ -379,6 +380,28 @@ fun QuestionCard(
                 else -> {}
             }
 
+            // ── Study: "শুধু প্রশ্ন দেখ" মোড — চালু থাকলে ও এই প্রশ্নের আসলেই
+            //    উত্তর/টেক্সট কনটেন্ট থাকলে, উত্তর/ব্যাখ্যা/টেকনিক সব লুকিয়ে শুধু
+            //    "উত্তর দেখুন" বাটন দেখানো হয়। ট্যাপ করলেই এই কার্ডের জন্য প্রকাশ
+            //    হয়ে যায় (isRevealed প্রতিটা প্রশ্নের id অনুযায়ী আলাদা)। ──
+            val hasAnswerContent = !studyNoQ && item.answer.isNotBlank()
+            val studyHideAnswer  = mode == StudyMode.STUDY && studyRevealMode && hasAnswerContent
+            var isRevealed by remember(item.id) { mutableStateOf(false) }
+
+            if (studyHideAnswer && !isRevealed) {
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick  = { isRevealed = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(12.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                ) {
+                    Icon(Icons.Default.Visibility, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("উত্তর দেখুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            } else {
+
             val showAnswerBox = when (mode) {
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
@@ -435,6 +458,7 @@ fun QuestionCard(
             // অ্যাডমিন ব্যাখ্যার জন্য যেভাবে সবসময় auto-expanded থাকে,
             // এখানে isAdmin=true দিয়ে সবার জন্যই সেই একই আচরণ করা হলো।
             // এডিট বাটন অবশ্য এখনো শুধু admin-ই পাবে (onEdit চেক অপরিবর্তিত)।
+            // ── এই আচরণ ইচ্ছাকৃতভাবেই অপরিবর্তিত — টেকনিক সবসময় সবার জন্য খোলা থাকবে ──
             if (showAnswerBox && item.technique.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 TechniqueBox(
@@ -450,6 +474,7 @@ fun QuestionCard(
                     questionId  = item.id,
                     currentUser = currentUser
                 )
+            }
             }
         }
     }
