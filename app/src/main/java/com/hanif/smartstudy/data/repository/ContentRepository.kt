@@ -43,7 +43,7 @@ class ContentRepository(private val context: Context) {
         @Volatile private var _memCache: AppContent? = null
         @Volatile private var _lastBgRefreshAt: Long = 0L
         private val mutex = Mutex()
-        private const val BG_REFRESH_MIN_GAP_MS = 60_000L // একই সেশনে বারবার getContent() কল হলেও ৬০ সেকেন্ডে একবারের বেশি Firebase hit না করার জন্য
+        private const val BG_REFRESH_MIN_GAP_MS = 15 * 60_000L // ১৫ মিনিটে একবারের বেশি Firebase hit না করার জন্য (আগে 60_000L ছিল, এবং callback থাকলে এই গ্যাপটাই বাইপাস হয়ে যেত — এটাই মূল bandwidth সমস্যা ছিল)
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
     }
@@ -154,24 +154,36 @@ class ContentRepository(private val context: Context) {
             Log.d("Repo", "Cache hit: quiz=${cached.quiz.size} — background refresh শুরু")
 
             // ── Step 2: Background এ Firebase check ───────────────────────
-            // আগে এটা শুধু onBackgroundUpdate callback দিলেই চলত — ফলে Quiz/QBank/Study/
-            // Routine/Menu থেকে getContent() কল হলে (কোনো callback ছাড়াই) কখনো refresh-ই
-            // হতো না, শুধু Home screen খুললেই হতো। তাই admin কোনো প্রশ্নে explanation
-            // যোগ/এডিট করলে সেটা student app-এ আসতে Home screen খোলা লাগত। এখন
-            // অনলাইন থাকলেই সবসময় background refresh হবে, callback থাকুক বা না থাকুক।
+            // FIX (মূল bandwidth bug): আগে শর্ত ছিল
+            //   (onBackgroundUpdate != null || now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS)
+            // — মানে callback দেওয়া থাকলে (Home/Quiz screen থেকে সবসময় দেওয়া হয়) গ্যাপ চেকটাই
+            // বাইপাস হয়ে যেত, আর প্রতিবার getContent() কল হলেই (স্ক্রিন খোলা, subject বদলানো,
+            // ট্যাব সুইচ করা ইত্যাদি) পুরো Quiz+QBank+Study আবার ডাউনলোড হতো। এখন গ্যাপ সবসময়
+            // মানা হয়, callback থাকুক বা না থাকুক। এছাড়া full fetchAllContent() করার আগে
+            // ছোট "/meta/updatedAt" চেক করা হয় — সার্ভারে আসলে নতুন কিছু না থাকলে পুরো
+            // কনটেন্ট আবার টানা হয় না।
             val now = System.currentTimeMillis()
-            if (isOnline() && (onBackgroundUpdate != null || now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS)) {
+            if (isOnline() && now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS) {
                 _lastBgRefreshAt = now
                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     try {
+                        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt()
+                        val serverHasNewer = remoteUpdatedAt == 0L || remoteUpdatedAt > cached.remoteUpdatedAt
+                        if (!serverHasNewer) {
+                            Log.d("Repo", "Background: meta unchanged, skipping full refetch")
+                            return@launch
+                        }
                         when (val fresh = ContentFetchService.fetchAllContent()) {
                             is ContentResult.Success -> {
                                 if (fresh.data.fetchedAt > cached.fetchedAt || fresh.data.quiz.size != cached.quiz.size) {
                                     Log.d("Repo", "Background update: new data found, notifying UI")
-                                    _memCache = fresh.data
-                                    cache.saveContent(fresh.data)
-                                    syncToRoom(fresh.data)
-                                    onBackgroundUpdate?.invoke(fresh.data)
+                                    val toSave = fresh.data.copy(
+                                        remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
+                                    )
+                                    _memCache = toSave
+                                    cache.saveContent(toSave)
+                                    syncToRoom(toSave)
+                                    onBackgroundUpdate?.invoke(toSave)
                                 } else {
                                     Log.d("Repo", "Background: data same, no update needed")
                                 }
