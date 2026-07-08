@@ -430,12 +430,17 @@ fun QuestionCard(
                 }
             }
 
+            // টেকনিক — কোনো প্রাইভেসি কনসেপ্ট নেই, তাই থাকলেই সবার জন্য
+            // সাথে সাথে (কোনো ট্যাপ ছাড়াই) খোলা অবস্থায় দেখা যাবে —
+            // অ্যাডমিন ব্যাখ্যার জন্য যেভাবে সবসময় auto-expanded থাকে,
+            // এখানে isAdmin=true দিয়ে সবার জন্যই সেই একই আচরণ করা হলো।
+            // এডিট বাটন অবশ্য এখনো শুধু admin-ই পাবে (onEdit চেক অপরিবর্তিত)।
             if (showAnswerBox && item.technique.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 TechniqueBox(
                     text    = item.technique,
                     onEdit  = if (isAdminUser) ({ activeEditField = "technique" }) else null,
-                    isAdmin = isAdminUser
+                    isAdmin = true
                 )
             }
 
