@@ -436,7 +436,14 @@ object FirebaseDataService {
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
             android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
             com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "PATCH → $sheet/$rowKey | fields=$fields | url_preview=${url.take(80)}")
-            val obj  = JsonObject().apply { fields.forEach { (k, v) -> addProperty(k, v) } }
+            // "updatedAt" নাম্বার হিসেবে স্ট্যাম্প করি (string না — Firebase orderBy query
+            // numeric type এর সাথে numeric startAt মেলায়, string হলে query কাজ করবে না)।
+            // অন্য ডিভাইসের incremental/delta sync এই row টা "changed since X" query তে
+            // ধরতে পারবে, পুরো sheet আবার ডাউনলোড না করেই।
+            val obj  = JsonObject().apply {
+                fields.forEach { (k, v) -> addProperty(k, v) }
+                addProperty("updatedAt", System.currentTimeMillis())
+            }
             val body = obj.toString().toRequestBody("application/json".toMediaType())
             val resp = client.newCall(Request.Builder().url(url).patch(body).build()).execute()
             val respBody = resp.body?.string() ?: ""
@@ -479,6 +486,8 @@ object FirebaseDataService {
                 val obj  = JsonObject().apply {
                     fields.forEach { (k, v) -> addProperty(k, v) }
                     addProperty("createdAt", System.currentTimeMillis())
+                    // নতুন প্রশ্নও "updatedAt" দিয়ে স্ট্যাম্প — নইলে delta sync query তে ধরা পড়বে না
+                    addProperty("updatedAt", System.currentTimeMillis())
                 }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val resp = client.newCall(Request.Builder().url(url).post(body).build()).execute()
@@ -641,7 +650,10 @@ object FirebaseDataService {
 
             var updated = 0
             matching.forEach { (key, _) ->
-                val obj  = JsonObject().apply { addProperty("AudienceTags", newTag) }
+                val obj  = JsonObject().apply {
+                    addProperty("AudienceTags", newTag)
+                    addProperty("updatedAt", System.currentTimeMillis())
+                }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val resp = client.newCall(
                     Request.Builder().url("$base/$sheet/$key.json$auth").patch(body).build()
@@ -703,6 +715,7 @@ object FirebaseDataService {
                     val obj = JsonObject().apply {
                         if (renameSubTopic) addProperty("sub_topic", newName.trim())
                         else addProperty("subject", newName.trim())
+                        addProperty("updatedAt", System.currentTimeMillis())
                     }
                     val body = obj.toString().toRequestBody("application/json".toMediaType())
                     val resp = client.newCall(
