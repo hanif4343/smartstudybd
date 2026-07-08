@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,7 +47,9 @@ import com.hanif.smartstudy.ui.theme.LocalAppTheme
 import com.hanif.smartstudy.ui.theme.NordicSage
 import com.hanif.smartstudy.ui.theme.NordicSageDeep
 import com.hanif.smartstudy.util.AdManager
+import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
+import kotlinx.coroutines.launch
 
 // ── Vibration helper (API 26+ VibrationEffect, পুরনো device এ fallback) ──
 private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
@@ -96,9 +100,24 @@ fun QuestionListScreen(
     val pagedQuestions = questions   // already paged from Room
     val isLastPage = safeCurrentPage >= totalPages - 1
     val listState = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
     var activeHighlightId by remember { mutableStateOf<String?>(null) }
+
+    // ── Study: "শুধু প্রশ্ন দেখ" মোড — এই টগলটা শুধু Study screen-এর
+    //    টপবারেই থাকে (Settings/Menu-তে না), Quiz/QBank-এ এফেক্ট নেই।
+    //    পছন্দটা DataStore-এ সেভ থাকে যাতে পরের বার Study খুললেও মনে থাকে। ──
+    val ctxForPrefs = androidx.compose.ui.platform.LocalContext.current
+    var studyRevealMode by remember { mutableStateOf(SessionManager(ctxForPrefs).isStudyRevealMode()) }
+    val prefsScope = rememberCoroutineScope()
+    val onToggleStudyRevealMode: () -> Unit = {
+        val newValue = !studyRevealMode
+        studyRevealMode = newValue
+        prefsScope.launch {
+            SessionManager(ctxForPrefs).setStudyRevealMode(newValue)
+        }
+    }
 
     // ── Sound + Vibration feedback ──
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -154,7 +173,9 @@ fun QuestionListScreen(
                     answered = answered,
                     total    = questions.size,
                     onBack   = onBack,
-                    onSubmit = if (mode != StudyMode.STUDY) {{ showSubmitDialog = true }} else null
+                    onSubmit = if (mode != StudyMode.STUDY) {{ showSubmitDialog = true }} else null,
+                    studyRevealMode = studyRevealMode,
+                    onToggleStudyRevealMode = onToggleStudyRevealMode
                 )
             }
         ) { padding ->
@@ -189,6 +210,17 @@ fun QuestionListScreen(
                     itemsIndexed(pagedQuestions, key = { _, q -> q.id }) { localIdx, q ->
                         val globalIdx = pageOffset + localIdx
                         val isHighlighted = q.id == activeHighlightId
+                        // ── চেকমার্ক দিলে (study mode) পরের প্রশ্ন কার্ডটা স্মুথলি
+                        //    স্ক্রল হয়ে স্ক্রিনে উঠে আসবে — এটা শুধুই স্ক্রল অ্যানিমেশন,
+                        //    ডেটার আসল অর্ডার এখনই পাল্টাচ্ছে না (সেটা সাবটপিক পরের বার
+                        //    খুললে হবে, ViewModel-এর loadQuestions-এই sort হয়) ──
+                        val onStudyDoneWithScroll: () -> Unit = {
+                            viewModel.toggleStudyDone(q.id)
+                            scrollScope.launch {
+                                val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                                listState.animateScrollToItem(nextLocalIdx)
+                            }
+                        }
                         // ── Study mode-এ "পড়া হয়েছে" টিক দিলে আইটেম লিস্টের নিচে চলে যায় —
                         //    animateItemPlacement() দিয়ে এই পজিশন-চেঞ্জটা হালকা স্মূথ এনিমেশনে
                         //    হয়, পুরো স্ক্রিন/স্ক্রল জাম্প করে না, বাকি আইটেমগুলো নিজ জায়গায়
@@ -233,11 +265,12 @@ fun QuestionListScreen(
                                     onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                                     onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
-                                    onStudyDone = { viewModel.toggleStudyDone(q.id) },
+                                    onStudyDone = onStudyDoneWithScroll,
                                     onReport    = { reportIdx = globalIdx },
                                     currentUser = currentUser,
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
-                                    onAdminEdit = onAdminEdit
+                                    onAdminEdit = onAdminEdit,
+                                    studyRevealMode = studyRevealMode
                                 )
                             }
                         } else {
@@ -250,11 +283,12 @@ fun QuestionListScreen(
                             onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                             onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
-                            onStudyDone = { viewModel.toggleStudyDone(q.id) },
+                            onStudyDone = onStudyDoneWithScroll,
                             onReport    = { reportIdx = globalIdx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
-                            onAdminEdit = onAdminEdit
+                            onAdminEdit = onAdminEdit,
+                            studyRevealMode = studyRevealMode
                         )
                         }
                         }
@@ -456,7 +490,9 @@ private fun QuestionTopBar(
     answered : Int,
     total    : Int,
     onBack   : () -> Unit,
-    onSubmit : (() -> Unit)?
+    onSubmit : (() -> Unit)?,
+    studyRevealMode         : Boolean = false,
+    onToggleStudyRevealMode : (() -> Unit)? = null
 ) {
     TopAppBar(
         title = {
@@ -483,6 +519,17 @@ private fun QuestionTopBar(
                 TextButton(onClick = onSubmit) {
                     Text("সাবমিট", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                         color = Indigo600, fontFamily = NotoSansBengali)
+                }
+            }
+            // ── Study: "শুধু প্রশ্ন দেখ" টগল — Quiz/QBank-এ এই বাটন দেখা যায় না,
+            //    যেহেতু ওখানে উত্তর এমনিতেই MCQ সিলেক্ট/লেখার আগ পর্যন্ত হাইড থাকে ──
+            if (mode == StudyMode.STUDY && onToggleStudyRevealMode != null) {
+                IconButton(onClick = onToggleStudyRevealMode) {
+                    Icon(
+                        if (studyRevealMode) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (studyRevealMode) "শুধু প্রশ্ন মোড: চালু" else "শুধু প্রশ্ন মোড: বন্ধ",
+                        tint = if (studyRevealMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         },
