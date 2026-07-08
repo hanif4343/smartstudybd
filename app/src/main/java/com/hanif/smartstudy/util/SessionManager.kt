@@ -24,6 +24,9 @@ class SessionManager(private val context: Context) {
         val KEY_THEME_COLOR      = stringPreferencesKey("theme_color")   // "indigo"|"teal"|"rose"|"amber"
         val KEY_OB_DONE          = booleanPreferencesKey("ob_done")
         val KEY_SOUND_OFF        = booleanPreferencesKey("sound_off")
+        // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
+        // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
+        val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
         val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
         val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
@@ -145,6 +148,18 @@ class SessionManager(private val context: Context) {
 
     suspend fun setSoundOff(off: Boolean) {
         context.dataStore.edit { it[KEY_SOUND_OFF] = off }
+    }
+
+    // ── Offline mode (ম্যানুয়াল বাটন — Firebase সম্পূর্ণ বন্ধ) ───
+
+    fun isOfflineMode(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_OFFLINE_MODE] ?: false
+    }
+
+    fun offlineModeFlow(): Flow<Boolean> = context.dataStore.data.map { it[KEY_OFFLINE_MODE] ?: false }
+
+    suspend fun setOfflineMode(on: Boolean) {
+        context.dataStore.edit { it[KEY_OFFLINE_MODE] = on }
     }
 
     // ── Onboarding ────────────────────────────────────────────
