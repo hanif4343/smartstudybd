@@ -24,7 +24,10 @@ data class StudyItem(
     @SerializedName("technique")     val technique    : String? = null,
     @SerializedName("Question Type") val questionType : String? = null,
     @SerializedName("AudienceTags")  val audienceTags : String? = null,
-    @SerializedName("VisualURL")     val visualUrl    : String? = null
+    @SerializedName("VisualURL")     val visualUrl    : String? = null,
+    // এডমিন এই row টা সর্বশেষ কবে এডিট/এড করেছে (device epoch millis) — delta/incremental
+    // sync এর জন্য: এই ভ্যালু না বাড়লে row টা আবার ডাউনলোড করার দরকার নেই।
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
 )
 
 data class QuizItem(
@@ -46,7 +49,9 @@ data class QuizItem(
     @SerializedName("Image")         val imageUrl     : String? = null,
     @SerializedName("VisualURL")     val visualUrl    : String? = null,
     // Model Test সিলেকশন অ্যালগরিদমের জন্য — এডমিন ম্যানুয়ালি "গুরুত্বপূর্ণ" ফ্ল্যাগ বসাতে পারবে
-    @SerializedName("important")     val important    : Boolean? = null
+    @SerializedName("important")     val important    : Boolean? = null,
+    // delta/incremental sync এর জন্য — দেখুন StudyItem.updatedAt এর নোট
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
 )
 
 data class QBankItem(
@@ -71,7 +76,9 @@ data class QBankItem(
     @SerializedName("VisualURL")     val visualUrl    : String? = null,
     // QBank-এ একাধিক Year/Exam-এ repeat হওয়া প্রশ্ন auto-important ধরা হয় (ContentRepository তে),
     // তবে এডমিন চাইলে ম্যানুয়ালিও ফ্ল্যাগ বসাতে পারবে — এই ফিল্ড সেটার জন্য
-    @SerializedName("important")     val important    : Boolean? = null
+    @SerializedName("important")     val important    : Boolean? = null,
+    // delta/incremental sync এর জন্য — দেখুন StudyItem.updatedAt এর নোট
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
 )
 
 // ── Gson case-insensitive + multi-alias adapter ──
@@ -176,6 +183,8 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                 || k == "visualurl"                 -> "VisualURL"
             // id
             k == "id"                               -> "id"
+            // delta sync টাইমস্ট্যাম্প
+            k == "updatedat" || k == "updated_at"    -> "updatedAt"
             else                                    -> key
         }
     }
