@@ -1,5 +1,8 @@
 package com.hanif.smartstudy.ui.menu.sections
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -15,11 +18,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import com.hanif.smartstudy.data.remote.ImgBbResult
+import com.hanif.smartstudy.data.remote.ImgBbService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.MenuUiState
 import com.hanif.smartstudy.viewmodel.MenuViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -519,6 +526,37 @@ private fun ReportQueueTab(state: MenuUiState, vm: MenuViewModel) {
                     OutlinedTextField(value = editExp, onValueChange = { editExp = it },
                         label = { Text("নতুন ব্যাখ্যা (ফাঁকা = অপরিবর্তিত)", fontFamily = NotoSansBengali, fontSize = 11.sp) },
                         modifier = Modifier.fillMaxWidth(), minLines = 2, shape = RoundedCornerShape(10.dp))
+                    run {
+                        val context = LocalContext.current
+                        val scope   = rememberCoroutineScope()
+                        var isUploading by remember { mutableStateOf(false) }
+                        val pickLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.GetContent()
+                        ) { uri: Uri? ->
+                            if (uri == null) return@rememberLauncherForActivityResult
+                            isUploading = true
+                            scope.launch {
+                                when (val result = ImgBbService.uploadImage(context, uri)) {
+                                    is ImgBbResult.Success -> {
+                                        editExp = if (editExp.isBlank()) result.url else editExp + "\n[ছবি: ${result.url}]"
+                                        isUploading = false
+                                    }
+                                    is ImgBbResult.Error -> { isUploading = false }
+                                }
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { pickLauncher.launch("image/*") },
+                            enabled = !isUploading, shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F46E5)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Image, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (isUploading) "আপলোড হচ্ছে..." else "ছবি যোগ করুন",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF4F46E5))
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -651,7 +689,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
         } else {
             AdminTabField("✅ উত্তর *", answer, { answer = it }, 2)
         }
-        AdminTabField("💡 ব্যাখ্যা", explanation, { explanation = it }, 2)
+        AdminTabFieldWithImage("💡 ব্যাখ্যা", explanation, { explanation = it }, 2)
 
         // ── ব্যাখ্যা Public/Private টগল — ডিফল্ট Public ──
         Row(
@@ -676,7 +714,7 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
             Switch(checked = explanationPublic, onCheckedChange = { explanationPublic = it })
         }
 
-        AdminTabField("🧠 টেকনিক", technique, { technique = it }, 2)
+        AdminTabFieldWithImage("🧠 টেকনিক", technique, { technique = it }, 2)
 
         // Audience dropdown
         ExposedDropdownMenuBox(expanded = audExp, onExpandedChange = { audExp = it }) {
@@ -1123,6 +1161,71 @@ private fun AdminTabField(label: String, value: String, onChange: (String) -> Un
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp))
+}
+
+// ── AdminTabField + ছবি আপলোড বাটন — ব্যাখ্যা/টেকনিক এর মতো ফিল্ডে ব্যবহারের জন্য।
+// গ্যালারি থেকে ছবি বেছে ImgBB তে আপলোড হয়, URL টা ফিল্ডের টেক্সটের শেষে যোগ হয়ে যায়।
+// এটা Firebase-নির্ভর না — তাই Firebase বন্ধ/limit থাকা অবস্থাতেও কাজ করবে। ──
+@Composable
+private fun AdminTabFieldWithImage(label: String, value: String, onChange: (String) -> Unit, minLines: Int = 2) {
+    val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
+    var isUploading by remember { mutableStateOf(false) }
+    var uploadError by remember { mutableStateOf<String?>(null) }
+
+    val pickLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        isUploading = true
+        uploadError = null
+        scope.launch {
+            when (val result = ImgBbService.uploadImage(context, uri)) {
+                is ImgBbResult.Success -> {
+                    val addition = "\n[ছবি: ${result.url}]"
+                    onChange(if (value.isBlank()) result.url else value + addition)
+                    isUploading = false
+                }
+                is ImgBbResult.Error -> {
+                    uploadError = result.message
+                    isUploading = false
+                }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = value, onValueChange = onChange,
+            label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp) },
+            modifier = Modifier.fillMaxWidth(), minLines = minLines, shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF4F46E5), unfocusedBorderColor = Color(0xFFE2E8F0)),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { pickLauncher.launch("image/*") },
+                enabled = !isUploading,
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F46E5)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                if (isUploading) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
+                    Spacer(Modifier.width(6.dp))
+                    Text("আপলোড হচ্ছে...", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF4F46E5))
+                } else {
+                    Icon(Icons.Default.Image, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("ছবি যোগ করুন", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF4F46E5))
+                }
+            }
+            uploadError?.let {
+                Text("❌ $it", fontFamily = NotoSansBengali, fontSize = 10.sp, color = Color(0xFFDC2626))
+            }
+        }
+    }
 }
 
 // ── Subject/SubTopic এর জন্য editable dropdown ──
