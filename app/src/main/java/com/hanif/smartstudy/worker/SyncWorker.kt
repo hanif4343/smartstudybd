@@ -179,6 +179,7 @@ class SyncWorker(
             "xp_update"          -> syncXpUpdate(payload)
             "study_progress"     -> syncStudyProgress(payload)
             "admin_edit_question" -> syncAdminEdit(payload)
+            "admin_add_question"  -> syncAdminAdd(payload)
             else -> false
         }
     }
@@ -318,6 +319,56 @@ class SyncWorker(
             ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminEdit error: ${e.message}")
+            false
+        }
+    }
+
+    // ── Offline এ যোগ করা নতুন প্রশ্ন Firebase এ push করে, তারপর local এর
+    // সাময়িক localId কে আসল Firebase key দিয়ে rename করে দেয় (কোনো data মোছা হয় না) ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminAdd(payload: Map<*, *>): Boolean {
+        return try {
+            val sheet   = payload["sheet"]?.toString() ?: return false
+            val localId = payload["localId"]?.toString() ?: return false
+            val fields  = payload["fields"] as? Map<String, String> ?: return false
+            if (sheet.isBlank() || fields.isEmpty()) return false
+
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val url    = "$base/$sheet.json?auth=$secret"
+
+            val jsonObj = com.google.gson.JsonObject().apply {
+                fields.forEach { (k, v) -> addProperty(k, v) }
+                addProperty("createdAt", System.currentTimeMillis())
+                addProperty("updatedAt", System.currentTimeMillis())
+            }
+            val resp = client.newCall(
+                Request.Builder().url(url)
+                    .post(jsonObj.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val respBody = resp.body?.string() ?: ""
+            val ok = resp.isSuccessful
+            resp.close()
+
+            if (ok) {
+                val newKey = try {
+                    com.google.gson.JsonParser.parseString(respBody)
+                        .asJsonObject.get("name")?.asString
+                } catch (e: Exception) { null }
+
+                if (!newKey.isNullOrBlank()) {
+                    com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                        .renameLocalQuestionKey(sheet, localId, newKey)
+                }
+                touchMeta(secret, base)
+                Log.d(TAG, "syncAdminAdd $sheet/$localId → $newKey")
+            } else {
+                Log.w(TAG, "syncAdminAdd failed: $sheet/$localId code=${resp.code}")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminAdd error: ${e.message}")
             false
         }
     }
