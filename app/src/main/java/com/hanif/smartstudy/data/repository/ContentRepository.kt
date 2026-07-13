@@ -539,6 +539,24 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
+    // ── Admin প্রশ্ন কার্ড ডিলিট করার পর in-memory + disk cache থেকে সেই
+    //    আইটেমটাই সরিয়ে দেয় — patchContentAndPersist এর মতোই প্যাটার্ন, কিন্তু
+    //    row বদলানোর বদলে পুরোপুরি বাদ দিয়ে দেয় (প্রশ্ন + অপশন + উত্তর + ব্যাখ্যা,
+    //    পুরো কার্ডটাই)।
+    suspend fun removeContentAndPersist(sheet: String, rowKey: String) {
+        val base = _memCache ?: cache.loadContent() ?: return
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.filter { it.id != rowKey })
+            "Quiz"  -> base.copy(quiz  = base.quiz.filter  { it.id != rowKey })
+            "QBank" -> base.copy(qbank = base.qbank.filter { it.id != rowKey })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
     //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
     suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
