@@ -563,6 +563,9 @@ class ContentRepository(private val context: Context) {
         _memCache = patched
         cache.saveContent(patched)
     }
+
+    /**
+     * Admin একটা mode + tag এর subject order সেভ করার পর in-memory + disk cache এ সরাসরি নতুন subject
      * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই।
      * mode + tag উভয়ভিত্তিক — শুধু সেই mode+tag এর subject order replace হয়।
      */
