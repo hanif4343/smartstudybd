@@ -69,7 +69,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "🧪 Model Test", "✅ চেকলিস্ট")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "⚡ Bulk Upload", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "🧪 Model Test", "✅ চেকলিস্ট")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -82,11 +82,11 @@ fun AdminPage(
 
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
-            // Auto-load debug log phone list when tab 7 opens
-            LaunchedEffect(tab) { if (tab == 7) vm.loadDebugLogPhones() }
+            // Auto-load debug log phone list when Logs tab (8) opens
+            LaunchedEffect(tab) { if (tab == 8) vm.loadDebugLogPhones() }
             // Sync ট্যাব (⏳ Sync) খোলার সময় প্রতিবার fresh করে নাও — যাতে
             // এইমাত্র করা offline edit-ও সাথে সাথে দেখা যায়
-            LaunchedEffect(tab) { if (tab == 8) vm.loadPendingEdits() }
+            LaunchedEffect(tab) { if (tab == 9) vm.loadPendingEdits() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -101,12 +101,13 @@ fun AdminPage(
                 2 -> FcmTab(state)
                 3 -> ReportQueueTab(state, vm)
                 4 -> AddQuestionTab(state, vm)
-                5 -> BulkAudienceTab(state, vm)
-                6 -> RenameTab(state, vm)
-                7 -> LogsTab(state, vm)
-                8 -> PendingSyncTab(state, vm)
-                9 -> ModelTestGenerateTab(state, vm)
-                10 -> ProductionChecklistTab()
+                5 -> BulkUploaderTab(state, vm)
+                6 -> BulkAudienceTab(state, vm)
+                7 -> RenameTab(state, vm)
+                8 -> LogsTab(state, vm)
+                9 -> PendingSyncTab(state, vm)
+                10 -> ModelTestGenerateTab(state, vm)
+                11 -> ProductionChecklistTab()
             }
         }
     }
@@ -1170,6 +1171,339 @@ private fun AdminSubjectField(
                 }
             }
         }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ── Bulk Question Uploader ── admin-app এর BulkUploaderPage এর 1:1 পোর্ট।
+// একই { } ব্লক / লাইন-বাই-লাইন পার্সিং, একই সেমিকোলন ফরম্যাট (Study/Written/MCQ)।
+// পার্থক্য শুধু ডেস্টিনেশন: এখানে সরাসরি Firebase-এ পুশ করার বদলে vm.adminBulkAddQuestions()
+// ব্যবহার করা হয়, যেটা AddQuestionTab-এর মতোই লোকাল-ফার্স্ট (in-memory + disk cache এ সাথে
+// সাথে দেখায়) এবং অফলাইন/quota-fail হলে PendingQueue-তে জমা রাখে — নেট/quota ঠিক হলে
+// SyncWorker অটো সিঙ্ক করে দেয়।
+// ══════════════════════════════════════════════════════════════════════════
+
+private data class BulkParseResult(
+    val ok: Boolean = false,
+    val skip: Boolean = false,
+    val err: Boolean = false,
+    val reason: String = "",
+    val q: String = "",
+    val opt1: String = "", val opt2: String = "", val opt3: String = "", val opt4: String = "",
+    val correct: String = "",
+    val explanation: String = ""
+)
+
+// { ... } ব্লক থাকলে সেগুলোই entry, নাহলে প্রতি নন-ফাঁকা লাইন একটা entry
+private fun getBulkEntries(raw: String): List<String> {
+    val entries = mutableListOf<String>()
+    Regex("\\{([\\s\\S]+?)\\}").findAll(raw).forEach { m ->
+        val e = m.groupValues[1].trim()
+        if (e.isNotEmpty()) entries.add(e)
+    }
+    if (entries.isNotEmpty()) return entries
+    return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+// mode==="Study" হলে সবসময় Study ফরম্যাট, নাহলে qtype (MCQ/Written) অনুযায়ী
+private fun getBulkEffectiveType(mode: String, qtype: String) = if (mode == "Study") "Study" else qtype
+
+private fun parseBulkEntry(entry: String, effectiveType: String): BulkParseResult {
+    val tr = entry.trim()
+    if (tr.isEmpty() || tr.startsWith("#")) return BulkParseResult(skip = true)
+
+    return when (effectiveType) {
+        "Study" -> {
+            val si = tr.indexOf(";")
+            if (si == -1) return BulkParseResult(err = true, reason = "Study: প্রথম ';' দিয়ে প্রশ্ন ও উত্তর আলাদা করুন")
+            val q   = tr.substring(0, si).trim()
+            val ans = tr.substring(si + 1).trim()
+            if (q.isEmpty())   return BulkParseResult(err = true, reason = "Study: প্রশ্ন খালি")
+            if (ans.isEmpty()) return BulkParseResult(err = true, reason = "Study: উত্তর খালি")
+            BulkParseResult(ok = true, q = q, correct = ans)
+        }
+        "Written" -> {
+            val si = tr.indexOf(";")
+            if (si == -1) return BulkParseResult(err = true, reason = "Written: ';' দিয়ে প্রশ্ন ও উত্তর আলাদা করুন")
+            val q    = tr.substring(0, si).trim()
+            val rest = tr.substring(si + 1)
+            val lastSemi = rest.lastIndexOf(";")
+            val ans: String
+            val exp: String
+            if (lastSemi > 0) {
+                ans = rest.substring(0, lastSemi).trim()
+                exp = rest.substring(lastSemi + 1).trim()
+            } else {
+                ans = rest.trim(); exp = ""
+            }
+            if (q.isEmpty())   return BulkParseResult(err = true, reason = "Written: প্রশ্ন খালি")
+            if (ans.isEmpty()) return BulkParseResult(err = true, reason = "Written: উত্তর খালি")
+            BulkParseResult(ok = true, q = q, correct = ans, explanation = exp)
+        }
+        else -> { // MCQ
+            val flat  = tr.replace(Regex("\\r?\\n"), " ").replace(Regex("\\s+"), " ")
+            val parts = flat.split(";").map { it.trim() }
+            if (parts.size < 6) return BulkParseResult(err = true,
+                reason = "MCQ: ${parts.size}টি কলাম পেয়েছি, দরকার কমপক্ষে ৬টি (প্রশ্ন;অপ১;অপ২;অপ৩;অপ৪;উত্তর)")
+            if (parts[0].isEmpty()) return BulkParseResult(err = true, reason = "MCQ: প্রশ্ন খালি")
+            if (parts[5].isEmpty()) return BulkParseResult(err = true, reason = "MCQ: সঠিক উত্তর খালি")
+            BulkParseResult(ok = true, q = parts[0], opt1 = parts[1], opt2 = parts[2], opt3 = parts[3], opt4 = parts[4],
+                correct = parts[5], explanation = parts.getOrElse(6) { "" })
+        }
+    }
+}
+
+// AddQuestionTab-এর সাবমিট করা fields map এর সাথে হুবহু একই shape
+private fun buildBulkFields(
+    item: BulkParseResult, subject: String, subTopic: String, mode: String, qtype: String,
+    audience: String, explanationPublic: Boolean
+): Map<String, String> {
+    val effType = getBulkEffectiveType(mode, qtype)
+    val isMcq   = effType == "MCQ"
+    val fields  = mutableMapOf(
+        "subject" to subject, "sub_topic" to subTopic.ifBlank { subject },
+        "question" to item.q, "correct" to item.correct,
+        "explanation" to item.explanation,
+        "explanationVisibility" to if (explanationPublic) "public" else "private",
+        "technique" to "", "AudienceTags" to audience,
+        "type" to if (mode == "Study") "study" else if (isMcq) "mcq" else "written"
+    )
+    if (isMcq) {
+        if (item.opt1.isNotBlank()) fields["option1"] = item.opt1
+        if (item.opt2.isNotBlank()) fields["option2"] = item.opt2
+        if (item.opt3.isNotBlank()) fields["option3"] = item.opt3
+        if (item.opt4.isNotBlank()) fields["option4"] = item.opt4
+    }
+    return fields
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BulkUploaderTab(state: MenuUiState, vm: MenuViewModel) {
+    var mode        by remember { mutableStateOf("Quiz") }
+    var qtype       by remember { mutableStateOf("MCQ") }
+    var subject     by remember { mutableStateOf("") }
+    var subTopic    by remember { mutableStateOf("") }
+    var audience    by remember { mutableStateOf("") }
+    var bulkText    by remember { mutableStateOf("") }
+    var explanationPublic by remember { mutableStateOf(true) }
+    var audExp      by remember { mutableStateOf(false) }
+
+    val effType = getBulkEffectiveType(mode, qtype)
+    val parsedRows = remember(bulkText, effType) {
+        if (bulkText.isBlank()) emptyList() else getBulkEntries(bulkText).map { parseBulkEntry(it, effType) }
+    }
+    val okCount   = parsedRows.count { it.ok }
+    val errCount  = parsedRows.count { it.err }
+    val skipCount = parsedRows.count { it.skip }
+
+    val running = state.isBulkUploading
+    val pct = if (state.bulkUploadTotal > 0) state.bulkUploadDone.toFloat() / state.bulkUploadTotal else 0f
+
+    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header
+        Column(
+            Modifier.fillMaxWidth()
+                .background(Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))), RoundedCornerShape(14.dp))
+                .padding(14.dp)
+        ) {
+            Text("⚡ বাল্ক প্রশ্ন আপলোড", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp, color = Color.White)
+            Spacer(Modifier.height(2.dp))
+            Text("একসাথে অনেক প্রশ্ন যোগ করুন — নেট/Firebase কোটা না থাকলেও সাথে সাথে লোকালি সেভ ও দেখা যাবে, ঠিক হলে অটো sync হবে",
+                fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color.White.copy(alpha = .9f))
+        }
+
+        // Sheet chips
+        Text("📂 Sheet", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SHEETS_LIST.forEach { s ->
+                FilterChip(selected = mode == s, onClick = { mode = s }, enabled = !running,
+                    label = { Text(s, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF4F46E5), selectedLabelColor = Color.White))
+            }
+        }
+
+        if (mode != "Study") {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("প্রশ্নের ধরন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Switch(checked = qtype == "MCQ", onCheckedChange = { qtype = if (it) "MCQ" else "Written" }, enabled = !running)
+                Spacer(Modifier.width(8.dp))
+                Text(qtype, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4F46E5))
+            }
+        }
+
+        HorizontalDivider()
+        val subjectOptions  = state.adminSubjectsBySheet[mode].orEmpty()
+        val subTopicOptions = state.adminSubTopicsByKey["$mode|$subject"].orEmpty()
+        AdminSubjectField("বিষয় (Subject) *", subject, subjectOptions, { subject = it })
+        AdminSubjectField("অধ্যায় (SubTopic)", subTopic, subTopicOptions, { subTopic = it })
+
+        // Audience dropdown
+        ExposedDropdownMenuBox(expanded = audExp, onExpandedChange = { audExp = it }) {
+            OutlinedTextField(
+                value = AUDIENCE_LIST.find { it.first == audience }?.second ?: "Job Seeker (default)",
+                onValueChange = {}, readOnly = true,
+                label = { Text("🎯 Audience Tag", fontFamily = NotoSansBengali) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(audExp) },
+                modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4F46E5))
+            )
+            ExposedDropdownMenu(expanded = audExp, onDismissRequest = { audExp = false }) {
+                AUDIENCE_LIST.forEach { (tag, label) ->
+                    DropdownMenuItem(text = { Text(label, fontFamily = NotoSansBengali) },
+                        onClick = { audience = tag; audExp = false })
+                }
+            }
+        }
+
+        // ব্যাখ্যা Public/Private টগল
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFFF8FAFC), RoundedCornerShape(10.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(if (explanationPublic) Icons.Default.Public else Icons.Default.Lock, null,
+                tint = if (explanationPublic) Color(0xFF10B981) else Color(0xFFF59E0B), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("ব্যাখ্যার ভিজিবিলিটি (সবগুলোর জন্য)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(if (explanationPublic) "Public — সবাই দেখতে পাবে" else "Private — শুধু Admin দেখতে পাবে",
+                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = explanationPublic, onCheckedChange = { explanationPublic = it })
+        }
+
+        // ফরম্যাট হিন্ট
+        Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFEEF2FF), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(10.dp)) {
+                Text("📋 প্রতিটি প্রশ্নের ফরম্যাট", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp, color = Color(0xFF4F46E5))
+                val hint = when (effType) {
+                    "Study"   -> "প্রশ্ন ; উত্তর"
+                    "Written" -> "প্রশ্ন ; উত্তর ; ব্যাখ্যা (ঐচ্ছিক)"
+                    else      -> "প্রশ্ন ; অপশন১ ; অপশন২ ; অপশন৩ ; অপশন৪ ; সঠিক উত্তর ; ব্যাখ্যা (ঐচ্ছিক)"
+                }
+                Text(hint, fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("প্রতিটি প্রশ্ন { } দিয়ে ঘিরে দিন, অথবা প্রতি লাইনে একটা করে লিখুন। # দিয়ে শুরু হওয়া লাইন বাদ যাবে।",
+                    fontFamily = NotoSansBengali, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Text("📝 প্রশ্নগুলো পেস্ট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = bulkText, onValueChange = { bulkText = it },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp),
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4F46E5)),
+            enabled = !running,
+            placeholder = { Text("{ প্রশ্ন ; অপশন১ ; অপশন২ ; অপশন৩ ; অপশন৪ ; উত্তর }", fontFamily = NotoSansBengali, fontSize = 11.sp) }
+        )
+
+        // Validation chips
+        if (parsedRows.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = {}, label = { Text("মোট ${parsedRows.size}", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+                AssistChip(onClick = {}, label = { Text("✅ $okCount", fontFamily = NotoSansBengali, fontSize = 11.sp, color = GreenOk) })
+                if (errCount > 0) AssistChip(onClick = {},
+                    label = { Text("❌ $errCount", fontFamily = NotoSansBengali, fontSize = 11.sp, color = RedWrong) })
+                if (skipCount > 0) AssistChip(onClick = {},
+                    label = { Text("⏭ $skipCount", fontFamily = NotoSansBengali, fontSize = 11.sp) })
+            }
+            val errorRows = parsedRows.filter { it.err }.take(6)
+            if (errorRows.isNotEmpty()) {
+                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF1F2), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp)) {
+                        errorRows.forEach {
+                            Text("• ${it.reason}", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF991B1B))
+                        }
+                        if (errCount > errorRows.size) {
+                            Text("...আরও ${errCount - errorRows.size}টি ভুল আছে", fontFamily = NotoSansBengali,
+                                fontSize = 10.sp, color = Color(0xFF991B1B))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Progress
+        if (running || state.bulkUploadTotal > 0) {
+            Column(Modifier.fillMaxWidth()) {
+                LinearProgressIndicator(progress = { pct }, modifier = Modifier.fillMaxWidth().height(8.dp),
+                    color = Color(0xFF4F46E5))
+                Spacer(Modifier.height(4.dp))
+                Text("${state.bulkUploadDone}/${state.bulkUploadTotal}  •  ✅ সফল ${state.bulkUploadSent}  •  ⚠️ pending/offline ${state.bulkUploadFailed}",
+                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        state.bulkUploadResultMsg?.let {
+            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFF0FDF4), modifier = Modifier.fillMaxWidth()) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+            }
+        }
+
+        // Live log
+        if (state.bulkUploadLog.isNotEmpty()) {
+            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF0F172A), modifier = Modifier.fillMaxWidth()) {
+                LazyColumn(Modifier.padding(8.dp).heightIn(max = 200.dp)) {
+                    items(state.bulkUploadLog.takeLast(40).reversed()) { line ->
+                        Text(line, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 10.sp, color = Color(0xFFE2E8F0), modifier = Modifier.padding(vertical = 1.dp))
+                    }
+                }
+            }
+        }
+
+        val isValid = subject.isNotBlank() && okCount > 0
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = {
+                    val entries = parsedRows.filter { it.ok }
+                        .map { row -> buildBulkFields(row, subject, subTopic, mode, qtype, audience, explanationPublic) }
+                    vm.adminBulkAddQuestions(mode, entries)
+                },
+                enabled = isValid && !running,
+                modifier = Modifier.weight(1f).height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+            ) {
+                if (running) {
+                    CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("আপলোড হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Submit ($okCount টি প্রশ্ন)", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                }
+            }
+            if (running) {
+                OutlinedButton(onClick = { vm.adminStopBulkUpload() },
+                    modifier = Modifier.height(52.dp), shape = RoundedCornerShape(14.dp)) {
+                    Text("⛔ বন্ধ", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (!running && (state.bulkUploadTotal > 0 || bulkText.isNotBlank())) {
+            TextButton(onClick = { bulkText = ""; vm.adminClearBulkUploadResult() }) {
+                Text("🔄 রিসেট করুন (নতুন ব্যাচ)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(Modifier.height(40.dp))
     }
 }
 
