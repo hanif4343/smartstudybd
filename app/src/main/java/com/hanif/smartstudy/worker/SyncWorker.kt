@@ -180,6 +180,7 @@ class SyncWorker(
             "study_progress"     -> syncStudyProgress(payload)
             "admin_edit_question" -> syncAdminEdit(payload)
             "admin_add_question"  -> syncAdminAdd(payload)
+            "admin_delete_question" -> syncAdminDelete(payload)
             else -> false
         }
     }
@@ -362,6 +363,37 @@ class SyncWorker(
             ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminAdd error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/fail অবস্থায় ডিলিট করা প্রশ্ন — net আসলে ব্যাকগ্রাউন্ডে Firebase
+    //    থেকেও সেই row (প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সব) মুছে দেয়। localId (এখনো
+    //    Firebase-এ কখনো পাঠানোই হয়নি এমন প্রশ্ন) হলে এখানে আসার আগেই
+    //    PendingQueue.removePendingForQuestion() দিয়ে বাদ দেওয়া হয়ে গেছে,
+    //    তাই এই ফাংশন শুধু আসল Firebase row-এর জন্যই কল হয় ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminDelete(payload: Map<*, *>): Boolean {
+        return try {
+            val sheet      = payload["sheet"]?.toString() ?: return false
+            val questionId = payload["questionId"]?.toString() ?: return false
+            if (questionId.isBlank()) return false
+
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val url    = "$base/$sheet/$questionId.json?auth=$secret"
+
+            val resp = client.newCall(
+                Request.Builder().url(url).delete().build()
+            ).execute()
+            val code = resp.code
+            resp.close()
+            val ok = resp.isSuccessful
+            Log.d(TAG, "syncAdminDelete $sheet/$questionId → $code")
+            if (ok) touchMeta(secret, base)
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminDelete error: ${e.message}")
             false
         }
     }
