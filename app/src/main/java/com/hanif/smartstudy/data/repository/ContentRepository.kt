@@ -516,117 +516,53 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
-    // ── Admin: offline নতুন প্রশ্ন সাথে সাথে local (memory + disk cache + Room) এ যোগ করো ──
-    // পুরনো কোনো কিছু মোছা/reset করা হয় না — শুধু নতুন item existing list এর শেষে যোগ হয়।
-    // sheet: "Quiz" | "QBank" | "Study"; localId: সাময়িক key (যেমন "LOCAL_<uuid>")
-    suspend fun addNewQuestionLocally(sheet: String, localId: String, fields: Map<String, String>) {
-        val base = _memCache ?: cache.loadContent() ?: AppContent()
+    // ── Admin নতুন প্রশ্ন যোগ করার পর (বা offline/fail হলেও) in-memory +
+    //    disk cache এ সরাসরি নতুন item যোগ করে দেয় — patchContentAndPersist এর
+    //    মতোই, কিন্তু existing row খোঁজার বদলে সম্পূর্ণ নতুন row append করে।
+    //    rowKey এখানে Firebase push-key (অনলাইন সফল হলে) অথবা একটা টেম্পোরারি
+    //    লোকাল আইডি (offline/fail হলে, পরে sync হওয়ার সময় আসল key দিয়ে বদলে যাবে)।
+    suspend fun addContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+        val obj  = com.google.gson.JsonObject()
+        fields.forEach { (k, v) -> obj.addProperty(k, v) }
+        obj.addProperty("id", rowKey)
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study + gson.fromJson(obj, com.hanif.smartstudy.data.model.StudyItem::class.java))
+            "Quiz"  -> base.copy(quiz  = base.quiz  + gson.fromJson(obj, com.hanif.smartstudy.data.model.QuizItem::class.java))
+            "QBank" -> base.copy(qbank = base.qbank + gson.fromJson(obj, com.hanif.smartstudy.data.model.QBankItem::class.java))
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
+    //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
+    suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
+        val base = _memCache ?: cache.loadContent() ?: return
         val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
 
-        fun <T : Any> buildItem(cls: Class<T>): T {
-            val obj = com.google.gson.JsonObject()
-            obj.addProperty("id", localId)
-            fields.forEach { (k, v) -> obj.addProperty(k, v) }
+        fun <T : Any> swapId(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) != oldId) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty("id", newId)
             return gson.fromJson(obj, cls)
         }
 
-        val updated = when (sheet) {
-            "Study" -> base.copy(study = base.study + buildItem(com.hanif.smartstudy.data.model.StudyItem::class.java))
-            "Quiz"  -> base.copy(quiz  = base.quiz  + buildItem(com.hanif.smartstudy.data.model.QuizItem::class.java))
-            "QBank" -> base.copy(qbank = base.qbank + buildItem(com.hanif.smartstudy.data.model.QBankItem::class.java))
-            else    -> base
-        }
-        _memCache = updated
-        cache.saveContent(updated)
-
-        // Room এও সাথে সাথে যোগ করো, যাতে paginated question list এ instant দেখা যায়
-        val now = System.currentTimeMillis()
-        when (sheet) {
-            "Study" -> updated.study.lastOrNull { it.id == localId }?.let { dao.upsert(it.toEntity(now)) }
-            "Quiz"  -> updated.quiz.lastOrNull  { it.id == localId }?.let { dao.upsert(it.toEntity(now)) }
-            "QBank" -> updated.qbank.lastOrNull { it.id == localId }?.let { dao.upsert(it.toEntity(now)) }
-        }
-    }
-
-    // ── Offline এ যোগ করা প্রশ্ন Firebase এ sync হওয়ার পর — সাময়িক localId কে
-    // আসল Firebase key দিয়ে rename করে (memory + disk cache + Room, তিন জায়গাতেই)।
-    // কোনো data মোছা হয় না, শুধু ID replace হয়।
-    suspend fun renameLocalQuestionKey(sheet: String, oldId: String, newId: String) {
-        val base = _memCache ?: cache.loadContent() ?: return
-
-        fun <T> renameId(item: T, idOf: (T) -> String?, withId: (T, String) -> T): T =
-            if (idOf(item) == oldId) withId(item, newId) else item
-
         val patched = when (sheet) {
-            "Study" -> base.copy(study = base.study.map { renameId(it, { s -> s.id }) { s, nid -> s.copy(id = nid) } })
-            "Quiz"  -> base.copy(quiz  = base.quiz.map  { renameId(it, { q -> q.id }) { q, nid -> q.copy(id = nid) } })
-            "QBank" -> base.copy(qbank = base.qbank.map { renameId(it, { q -> q.id }) { q, nid -> q.copy(id = nid) } })
+            "Study" -> base.copy(study = base.study.map { swapId(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { swapId(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { swapId(it) { q -> q.id } })
             else    -> base
         }
+
         _memCache = patched
         cache.saveContent(patched)
-
-        // Room: primary key (sheet, fbKey) বদলাতে হলে পুরনো row মুছে নতুন key দিয়ে আবার বসাতে হয়
-        val old = dao.getById(sheet.uppercase(), oldId)
-        if (old != null) {
-            dao.deleteByKey(sheet.uppercase(), oldId)
-            dao.upsert(old.copy(fbKey = newId))
-        }
     }
-
-    // ── Settings > "এখনই Backup নিন" — বর্তমান cache/local content একটা JSON ফাইলে
-    // ফোনের Downloads ফোল্ডারে সেভ করে দেয়। Pure read-only — কোনো ঝুঁকি নেই। ──
-    suspend fun exportCurrentContentBackup(): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val content = _memCache ?: cache.loadContent()
-                ?: return@withContext Result.failure(Exception("কোনো ডেটা পাওয়া যায়নি"))
-
-            fun <T> toNode(items: List<T>, idOf: (T) -> String?): Map<String, T> {
-                val map = LinkedHashMap<String, T>()
-                items.forEachIndexed { idx, item ->
-                    val key = idOf(item)?.takeIf { it.isNotBlank() } ?: idx.toString()
-                    map[key] = item
-                }
-                return map
-            }
-
-            val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-            val exportObj = mapOf(
-                "QBank" to toNode(content.qbank) { it.id },
-                "Quiz"  to toNode(content.quiz)  { it.id },
-                "Study" to toNode(content.study) { it.id }
-            )
-            val json = gson.toJson(exportObj)
-
-            val fileName = "SmartStudyBD_backup_${System.currentTimeMillis()}.json"
-            val resolver = context.contentResolver
-            val values = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
-                }
-            }
-            val collection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            } else {
-                @Suppress("DEPRECATION")
-                android.net.Uri.fromFile(
-                    java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOADS), fileName)
-                )
-            }
-            val uri = resolver.insert(collection, values)
-                ?: return@withContext Result.failure(Exception("ফাইল তৈরি করা যায়নি"))
-            resolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                ?: return@withContext Result.failure(Exception("ফাইলে লেখা যায়নি"))
-
-            Result.success(fileName)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
      * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই।
      * mode + tag উভয়ভিত্তিক — শুধু সেই mode+tag এর subject order replace হয়।
      */
