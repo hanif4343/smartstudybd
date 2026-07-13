@@ -995,7 +995,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val BATCH = 6
             var i = 0
             while (i < entries.size) {
-                kotlinx.coroutines.ensureActive()
+                ensureActive()
                 val batch = entries.subList(i, minOf(i + BATCH, entries.size))
 
                 // ধাপ ১: নেটওয়ার্ক কল (Firebase push) গুলো একসাথে সমান্তরালে চালাও — দ্রুত হওয়ার জন্য
