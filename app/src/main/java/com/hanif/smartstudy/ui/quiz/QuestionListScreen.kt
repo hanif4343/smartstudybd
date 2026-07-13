@@ -88,7 +88,8 @@ fun QuestionListScreen(
     currentUser : com.hanif.smartstudy.data.model.User? = null,
     highlightQuestionId : String? = null,
     onHighlightConsumed : () -> Unit = {},
-    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
+    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
+    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
 ) {
     val pageSize = QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
@@ -270,6 +271,7 @@ fun QuestionListScreen(
                                     currentUser = currentUser,
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
+                                    onAdminDelete = onAdminDelete,
                                     studyRevealMode = studyRevealMode
                                 )
                             }
@@ -288,6 +290,7 @@ fun QuestionListScreen(
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
+                            onAdminDelete = onAdminDelete,
                             studyRevealMode = studyRevealMode
                         )
                         }
