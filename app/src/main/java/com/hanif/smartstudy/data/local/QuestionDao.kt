@@ -122,10 +122,6 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE sheet = :sheet AND fbKey = :fbKey LIMIT 1")
     suspend fun getById(sheet: String, fbKey: String): QuestionEntity?
 
-    // ── offline এ local key দিয়ে যোগ করা প্রশ্ন sync হওয়ার পর আসল Firebase key তে rename করতে ──
-    @Query("DELETE FROM questions WHERE sheet = :sheet AND fbKey = :fbKey")
-    suspend fun deleteByKey(sheet: String, fbKey: String)
-
     // ── Global search ─────────────────────────────────────────────────────────
     @Query("""
         SELECT * FROM questions 
