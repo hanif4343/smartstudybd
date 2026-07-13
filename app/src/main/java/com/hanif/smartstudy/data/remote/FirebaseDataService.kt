@@ -465,6 +465,28 @@ object FirebaseDataService {
         }
     }
 
+    /** Admin: পুরো প্রশ্ন কার্ড Firebase থেকে ডিলিট করো (প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সহ পুরো row) */
+    suspend fun adminDeleteQuestion(
+        sheet  : String,
+        rowKey : String
+    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
+            val resp = client.newCall(Request.Builder().url(url).delete().build()).execute()
+            val code = resp.code
+            resp.close()
+            if (resp.isSuccessful) {
+                touchMetaUpdatedAt()
+                ApiResult.Success(Unit)
+            } else {
+                ApiResult.Error("Firebase error: $code")
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
     /** Admin: Options swap করো — Firebase এ option1-4 + correct একসাথে update */
     suspend fun adminSwapOptions(
         sheet    : String,
