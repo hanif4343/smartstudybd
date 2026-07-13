@@ -109,13 +109,46 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin: প্রশ্ন কার্ড ডিলিট (অফলাইন/fail হলে queue এ রাখা হয়, net আসলে
+    //    Firebase থেকেও ডিলিট হয়ে যাবে) ──
+    suspend fun enqueueAdminDelete(
+        sheet      : String,
+        questionId : String,
+        questionPreview: String = ""
+    ) {
+        enqueue(PendingAction(
+            type    = "admin_delete_question",
+            payload = gson.toJson(mapOf(
+                "sheet"           to sheet,
+                "questionId"      to questionId,
+                "questionPreview" to questionPreview.take(80)
+            ))
+        ))
+    }
+
+    // ── কোনো প্রশ্ন (rowKey/localId) ডিলিট হয়ে গেলে সেই প্রশ্নের জন্য আগে থেকে
+    //    queue-তে থাকা pending edit/add action গুলো আর দরকার নেই — সরিয়ে ফেলো।
+    //    বিশেষত: এখনো sync না হওয়া লোকাল-add প্রশ্ন ডিলিট করলে তো Firebase-এ
+    //    কখনো পাঠানোরই দরকার নেই ──
+    suspend fun removePendingForQuestion(questionId: String) {
+        val queue = getAll().toMutableList()
+        queue.removeAll { action ->
+            if (action.type != "admin_edit_question" && action.type != "admin_add_question") return@removeAll false
+            try {
+                val map = gson.fromJson<Map<String, Any>>(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                map["questionId"]?.toString() == questionId || map["localId"]?.toString() == questionId
+            } catch (e: Exception) { false }
+        }
+        save(queue)
+    }
+
+    // ── Pending admin edit + add + delete — সবগুলোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
+    suspend fun getPendingAdminActions(): List<PendingAction> =
+        getAll().filter { it.type == "admin_edit_question" || it.type == "admin_add_question" || it.type == "admin_delete_question" }
+
     // ── Pending admin edits আলাদা করে দেখাও ──
     suspend fun getPendingAdminEdits(): List<PendingAction> =
         getAll().filter { it.type == "admin_edit_question" }
-
-    // ── Pending admin edit + add — দুটোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
-    suspend fun getPendingAdminActions(): List<PendingAction> =
-        getAll().filter { it.type == "admin_edit_question" || it.type == "admin_add_question" }
 
     // ── সব pending action পড়ো ──
     suspend fun getAll(): List<PendingAction> {
