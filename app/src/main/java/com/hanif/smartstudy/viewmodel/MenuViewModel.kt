@@ -707,12 +707,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                                 contentEditVersion = _state.value.contentEditVersion + 1) }
                         }
                         is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                            // Online কিন্তু fail — queue এ রাখো, সাথে সাথে local এও দেখাও
+                            // Online কিন্তু fail — queue এ রাখো + লোকাল cache-এও সাথে সাথে
+                            // patch করে দাও, যাতে sync না হওয়া পর্যন্ত এই edit-টাই অ্যাপে
+                            // দেখা যায় (Firebase-এ সিঙ্ক না হলেও UI নিজের local state দেখাবে)।
                             com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "Online but FAILED: ${r.message} — queueing")
-                            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                            q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                             com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                                 .patchContentAndPersist(sheet, rowKey, fields)
+                            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                            q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                             loadPendingEdits()
                             _state.update { it.copy(isEditingQuestion = false,
                                 editSuccessMsg = "⚠️ সংরক্ষিত — sync হবে", error = "❌ ${r.message}",
@@ -720,12 +722,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 } else {
-                    // Offline — queue এ রাখো, net আসলে auto sync হবে; সাথে সাথে local এও patch করো
+                    // Offline — লোকাল cache-এ সাথে সাথে patch করো (তাই edit-টা সাথে সাথেই
+                    // অ্যাপে দেখা যাবে), আর queue এ রাখো — net আসলে auto sync হবে
                     com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "OFFLINE branch — enqueueing")
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                     com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                         .patchContentAndPersist(sheet, rowKey, fields)
+                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                     val countAfter = q.getPendingAdminEdits().size
                     com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "enqueued OK — pending count now = $countAfter")
                     loadPendingEdits()
@@ -739,10 +742,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 //    চেষ্টা করি, যাতে edit-টা একদম হারিয়ে না যায় ──
                 com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "EXCEPTION in adminEditQuestion: ${e.message}", e)
                 try {
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                     com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                         .patchContentAndPersist(sheet, rowKey, fields)
+                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                     loadPendingEdits()
                     _state.update { it.copy(isEditingQuestion = false,
                         editSuccessMsg = "📴 সংরক্ষিত — net আসলে auto sync হবে",
@@ -760,7 +763,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     fun loadPendingEdits() {
         viewModelScope.launch {
             val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-            _state.update { it.copy(pendingEdits = q.getPendingAdminEdits()) }
+            _state.update { it.copy(pendingEdits = q.getPendingAdminActions()) }
         }
     }
 
@@ -770,7 +773,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isSyncingEdits = true, syncEditsMsg = null) }
             val q       = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-            val pending = q.getPendingAdminEdits()
+            val pending = q.getPendingAdminActions()
             if (pending.isEmpty()) {
                 _state.update { it.copy(isSyncingEdits = false, syncEditsMsg = "✅ কোনো pending edit নেই") }
                 return@launch
@@ -781,20 +784,40 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
             for (action in pending) {
                 try {
-                    val payload    = gson.fromJson(action.payload, Map::class.java)
-                    val sheet      = payload["sheet"]?.toString() ?: continue
-                    val questionId = payload["questionId"]?.toString() ?: continue
+                    val payload = gson.fromJson(action.payload, Map::class.java)
+                    val sheet   = payload["sheet"]?.toString() ?: continue
                     @Suppress("UNCHECKED_CAST")
-                    val fields     = payload["fields"] as? Map<String, String> ?: continue
-                    when (com.hanif.smartstudy.data.remote.FirebaseDataService
-                            .adminUpdateQuestionField(sheet, questionId, fields)) {
-                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                            repo.patchContentAndPersist(sheet, questionId, fields)
-                            q.remove(action.id); successCount++
+                    val fields  = payload["fields"] as? Map<String, String> ?: continue
+
+                    when (action.type) {
+                        "admin_edit_question" -> {
+                            val questionId = payload["questionId"]?.toString() ?: continue
+                            when (com.hanif.smartstudy.data.remote.FirebaseDataService
+                                    .adminUpdateQuestionField(sheet, questionId, fields)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    repo.patchContentAndPersist(sheet, questionId, fields)
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
                         }
-                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                            q.incrementRetry(action.id); failCount++
+                        "admin_add_question" -> {
+                            val localId = payload["localId"]?.toString() ?: continue
+                            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                                    .adminAddQuestion(sheet, fields)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    // temp local id → আসল Firebase push key দিয়ে replace
+                                    repo.replaceLocalIdAndPersist(sheet, localId, r.data)
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
                         }
+                        else -> continue
                     }
                 } catch (e: Exception) { failCount++ }
             }
@@ -811,23 +834,12 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearSyncEditsMsg() { _state.update { it.copy(syncEditsMsg = null) } }
 
-    fun adminSwapOptions(sheet: String, rowKey: String, options: Map<String, String>, newAnswer: String) {
+    // ── Admin: Options swap (offline-aware — adminEditQuestion এরই একটা shortcut,
+    //    যেহেতু এটাও শুধু কিছু ফিল্ড patch করা, তাই একই offline/queue লজিক পায়) ──
+    fun adminSwapOptions(sheet: String, rowKey: String, options: Map<String, String>, newAnswer: String, questionPreview: String = "") {
         if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            _state.update { it.copy(isEditingQuestion = true) }
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                    .adminSwapOptions(sheet, rowKey, options, newAnswer)) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    val fields = options.toMutableMap().apply { put("correct", newAnswer) }
-                    com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                        .patchContentAndPersist(sheet, rowKey, fields)
-                    _state.update { it.copy(isEditingQuestion = false, toast = "✅ Options আপডেট",
-                        contentEditVersion = it.contentEditVersion + 1) }
-                }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(isEditingQuestion = false, error = "❌ ${r.message}") }
-            }
-        }
+        val fields = options.toMutableMap().apply { put("correct", newAnswer) }
+        adminEditQuestion(sheet, rowKey, fields, questionPreview)
     }
 
     fun clearEditMsg() { _state.update { it.copy(editSuccessMsg = null) } }
@@ -877,9 +889,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     // ── Admin: Add New Question (offline-aware) ───────────────
     fun adminAddQuestion(sheet: String, fields: Map<String, String>) {
         if (!_state.value.isAdmin) return
+        val questionPreview = fields["question"] ?: ""
         viewModelScope.launch {
             _state.update { it.copy(isAddingQuestion = true, addQuestionMsg = null) }
-            val questionPreview = fields["question"] ?: ""
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            // অস্থায়ী লোকাল id — অনলাইন হলে Firebase push-key দিয়ে replace হয়ে যাবে,
+            // অফলাইন/fail হলে এটাই থেকে যাবে যতক্ষণ না পরে sync হয়
+            val localId = "-local" + System.currentTimeMillis().toString(36) +
+                    (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
             try {
                 val cm = getApplication<android.app.Application>()
                     .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
@@ -890,25 +907,43 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 if (isOnline) {
                     when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                            // পুরো cache clear/refetch করার বদলে — নতুন প্রশ্নটা সরাসরি
-                            // আসল Firebase key দিয়ে local এ patch করি (কোনো data হারানোর ঝুঁকি নেই)
-                            com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                                .addNewQuestionLocally(sheet, r.data, fields)
+                            // পুরো cache clear করার বদলে সরাসরি নতুন row cache-এ যোগ করো —
+                            // তাতে স্ক্রিন reload ছাড়াই সাথে সাথে নতুন প্রশ্নটা দেখা যাবে।
+                            repo.addContentAndPersist(sheet, r.data, fields)
                             _state.update { it.copy(isAddingQuestion = false,
                                 addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}",
                                 contentEditVersion = it.contentEditVersion + 1) }
                         }
                         is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                            // Online কিন্তু fail — offline এর মতোই queue এ রাখো, হারাবে না
-                            queueNewQuestionOffline(sheet, fields, questionPreview)
+                            // Online কিন্তু fail — লোকাল id দিয়ে cache-এ দেখাও + queue করো
+                            repo.addContentAndPersist(sheet, localId, fields)
+                            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                            q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                            loadPendingEdits()
+                            _state.update { it.copy(isAddingQuestion = false,
+                                addQuestionMsg = "⚠️ সংরক্ষিত — sync হবে (❌ ${r.message})",
+                                contentEditVersion = it.contentEditVersion + 1) }
                         }
                     }
                 } else {
-                    queueNewQuestionOffline(sheet, fields, questionPreview)
+                    // Offline — লোকাল id দিয়ে cache-এ সাথে সাথে যোগ করো, queue এ রাখো
+                    repo.addContentAndPersist(sheet, localId, fields)
+                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                    q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                    loadPendingEdits()
+                    _state.update { it.copy(isAddingQuestion = false,
+                        addQuestionMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 }
             } catch (e: Exception) {
                 try {
-                    queueNewQuestionOffline(sheet, fields, questionPreview)
+                    repo.addContentAndPersist(sheet, localId, fields)
+                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                    q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                    loadPendingEdits()
+                    _state.update { it.copy(isAddingQuestion = false,
+                        addQuestionMsg = "📴 সংরক্ষিত — net আসলে auto sync হবে",
+                        contentEditVersion = it.contentEditVersion + 1) }
                 } catch (e2: Exception) {
                     _state.update { it.copy(isAddingQuestion = false,
                         addQuestionMsg = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e2.message ?: "unknown error"}") }
@@ -917,33 +952,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Offline/failed হলে নতুন প্রশ্ন সাময়িক local key দিয়ে সাথে সাথে দেখানো + queue করা ──
-    private suspend fun queueNewQuestionOffline(sheet: String, fields: Map<String, String>, questionPreview: String) {
-        val localId = "LOCAL_" + java.util.UUID.randomUUID().toString()
-        com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            .addNewQuestionLocally(sheet, localId, fields)
-        com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-            .enqueueAdminAdd(sheet, localId, fields, questionPreview)
-        _state.update { it.copy(isAddingQuestion = false,
-            addQuestionMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে",
-            contentEditVersion = it.contentEditVersion + 1) }
-    }
-
     fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
-
-    // ── Settings > "এখনই Backup নিন" — বর্তমান local content (Study/Quiz/QBank)
-    // একটা JSON ফাইল আকারে ফোনের Downloads ফোল্ডারে সেভ করে। Pure read-only, ঝুঁকিহীন। ──
-    fun backupNow() {
-        viewModelScope.launch {
-            val result = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                .exportCurrentContentBackup()
-            result.onSuccess { fileName ->
-                _state.update { it.copy(toast = "✅ Backup সেভ হয়েছে: Downloads/$fileName") }
-            }.onFailure { e ->
-                _state.update { it.copy(toast = "❌ Backup ব্যর্থ: ${e.message}") }
-            }
-        }
-    }
 
     // ── Admin: Subject/SubTopic taxonomy লোড করো (dropdown suggestion এর জন্য) ──
     // Rename/Bulk/AddQuestion — এই তিনটা tab এই একই taxonomy share করে, তাই
