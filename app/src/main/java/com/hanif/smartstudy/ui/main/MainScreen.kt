@@ -295,6 +295,9 @@ fun MainScreen(
                     onStreakUpdated       = onStreakUpdated,
                     onAdminEdit = { sheet, rowKey, fields, preview ->
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    },
+                    onAdminDelete = { sheet, rowKey, preview ->
+                        menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     }
                 )
                 BottomTab.QBANK -> CoreScreen(
@@ -304,6 +307,9 @@ fun MainScreen(
                     onStreakUpdated       = onStreakUpdated,
                     onAdminEdit = { sheet, rowKey, fields, preview ->
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    },
+                    onAdminDelete = { sheet, rowKey, preview ->
+                        menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     }
                 )
                 BottomTab.STUDY -> CoreScreen(
@@ -313,6 +319,9 @@ fun MainScreen(
                     onStreakUpdated       = onStreakUpdated,
                     onAdminEdit = { sheet, rowKey, fields, preview ->
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
+                    },
+                    onAdminDelete = { sheet, rowKey, preview ->
+                        menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     }
                 )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
