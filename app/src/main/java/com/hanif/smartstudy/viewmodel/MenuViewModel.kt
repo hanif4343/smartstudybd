@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -119,6 +121,14 @@ data class MenuUiState(
     // Add Question
     val isAddingQuestion  : Boolean          = false,
     val addQuestionMsg    : String?          = null,
+    // Bulk Question Uploader (admin app এর মতো — local-first, sync হবে পরে)
+    val isBulkUploading   : Boolean          = false,
+    val bulkUploadTotal   : Int              = 0,
+    val bulkUploadDone    : Int              = 0,
+    val bulkUploadSent    : Int              = 0,
+    val bulkUploadFailed  : Int              = 0,
+    val bulkUploadLog     : List<String>     = emptyList(),
+    val bulkUploadResultMsg: String?         = null,
     // Bulk Audience
     val isBulkUpdating    : Boolean          = false,
     val bulkUpdateMsg     : String?          = null,
@@ -953,6 +963,108 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
+
+    // ── Admin: Bulk Question Upload (offline-aware, local-first) ───────────────
+    // admin-app এর BulkUploaderPage এর মতোই কাজ করে: একসাথে অনেক প্রশ্ন { } ব্লক বা
+    // লাইন-বাই-লাইন পার্স করে একটার পর একটা adminAddQuestion-এর মতোই সেভ করে।
+    // প্রতিটি আইটেম আগে সাথে সাথে লোকাল cache-এ (in-memory + disk) দেখানো হয়,
+    // তারপর অনলাইন থাকলে Firebase-এ push করার চেষ্টা হয়; fail/offline হলে
+    // PendingQueue-তে জমা থাকে এবং নেট/quota ঠিক হলে SyncWorker স্বয়ংক্রিয়ভাবে sync করে দেয়।
+    private var bulkUploadJob: kotlinx.coroutines.Job? = null
+
+    fun adminStopBulkUpload() { bulkUploadJob?.cancel() }
+
+    fun adminClearBulkUploadResult() { _state.update { it.copy(bulkUploadResultMsg = null, bulkUploadLog = emptyList()) } }
+
+    fun adminBulkAddQuestions(sheet: String, entries: List<Map<String, String>>) {
+        if (!_state.value.isAdmin) return
+        if (entries.isEmpty()) return
+        bulkUploadJob?.cancel()
+        bulkUploadJob = viewModelScope.launch {
+            _state.update { it.copy(
+                isBulkUploading = true, bulkUploadTotal = entries.size, bulkUploadDone = 0,
+                bulkUploadSent = 0, bulkUploadFailed = 0, bulkUploadLog = emptyList(), bulkUploadResultMsg = null
+            ) }
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val q    = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+            val cm = getApplication<android.app.Application>()
+                .getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+
+            var sent = 0
+            var failed = 0
+            val BATCH = 6
+            var i = 0
+            while (i < entries.size) {
+                kotlinx.coroutines.ensureActive()
+                val batch = entries.subList(i, minOf(i + BATCH, entries.size))
+
+                // ধাপ ১: নেটওয়ার্ক কল (Firebase push) গুলো একসাথে সমান্তরালে চালাও — দ্রুত হওয়ার জন্য
+                val netResults = batch.map { fields ->
+                    async(kotlinx.coroutines.Dispatchers.IO) {
+                        val isOnline = try {
+                            cm.getNetworkCapabilities(cm.activeNetwork)
+                                ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                        } catch (e: Exception) { false }
+                        if (!isOnline) {
+                            fields to null
+                        } else {
+                            val r = try {
+                                com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)
+                            } catch (e: Exception) {
+                                com.hanif.smartstudy.data.remote.ApiResult.Error(e.message ?: "unknown")
+                            }
+                            fields to r
+                        }
+                    }
+                }.map { it.await() }
+
+                // ধাপ ২: লোকাল cache (in-memory + disk) এ লেখা — একটার পর একটা (সমান্তরাল লিখলে
+                // ContentRepository-র in-memory cache race-condition-এ পড়তে পারে বলে সিরিয়ালি করা হলো)
+                netResults.forEach { (fields, r) ->
+                    val questionPreview = fields["question"] ?: ""
+                    val localId = "-local" + System.currentTimeMillis().toString(36) +
+                            (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
+                    val (ok, logLine) = try {
+                        when (r) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                repo.addContentAndPersist(sheet, r.data, fields)
+                                true to "✔ ${questionPreview.take(45)}"
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                repo.addContentAndPersist(sheet, localId, fields)
+                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                                false to "⚠ সংরক্ষিত (sync বাকি): ${questionPreview.take(35)} [${r.message}]"
+                            }
+                            null -> {
+                                repo.addContentAndPersist(sheet, localId, fields)
+                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                                false to "📴 অফলাইনে সংরক্ষিত: ${questionPreview.take(40)}"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        false to "❌ ব্যর্থ: ${questionPreview.take(35)} [${e.message ?: "unknown"}]"
+                    }
+                    if (ok) sent++ else failed++
+                    _state.update {
+                        it.copy(
+                            bulkUploadDone   = it.bulkUploadDone + 1,
+                            bulkUploadSent   = sent,
+                            bulkUploadFailed = failed,
+                            bulkUploadLog    = (it.bulkUploadLog + logLine).takeLast(100),
+                            contentEditVersion = it.contentEditVersion + 1
+                        )
+                    }
+                }
+                i += BATCH
+            }
+            loadPendingEdits()
+            _state.update { it.copy(
+                isBulkUploading = false,
+                bulkUploadResultMsg = "✅ সম্পন্ন — মোট ${entries.size}টি, সফল $sent টি" +
+                    (if (failed > 0) ", অফলাইন/pending $failed টি (auto sync হবে)" else "")
+            ) }
+        }
+    }
 
     // ── Admin: Subject/SubTopic taxonomy লোড করো (dropdown suggestion এর জন্য) ──
     // Rename/Bulk/AddQuestion — এই তিনটা tab এই একই taxonomy share করে, তাই
