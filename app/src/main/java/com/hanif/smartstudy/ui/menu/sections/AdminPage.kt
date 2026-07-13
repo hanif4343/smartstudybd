@@ -1959,6 +1959,17 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                             fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
                                             color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
                                     }
+                                    val (typeLabel, typeColor) = when (action.type) {
+                                        "admin_add_question"    -> "➕ নতুন" to Color(0xFF16A34A)
+                                        "admin_delete_question" -> "🗑️ ডিলিট" to Color(0xFFDC2626)
+                                        else                     -> "✏️ এডিট" to Color(0xFF4F46E5)
+                                    }
+                                    Surface(shape = RoundedCornerShape(6.dp),
+                                        color = typeColor.copy(0.1f)) {
+                                        Text(typeLabel, Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                                            color = typeColor, fontFamily = NotoSansBengali)
+                                    }
                                     Text(sdf.format(java.util.Date(action.createdAt)),
                                         fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
                                     if (retry > 0) {
