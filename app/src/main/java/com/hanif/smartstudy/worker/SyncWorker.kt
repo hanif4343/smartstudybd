@@ -323,15 +323,15 @@ class SyncWorker(
         }
     }
 
-    // ── Offline এ যোগ করা নতুন প্রশ্ন Firebase এ push করে, তারপর local এর
-    // সাময়িক localId কে আসল Firebase key দিয়ে rename করে দেয় (কোনো data মোছা হয় না) ──
+    // ── অফলাইনে/fail অবস্থায় যোগ করা নতুন প্রশ্ন — net আসলে ব্যাকগ্রাউন্ডে
+    //    সরাসরি push করে, আর লোকাল temp id-টাকে আসল Firebase key দিয়ে বদলে দেয় ──
     @Suppress("UNCHECKED_CAST")
     private suspend fun syncAdminAdd(payload: Map<*, *>): Boolean {
         return try {
             val sheet   = payload["sheet"]?.toString() ?: return false
             val localId = payload["localId"]?.toString() ?: return false
             val fields  = payload["fields"] as? Map<String, String> ?: return false
-            if (sheet.isBlank() || fields.isEmpty()) return false
+            if (fields.isEmpty()) return false
 
             val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
             val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
@@ -350,22 +350,15 @@ class SyncWorker(
             val respBody = resp.body?.string() ?: ""
             val ok = resp.isSuccessful
             resp.close()
-
             if (ok) {
-                val newKey = try {
-                    com.google.gson.JsonParser.parseString(respBody)
-                        .asJsonObject.get("name")?.asString
-                } catch (e: Exception) { null }
-
-                if (!newKey.isNullOrBlank()) {
+                val newId = try { org.json.JSONObject(respBody).optString("name", "") } catch (e: Exception) { "" }
+                if (newId.isNotBlank()) {
                     com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
-                        .renameLocalQuestionKey(sheet, localId, newKey)
+                        .replaceLocalIdAndPersist(sheet, localId, newId)
                 }
                 touchMeta(secret, base)
-                Log.d(TAG, "syncAdminAdd $sheet/$localId → $newKey")
-            } else {
-                Log.w(TAG, "syncAdminAdd failed: $sheet/$localId code=${resp.code}")
             }
+            Log.d(TAG, "syncAdminAdd $sheet localId=$localId → $ok")
             ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminAdd error: ${e.message}")
