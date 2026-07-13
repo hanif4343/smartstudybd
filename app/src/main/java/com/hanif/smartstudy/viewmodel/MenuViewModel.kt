@@ -115,6 +115,9 @@ data class MenuUiState(
     val adminViewingTag   : String           = "",   // audience switch
     val isEditingQuestion : Boolean          = false,
     val editSuccessMsg    : String?          = null,
+    // Delete Question (পুরো কার্ড — প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা)
+    val isDeletingQuestion: Boolean          = false,
+    val deleteSuccessMsg  : String?          = null,
     // Report Queue
     val reportedQuestions : List<com.hanif.smartstudy.data.remote.ReportedQuestion> = emptyList(),
     val isLoadingReports  : Boolean          = false,
@@ -769,6 +772,83 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Admin: পুরো প্রশ্ন কার্ড ডিলিট করো (প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সবসহ) ──
+    // adminEditQuestion এর মতোই প্যাটার্ন — লোকাল cache থেকে সাথে সাথেই সরিয়ে
+    // দেওয়া হয় (তাই ইউজার/এডমিন সাথে সাথেই ফলাফল দেখে), আর Firebase সেভ
+    // ব্যর্থ/অফলাইন হলে queue-তে রাখা হয় — নেট ফিরলে auto sync হয়ে Firebase
+    // থেকেও ডিলিট হয়ে যাবে। এখনো কখনো Firebase-এ sync-ই হয়নি এমন লোকাল
+    // প্রশ্ন (id "-local..." দিয়ে শুরু) হলে Firebase-এ কিছু পাঠানোর দরকারই নেই।
+    fun adminDeleteQuestion(sheet: String, rowKey: String, questionPreview: String = "") {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            _state.update { it.copy(isDeletingQuestion = true, deleteSuccessMsg = null) }
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val q    = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+            val isLocalOnly = rowKey.startsWith("-local")
+            try {
+                // যেভাবেই sync হোক না কেন — অ্যাপ থেকে সাথে সাথেই সরিয়ে দাও, আর এই
+                // প্রশ্নের জন্য আগে থেকে থাকা কোনো pending edit/add থাকলে সেটাও বাতিল করো
+                repo.removeContentAndPersist(sheet, rowKey)
+                q.removePendingForQuestion(rowKey)
+
+                if (isLocalOnly) {
+                    // এই প্রশ্নটা কখনো Firebase-এ পাঠানোই হয়নি, তাই ডিলিট sync করারও দরকার নেই
+                    loadPendingEdits()
+                    _state.update { it.copy(isDeletingQuestion = false,
+                        deleteSuccessMsg = "🗑️ প্রশ্ন কার্ডটি মুছে ফেলা হয়েছে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                    return@launch
+                }
+
+                val cm = getApplication<android.app.Application>()
+                    .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                        as android.net.ConnectivityManager
+                val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                    ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+                if (isOnline) {
+                    when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                            .adminDeleteQuestion(sheet, rowKey)) {
+                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                            _state.update { it.copy(isDeletingQuestion = false,
+                                deleteSuccessMsg = "✅ প্রশ্ন কার্ডটি ডিলিট হয়েছে!", toast = "🗑️ প্রশ্ন ডিলিট হয়েছে",
+                                contentEditVersion = it.contentEditVersion + 1) }
+                        }
+                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                            // Online কিন্তু fail (যেমন Firebase quota শেষ) — queue এ রাখো,
+                            // নেট/quota ঠিক হলে auto sync হয়ে Firebase থেকেও ডিলিট হয়ে যাবে
+                            q.enqueueAdminDelete(sheet, rowKey, questionPreview)
+                            loadPendingEdits()
+                            _state.update { it.copy(isDeletingQuestion = false,
+                                deleteSuccessMsg = "⚠️ অ্যাপ থেকে মুছে ফেলা হয়েছে — Firebase-এ sync বাকি",
+                                error = "❌ ${r.message}",
+                                contentEditVersion = it.contentEditVersion + 1) }
+                        }
+                    }
+                } else {
+                    q.enqueueAdminDelete(sheet, rowKey, questionPreview)
+                    loadPendingEdits()
+                    _state.update { it.copy(isDeletingQuestion = false,
+                        deleteSuccessMsg = "📴 Offline এ মুছে ফেলা হয়েছে — net আসলে Firebase থেকেও auto ডিলিট হবে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                }
+            } catch (e: Exception) {
+                try {
+                    repo.removeContentAndPersist(sheet, rowKey)
+                    q.removePendingForQuestion(rowKey)
+                    if (!isLocalOnly) q.enqueueAdminDelete(sheet, rowKey, questionPreview)
+                    loadPendingEdits()
+                    _state.update { it.copy(isDeletingQuestion = false,
+                        deleteSuccessMsg = "📴 মুছে ফেলা হয়েছে — net আসলে auto sync হবে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                } catch (e2: Exception) {
+                    _state.update { it.copy(isDeletingQuestion = false,
+                        error = "❌ ডিলিট ব্যর্থ হয়েছে: ${e2.message ?: "unknown error"}") }
+                }
+            }
+        }
+    }
+
     // ── Pending admin edits লোড করো ──────────────────────────
     fun loadPendingEdits() {
         viewModelScope.launch {
@@ -796,11 +876,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     val payload = gson.fromJson(action.payload, Map::class.java)
                     val sheet   = payload["sheet"]?.toString() ?: continue
-                    @Suppress("UNCHECKED_CAST")
-                    val fields  = payload["fields"] as? Map<String, String> ?: continue
 
                     when (action.type) {
                         "admin_edit_question" -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
                             when (com.hanif.smartstudy.data.remote.FirebaseDataService
                                     .adminUpdateQuestionField(sheet, questionId, fields)) {
@@ -814,12 +894,28 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "admin_add_question" -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val localId = payload["localId"]?.toString() ?: continue
                             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
                                     .adminAddQuestion(sheet, fields)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // temp local id → আসল Firebase push key দিয়ে replace
                                     repo.replaceLocalIdAndPersist(sheet, localId, r.data)
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
+                        "admin_delete_question" -> {
+                            val questionId = payload["questionId"]?.toString() ?: continue
+                            when (com.hanif.smartstudy.data.remote.FirebaseDataService
+                                    .adminDeleteQuestion(sheet, questionId)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    // লোকাল cache থেকে তো ডিলিটের সময়ই সরানো হয়ে গেছে,
+                                    // এখানে শুধু Firebase-এ পাঠানো সফল হলো এটাই নিশ্চিত করা
                                     q.remove(action.id); successCount++
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
