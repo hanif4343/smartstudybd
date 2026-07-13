@@ -1,7 +1,10 @@
 package com.hanif.smartstudy.ui.shared
 
+import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -41,6 +44,8 @@ import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.local.LocalTechniqueStore
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
+import com.hanif.smartstudy.data.remote.ImgBbResult
+import com.hanif.smartstudy.data.remote.ImgBbService
 import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
@@ -206,6 +211,7 @@ fun QuestionCard(
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
+    onAdminDelete  : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
@@ -501,7 +507,8 @@ fun QuestionCard(
                 activeEditField = null
                 onAdminRefresh?.invoke()
             },
-            onAdminEdit  = onAdminEdit
+            onAdminEdit   = onAdminEdit,
+            onAdminDelete = onAdminDelete
         )
     }
 }
@@ -1347,8 +1354,11 @@ private fun UserTechniqueCard(
                 }
             }
             Spacer(Modifier.height(3.dp))
-            Text(technique.text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface,
-                fontFamily = NotoSansBengali, lineHeight = 18.sp)
+            RichContentText(
+                text      = technique.text,
+                textColor = MaterialTheme.colorScheme.onSurface,
+                fontSize  = 12
+            )
         }
     }
 
@@ -1382,6 +1392,33 @@ private fun AddTechniqueDialog(
     // ── ব্যাখ্যা না টেকনিক — কোনটা যোগ/এডিট করা হচ্ছে ──
     var type     by remember(existing) { mutableStateOf(existing?.type ?: "technique") }
     val isEditingExisting = existing != null
+
+    // ── ছবি আপলোড: গ্যালারি থেকে ছবি নিয়ে imgbb-তে আপলোড, তারপর লিংকটা টেক্সটের
+    // মধ্যেই বসিয়ে দেওয়া হয় — ছবি দেখানোর সিস্টেম (RichContentText) আগে থেকেই
+    // টেক্সটের মধ্যে থাকা imgbb লিংক থেকে ছবি অটো-রেন্ডার করে, তাই আলাদা ফিল্ড লাগে না ──
+    val context           = LocalContext.current
+    val scope             = rememberCoroutineScope()
+    var isUploadingImage  by remember { mutableStateOf(false) }
+    var imageUploadError  by remember { mutableStateOf<String?>(null) }
+
+    val imageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            isUploadingImage = true
+            imageUploadError = null
+            when (val result = ImgBbService.uploadImage(context, uri)) {
+                is ImgBbResult.Success -> {
+                    text = if (text.isBlank()) result.url else text.trimEnd() + "\n" + result.url
+                }
+                is ImgBbResult.Error -> {
+                    imageUploadError = result.message
+                }
+            }
+            isUploadingImage = false
+        }
+    }
 
     // Dark mode aware colors
     val cardBg    = MaterialTheme.colorScheme.surface
@@ -1474,13 +1511,38 @@ private fun AddTechniqueDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // ── ছবি যুক্ত করার বাটন — গ্যালারি খুলে, imgbb-তে আপলোড হয়ে
+                        // লিংক টেক্সটে বসে যায়। আপলোড চলাকালীন ছোট লোডার দেখায় ──
+                        Surface(
+                            onClick  = { if (!isUploadingImage) imageLauncher.launch("image/*") },
+                            shape    = RoundedCornerShape(9.dp),
+                            color    = Indigo600.copy(alpha = 0.12f),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isUploadingImage) {
+                                    CircularProgressIndicator(
+                                        modifier    = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color       = Indigo600
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Image,
+                                        contentDescription = "ছবি যুক্ত করুন",
+                                        tint = Indigo600,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (isPublic) "🌐 সবার জন্য পাবলিক" else "🔒 শুধু আমার জন্য প্রাইভেট",
+                                if (isPublic) "🌐 পাবলিক" else "🔒 প্রাইভেট",
                                 fontSize   = 12.sp, fontWeight = FontWeight.Bold,
                                 color      = onCardBg, fontFamily = NotoSansBengali
                             )
@@ -1498,6 +1560,16 @@ private fun AddTechniqueDialog(
                             colors          = SwitchDefaults.colors(checkedThumbColor = Indigo600)
                         )
                     }
+                }
+
+                imageUploadError?.let { err ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "⚠️ $err",
+                        fontSize = 10.sp,
+                        color = RedWrong,
+                        fontFamily = NotoSansBengali
+                    )
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -1677,7 +1749,8 @@ fun AdminFieldEditDialog(
     fieldId     : String,
     initialValue: String,
     onDismiss   : () -> Unit,
-    onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
+    onAdminEdit   : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
+    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
 ) {
     val sheet = when {
         item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
@@ -1690,6 +1763,11 @@ fun AdminFieldEditDialog(
 
     var text        by remember { mutableStateOf(initialValue) }
     var isSaving    by remember { mutableStateOf(false) }
+    // ── পুরো প্রশ্ন কার্ড ডিলিট — শুধু এই ফিল্ড না, পুরো row (প্রশ্ন+অপশন+
+    // উত্তর+ব্যাখ্যা+টেকনিক সব) ডিলিট হয়ে যায়, তাই confirm করার জন্য
+    // আলাদা রেড ওয়ার্নিং ডায়ালগ দেখানো হয় ──
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var isDeleting        by remember { mutableStateOf(false) }
     val scope       = rememberCoroutineScope()
 
     val doSave: () -> Unit = {
@@ -1719,6 +1797,22 @@ fun AdminFieldEditDialog(
         }
     }
 
+    val doDelete: () -> Unit = {
+        scope.launch {
+            isDeleting = true
+            try {
+                if (onAdminDelete != null) {
+                    onAdminDelete(sheet, item.id, item.question.take(60))
+                } else {
+                    FirebaseDataService.adminDeleteQuestion(sheet, item.id)
+                }
+            } catch (_: Exception) { }
+            isDeleting = false
+            showDeleteConfirm = false
+            onDismiss()
+        }
+    }
+
     Dialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
         properties = androidx.compose.ui.window.DialogProperties(
@@ -1743,18 +1837,37 @@ fun AdminFieldEditDialog(
                         color      = adminIndigo,
                         fontFamily = NotoSansBengali
                     )
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            fieldLabel,
-                            modifier   = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            fontSize   = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = NotoSansBengali
-                        )
+                        // ── পুরো প্রশ্ন কার্ড ডিলিট বাটন — শুধু এই ফিল্ড না,
+                        // প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সহ পুরো কার্ডটাই ডিলিট হয় ──
+                        Surface(
+                            onClick  = { if (!isSaving && !isDeleting) showDeleteConfirm = true },
+                            shape    = RoundedCornerShape(20.dp),
+                            color    = RedWrong.copy(alpha = 0.12f)
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "পুরো প্রশ্ন কার্ড ডিলিট করুন",
+                                tint = RedWrong,
+                                modifier = Modifier.padding(6.dp).size(18.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                fieldLabel,
+                                modifier   = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                fontSize   = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -1811,6 +1924,49 @@ fun AdminFieldEditDialog(
                 }
             }
         }
+    }
+
+    // ── রেড ওয়ার্নিং: পুরো প্রশ্ন কার্ড ডিলিট কনফার্মেশন ──
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { if (!isDeleting) showDeleteConfirm = false },
+            icon = { Text("⚠️", fontSize = 28.sp) },
+            title = {
+                Text(
+                    "পুরো প্রশ্ন কার্ড ডিলিট করবেন?",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = RedWrong,
+                    fontFamily = NotoSansBengali
+                )
+            },
+            text = {
+                Text(
+                    "শুধু এই ফিল্ড না — প্রশ্ন, চারটা অপশন, সঠিক উত্তর, ব্যাখ্যা, টেকনিক " +
+                        "সহ পুরো প্রশ্ন কার্ডটাই স্থায়ীভাবে মুছে যাবে। এই কাজটি ফিরিয়ে আনা যাবে না।",
+                    fontFamily = NotoSansBengali,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick  = doDelete,
+                    enabled  = !isDeleting,
+                    colors   = ButtonDefaults.buttonColors(containerColor = RedWrong)
+                ) {
+                    if (isDeleting) {
+                        CircularProgressIndicator(Modifier.size(16.dp), Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Text("হ্যাঁ, ডিলিট করুন", fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!isDeleting) showDeleteConfirm = false }) {
+                    Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
     }
 }
 
