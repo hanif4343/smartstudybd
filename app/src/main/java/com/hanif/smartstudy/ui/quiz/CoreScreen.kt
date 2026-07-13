@@ -23,7 +23,8 @@ fun CoreScreen(
     viewModel             : QuizViewModel = viewModel(),
     onAchievementUnlocked : (com.hanif.smartstudy.data.model.Achievement) -> Unit = {},
     onStreakUpdated       : (Int) -> Unit = {},
-    onAdminEdit           : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null
+    onAdminEdit           : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
+    onAdminDelete         : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val ctx   = LocalContext.current
@@ -112,7 +113,8 @@ fun CoreScreen(
                 onBack         = { viewModel.navigateBack() },
                 onSubmit       = {},
                 currentUser    = currentUser,
-                onAdminEdit    = onAdminEdit
+                onAdminEdit    = onAdminEdit,
+                onAdminDelete  = onAdminDelete
             )
             ResultModal(
                 result  = state.result!!,
@@ -151,7 +153,8 @@ fun CoreScreen(
                 currentUser         = currentUser,
                 highlightQuestionId = state.highlightQuestionId,
                 onHighlightConsumed = { viewModel.consumeHighlight() },
-                onAdminEdit         = onAdminEdit
+                onAdminEdit         = onAdminEdit,
+                onAdminDelete       = onAdminDelete
             )
         }
 
