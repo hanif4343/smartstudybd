@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -129,17 +128,6 @@ fun SettingsScreen(
                             fontFamily = NotoSansBengali, fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
                         )
-                    }
-                    OutlinedButton(
-                        onClick = { vm.backupNow() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4F46E5))
-                    ) {
-                        Icon(Icons.Default.Download, null, tint = Color(0xFF4F46E5), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("📥 এখনই Backup নিন (Downloads এ JSON সেভ হবে)",
-                            fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
                     }
                 }
             }
