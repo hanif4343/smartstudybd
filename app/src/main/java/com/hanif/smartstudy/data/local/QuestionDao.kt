@@ -122,10 +122,17 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE sheet = :sheet AND fbKey = :fbKey LIMIT 1")
     suspend fun getById(sheet: String, fbKey: String): QuestionEntity?
 
-    // ── Global search ─────────────────────────────────────────────────────────
+    // ── Global search — Room cache (offline/persistent) থেকে সব ফিল্ড মিলিয়ে খোঁজে ──
     @Query("""
         SELECT * FROM questions 
-        WHERE sheet = :sheet AND (question LIKE '%' || :query || '%' OR answer LIKE '%' || :query || '%')
+        WHERE sheet = :sheet AND (
+            question LIKE '%' || :query || '%' OR 
+            answer   LIKE '%' || :query || '%' OR
+            subject  LIKE '%' || :query || '%' OR
+            subTopic LIKE '%' || :query || '%' OR
+            optionA  LIKE '%' || :query || '%' OR
+            optionB  LIKE '%' || :query || '%'
+        )
         LIMIT 50
     """)
     suspend fun search(sheet: String, query: String): List<QuestionEntity>
