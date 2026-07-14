@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -26,23 +27,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
+import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.toQuestionItem
+import com.hanif.smartstudy.data.model.AnswerState
 import com.hanif.smartstudy.data.model.QuestionItem
+import com.hanif.smartstudy.ui.shared.AnswerBox
+import com.hanif.smartstudy.ui.shared.McqOptions
+import com.hanif.smartstudy.ui.shared.OrangeTech
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val Indigo600  = Color(0xFF4F46E5)
 
+// ── এখন আর কোনো একটা ট্যাবের ViewModel-এর সীমিত (শুধু বর্তমানে ওপেন করা subject/subTopic-এর)
+// প্রশ্ন লিস্টের উপর নির্ভর করে না — সরাসরি Room cache থেকে Quiz+QBank+Study তিনটাই একসাথে
+// খোঁজে। Room-এ যা কিছু একবার sync হয়েছে (অফলাইনেও থাকে), তার সবকিছুতেই সার্চ কাজ করবে —
+// Home/Menu যেখান থেকেই ওপেন করা হোক না কেন, বা user কোনো subject visit না করে থাকলেও।
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlobalSearchScreen(
-    allQuestions : List<QuestionItem>,
     onBack       : () -> Unit,
     onSelect     : (QuestionItem) -> Unit = {}
 ) {
+    val context     = LocalContext.current
+    val dao         = remember { AppDatabase.getInstance(context).questionDao() }
+
     var query       by remember { mutableStateOf("") }
     var activeQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var selectedMode by remember { mutableStateOf("সব") }
+    var results      by remember { mutableStateOf<List<QuestionItem>>(emptyList()) }
     val focusReq    = remember { FocusRequester() }
     val keyboard    = LocalSoftwareKeyboardController.current
 
@@ -51,22 +67,29 @@ fun GlobalSearchScreen(
             isSearching = true
             delay(300)
             activeQuery = query
-            isSearching = false
         } else {
+            isSearching = false
             activeQuery = ""
         }
     }
 
     LaunchedEffect(Unit) { focusReq.requestFocus() }
 
-    val results = remember(activeQuery, allQuestions) {
-        if (activeQuery.length < 2) emptyList()
-        else allQuestions.filter { q ->
-            val q2 = activeQuery.lowercase()
-            q.question.lowercase().contains(q2) || q.answer.lowercase().contains(q2) ||
-            q.subject.lowercase().contains(q2)  || q.subTopic.lowercase().contains(q2) ||
-            q.optionA.lowercase().contains(q2)  || q.optionB.lowercase().contains(q2)
-        }.take(50)
+    // Room cache (persistent, অফলাইনেও থাকে) থেকে খোঁজে — Quiz + QBank + Study
+    LaunchedEffect(activeQuery) {
+        if (activeQuery.length < 2) {
+            results = emptyList()
+            isSearching = false
+            return@LaunchedEffect
+        }
+        val found = withContext(Dispatchers.IO) {
+            val quiz  = dao.search("QUIZ",  activeQuery)
+            val qbank = dao.search("QBANK", activeQuery)
+            val study = dao.search("STUDY", activeQuery)
+            (quiz + qbank + study).map { it.toQuestionItem() }
+        }
+        results = found.take(60)
+        isSearching = false
     }
 
     val filtered = remember(results, selectedMode) {
@@ -164,32 +187,58 @@ fun GlobalSearchScreen(
     }
 }
 
+// ── এই কার্ডটা এখন McqOptions/AnswerBox — অ্যাপের বাকি জায়গায় (Quiz/QBank/Study কার্ডে)
+// যেই কম্পোনেন্টগুলো দিয়ে MCQ/Written প্রশ্ন দেখানো হয় — সেগুলোই সরাসরি reuse করে।
+// ফলে সার্চ রেজাল্ট দেখতে হুবহু আসল MCQ/Written কার্ডের মতোই লাগবে।
 @Composable
 private fun SearchResultCard(q: QuestionItem, query: String, onClick: (QuestionItem) -> Unit) {
+    // MCQ হলে সঠিক অপশনটা আগে থেকেই "reveal" করা অবস্থায় দেখানো হয় (McqOptions একই রঙ/স্টাইলে
+    // সঠিক উত্তর সবুজ করে দেখাবে, ঠিক Quiz/QBank কার্ডে উত্তর দেওয়ার পর যেমন দেখায়)
+    val revealedItem = remember(q.id) {
+        if (q.isMcq()) {
+            val correctOpt = when (q.answer.trim().lowercase()) {
+                q.optionA.trim().lowercase() -> 1
+                q.optionB.trim().lowercase() -> 2
+                q.optionC.trim().lowercase() -> 3
+                q.optionD.trim().lowercase() -> 4
+                else -> 0
+            }
+            if (correctOpt > 0) q.copy(answerState = AnswerState.McqSelected(correctOpt, true)) else q
+        } else q
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick(q) },
-        shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(1.dp)
+        modifier  = Modifier.fillMaxWidth().clickable { onClick(q) },
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(q.subject, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                if (q.subject.isNotBlank()) Text(q.subject, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
                     modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
                 if (q.subTopic.isNotBlank()) Text(q.subTopic, fontSize = 9.sp, color = Indigo600, fontWeight = FontWeight.Bold,
                     fontFamily = NotoSansBengali, modifier = Modifier.background(Indigo600.copy(alpha = 0.12f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
                 Spacer(Modifier.weight(1f))
-                val (typeColor, typeBg) = when {
-                    q.isStudy()   -> Color(0xFF2563EB) to Color(0xFFDBEAFE)
-                    q.isMcq()     -> Color(0xFF059669) to Color(0xFFD1FAE5)
-                    else          -> Color(0xFF7C3AED) to Color(0xFFEDE9FE)
+                if (q.isWritten()) {
+                    Text("Written", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = OrangeTech,
+                        modifier = Modifier.background(OrangeTech.copy(alpha = 0.15f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp))
+                } else if (q.isStudy()) {
+                    Text("Study", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2563EB),
+                        modifier = Modifier.background(Color(0xFFDBEAFE), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp))
                 }
-                Text(when { q.isStudy() -> "Study"; q.isMcq() -> "MCQ"; else -> "Written" }, fontSize = 9.sp, color = typeColor, fontWeight = FontWeight.ExtraBold,
-                    fontFamily = NotoSansBengali, modifier = Modifier.background(typeBg, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
             }
-            Text(highlightText(q.question, query), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 2)
-            if (q.answer.isNotBlank()) {
-                Text(highlightText("✅ " + q.answer.take(80) + if (q.answer.length > 80) "..." else "", query),
-                    fontSize = 11.sp, color = Color(0xFF059669), fontFamily = NotoSansBengali, maxLines = 1)
+
+            Text(highlightText(q.question, query), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 3)
+
+            when {
+                // MCQ — বাকি অ্যাপের মতোই McqOptions (A/B/C/D), সঠিকটা সবুজ করে দেখানো
+                q.isMcq() -> McqOptions(item = revealedItem, onAnswer = {})
+                // Written/Study — বাকি অ্যাপের মতোই AnswerBox (উত্তর বক্স)
+                q.answer.isNotBlank() -> AnswerBox(text = q.answer)
+                q.explanation.isNotBlank() -> AnswerBox(text = q.explanation)
+                else -> {}
             }
         }
     }
