@@ -213,17 +213,9 @@ fun MainScreen(
     val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE, BottomTab.MENU) }
 
     if (showSearch) {
-        val activeVm = when (currentTab) {
-            BottomTab.QUIZ  -> quizViewModel
-            BottomTab.QBANK -> qbankViewModel
-            BottomTab.STUDY -> studyViewModel
-            else            -> quizViewModel
-        }
-        val activeState by activeVm.state.collectAsState()
         LaunchedEffect(Unit) { unlockAchievement("search_used") }
         GlobalSearchScreen(
-            allQuestions = activeState.questions,
-            onBack       = { showSearch = false }
+            onBack = { showSearch = false }
         )
         return
     }
