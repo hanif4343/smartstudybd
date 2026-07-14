@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
@@ -170,7 +171,7 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 88.dp)
     ) {
-        HomeHero(state = state, onNameEdit = { viewModel.updateUserName(it) }, onRefresh = { viewModel.refresh() })
+        HomeHero(state = state, onNameEdit = { viewModel.updateUserName(it) }, onRefresh = { viewModel.refresh() }, onSearchClick = onSearchClick)
 
         if (state.isOffline) OfflineBanner()
 
@@ -276,7 +277,7 @@ fun AdNativePlaceholder() {
 // ═══════════════════════════════════════════════════════════
 
 @Composable
-private fun HomeHero(state: HomeUiState, onNameEdit: (String) -> Unit, onRefresh: () -> Unit) {
+private fun HomeHero(state: HomeUiState, onNameEdit: (String) -> Unit, onRefresh: () -> Unit, onSearchClick: () -> Unit = {}) {
     var editingName by remember { mutableStateOf(false) }
     var nameInput   by remember { mutableStateOf(state.user?.name ?: "") }
     LaunchedEffect(state.user?.name) { nameInput = state.user?.name ?: "" }
@@ -340,6 +341,9 @@ private fun HomeHero(state: HomeUiState, onNameEdit: (String) -> Unit, onRefresh
                     Text("XP", fontSize = 8.sp, color = Color.White.copy(0.8f), fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(6.dp))
+                IconButton(onClick = onSearchClick, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp)) }
+                Spacer(Modifier.width(4.dp))
                 IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Refresh, null, tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp)) }
             }
