@@ -327,7 +327,7 @@ private fun HomeQuickAccessGrid(
             tiles = listOf(
                 GridTileData(Icons.Default.Keyboard, "Typing",       Color(0xFF16A34A), onOpenTyping),
                 GridTileData(Icons.Default.Assignment, "Mock Test",  Color(0xFF7C3AED), onOpenQuizTab),
-                GridTileData(Icons.Default.Cancel,   "Wrong Review", Color(0xFFDC2626), onOpenMenu)
+                GridTileData(Icons.Default.Cancel,   "Wrong Review", Color(0xFFDC2626), { onOpenMenuPage("wrongreview") })
             )
         )
 
@@ -341,7 +341,7 @@ private fun HomeQuickAccessGrid(
         )
 
         val mgmtTiles = buildList {
-            add(GridTileData(Icons.Default.CalendarMonth,       "Routine",    Color(0xFFEA580C), onOpenMenu))
+            add(GridTileData(Icons.Default.CalendarMonth,       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
             add(GridTileData(Icons.Default.CenterFocusStrong,   "Focus Mode", Color(0xFF0D9488), onOpenMenu))
             if (isAdmin) add(GridTileData(Icons.Default.AdminPanelSettings, "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
         }
