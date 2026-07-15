@@ -76,6 +76,8 @@ fun MenuScreen(
             "profile"     -> MenuNav.PROFILE
             "studybuddy"  -> MenuNav.STUDY_BUDDY
             "testhistory" -> MenuNav.TEST_HISTORY
+            "routine"     -> MenuNav.ROUTINE
+            "wrongreview" -> MenuNav.WRONG_REVIEW
             else          -> MenuNav.MAIN
         }
     }
@@ -118,6 +120,18 @@ fun MenuScreen(
             MenuNav.PRIVACY     -> PrivacyPolicyScreen(onBack = { screen = MenuNav.MAIN })
             MenuNav.STUDY_BUDDY -> StudyBuddyScreen(onBack = { screen = MenuNav.MAIN })
             MenuNav.TEST_HISTORY -> TestHistoryScreen(onBack = { screen = MenuNav.PROFILE })
+            MenuNav.ROUTINE      -> RoutineFullScreen(
+                onBack = { screen = MenuNav.MAIN },
+                highlightRoutineItemId   = highlightRoutineItemId,
+                onRoutineItemHighlighted = onRoutineItemHighlighted,
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
+            MenuNav.WRONG_REVIEW -> WrongReviewFullScreen(
+                onBack        = { screen = MenuNav.MAIN },
+                quizViewModel = quizViewModel
+            )
         }
     }
 
@@ -141,7 +155,92 @@ fun MenuScreen(
     }
 }
 
-enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY }
+enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY, ROUTINE, WRONG_REVIEW }
+
+// ─────────────────────────────────────────────────────────────
+//  Routine / Wrong Review — Home থেকে সরাসরি open হওয়ার জন্য dedicated screen
+// ─────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RoutineFullScreen(
+    onBack: () -> Unit,
+    highlightRoutineItemId   : String? = null,
+    onRoutineItemHighlighted : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("✅ আজকের রুটিন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)
+        ) {
+            DailyRoutineCard(
+                highlightRoutineItemId   = highlightRoutineItemId,
+                onRoutineItemHighlighted = onRoutineItemHighlighted,
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WrongReviewFullScreen(onBack: () -> Unit, quizViewModel: QuizViewModel?) {
+    val homeViewModel : HomeViewModel = viewModel()
+    val homeState by homeViewModel.uiState.collectAsState()
+    var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
+    LaunchedEffect(homeState.isLoading) {
+        if (!homeState.isLoading) {
+            wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
+        }
+    }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("❌ ভুল প্রশ্ন Review", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+            )
+        }
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (wrongItems.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🎉", fontSize = 40.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text("কোনো ভুল প্রশ্ন নেই", fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                    }
+                }
+            } else {
+                WrongReviewSection(
+                    wrongItems      = wrongItems,
+                    onAnswerMcq     = { qId, opt ->
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) quizViewModel?.answerMcq(idx, opt)
+                    },
+                    onAnswerWritten = { qId, text ->
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) quizViewModel?.answerWritten(idx, text) ?: 0 else 0
+                    },
+                    onRemoveCorrect = { qId ->
+                        quizViewModel?.removeWrongQId(qId)
+                        wrongItems = wrongItems.filter { it.first.id != qId }
+                    }
+                )
+            }
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Main Menu Screen
@@ -231,34 +330,14 @@ fun MainMenuScreen(
 
             Spacer(Modifier.height(4.dp))
 
-            // ── Home থেকে সরিয়ে আনা widget গুলো (আগে Home-এ ছিল, এখন এখানে) ──
-            DailyRoutineCard(
-                highlightRoutineItemId   = highlightRoutineItemId,
-                onRoutineItemHighlighted = onRoutineItemHighlighted,
-                onOpenStudy       = onOpenStudy,
-                onOpenInstantTest = onOpenInstantTest,
-                onOpenWeeklyTest  = onOpenWeeklyTest
-            )
+            // ── Routine ও Wrong Review — এখন dedicated screen, এখানে শুধু quick-access row ──
+            MenuGroup("📋 আজকের কার্যক্রম") {
+                MenuRow("✅ আজকের রুটিন",   "পড়ার রুটিন দেখো/যোগ করো",  Icons.Default.CalendarMonth) { onNavigate(MenuNav.ROUTINE) }
+                val wrongCount = quizViewModel?.getWrongQuestions()?.size ?: wrongItems.size
+                MenuRow("❌ ভুল প্রশ্ন Review", "$wrongCount টি ভুল প্রশ্ন", Icons.Default.Cancel, tint = Color(0xFFDC2626)) { onNavigate(MenuNav.WRONG_REVIEW) }
+            }
 
             WeeklyStreakCard(streak = homeState.streakInfo)
-
-            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
-                WrongReviewSection(
-                    wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt ->
-                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
-                        if (idx != -1) quizViewModel?.answerMcq(idx, opt)
-                    },
-                    onAnswerWritten = { qId, text ->
-                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
-                        if (idx != -1) quizViewModel?.answerWritten(idx, text) ?: 0 else 0
-                    },
-                    onRemoveCorrect = { qId ->
-                        quizViewModel?.removeWrongQId(qId)
-                        wrongItems = wrongItems.filter { it.first.id != qId }
-                    }
-                )
-            }
 
             val examExpired = homeState.examCountdown.isSet &&
                 homeState.examCountdown.days   == 0L &&
