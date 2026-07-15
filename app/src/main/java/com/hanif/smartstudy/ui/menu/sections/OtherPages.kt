@@ -29,6 +29,7 @@ import com.hanif.smartstudy.util.ReminderHelper
 import com.hanif.smartstudy.viewmodel.MenuUiState
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val Indigo600 = Color(0xFF4F46E5)
 private val AmberWarn = Color(0xFFF59E0B)
@@ -46,21 +47,29 @@ private val GreenOk   = Color(0xFF10B981)
 fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
     val bookmarkIds = state.bookmarkedIds
 
-    // Cache থেকে প্রশ্ন টেনে আনো (defensive — malformed/null cache data থাকলেও crash না করুক)
-    val allQuestions = remember {
-        try {
-            val content = ContentRepository.getMemCache() ?: return@remember emptyList()
-            val quizQ  = content.quiz.mapNotNull  { it?.let { qi -> QuestionItem.fromQuizItem(qi)  } }
-            val qbankQ = content.qbank.mapNotNull { it?.let { qi -> QuestionItem.fromQBankItem(qi) } }
-            val studyQ = content.study.mapNotNull { it?.let { si -> QuestionItem.fromStudyItem(si) } }
-            (quizQ + qbankQ + studyQ)
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
+    // আগে পুরো quiz+qbank+study কনটেন্ট (হাজার হাজার প্রশ্ন) main thread-এ transform
+    // হতো — বড় ডেটাসেটে এটাই UI freeze/ANR (হ্যাং → ক্র্যাশ) এর কারণ ছিল।
+    // এখন: (১) background thread-এ (Dispatchers.Default) কম্পিউট হয়, এবং
+    // (২) পুরো লিস্ট transform না করে শুধু bookmark করা id-গুলোই আগে filter করে
+    //     তারপর transform করা হয় — অনেক কম কাজ, অনেক দ্রুত।
+    var bookmarkedQuestions by remember { mutableStateOf<List<QuestionItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
 
-    val bookmarkedQuestions = remember(bookmarkIds, allQuestions) {
-        allQuestions.filter { it.id in bookmarkIds }
+    LaunchedEffect(bookmarkIds) {
+        isLoading = true
+        bookmarkedQuestions = withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try {
+                if (bookmarkIds.isEmpty()) return@withContext emptyList()
+                val content = ContentRepository.getMemCache() ?: return@withContext emptyList()
+                val quizQ  = content.quiz.filter  { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQuizItem(it)  }
+                val qbankQ = content.qbank.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQBankItem(it) }
+                val studyQ = content.study.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromStudyItem(it) }
+                quizQ + qbankQ + studyQ
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        isLoading = false
     }
 
     var filter by remember { mutableStateOf("সব") }
@@ -103,7 +112,11 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
                 }
             }
 
-            if (bookmarkIds.isEmpty()) {
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Indigo600)
+                }
+            } else if (bookmarkIds.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("⭐", fontSize = 48.sp)
