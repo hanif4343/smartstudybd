@@ -49,27 +49,52 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
 
     // আগে পুরো quiz+qbank+study কনটেন্ট (হাজার হাজার প্রশ্ন) main thread-এ transform
     // হতো — বড় ডেটাসেটে এটাই UI freeze/ANR (হ্যাং → ক্র্যাশ) এর কারণ ছিল।
-    // এখন: (১) background thread-এ (Dispatchers.Default) কম্পিউট হয়, এবং
+    // এখন: (১) background thread-এ (Dispatchers.Default) কম্পিউট হয়,
     // (২) পুরো লিস্ট transform না করে শুধু bookmark করা id-গুলোই আগে filter করে
-    //     তারপর transform করা হয় — অনেক কম কাজ, অনেক দ্রুত।
+    //     তারপর transform করা হয়, এবং
+    // (৩) ৬ সেকেন্ডের হার্ড টাইমআউট + Throwable ক্যাচ — যাই ঘটুক (স্লো নেটওয়ার্ক,
+    //     GC pressure, পুরনো/দুর্বল ডিভাইস), main thread কখনোই আটকে থাকবে না,
+    //     বড়জোর একটা "আবার চেষ্টা করুন" স্টেট দেখাবে, কিন্তু অ্যাপ হ্যাং/ক্র্যাশ করবে না।
     var bookmarkedQuestions by remember { mutableStateOf<List<QuestionItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var loadFailed by remember { mutableStateOf(false) }
+    var retryTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(bookmarkIds) {
+    LaunchedEffect(bookmarkIds, retryTick) {
         isLoading = true
-        bookmarkedQuestions = withContext(kotlinx.coroutines.Dispatchers.Default) {
-            try {
-                if (bookmarkIds.isEmpty()) return@withContext emptyList()
-                val content = ContentRepository.getMemCache() ?: return@withContext emptyList()
-                val quizQ  = content.quiz.filter  { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQuizItem(it)  }
-                val qbankQ = content.qbank.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQBankItem(it) }
-                val studyQ = content.study.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromStudyItem(it) }
-                quizQ + qbankQ + studyQ
-            } catch (e: Exception) {
-                emptyList()
+        loadFailed = false
+        try {
+            val result = kotlinx.coroutines.withTimeoutOrNull(6000L) {
+                withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    if (bookmarkIds.isEmpty()) {
+                        emptyList()
+                    } else {
+                        val content = ContentRepository.getMemCache()
+                        if (content == null) {
+                            emptyList()
+                        } else {
+                            val quizQ  = content.quiz.filter  { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQuizItem(it)  }
+                            val qbankQ = content.qbank.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromQBankItem(it) }
+                            val studyQ = content.study.filter { it.id != null && it.id in bookmarkIds }.map { QuestionItem.fromStudyItem(it) }
+                            // একই id দুবার bookmarked list-এ থাকলে LazyColumn key crash করতে পারে — dedupe করি
+                            (quizQ + qbankQ + studyQ).distinctBy { it.id }
+                        }
+                    }
+                }
             }
+            if (result == null) {
+                // ৬ সেকেন্ডেও শেষ হয়নি — টাইমআউট, hang হতে দেব না
+                loadFailed = true
+                bookmarkedQuestions = emptyList()
+            } else {
+                bookmarkedQuestions = result
+            }
+        } catch (t: Throwable) {
+            loadFailed = true
+            bookmarkedQuestions = emptyList()
+        } finally {
+            isLoading = false
         }
-        isLoading = false
     }
 
     var filter by remember { mutableStateOf("সব") }
@@ -115,6 +140,19 @@ fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Indigo600)
+                }
+            } else if (loadFailed) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⚠️", fontSize = 40.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text("লোড করতে সমস্যা হয়েছে", fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = { retryTick++ }, colors = ButtonDefaults.buttonColors(containerColor = Indigo600)) {
+                            Text("আবার চেষ্টা করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             } else if (bookmarkIds.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
