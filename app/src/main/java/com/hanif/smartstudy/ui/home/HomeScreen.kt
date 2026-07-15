@@ -140,7 +140,8 @@ fun HomeScreen(
     onOpenQuizTab  : () -> Unit = {},
     onOpenQBankTab : () -> Unit = {},
     onOpenStudyTab : () -> Unit = {},
-    onOpenTyping   : () -> Unit = {}
+    onOpenTyping   : () -> Unit = {},
+    onOpenMockTest : (Boolean) -> Unit = {}   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
 ) {
     val state by viewModel.uiState.collectAsState()
 
@@ -160,7 +161,7 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 88.dp)
+            .padding(bottom = 72.dp)
     ) {
         HomeHeaderBar(state = state, onOpenMenu = onOpenMenu, onSearchClick = onSearchClick)
 
@@ -168,9 +169,9 @@ fun HomeScreen(
 
         Column(
             modifier            = Modifier.padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(2.dp))
 
             HomeStatusRow(streak = state.streakInfo, stats = state.studyStats, goal = state.goalProgress)
 
@@ -183,7 +184,8 @@ fun HomeScreen(
                 onOpenStudyTab = onOpenStudyTab,
                 onOpenTyping   = onOpenTyping,
                 onOpenMenu     = onOpenMenu,
-                onOpenMenuPage = onOpenMenuPage
+                onOpenMenuPage = onOpenMenuPage,
+                onOpenMockTest = onOpenMockTest
             )
 
             if (state.isLoading) {
@@ -193,7 +195,7 @@ fun HomeScreen(
             }
             state.error?.let { ErrorBanner(it) }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
         }
     }
 }
@@ -225,7 +227,7 @@ private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchCl
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onOpenMenu, modifier = Modifier.size(32.dp)) {
@@ -270,7 +272,7 @@ private fun HomeStatusRow(streak: StreakInfo, stats: StudyStats, goal: GoalProgr
         colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(1.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             StatusPill("🔥", "${streak.streakDays}", "Day Streak", Color(0xFFF59E0B))
             StatusDivider()
             StatusPill("📊", "${stats.accuracyPct}%", "Today's Progress", Color(0xFF2563EB))
@@ -299,7 +301,16 @@ private fun StatusPill(icon: String, value: String, label: String, color: Color)
 // ═══════════════════════════════════════════════════════════
 // Quick-access grid — ছবি ১ এর ৪টা category: Learning / Practice / Progress / Management
 // ═══════════════════════════════════════════════════════════
-private data class GridTileData(val icon: ImageVector, val label: String, val color: Color, val onClick: () -> Unit)
+// TileIcon — গ্রিড টাইলের আইকন হয় Material vector, অথবা নিচের navigation bar-এর
+// সাথে মিলিয়ে ইমোজি (Quiz 🎯 / QBank 📚 / Study 📖) — দুটোই সাপোর্ট করার জন্য sealed type
+private sealed class TileIcon {
+    data class Vector(val icon: ImageVector) : TileIcon()
+    data class Emoji(val emoji: String) : TileIcon()
+}
+
+private data class GridTileData(val icon: TileIcon, val label: String, val color: Color, val onClick: () -> Unit)
+private fun vecIcon(icon: ImageVector) = TileIcon.Vector(icon)
+private fun emojiIcon(emoji: String) = TileIcon.Emoji(emoji)
 
 @Composable
 private fun HomeQuickAccessGrid(
@@ -309,44 +320,85 @@ private fun HomeQuickAccessGrid(
     onOpenStudyTab : () -> Unit,
     onOpenTyping   : () -> Unit,
     onOpenMenu     : () -> Unit,
-    onOpenMenuPage : (String) -> Unit
+    onOpenMenuPage : (String) -> Unit,
+    onOpenMockTest : (Boolean) -> Unit = {}
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    var showMockTestPicker by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
         GridCategorySection(
             title = "Learning", titleColor = Color(0xFF059669), onExplore = onOpenQuizTab,
             tiles = listOf(
-                GridTileData(Icons.AutoMirrored.Filled.MenuBook, "Quiz",  Color(0xFF059669), onOpenQuizTab),
-                GridTileData(Icons.Default.Assignment,           "QBank", Color(0xFFDB2777), onOpenQBankTab),
-                GridTileData(Icons.Default.Article,              "Study", Color(0xFF2563EB), onOpenStudyTab)
+                // নিচের নেভিগেশন বার (Quiz 🎯 / QBank 📚 / Study 📖) এর আইকনের সাথে মিলিয়ে
+                GridTileData(emojiIcon("🎯"), "Quiz",  Color(0xFF059669), onOpenQuizTab),
+                GridTileData(emojiIcon("📚"), "QBank", Color(0xFFDB2777), onOpenQBankTab),
+                GridTileData(emojiIcon("📖"), "Study", Color(0xFF2563EB), onOpenStudyTab)
             )
         )
 
         GridCategorySection(
             title = "Practice", titleColor = Color(0xFFEA580C), onExplore = onOpenTyping,
             tiles = listOf(
-                GridTileData(Icons.Default.Keyboard, "Typing",       Color(0xFF16A34A), onOpenTyping),
-                GridTileData(Icons.Default.Assignment, "Mock Test",  Color(0xFF7C3AED), onOpenQuizTab),
-                GridTileData(Icons.Default.Cancel,   "Wrong Review", Color(0xFFDC2626), { onOpenMenuPage("wrongreview") })
+                GridTileData(vecIcon(Icons.Default.Keyboard), "Typing",       Color(0xFF16A34A), onOpenTyping),
+                // Mock Test ট্যাপ করলে আগে Quiz/QBank বেছে নিতে বলা হয়, তারপর সেই মোডে ফুল Mock Test ফ্লো ওপেন হয়
+                GridTileData(vecIcon(Icons.Default.Assignment), "Mock Test",  Color(0xFF7C3AED), { showMockTestPicker = true }),
+                GridTileData(vecIcon(Icons.Default.Cancel),   "Wrong Review", Color(0xFFDC2626), { onOpenMenuPage("wrongreview") })
             )
         )
 
         GridCategorySection(
             title = "Progress", titleColor = Color(0xFF2563EB), onExplore = { onOpenMenuPage("stats") },
             tiles = listOf(
-                GridTileData(Icons.Default.EmojiEvents, "Leaderboard",   Color(0xFFF59E0B), { onOpenMenuPage("leaderboard") }),
-                GridTileData(Icons.Default.BarChart,    "Statistics",    Color(0xFF2563EB), { onOpenMenuPage("stats") }),
-                GridTileData(Icons.Default.Bookmark,    "Saved Question", Color(0xFF64748B), { onOpenMenuPage("bookmarks") })
+                GridTileData(vecIcon(Icons.Default.EmojiEvents), "Leaderboard",   Color(0xFFF59E0B), { onOpenMenuPage("leaderboard") }),
+                GridTileData(vecIcon(Icons.Default.BarChart),    "Statistics",    Color(0xFF2563EB), { onOpenMenuPage("stats") }),
+                GridTileData(vecIcon(Icons.Default.Bookmark),    "Saved Question", Color(0xFF64748B), { onOpenMenuPage("bookmarks") })
             )
         )
 
         val mgmtTiles = buildList {
-            add(GridTileData(Icons.Default.CalendarMonth,       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
-            add(GridTileData(Icons.Default.CenterFocusStrong,   "Focus Mode", Color(0xFF0D9488), onOpenMenu))
-            if (isAdmin) add(GridTileData(Icons.Default.AdminPanelSettings, "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
+            add(GridTileData(vecIcon(Icons.Default.CalendarMonth),       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
+            add(GridTileData(vecIcon(Icons.Default.CenterFocusStrong),   "Focus Mode", Color(0xFF0D9488), onOpenMenu))
+            if (isAdmin) add(GridTileData(vecIcon(Icons.Default.AdminPanelSettings), "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
         }
         GridCategorySection(title = "Management", titleColor = Color(0xFF7C3AED), onExplore = onOpenMenu, tiles = mgmtTiles)
     }
+
+    if (showMockTestPicker) {
+        MockTestModePickerDialog(
+            onPick = { isQBank ->
+                showMockTestPicker = false
+                onOpenMockTest(isQBank)
+            },
+            onDismiss = { showMockTestPicker = false }
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Mock Test ট্যাপ করলে প্রথমে জিজ্ঞেস করে: Quiz না QBank — তারপর সেই মোডেই
+// ফুল Mock Test ফ্লো (subject/topic select → limit → শুরু) ওপেন হয়।
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun MockTestModePickerDialog(onPick: (Boolean) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Mock Test", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
+        text  = {
+            Text("Quiz নাকি QBank থেকে Mock Test দিতে চান?", fontFamily = NotoSansBengali, fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(false) }) {
+                Text("🎯 Quiz", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF059669))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onPick(true) }) {
+                Text("📚 QBank", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFDB2777))
+            }
+        }
+    )
 }
 
 @Composable
@@ -359,7 +411,7 @@ private fun GridCategorySection(title: String, titleColor: Color, onExplore: () 
                 modifier = Modifier.clickable(onClick = onExplore)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             tiles.forEach { tile -> GridTile(tile, Modifier.weight(1f)) }
             // ৩টার কম tile হলে (যেমন admin না হলে Management এ ২টা) খালি জায়গা রাখি যাতে layout না ভাঙে
@@ -376,10 +428,13 @@ private fun GridTile(tile: GridTileData, modifier: Modifier = Modifier) {
             .background(tile.color.copy(alpha = 0.10f))
             .border(1.dp, tile.color.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
             .clickable(onClick = tile.onClick)
-            .padding(vertical = 14.dp, horizontal = 4.dp),
+            .padding(vertical = 11.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(tile.icon, contentDescription = tile.label, tint = tile.color, modifier = Modifier.size(24.dp))
+        when (val icon = tile.icon) {
+            is TileIcon.Vector -> Icon(icon.icon, contentDescription = tile.label, tint = tile.color, modifier = Modifier.size(24.dp))
+            is TileIcon.Emoji  -> Text(icon.emoji, fontSize = 22.sp)
+        }
         Spacer(Modifier.height(6.dp))
         Text(tile.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
             fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
