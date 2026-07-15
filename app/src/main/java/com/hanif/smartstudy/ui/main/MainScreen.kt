@@ -270,7 +270,16 @@ fun MainScreen(
                     onOpenQuizTab  = { currentTab = BottomTab.QUIZ },
                     onOpenQBankTab = { currentTab = BottomTab.QBANK },
                     onOpenStudyTab = { currentTab = BottomTab.STUDY },
-                    onOpenTyping   = { showTyping = true }
+                    onOpenTyping   = { showTyping = true },
+                    onOpenMockTest = { isQBank ->
+                        if (isQBank) {
+                            currentTab = BottomTab.QBANK
+                            qbankViewModel.openMockZone()
+                        } else {
+                            currentTab = BottomTab.QUIZ
+                            quizViewModel.openMockZone()
+                        }
+                    }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
