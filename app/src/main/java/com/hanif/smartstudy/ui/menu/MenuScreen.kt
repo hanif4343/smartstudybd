@@ -23,9 +23,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.ui.menu.sections.AdminPage
 import com.hanif.smartstudy.ui.menu.sections.BookmarksPage
+import com.hanif.smartstudy.ui.home.*
+import com.hanif.smartstudy.data.model.QuestionItem
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.viewmodel.HomeViewModel
 import com.hanif.smartstudy.viewmodel.MenuViewModel
+import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────
@@ -38,7 +42,13 @@ fun MenuScreen(
     onLogout      : () -> Unit    = {},
     onSearchClick : () -> Unit    = {},
     onTypingClick : () -> Unit    = {},
-    initialPage   : String?       = null   // "reports" | "techniques" | "stats" | "bookmarks" | "admin"
+    initialPage   : String?       = null,   // "reports" | "techniques" | "stats" | "bookmarks" | "admin"
+    quizViewModel : QuizViewModel? = null,
+    highlightRoutineItemId   : String? = null,
+    onRoutineItemHighlighted : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val darkMode = LocalDarkMode.current
@@ -93,7 +103,12 @@ fun MenuScreen(
     ) { nav ->
         when (nav) {
             MenuNav.MAIN        -> MainMenuScreen(state, vm, onLogout, onNavigate = { screen = it },
-                                    onSearchClick = onSearchClick, onTypingClick = onTypingClick)
+                                    onSearchClick = onSearchClick, onTypingClick = onTypingClick,
+                                    quizViewModel = quizViewModel,
+                                    highlightRoutineItemId = highlightRoutineItemId,
+                                    onRoutineItemHighlighted = onRoutineItemHighlighted,
+                                    onOpenStudy = onOpenStudy, onOpenInstantTest = onOpenInstantTest,
+                                    onOpenWeeklyTest = onOpenWeeklyTest)
             MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN }, onOpenTestHistory = { screen = MenuNav.TEST_HISTORY })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.SETTINGS    -> SettingsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
@@ -140,12 +155,28 @@ fun MainMenuScreen(
     onLogout      : () -> Unit,
     onNavigate    : (MenuNav) -> Unit,
     onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {}
+    onTypingClick : () -> Unit = {},
+    quizViewModel : QuizViewModel? = null,
+    highlightRoutineItemId   : String? = null,
+    onRoutineItemHighlighted : () -> Unit = {},
+    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenWeeklyTest  : () -> Unit = {}
 ) {
     val context    = LocalContext.current
     val scope      = rememberCoroutineScope()
     val uiScale    = LocalUiScale.current
     val session    = remember { SessionManager(context) }
+
+    // ── Home থেকে সরিয়ে আনা widget গুলোর জন্য — একই HomeViewModel instance shared হয় (default key)
+    val homeViewModel : HomeViewModel = viewModel()
+    val homeState by homeViewModel.uiState.collectAsState()
+    var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
+    LaunchedEffect(homeState.isLoading) {
+        if (!homeState.isLoading) {
+            wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
+        }
+    }
 
     // reducedUi flag আছে এমন user এর জন্যই শুধু button দেখাবো
     val isReducedUiUser = state.user?.reducedUi == true
@@ -198,6 +229,57 @@ fun MainMenuScreen(
                 )
             }
 
+            Spacer(Modifier.height(4.dp))
+
+            // ── Home থেকে সরিয়ে আনা widget গুলো (আগে Home-এ ছিল, এখন এখানে) ──
+            DailyRoutineCard(
+                highlightRoutineItemId   = highlightRoutineItemId,
+                onRoutineItemHighlighted = onRoutineItemHighlighted,
+                onOpenStudy       = onOpenStudy,
+                onOpenInstantTest = onOpenInstantTest,
+                onOpenWeeklyTest  = onOpenWeeklyTest
+            )
+
+            WeeklyStreakCard(streak = homeState.streakInfo)
+
+            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
+                WrongReviewSection(
+                    wrongItems      = wrongItems,
+                    onAnswerMcq     = { qId, opt ->
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) quizViewModel?.answerMcq(idx, opt)
+                    },
+                    onAnswerWritten = { qId, text ->
+                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
+                        if (idx != -1) quizViewModel?.answerWritten(idx, text) ?: 0 else 0
+                    },
+                    onRemoveCorrect = { qId ->
+                        quizViewModel?.removeWrongQId(qId)
+                        wrongItems = wrongItems.filter { it.first.id != qId }
+                    }
+                )
+            }
+
+            val examExpired = homeState.examCountdown.isSet &&
+                homeState.examCountdown.days   == 0L &&
+                homeState.examCountdown.hours  == 0L &&
+                homeState.examCountdown.minutes == 0L &&
+                homeState.examCountdown.seconds == 0L
+            when {
+                homeState.examCountdown.isSet && !examExpired ->
+                    ExamCountdownCard(
+                        countdown = homeState.examCountdown,
+                        onClear   = { homeViewModel.clearExamDate() }
+                    )
+                !homeState.examCountdown.isSet ->
+                    SetExamCard(onSet = { d, n ->
+                        homeViewModel.setExamDate(d, n)
+                        ExamNotificationHelper.scheduleExamEveReminder(context, d, n)
+                    })
+            }
+
+            Spacer(Modifier.height(4.dp))
+
             // ── Menu items ──
             MenuGroup("📊 তথ্য") {
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
@@ -225,8 +307,8 @@ fun MainMenuScreen(
                     currentTag = state.adminViewingTag,
                     onSwitch   = { vm.adminSwitchAudienceTag(it) }
                 )
-                com.hanif.smartstudy.focus.FocusModePanel()
             }
+            com.hanif.smartstudy.focus.FocusModePanel()
 
             MenuGroup("❓ অন্যান্য") {
                 MenuRow("🔒 গোপনীয়তা নীতি", "Privacy Policy", Icons.Default.Security) { onNavigate(MenuNav.PRIVACY) }
