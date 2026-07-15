@@ -46,13 +46,17 @@ private val GreenOk   = Color(0xFF10B981)
 fun BookmarksPage(state: MenuUiState, onBack: () -> Unit) {
     val bookmarkIds = state.bookmarkedIds
 
-    // Cache থেকে প্রশ্ন টেনে আনো
+    // Cache থেকে প্রশ্ন টেনে আনো (defensive — malformed/null cache data থাকলেও crash না করুক)
     val allQuestions = remember {
-        val content = ContentRepository.getMemCache() ?: return@remember emptyList()
-        val quizQ  = content.quiz.map  { QuestionItem.fromQuizItem(it)  }
-        val qbankQ = content.qbank.map { QuestionItem.fromQBankItem(it) }
-        val studyQ = content.study.map { QuestionItem.fromStudyItem(it) }
-        (quizQ + qbankQ + studyQ)
+        try {
+            val content = ContentRepository.getMemCache() ?: return@remember emptyList()
+            val quizQ  = content.quiz.mapNotNull  { it?.let { qi -> QuestionItem.fromQuizItem(qi)  } }
+            val qbankQ = content.qbank.mapNotNull { it?.let { qi -> QuestionItem.fromQBankItem(qi) } }
+            val studyQ = content.study.mapNotNull { it?.let { si -> QuestionItem.fromStudyItem(si) } }
+            (quizQ + qbankQ + studyQ)
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     val bookmarkedQuestions = remember(bookmarkIds, allQuestions) {
