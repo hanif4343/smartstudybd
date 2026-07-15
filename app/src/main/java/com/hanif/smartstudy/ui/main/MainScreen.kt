@@ -172,7 +172,7 @@ fun MainScreen(
             DeepLinkAction.Type.MENU       -> { currentTab = BottomTab.MENU  }
             DeepLinkAction.Type.CHALLENGE  -> { currentTab = BottomTab.CHALLENGE }
             DeepLinkAction.Type.ROUTINE    -> {
-                currentTab = BottomTab.HOME
+                currentTab = BottomTab.MENU
                 pendingRoutineItemId = deepLink.routineItemId
             }
             DeepLinkAction.Type.FOCUS      -> {
@@ -183,9 +183,10 @@ fun MainScreen(
         }
     }
 
-    // deepLink থেকে menuPage বের করো
-    val menuInitialPage = remember(deepLink) {
-        when (deepLink.type) {
+    // deepLink থেকে menuPage বের করো (এখন mutable — Home এর grid card থেকেও set করা যায়)
+    var menuInitialPage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(deepLink) {
+        menuInitialPage = when (deepLink.type) {
             DeepLinkAction.Type.REPORTS    -> if (deepLink.questionId.isNullOrBlank()) "admin" else null
             DeepLinkAction.Type.TECHNIQUES -> "admin"
             DeepLinkAction.Type.MENU       -> deepLink.menuPage
@@ -262,23 +263,14 @@ fun MainScreen(
                 OfflineBanner(visible = !isOnline)
             when (currentTab) {
                 BottomTab.HOME  -> HomeScreen(
-                    quizViewModel          = quizViewModel,
-                    highlightRoutineItemId = pendingRoutineItemId,
-                    onRoutineItemHighlighted = { pendingRoutineItemId = null },
-                    onSearchClick = { showSearch = true },
-                    onTypingClick = { showTyping = true },
-                    onOpenStudy = { subject, subTopic ->
-                        currentTab = BottomTab.STUDY
-                        studyViewModel.navigateToSubject(subject)
-                        if (subTopic.isNotBlank()) studyViewModel.navigateToSubTopic(subTopic)
-                    },
-                    onOpenInstantTest = { subject, subTopic ->
-                        currentTab = BottomTab.QUIZ
-                        quizViewModel.startInstantTestFor(subject, subTopic)
-                    },
-                    onOpenWeeklyTest = {
-                        currentTab = BottomTab.CHALLENGE
-                    }
+                    isAdmin        = menuState.isAdmin,
+                    onSearchClick  = { showSearch = true },
+                    onOpenMenu     = { menuInitialPage = null; currentTab = BottomTab.MENU },
+                    onOpenMenuPage = { page -> menuInitialPage = page; currentTab = BottomTab.MENU },
+                    onOpenQuizTab  = { currentTab = BottomTab.QUIZ },
+                    onOpenQBankTab = { currentTab = BottomTab.QBANK },
+                    onOpenStudyTab = { currentTab = BottomTab.STUDY },
+                    onOpenTyping   = { showTyping = true }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
@@ -322,7 +314,22 @@ fun MainScreen(
                     onLogout             = onLogout,
                     onSearchClick        = { showSearch = true },
                     onTypingClick        = { showTyping = true },
-                    initialPage          = menuInitialPage
+                    initialPage          = menuInitialPage,
+                    quizViewModel        = quizViewModel,
+                    highlightRoutineItemId   = pendingRoutineItemId,
+                    onRoutineItemHighlighted = { pendingRoutineItemId = null },
+                    onOpenStudy = { subject, subTopic ->
+                        currentTab = BottomTab.STUDY
+                        studyViewModel.navigateToSubject(subject)
+                        if (subTopic.isNotBlank()) studyViewModel.navigateToSubTopic(subTopic)
+                    },
+                    onOpenInstantTest = { subject, subTopic ->
+                        currentTab = BottomTab.QUIZ
+                        quizViewModel.startInstantTestFor(subject, subTopic)
+                    },
+                    onOpenWeeklyTest = {
+                        currentTab = BottomTab.CHALLENGE
+                    }
                 )
             }
             } // Box
