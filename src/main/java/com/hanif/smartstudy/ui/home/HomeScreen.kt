@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,7 +56,6 @@ import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.HomeUiState
 import com.hanif.smartstudy.viewmodel.HomeViewModel
-import com.hanif.smartstudy.viewmodel.QuizViewModel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -132,18 +132,17 @@ object ExamNotificationHelper {
 
 @Composable
 fun HomeScreen(
-    viewModel              : HomeViewModel = viewModel(),
-    quizViewModel          : QuizViewModel? = null,
-    highlightRoutineItemId : String? = null,
-    onRoutineItemHighlighted : () -> Unit = {},
-    onSearchClick : () -> Unit = {},
-    onTypingClick : () -> Unit = {},
-    onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
+    viewModel      : HomeViewModel = viewModel(),
+    isAdmin        : Boolean = false,
+    onSearchClick  : () -> Unit = {},
+    onOpenMenu     : () -> Unit = {},                    // ☰ hamburger → Menu ট্যাব
+    onOpenMenuPage : (String) -> Unit = {},               // gridকার্ড → Menu ট্যাব + নির্দিষ্ট sub-page
+    onOpenQuizTab  : () -> Unit = {},
+    onOpenQBankTab : () -> Unit = {},
+    onOpenStudyTab : () -> Unit = {},
+    onOpenTyping   : () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
-    val ctx   = LocalContext.current
 
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -156,14 +155,6 @@ fun HomeScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    var wrongItems by remember { mutableStateOf(quizViewModel?.getWrongQuestions() ?: emptyList<Pair<QuestionItem, Int>>()) }
-    // state পরিবর্তনে reload করি, কিন্তু practice চলাকালে নয়
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) {
-            wrongItems = quizViewModel?.getWrongQuestions() ?: emptyList()
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -171,76 +162,29 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 88.dp)
     ) {
-        HomeHero(state = state, onNameEdit = { viewModel.updateUserName(it) }, onRefresh = { viewModel.refresh() }, onSearchClick = onSearchClick)
+        HomeHeaderBar(state = state, onOpenMenu = onOpenMenu, onSearchClick = onSearchClick)
 
         if (state.isOffline) OfflineBanner()
 
         Column(
             modifier            = Modifier.padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
+
+            HomeStatusRow(streak = state.streakInfo, stats = state.studyStats, goal = state.goalProgress)
 
             AdBannerPlaceholder()
 
-            QuickStatsRow(stats = state.studyStats)
-
-            AdNativePlaceholder()
-
-            // Daily Goal feature removed
-
-            DailyRoutineCard(
-                highlightRoutineItemId   = highlightRoutineItemId,
-                onRoutineItemHighlighted = onRoutineItemHighlighted,
-                onOpenStudy       = onOpenStudy,
-                onOpenInstantTest = onOpenInstantTest,
-                onOpenWeeklyTest  = onOpenWeeklyTest
+            HomeQuickAccessGrid(
+                isAdmin        = isAdmin,
+                onOpenQuizTab  = onOpenQuizTab,
+                onOpenQBankTab = onOpenQBankTab,
+                onOpenStudyTab = onOpenStudyTab,
+                onOpenTyping   = onOpenTyping,
+                onOpenMenu     = onOpenMenu,
+                onOpenMenuPage = onOpenMenuPage
             )
-
-            WeeklyStreakCard(streak = state.streakInfo)
-
-            // ── Wrong Question Review Section (QuizViewModel এর আসল মেথড দিয়ে ফিক্সড) ──
-            if (wrongItems.isNotEmpty() || (quizViewModel?.getWrongQuestions()?.isNotEmpty() == true)) {
-                WrongReviewSection(
-                    wrongItems      = wrongItems,
-                    onAnswerMcq     = { qId, opt -> 
-                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
-                        if (idx != -1) {
-                            quizViewModel?.answerMcq(idx, opt)
-                        }
-                    },
-                    onAnswerWritten = { qId, text -> 
-                        val idx = wrongItems.indexOfFirst { it.first.id == qId }
-                        if (idx != -1) {
-                            quizViewModel?.answerWritten(idx, text) ?: 0
-                        } else { 0 }
-                    },
-                    onRemoveCorrect = { qId -> 
-                        quizViewModel?.removeWrongQId(qId)
-                        // local state থেকেও সাথে সাথে সরিয়ে দাও
-                        // তাহলে পরবর্তী recomposition এ আর দেখাবে না
-                        wrongItems = wrongItems.filter { it.first.id != qId }
-                    }
-                )
-            }
-
-            val examExpired = state.examCountdown.isSet &&
-                state.examCountdown.days   == 0L &&
-                state.examCountdown.hours  == 0L &&
-                state.examCountdown.minutes == 0L &&
-                state.examCountdown.seconds == 0L
-            when {
-                state.examCountdown.isSet && !examExpired ->
-                    ExamCountdownCard(
-                        countdown = state.examCountdown,
-                        onClear   = { viewModel.clearExamDate() }
-                    )
-                !state.examCountdown.isSet ->
-                    SetExamCard(onSet = { d, n ->
-                        viewModel.setExamDate(d, n)
-                        ExamNotificationHelper.scheduleExamEveReminder(ctx, d, n)
-                    })
-            }
 
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -273,102 +217,179 @@ fun AdNativePlaceholder() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// EXISTING COMPONENTS
+// নতুন Home header — ছবি ২ রেফারেন্স অনুযায়ী: ☰ + avatar + "Welcome back, নাম" + 🔔 + 🔍
 // ═══════════════════════════════════════════════════════════
-
 @Composable
-private fun HomeHero(state: HomeUiState, onNameEdit: (String) -> Unit, onRefresh: () -> Unit, onSearchClick: () -> Unit = {}) {
-    var editingName by remember { mutableStateOf(false) }
-    var nameInput   by remember { mutableStateOf(state.user?.name ?: "") }
-    LaunchedEffect(state.user?.name) { nameInput = state.user?.name ?: "" }
-
-    Box(
-        modifier = Modifier.fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color(0xFF312E81), Color(0xFF4F46E5), Color(0xFF6366F1))))
-            .padding(top = 16.dp, bottom = 20.dp, start = 14.dp, end = 14.dp)
+private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()) {
-                Box(Modifier.size(56.dp).clip(CircleShape)
-                    .background(Color.White.copy(0.2f))
-                    .border(2.dp, Color.White.copy(0.5f), CircleShape),
-                    contentAlignment = Alignment.Center) {
-                    val pic = state.user?.picture
-                    if (!pic.isNullOrEmpty()) {
-                        AsyncImage(model = pic, contentDescription = null,
-                            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else { Text("👤", fontSize = 26.sp) }
-                }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("স্বাগতম! 👋", fontSize = 10.sp, color = Color.White.copy(0.6f),
-                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    if (editingName) {
-                        OutlinedTextField(value = nameInput, onValueChange = { nameInput = it },
-                            singleLine = true, modifier = Modifier.fillMaxWidth().height(40.dp),
-                            textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.White.copy(0.6f), unfocusedBorderColor = Color.White.copy(0.3f), cursorColor = Color.White),
-                            trailingIcon = { IconButton(onClick = { onNameEdit(nameInput.trim()); editingName = false }) { Text("✓", color = Color.White, fontSize = 16.sp) } })
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(state.user?.displayName() ?: "নাম লিখুন", fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold, color = Color.White,
-                                fontFamily = NotoSansBengali, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
-                            Spacer(Modifier.width(4.dp))
-                            IconButton(onClick = { editingName = true }, modifier = Modifier.size(22.dp)) {
-                                Icon(Icons.Default.Edit, null, tint = Color.White.copy(0.6f), modifier = Modifier.size(14.dp)) }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 3.dp)) {
-                            state.user?.role?.let {
-                                val isAdmin = it.lowercase() == "admin"
-                                Badge(containerColor = if (isAdmin) Amber else Color.White.copy(0.15f),
-                                    contentColor = if (isAdmin) Color(0xFF78350F) else Color.White.copy(0.85f)) {
-                                    Text(it, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 4.dp)) }
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.background(Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFD97706))), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("⭐", fontSize = 14.sp)
-                        Text(state.xpInfo.xp.toString(), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, fontFamily = NotoSansBengali) }
-                    Text("XP", fontSize = 8.sp, color = Color.White.copy(0.8f), fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(6.dp))
-                IconButton(onClick = onSearchClick, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp)) }
-                Spacer(Modifier.width(4.dp))
-                IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Refresh, null, tint = Color.White.copy(0.7f), modifier = Modifier.size(18.dp)) }
-            }
-            Spacer(Modifier.height(12.dp))
-            val xp = state.xpInfo
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("${xp.currentLevel.emoji} Lv.${xp.currentLevel.level} · ${xp.currentLevel.name}",
-                    color = Color.White.copy(0.9f), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                xp.nextLevel?.let { Text("${it.minXP - xp.xp} XP → ${it.name}", color = Color.White.copy(0.55f), fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-            }
-            Spacer(Modifier.height(6.dp))
-            LinearProgressBar(pct = xp.progressPct / 100f)
+        IconButton(onClick = onOpenMenu, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Default.Menu, contentDescription = "মেনু", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(42.dp).clip(CircleShape).background(PrimaryIndigo.copy(0.12f)), contentAlignment = Alignment.Center) {
+            val pic = state.user?.picture
+            if (!pic.isNullOrEmpty()) {
+                AsyncImage(model = pic, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else { Text("👤", fontSize = 20.sp) }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Welcome back,", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            Text(
+                "${state.user?.displayName() ?: "বন্ধু"} 👋",
+                fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Text("পড়তে থাকো, এগিয়ে যেতে থাকো!", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+        }
+        // 🔔 — এখনো কোনো ফাংশন যুক্ত নেই, শুধু UI placeholder (পরে notification inbox যোগ হলে wiring হবে)
+        IconButton(onClick = {}, modifier = Modifier.size(34.dp)) {
+            Icon(Icons.Default.NotificationsNone, contentDescription = "নোটিফিকেশন", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
+            Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Status row — ছবি ১ এর উপরের অংশ: Day Streak / Today's Progress / Daily Goal
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun HomeStatusRow(streak: StreakInfo, stats: StudyStats, goal: GoalProgress) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(16.dp),
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StatusPill("🔥", "${streak.streakDays}", "Day Streak", Color(0xFFF59E0B))
+            StatusDivider()
+            StatusPill("📊", "${stats.accuracyPct}%", "Today's Progress", Color(0xFF2563EB))
+            StatusDivider()
+            StatusPill("🎯", "${goal.doneMinutes}/${goal.goalMinutes}", "Daily Goal", Color(0xFF059669))
         }
     }
 }
 
 @Composable
-private fun LinearProgressBar(pct: Float) {
-    val animPct by animateFloatAsState(pct, tween(800, easing = FastOutSlowInEasing), label = "xpBar")
-    Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(20.dp)).background(Color.White.copy(0.2f))) {
-        Box(Modifier.fillMaxWidth(animPct).fillMaxHeight().clip(RoundedCornerShape(20.dp))
-            .background(Brush.horizontalGradient(listOf(Amber, Color(0xFFD97706)))))
+private fun StatusDivider() {
+    Box(Modifier.width(1.dp).height(36.dp).background(MaterialTheme.colorScheme.outline.copy(0.15f)))
+}
+
+@Composable
+private fun StatusPill(icon: String, value: String, label: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(icon, fontSize = 14.sp)
+            Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
+        }
+        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, maxLines = 1)
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// Quick-access grid — ছবি ১ এর ৪টা category: Learning / Practice / Progress / Management
+// ═══════════════════════════════════════════════════════════
+private data class GridTileData(val icon: ImageVector, val label: String, val color: Color, val onClick: () -> Unit)
+
+@Composable
+private fun HomeQuickAccessGrid(
+    isAdmin        : Boolean,
+    onOpenQuizTab  : () -> Unit,
+    onOpenQBankTab : () -> Unit,
+    onOpenStudyTab : () -> Unit,
+    onOpenTyping   : () -> Unit,
+    onOpenMenu     : () -> Unit,
+    onOpenMenuPage : (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+        GridCategorySection(
+            title = "Learning", titleColor = Color(0xFF059669), onExplore = onOpenQuizTab,
+            tiles = listOf(
+                GridTileData(Icons.AutoMirrored.Filled.MenuBook, "Quiz",  Color(0xFF059669), onOpenQuizTab),
+                GridTileData(Icons.Default.Assignment,           "QBank", Color(0xFFDB2777), onOpenQBankTab),
+                GridTileData(Icons.Default.Article,              "Study", Color(0xFF2563EB), onOpenStudyTab)
+            )
+        )
+
+        GridCategorySection(
+            title = "Practice", titleColor = Color(0xFFEA580C), onExplore = onOpenTyping,
+            tiles = listOf(
+                GridTileData(Icons.Default.Keyboard, "Typing",       Color(0xFF16A34A), onOpenTyping),
+                GridTileData(Icons.Default.Assignment, "Mock Test",  Color(0xFF7C3AED), onOpenQuizTab),
+                GridTileData(Icons.Default.Cancel,   "Wrong Review", Color(0xFFDC2626), onOpenMenu)
+            )
+        )
+
+        GridCategorySection(
+            title = "Progress", titleColor = Color(0xFF2563EB), onExplore = { onOpenMenuPage("stats") },
+            tiles = listOf(
+                GridTileData(Icons.Default.EmojiEvents, "Leaderboard",   Color(0xFFF59E0B), { onOpenMenuPage("leaderboard") }),
+                GridTileData(Icons.Default.BarChart,    "Statistics",    Color(0xFF2563EB), { onOpenMenuPage("stats") }),
+                GridTileData(Icons.Default.Bookmark,    "Saved Question", Color(0xFF64748B), { onOpenMenuPage("bookmarks") })
+            )
+        )
+
+        val mgmtTiles = buildList {
+            add(GridTileData(Icons.Default.CalendarMonth,       "Routine",    Color(0xFFEA580C), onOpenMenu))
+            add(GridTileData(Icons.Default.CenterFocusStrong,   "Focus Mode", Color(0xFF0D9488), onOpenMenu))
+            if (isAdmin) add(GridTileData(Icons.Default.AdminPanelSettings, "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
+        }
+        GridCategorySection(title = "Management", titleColor = Color(0xFF7C3AED), onExplore = onOpenMenu, tiles = mgmtTiles)
+    }
+}
+
+@Composable
+private fun GridCategorySection(title: String, titleColor: Color, onExplore: () -> Unit, tiles: List<GridTileData>) {
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = titleColor, fontFamily = NotoSansBengali)
+            Text(
+                "Explore →", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = titleColor,
+                modifier = Modifier.clickable(onClick = onExplore)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            tiles.forEach { tile -> GridTile(tile, Modifier.weight(1f)) }
+            // ৩টার কম tile হলে (যেমন admin না হলে Management এ ২টা) খালি জায়গা রাখি যাতে layout না ভাঙে
+            repeat(3 - tiles.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+@Composable
+private fun GridTile(tile: GridTileData, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(tile.color.copy(alpha = 0.10f))
+            .border(1.dp, tile.color.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+            .clickable(onClick = tile.onClick)
+            .padding(vertical = 14.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(tile.icon, contentDescription = tile.label, tint = tile.color, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(tile.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXISTING COMPONENTS (এখন এগুলো HomeScreen-এ ব্যবহার হয় না — MenuScreen-এ সরানো হয়েছে,
+// widget গুলো (Routine/Streak/WrongReview/ExamCountdown) MainMenuScreen থেকে reuse করা হয়)
+// ═══════════════════════════════════════════════════════════
 @Composable
 fun QuickStatsRow(stats: StudyStats) {
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
@@ -1320,7 +1341,7 @@ private fun CountdownBox(value: String, label: String, modifier: Modifier = Modi
 }
 
 @Composable
-private fun SetExamCard(onSet: (String, String) -> Unit) {
+fun SetExamCard(onSet: (String, String) -> Unit) {
     var showDialog by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().clickable { showDialog = true }, RoundedCornerShape(14.dp),
         CardDefaults.cardColors(Color(0xFFF0F4FF)), border = BorderStroke(1.dp, Color(0xFFBFDBFE))) {
