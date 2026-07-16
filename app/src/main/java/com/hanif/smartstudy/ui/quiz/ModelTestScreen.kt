@@ -111,10 +111,12 @@ fun ModelTestSubjectPickerScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelTestListScreen(
-    subject  : String,
-    tests    : List<ModelTestMeta>,
-    onSelect : (ModelTestMeta) -> Unit,
-    onBack   : () -> Unit
+    subject      : String,
+    tests        : List<ModelTestMeta>,
+    warning      : String? = null,
+    onSelect     : (ModelTestMeta) -> Unit,
+    onGenerateNew: () -> Unit = {},
+    onBack       : () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -137,8 +139,17 @@ fun ModelTestListScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🏆", fontSize = 40.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("এখনো কোনো মডেল টেস্ট যোগ করা হয়নি", fontFamily = NotoSansBengali,
+                    Text("এখনো কোনো মডেল টেস্ট বানানো হয়নি", fontFamily = NotoSansBengali,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = onGenerateNew,
+                        shape   = RoundedCornerShape(14.dp),
+                        colors  = ButtonDefaults.buttonColors(containerColor = ModelGreen)
+                    ) {
+                        Text("+ নতুন মডেল টেস্ট বানান", fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                    }
                 }
             }
             return@Scaffold
@@ -150,10 +161,33 @@ fun ModelTestListScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
+                OutlinedButton(
+                    onClick  = onGenerateNew,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = ModelGreen),
+                    border   = BorderStroke(1.2.dp, ModelGreen)
+                ) {
+                    Text("+ নতুন মডেল টেস্ট বানান", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                }
+            }
+            if (warning != null) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFFFF7ED)
+                    ) {
+                        Text(warning, fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = Color(0xFF9A3412), modifier = Modifier.padding(10.dp))
+                    }
+                }
+            }
+            item {
                 Text(
                     "প্রতিটা টেস্ট পূর্ণমান — শুরু করলে পুরো সেট একসাথে দিতে হবে",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 4.dp)
+                    fontFamily = NotoSansBengali, modifier = Modifier.padding(bottom = 4.dp, top = 4.dp)
                 )
             }
             items(tests) { test ->
@@ -196,6 +230,115 @@ private fun ModelTestCard(test: ModelTestMeta, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
             }
             Icon(Icons.Default.PlayCircleFilled, null, tint = ModelGreen, modifier = Modifier.size(28.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// Model Test — "+ নতুন মডেল টেস্ট বানান" ফর্ম (bottom sheet)
+// প্রশ্নের ধরন, প্রতি টেস্টে প্রশ্ন সংখ্যা (=পূর্ণমান), কয়টা টেস্ট — এই তিনটা নিয়ে জেনারেট করে
+// ─────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModelTestGenerateSheet(
+    isGenerating : Boolean,
+    onGenerate   : (type: String, perTest: Int, count: Int) -> Unit,
+    onDismiss    : () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var type    by remember { mutableStateOf("written") }
+    var perTest by remember { mutableStateOf(25) }
+    var count   by remember { mutableStateOf(5) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = MaterialTheme.colorScheme.surface,
+        shape            = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 30.dp)
+        ) {
+            Text("🏆 নতুন মডেল টেস্ট বানান", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(18.dp))
+
+            Text("প্রশ্নের ধরন", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TypeChip("MCQ", type == "mcq", Modifier.weight(1f)) { type = "mcq" }
+                TypeChip("Written", type == "written", Modifier.weight(1f)) { type = "written" }
+                TypeChip("উভয়", type == "both", Modifier.weight(1f)) { type = "both" }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            StepperRow(
+                label = "প্রতি টেস্টে প্রশ্ন (=পূর্ণমান)", value = perTest,
+                onDec = { perTest = (perTest - 5).coerceIn(10, 100) },
+                onInc = { perTest = (perTest + 5).coerceIn(10, 100) }
+            )
+
+            Spacer(Modifier.height(14.dp))
+            StepperRow(
+                label = "কয়টা টেস্ট বানাবে", value = count,
+                onDec = { count = (count - 1).coerceIn(1, 15) },
+                onInc = { count = (count + 1).coerceIn(1, 15) }
+            )
+
+            Spacer(Modifier.height(22.dp))
+            Button(
+                onClick  = { onGenerate(type, perTest, count) },
+                enabled  = !isGenerating,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape    = RoundedCornerShape(14.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = ModelGreen)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("জেনারেট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TypeChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier.clickable { onClick() },
+        shape    = RoundedCornerShape(12.dp),
+        color    = if (selected) ModelGreen else MaterialTheme.colorScheme.surfaceVariant,
+        border   = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Text(
+            label, fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun StepperRow(label: String, value: Int, onDec: () -> Unit, onInc: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 13.sp, fontFamily = NotoSansBengali,
+            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(onClick = onDec, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.RemoveCircle, null, tint = ModelGreen)
+            }
+            Text("$value", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                fontFamily = NotoSansBengali, modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
+            IconButton(onClick = onInc, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.AddCircle, null, tint = ModelGreen)
+            }
         }
     }
 }
