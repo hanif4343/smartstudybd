@@ -69,7 +69,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "⚡ Bulk Upload", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "🧪 Model Test", "✅ চেকলিস্ট")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "⚡ Bulk Upload", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "✅ চেকলিস্ট")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -106,8 +106,7 @@ fun AdminPage(
                 7 -> RenameTab(state, vm)
                 8 -> LogsTab(state, vm)
                 9 -> PendingSyncTab(state, vm)
-                10 -> ModelTestGenerateTab(state, vm)
-                11 -> ProductionChecklistTab()
+                10 -> ProductionChecklistTab()
             }
         }
     }
@@ -739,127 +738,6 @@ private fun AddQuestionTab(state: MenuUiState, vm: MenuViewModel) {
                     fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
             }
         }
-        Spacer(Modifier.height(40.dp))
-    }
-}
-
-// ── Model Test Bulk-Generate Tab ──
-// এডমিন শুধু Subject সিলেক্ট করে + কতগুলো Model Test + প্রতিটায় কতগুলো প্রশ্ন
-// (পূর্ণমান) দিলে Quiz+QBank pool থেকে অ্যালগরিদম দিয়ে অটো-সিলেক্ট করে
-// Firebase-এর "ModelTests/{subject}" নোডে সেভ করে দেয়। SubTopic সিলেক্ট করা লাগে না।
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelTestGenerateTab(state: MenuUiState, vm: MenuViewModel) {
-    var subject   by remember { mutableStateOf("") }
-    var countText by remember { mutableStateOf("5") }
-    var perTestText by remember { mutableStateOf("50") }
-    var type      by remember { mutableStateOf("both") }
-
-    val msg    = state.modelTestGenMsg
-    val saving = state.isGeneratingModelTest
-    val isOk   = msg?.startsWith("✅") == true
-
-    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
-
-    // Quiz + QBank দুই sheet-এর subject মিলিয়ে suggestion — Model Test দুই সোর্স থেকেই প্রশ্ন নেয়
-    val subjectOptions = remember(state.adminSubjectsBySheet) {
-        (state.adminSubjectsBySheet["Quiz"].orEmpty() + state.adminSubjectsBySheet["QBank"].orEmpty())
-            .distinct().sorted()
-    }
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth().background(Color(0xFFF0FDF4), RoundedCornerShape(12.dp)).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Quiz, null, tint = Color(0xFF059669), modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text("Model Test বাল্ক-জেনারেট", fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color(0xFF059669))
-                Text("Subject সিলেক্ট করো — অটোমেটিক ভালো প্রশ্ন বাছাই করে টেস্ট বানাবে",
-                    fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        HorizontalDivider()
-        AdminSubjectField("বিষয় (Subject) *", subject, subjectOptions, { subject = it })
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(
-                value = countText, onValueChange = { countText = it.filter(Char::isDigit) },
-                label = { Text("কতগুলো Model Test *", fontFamily = NotoSansBengali, fontSize = 11.sp) },
-                singleLine = true, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
-            )
-            OutlinedTextField(
-                value = perTestText, onValueChange = { perTestText = it.filter(Char::isDigit) },
-                label = { Text("প্রতিটায় প্রশ্ন (পূর্ণমান) *", fontFamily = NotoSansBengali, fontSize = 11.sp) },
-                singleLine = true, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
-            )
-        }
-
-        Text("📝 প্রশ্নের ধরন (Audience অনুযায়ী প্রি-সেট)", fontFamily = NotoSansBengali,
-            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("mcq" to "MCQ", "written" to "Written", "both" to "উভয়").forEach { (v, label) ->
-                FilterChip(selected = type == v, onClick = { type = v },
-                    label = { Text(label, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Color(0xFF059669), selectedLabelColor = Color.White))
-            }
-        }
-        if (type == "both") {
-            Text("ইউজার শুরুতে MCQ / Written বেছে নেওয়ার অপশন দেখবে", fontFamily = NotoSansBengali,
-                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFFBEB), modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "অ্যালগরিদম: পুরো subject-এর সব প্রশ্ন (Quiz+QBank) pool করে, প্রতিটা টেস্টে ~৩০-৪০% " +
-                "গুরুত্বপূর্ণ (একাধিক Year-এ repeat হওয়া / ম্যানুয়াল ফ্ল্যাগ) প্রশ্ন + বাকিটা কম-ব্যবহৃত normal " +
-                "প্রশ্ন দিয়ে ভরে — ফলে টেস্টগুলোয় কিছু কমন, কিছু নতুন প্রশ্ন থাকবে। প্রশ্ন সংখ্যা কম হলে টেস্টের " +
-                "মধ্যে ইউনিক প্রশ্নই থাকবে, কিন্তু আলাদা টেস্টের মধ্যে repeat হতে পারে।",
-                Modifier.padding(12.dp), fontFamily = NotoSansBengali, fontSize = 11.sp,
-                color = Color(0xFF92400E), lineHeight = 16.sp
-            )
-        }
-
-        msg?.let {
-            Surface(shape = RoundedCornerShape(10.dp), color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF1F2),
-                modifier = Modifier.fillMaxWidth()) {
-                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.Bold, fontSize = 12.sp,
-                    color = if (isOk) Color(0xFF166534) else Color(0xFF991B1B))
-            }
-        }
-
-        val count   = countText.toIntOrNull() ?: 0
-        val perTest = perTestText.toIntOrNull() ?: 0
-        val isValid = subject.isNotBlank() && count in 1..50 && perTest in 1..300
-
-        Button(
-            onClick = { vm.adminGenerateModelTests(subject, count, perTest, type) },
-            enabled = isValid && !saving,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-        ) {
-            if (saving) {
-                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-                Text("বানানো হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-            } else {
-                Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Model Test বানাও", fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
-            }
-        }
-        Text("⚠️ আগে এই subject-এ Model Test বানানো থাকলে এই নতুন সেট সেগুলো replace করবে (testNumber 1..N)।",
-            fontFamily = NotoSansBengali, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(40.dp))
     }
 }
