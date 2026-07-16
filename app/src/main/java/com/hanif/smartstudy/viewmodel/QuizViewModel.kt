@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.TestHistoryCache
+import com.hanif.smartstudy.data.local.LocalModelTestStore
 import com.hanif.smartstudy.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import com.hanif.smartstudy.data.model.*
@@ -55,6 +56,11 @@ data class QuizUiState(
     val pendingModelTestType : ModelTestMeta?      = null,    // type=="both" হলে MCQ/Written bottom sheet এর জন্য
     val activeModelTest      : ModelTestMeta?      = null,    // বর্তমানে চলমান/সদ্য-শেষ Model Test — back/retry নেভিগেশনের জন্য
     val activeModelTestType  : String?             = null,
+    // ── Model Test — ইউজার নিজে জেনারেট করে (QBank-only entry, Quiz sheet থেকে পুল, লোকাল স্টোরেজ) ──
+    val isModelTestJobUser       : Boolean         = false,   // true হলে subject picker স্কিপ হয়ে সরাসরি "সকল বিষয়" ব্যাচ খোলে
+    val showModelTestGenerateSheet : Boolean       = false,   // "+ নতুন মডেল টেস্ট বানান" ফর্ম
+    val isGeneratingModelTest    : Boolean         = false,
+    val modelTestGenWarning      : String?         = null,    // জেনারেটরের warning (যেমন প্রশ্ন কম থাকলে)
     val readingIndex  : Int              = 0,
     val bookmarkedIds : Set<String>      = emptySet(),
     val weakTopics    : List<WeakTopic>  = emptyList(),
@@ -83,6 +89,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val cache   = ContentCache(app)
     private val session = SessionManager(app)
     private val historyCache = TestHistoryCache(app)
+    private val localModelTestStore = LocalModelTestStore(app)
 
     private val _state = MutableStateFlow(QuizUiState())
     val state: StateFlow<QuizUiState> = _state.asStateFlow()
@@ -293,10 +300,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         timerJob?.cancel()
         when {
             // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subject picker এ ফিরে যাও
+            // (Job ইউজারের ক্ষেত্রে subject picker ছিলই না — সরাসরি বন্ধ করে বেস লিস্টে ফিরে যাও)
             _state.value.isModelTestZone -> _state.update {
                 it.copy(isModelTestZone = false, modelTests = emptyList(),
                          modelTestSubject = "", pendingModelTestType = null,
-                         isModelTestSubjectPicker = true)
+                         isModelTestSubjectPicker = !it.isModelTestJobUser)
             }
             // Model Test subject picker খোলা ছিল → পুরোপুরি বন্ধ, বেস subject list এ ফিরে যাও
             _state.value.isModelTestSubjectPicker -> _state.update {
@@ -308,31 +316,32 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
             _state.value.showResult -> {
                 val fromModelTest = _state.value.activeModelTest != null
+                // মডেল টেস্ট হলে NavPath-এ যে "subject" থাকে সেটা display label (যেমন "সকল বিষয় (মিশ্র)"),
+                // কিন্তু স্টোরেজ/জোন খুলতে আসল subjectKey লাগে — সেটা modelTestSubject-এ এখনো ধরা আছে
+                val modelSubjectKey = _state.value.modelTestSubject
                 _state.update {
                     it.copy(showResult = false, isQuizActive = false, result = null,
                             navPath = NavPath(path.subject), timerSec = 0,
                             activeModelTest = null, activeModelTestType = null)
                 }
                 // উত্তর দেওয়ার পর progress আপডেট হয়েছে — সঠিক লিস্টে ফিরে যাও
-                if (path.subject != null) {
-                    if (fromModelTest) {
-                        openModelTestZone(path.subject)
-                    } else {
-                        viewModelScope.launch {
-                            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                            rebuildSubTopics(content, path.subject, _state.value.mode)
-                        }
+                if (fromModelTest) {
+                    if (modelSubjectKey.isNotBlank()) openModelTestZone(modelSubjectKey)
+                } else if (path.subject != null) {
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubTopics(content, path.subject, _state.value.mode)
                     }
                 }
             }
             // Model Test চলাকালীন (submit না করে) back চাপলে → subTopic list না, Model Test list এ ফিরে যাও
             _state.value.activeModelTest != null && path.subTopic != null -> {
-                val subj = path.subject
+                val modelSubjectKey = _state.value.modelTestSubject
                 _state.update {
-                    it.copy(navPath = NavPath(subj), isQuizActive = false,
+                    it.copy(navPath = NavPath(path.subject), isQuizActive = false,
                              activeModelTest = null, activeModelTestType = null)
                 }
-                if (subj != null) openModelTestZone(subj)
+                if (modelSubjectKey.isNotBlank()) openModelTestZone(modelSubjectKey)
             }
             path.subTopic != null -> {
                 _state.update { it.copy(navPath = NavPath(path.subject)) }
@@ -355,47 +364,120 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Study/Quiz/QBank subject list-এর নিচে "🏆 মডেল টেস্ট" বাটনে ট্যাপ করলে কল হয় (Mock Test-এর মতোই
-     * একটা গ্লোবাল এন্ট্রি পয়েন্ট) — যে subject-গুলোতে অন্তত ১টা Model Test আছে এবং ইউজারের audience
-     * tag অনুযায়ী দেখা যায়, সেগুলোর তালিকা দেখায়।
+     * QBank subject list-এর নিচে "🏆 মডেল টেস্ট" বাটনে ট্যাপ করলে কল হয়।
+     * সোর্স সবসময় **Quiz sheet** (QBank sheet না) — এন্ট্রি পয়েন্টটা শুধু QBank স্ক্রিনে থাকে,
+     * কিন্তু প্রশ্ন আসে Quiz থেকে।
+     *   - Job seeker  → subject picker স্কিপ, Quiz-এর সব সাবজেক্ট মিশিয়ে একটাই ব্যাচ (JOB_ALL_KEY)
+     *   - Student     → নিজের classLevel-এ Quiz-এ যেসব সাবজেক্ট আছে তার একটা বাছাই করতে হয়
      */
     fun openModelTestPicker() {
-        _state.update { it.copy(isModelTestSubjectPicker = true, modelTestSubjectList = emptyList()) }
         viewModelScope.launch {
+            val user = session.getCurrentUser()
+            val isJob = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .equals("Job", ignoreCase = true)
+
+            if (isJob) {
+                _state.update { it.copy(isModelTestJobUser = true) }
+                openModelTestZone(LocalModelTestStore.JOB_ALL_KEY)
+                return@launch
+            }
+
+            _state.update { it.copy(isModelTestJobUser = false, isModelTestSubjectPicker = true,
+                modelTestSubjectList = emptyList()) }
+
             val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            val user     = session.getCurrentUser()
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val filtered = content.forUser(user, adminTag)
-            // পুরা অ্যাপে audience tag অনুযায়ী যেভাবে ডেটা ফিল্টার হয় ঠিক সেভাবেই —
-            // ইউজার যে subject-গুলো আসলে দেখতে পারে (Quiz/QBank/Study যেকোনো sheet-এ) তার তালিকা
-            val visibleSubjects = (filtered.quiz.map { it.subject } +
-                                    filtered.qbank.map { it.subject } +
-                                    filtered.study.map { it.subject }).toSet()
+            // ইউজারের classLevel অনুযায়ী Quiz sheet-এ যেসব সাবজেক্ট আছে (audience-filtered)
+            val subjects = filtered.quiz.map { it.subject }.filter { it.isNotBlank() }.toSet().sorted()
 
-            val list = content.modelTests
-                .filterKeys { it.isNotBlank() && it in visibleSubjects }
-                .map { (subj, tests) -> subj to tests.size }
-                .sortedBy { it.first }
+            val list = subjects.map { subj -> subj to localModelTestStore.countFor(subj) }
 
             _state.update { it.copy(modelTestSubjectList = list) }
         }
     }
 
     // ═════════════════════════════════════════════════════════
-    // Model Test — এডমিন-কিউরেটেড, ফিক্সড, সবার জন্য একই।
-    // Study ও QBank দুই মোডেই subTopic list এ একটা virtual card হিসেবে দেখায়
-    // (rebuildSubTopics দ্রষ্টব্য), এখানে ট্যাপ করলে এই zone খোলে।
+    // Model Test — ইউজার নিজে জেনারেট করে, শুধু এই ডিভাইসে সংরক্ষিত (LocalModelTestStore)।
+    // প্রশ্নের পুল সবসময় Quiz sheet থেকে আসে।
     // ═════════════════════════════════════════════════════════
 
-    /** Study/QBank subTopic list থেকে "মডেল টেস্ট" কার্ডে ট্যাপ করলে কল হয় */
-    fun openModelTestZone(subject: String) {
+    /** Subject picker থেকে একটা subject বাছাই করলে (বা Job ইউজারের জন্য সরাসরি) কল হয় */
+    fun openModelTestZone(subjectKey: String) {
         _state.update {
             it.copy(isModelTestZone = true, isModelTestSubjectPicker = false,
-                     modelTestSubject = subject, pendingModelTestType = null)
+                     modelTestSubject = subjectKey, pendingModelTestType = null, modelTestGenWarning = null)
         }
         viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            _state.update { it.copy(modelTests = content.modelTests[subject].orEmpty()) }
+            _state.update { it.copy(modelTests = localModelTestStore.getTests(subjectKey)) }
+        }
+    }
+
+    /** "+ নতুন মডেল টেস্ট বানান" বাটনে ট্যাপ করলে ফর্ম খোলে */
+    fun openModelTestGenerateSheet() {
+        _state.update { it.copy(showModelTestGenerateSheet = true) }
+    }
+
+    fun dismissModelTestGenerateSheet() {
+        _state.update { it.copy(showModelTestGenerateSheet = false) }
+    }
+
+    /**
+     * ফর্ম সাবমিট করলে কল হয় — Quiz sheet থেকে পুল বানিয়ে ModelTestGenerator দিয়ে জেনারেট করে
+     * LocalModelTestStore-এ সেভ করে (আগের ব্যাচ থাকলে রিপ্লেস হয়ে যায়)।
+     *
+     * subjectKey == JOB_ALL_KEY হলে Quiz-এর সব সাবজেক্ট মিশিয়ে পুল বানানো হয় (Job ইউজার),
+     * নাহলে শুধু ওই একটা সাবজেক্টের সব সাবটপিক মিলিয়ে পুল বানানো হয় (Student ইউজার)।
+     */
+    fun generateLocalModelTests(type: String, perTest: Int, count: Int) {
+        val subjectKey = _state.value.modelTestSubject
+        if (subjectKey.isBlank()) return
+
+        _state.update { it.copy(isGeneratingModelTest = true, modelTestGenWarning = null) }
+        viewModelScope.launch {
+            val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val filtered = content.forUser(user, adminTag)
+
+            val quizItems = if (subjectKey == LocalModelTestStore.JOB_ALL_KEY)
+                filtered.quiz
+            else
+                filtered.quiz.filter { it.subject == subjectKey }
+
+            var pool = quizItems.map { QuestionItem.fromQuizItem(it) }
+            if (type != "both") {
+                pool = pool.filter { if (type == "written") it.isWritten() else it.isMcq() }
+            }
+
+            val result = com.hanif.smartstudy.util.ModelTestGenerator.generate(pool, count, perTest)
+
+            val displaySubject = if (subjectKey == LocalModelTestStore.JOB_ALL_KEY)
+                LocalModelTestStore.JOB_ALL_LABEL else subjectKey
+
+            val now = System.currentTimeMillis()
+            val tests = result.tests.map { g ->
+                ModelTestMeta(
+                    subject    = displaySubject,
+                    testNumber = g.testNumber,
+                    title      = "মডেল টেস্ট ${g.testNumber}",
+                    type       = type,
+                    totalMarks = g.questionKeys.size,
+                    questionIds = g.questionKeys,
+                    createdAt  = now
+                )
+            }
+
+            localModelTestStore.saveTests(subjectKey, tests)
+
+            _state.update {
+                it.copy(
+                    modelTests = tests,
+                    isGeneratingModelTest = false,
+                    showModelTestGenerateSheet = false,
+                    modelTestGenWarning = result.warning
+                )
+            }
         }
     }
 
@@ -412,7 +494,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(pendingModelTestType = null) }
     }
 
-    /** Model Test শুরু করো — questionIds ("sheet|id") resolve করে audience-filtered pool থেকে প্রশ্ন বসাও */
+    /** Model Test শুরু করো — questionIds ("Quiz|id") resolve করে audience-filtered Quiz pool থেকে প্রশ্ন বসাও */
     fun startModelTest(test: ModelTestMeta, chosenType: String) {
         viewModelScope.launch {
             val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
@@ -420,25 +502,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val filtered = content.forUser(user, adminTag)
 
-            val quizPool  = filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }.associateBy { it.sourceKey() }
-            val qbankPool = filtered.qbank.map { QuestionItem.fromQBankItem(it) }.associateBy { it.sourceKey() }
-            // Study sheet-এর প্রশ্নে option নেই — Model Test-এ এলে সবসময় "written" হিসেবে ধরা হয়
-            val studyPool = filtered.study.map { QuestionItem.fromStudyItem(it).copy(questionType = "written") }
-                .associateBy { it.sourceKey() }
+            val quizPool = filtered.quiz.map { QuestionItem.fromQuizItem(it) }.associateBy { it.sourceKey() }
 
-            // admin যে ক্রমে ঠিক করে দিয়েছে সেই ক্রমেই resolve করা হয় — সাধারণ Quiz/QBank/Study
-            // আইটেম live content থেকে resolve হয়, কিন্তু Study থেকে auto-generate করা MCQ
-            // (distractor ধার করা) সিন্থেটিক বলে test.inlineMcq থেকে সরাসরি বসানো হয়
-            val resolved = test.questionIds.mapNotNull { key ->
-                quizPool[key] ?: qbankPool[key] ?: studyPool[key] ?: test.inlineMcq[key]?.let { inline ->
-                    QuestionItem(
-                        id = key, subject = test.subject, subTopic = inline.subTopic,
-                        question = inline.question, optionA = inline.optionA, optionB = inline.optionB,
-                        optionC = inline.optionC, optionD = inline.optionD, answer = inline.answer,
-                        questionType = "mcq", sourceSheet = "StudyMcq"
-                    )
-                }
-            }
+            val resolved = test.questionIds.mapNotNull { key -> quizPool[key] }
             val typeFiltered = if (test.type == "both") {
                 resolved.filter { if (chosenType == "written") it.isWritten() else it.isMcq() }
             } else resolved
