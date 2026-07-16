@@ -141,7 +141,8 @@ fun HomeScreen(
     onOpenQBankTab : () -> Unit = {},
     onOpenStudyTab : () -> Unit = {},
     onOpenTyping   : () -> Unit = {},
-    onOpenMockTest : (Boolean) -> Unit = {}   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
+    onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
+    onOpenFocusMode: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
 
@@ -185,7 +186,8 @@ fun HomeScreen(
                 onOpenTyping   = onOpenTyping,
                 onOpenMenu     = onOpenMenu,
                 onOpenMenuPage = onOpenMenuPage,
-                onOpenMockTest = onOpenMockTest
+                onOpenMockTest = onOpenMockTest,
+                onOpenFocusMode = onOpenFocusMode
             )
 
             if (state.isLoading) {
@@ -321,7 +323,8 @@ private fun HomeQuickAccessGrid(
     onOpenTyping   : () -> Unit,
     onOpenMenu     : () -> Unit,
     onOpenMenuPage : (String) -> Unit,
-    onOpenMockTest : (Boolean) -> Unit = {}
+    onOpenMockTest : (Boolean) -> Unit = {},
+    onOpenFocusMode: () -> Unit = {}
 ) {
     var showMockTestPicker by remember { mutableStateOf(false) }
 
@@ -358,7 +361,7 @@ private fun HomeQuickAccessGrid(
 
         val mgmtTiles = buildList {
             add(GridTileData(vecIcon(Icons.Default.CalendarMonth),       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
-            add(GridTileData(vecIcon(Icons.Default.CenterFocusStrong),   "Focus Mode", Color(0xFF0D9488), onOpenMenu))
+            add(GridTileData(vecIcon(Icons.Default.CenterFocusStrong),   "Focus Mode", Color(0xFF0D9488), onOpenFocusMode))
             if (isAdmin) add(GridTileData(vecIcon(Icons.Default.AdminPanelSettings), "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
         }
         GridCategorySection(title = "Management", titleColor = Color(0xFF7C3AED), onExplore = onOpenMenu, tiles = mgmtTiles)
