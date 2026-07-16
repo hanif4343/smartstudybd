@@ -141,7 +141,7 @@ fun FocusTodayCard(subjects: List<String>) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FocusSubjectPickerSheet(
+fun FocusSubjectPickerSheet(
     subjects     : List<String>,
     focusState   : FocusModeState,
     onActivate   : (subject: String, examDateMillis: Long) -> Unit,
