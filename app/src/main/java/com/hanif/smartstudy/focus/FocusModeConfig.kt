@@ -16,9 +16,8 @@ object FocusModeConfig {
     /** মাস্টার সুইচ — পুরো ফোকাস মোড ফিচার চালু/বন্ধ করার একমাত্র জায়গা */
     const val ENABLED: Boolean = true
 
-    /** আপাতত এই ফিচার শুধু Admin-এর জন্য (isAdmin() true) — সাধারণ ইউজার
-     *  এটার কোনো UI (কার্ড/ওভারলে/প্যানেল) দেখতেও পাবে না। */
-    const val ADMIN_ONLY: Boolean = true
+    /** ফোকাস মোড এখন সবার জন্য উন্মুক্ত — আগে শুধু Admin-দের জন্য ছিল। */
+    const val ADMIN_ONLY: Boolean = false
 
     /** পরীক্ষার তারিখ না পার হলেও, ভুলে বন্ধ না করলে সর্বোচ্চ এই কয়দিন পর
      *  ফোকাস মোড নিজে থেকেই বন্ধ হয়ে যাবে (hard cap safety net) */
