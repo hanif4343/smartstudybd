@@ -79,19 +79,31 @@ fun CoreScreen(
             )
         }
 
-        // ── Model Test Zone (এডমিন-কিউরেটেড, ফিক্সড টেস্ট লিস্ট) ──
+        // ── Model Test Zone — ইউজার নিজে জেনারেট করা টেস্ট লিস্ট (লোকাল স্টোরেজ) ──
         state.isModelTestZone -> {
             ModelTestListScreen(
-                subject    = state.modelTestSubject,
-                tests      = state.modelTests,
-                onSelect   = { viewModel.selectModelTest(it) },
-                onBack     = { viewModel.navigateBack() }
+                subject       = state.modelTests.firstOrNull()?.subject
+                    ?: if (state.isModelTestJobUser)
+                           com.hanif.smartstudy.data.local.LocalModelTestStore.JOB_ALL_LABEL
+                       else state.modelTestSubject,
+                tests         = state.modelTests,
+                warning       = state.modelTestGenWarning,
+                onSelect      = { viewModel.selectModelTest(it) },
+                onGenerateNew = { viewModel.openModelTestGenerateSheet() },
+                onBack        = { viewModel.navigateBack() }
             )
             if (state.pendingModelTestType != null) {
                 ModelTestTypeSheet(
                     test      = state.pendingModelTestType!!,
                     onPick    = { type -> viewModel.startModelTest(state.pendingModelTestType!!, type) },
                     onDismiss = { viewModel.dismissModelTestTypePicker() }
+                )
+            }
+            if (state.showModelTestGenerateSheet) {
+                ModelTestGenerateSheet(
+                    isGenerating = state.isGeneratingModelTest,
+                    onGenerate   = { type, perTest, count -> viewModel.generateLocalModelTests(type, perTest, count) },
+                    onDismiss    = { viewModel.dismissModelTestGenerateSheet() }
                 )
             }
         }
