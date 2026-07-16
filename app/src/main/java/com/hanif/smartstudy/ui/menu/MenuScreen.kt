@@ -48,7 +48,9 @@ fun MenuScreen(
     onRoutineItemHighlighted : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
-    onOpenWeeklyTest  : () -> Unit = {}
+    onOpenWeeklyTest  : () -> Unit = {},
+    onBackToHome      : (() -> Unit)? = null   // Home থেকে সরাসরি কোনো সাবপেজ (Saved Question, Statistics ইত্যাদি)
+                                                // খোলা হলে, Menu-র মূল লিস্টে না গিয়ে সরাসরি Home এ ফিরে যেতে
 ) {
     val state   by vm.state.collectAsStateWithLifecycle()
     val darkMode = LocalDarkMode.current
@@ -88,9 +90,15 @@ fun MenuScreen(
         if (initialPage != null) screen = startScreen
     }
 
-    // Sub-screen এ থাকলে back দিলে MAIN এ ফেরত
+    // Sub-screen এ থাকলে back দিলে MAIN এ ফেরত — তবে Home থেকে শর্টকাটে
+    // (initialPage দিয়ে) সরাসরি এই সাবপেজে আসা হলে, এখনো সেই একই পেজে থাকা
+    // অবস্থায় back চাপলে Menu-র মূল লিস্টে না গিয়ে সরাসরি Home এ ফিরে যাবে।
     androidx.activity.compose.BackHandler(enabled = screen != MenuNav.MAIN) {
-        screen = MenuNav.MAIN
+        if (initialPage != null && screen == startScreen && onBackToHome != null) {
+            onBackToHome()
+        } else {
+            screen = MenuNav.MAIN
+        }
     }
 
     AnimatedContent(
