@@ -389,7 +389,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val filtered = content.forUser(user, adminTag)
             // ইউজারের classLevel অনুযায়ী Quiz sheet-এ যেসব সাবজেক্ট আছে (audience-filtered)
-            val subjects = filtered.quiz.map { it.subject }.filter { it.isNotBlank() }.toSet().sorted()
+            val subjects = filtered.quiz.mapNotNull { it.subject }.filter { it.isNotBlank() }.toSet().sorted()
 
             val list = subjects.map { subj -> subj to localModelTestStore.countFor(subj) }
 
