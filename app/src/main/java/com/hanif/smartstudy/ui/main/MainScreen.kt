@@ -51,6 +51,7 @@ fun MainScreen(
     var currentTab     by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch     by remember { mutableStateOf(false) }
     var showTyping     by remember { mutableStateOf(false) }
+    var showFocusModeInfo by remember { mutableStateOf(false) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -91,17 +92,20 @@ fun MainScreen(
     }
 
     // Back button:
-    // 1) search/typing খোলা থাকলে বন্ধ করো
-    // 2) অন্য tab এ থাকলে Home এ যাও (Quiz ভেতরের depth CoreScreen BackHandler আগেই consume করে)
-    // 3) Home এ থাকলে exit dialog দেখাও
+    // 1) search/typing/focus-mode-info খোলা থাকলে বন্ধ করো
+    // 2) Menu ট্যাবের সাবপেজে থাকলে MenuScreen এর নিজস্ব (nested) BackHandler
+    //    আগেই handle করে ফেলবে (Home থেকে শর্টকাটে আসা সাবপেজ হলে সরাসরি Home এ
+    //    ফিরিয়ে দেয়, নাহলে Menu-র MAIN লিস্টে ফেরত যায়) — তাই এখানে আলাদা কিছু
+    //    করার দরকার নেই।
+    // 3) অন্য যেকোনো tab এ (Menu-র MAIN root সহ) থাকলে Home এ যাও
+    // 4) Home এ থাকলে exit dialog দেখাও
     BackHandler(enabled = true) {
         when {
-            showSearch                   -> showSearch = false
-            showTyping                   -> showTyping = false
-            // Menu tab এ থাকলে MenuScreen এর নিজস্ব BackHandler handle করবে
-            currentTab == BottomTab.MENU -> { /* MenuScreen BackHandler consume করবে */ }
-            currentTab != BottomTab.HOME -> currentTab = BottomTab.HOME
-            else                         -> showExitDialog = true
+            showSearch                    -> showSearch = false
+            showTyping                    -> showTyping = false
+            showFocusModeInfo             -> showFocusModeInfo = false
+            currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
+            else                          -> showExitDialog = true
         }
     }
 
@@ -227,6 +231,14 @@ fun MainScreen(
         )
         return
     }
+    if (showFocusModeInfo) {
+        val studyState by studyViewModel.state.collectAsStateWithLifecycle()
+        com.hanif.smartstudy.focus.FocusModeInfoScreen(
+            subjects = studyState.subjects.map { it.name },
+            onBack   = { showFocusModeInfo = false }
+        )
+        return
+    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -279,7 +291,8 @@ fun MainScreen(
                             currentTab = BottomTab.QUIZ
                             quizViewModel.openMockZone()
                         }
-                    }
+                    },
+                    onOpenFocusMode = { showFocusModeInfo = true }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
@@ -338,7 +351,8 @@ fun MainScreen(
                     },
                     onOpenWeeklyTest = {
                         currentTab = BottomTab.CHALLENGE
-                    }
+                    },
+                    onBackToHome = { menuInitialPage = null; currentTab = BottomTab.HOME }
                 )
             }
             } // Box
