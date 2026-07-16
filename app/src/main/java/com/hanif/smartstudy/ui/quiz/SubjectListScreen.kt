@@ -210,11 +210,11 @@ fun SubjectListScreen(
             }
         }
 
-        // ── Model Test — Mock Test-এর মতোই একটা কম্প্যাক্ট গ্লোবাল বাটন, সব মোডেই (Study সহ) —
-        // ট্যাপ করলে subject picker খুলবে, বেশি জায়গা নেয় না (স্লিম আউটলাইন বাটন) ──
-        if (subjects.isNotEmpty()) {
+        // ── Model Test — শুধু QBank মোডে (এন্ট্রি পয়েন্ট এখানেই, প্রশ্ন আসে Quiz sheet থেকে) —
+        // Job ইউজারের জন্য সরাসরি জেনারেট-ফর্ম, Student ইউজারের জন্য আগে subject picker ──
+        if (mode == StudyMode.QBANK && subjects.isNotEmpty()) {
             item {
-                Spacer(Modifier.height(if (mode == StudyMode.STUDY) 4.dp else 6.dp))
+                Spacer(Modifier.height(6.dp))
                 OutlinedButton(
                     onClick  = onModelTestZone,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
