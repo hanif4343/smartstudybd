@@ -171,17 +171,40 @@ fun SubjectListScreen(
             }
         }
 
-        // Subject cards
-        itemsIndexed(subjects) { idx, subject ->
-            SubjectCard(
-                subject = subject,
-                onClick = { onSubject(subject.name) },
-                reorderEnabled = isAdmin && isReorderMode,
-                isFirst = idx == 0,
-                isLast  = idx == subjects.lastIndex,
-                onMoveUp   = { onMoveSubject(idx, idx - 1) },
-                onMoveDown = { onMoveSubject(idx, idx + 1) }
-            )
+        // Subject cards — QBank এ ২-কলাম গ্রিড (সাবটপিক কাউন্ট দেখায়), Quiz/Study এ আগের মতো সিঙ্গল-কলাম লিস্ট
+        if (mode == StudyMode.QBANK) {
+            item {
+                LazyVerticalGrid(
+                    columns                = GridCells.Fixed(2),
+                    modifier               = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
+                    verticalArrangement    = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(subjects) { idx, subject ->
+                        QBankSubjectCard(
+                            subject = subject,
+                            onClick = { onSubject(subject.name) },
+                            reorderEnabled = isAdmin && isReorderMode,
+                            isFirst = idx == 0,
+                            isLast  = idx == subjects.lastIndex,
+                            onMoveUp   = { onMoveSubject(idx, idx - 1) },
+                            onMoveDown = { onMoveSubject(idx, idx + 1) }
+                        )
+                    }
+                }
+            }
+        } else {
+            itemsIndexed(subjects) { idx, subject ->
+                SubjectCard(
+                    subject = subject,
+                    onClick = { onSubject(subject.name) },
+                    reorderEnabled = isAdmin && isReorderMode,
+                    isFirst = idx == 0,
+                    isLast  = idx == subjects.lastIndex,
+                    onMoveUp   = { onMoveSubject(idx, idx - 1) },
+                    onMoveDown = { onMoveSubject(idx, idx + 1) }
+                )
+            }
         }
 
         // ── QBank subject list — banner ad (list এর শেষে, Mock button এর আগে) ──
@@ -193,22 +216,9 @@ fun SubjectListScreen(
             }
         }
 
-        // Mock Zone button (quiz + qbank)
-        if (mode != StudyMode.STUDY) {
-            item {
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick  = onMockZone,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    shape    = RoundedCornerShape(16.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                ) {
-                    Text("🏆 বিষয় ভিত্তিক মক টেস্ট", fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
-                        modifier = Modifier.padding(vertical = 6.dp))
-                }
-            }
-        }
+        // ── Mock Test বাটন এখান থেকে সরানো হয়েছে — এটা অলরেডি Home স্ক্রিনে আছে,
+        //    তাই Quiz/QBank নেভিগেশনে এটা রিডান্ড্যান্ট ছিল। onMockZone প্যারামিটার
+        //    signature-এ রাখা হলো (backward-compat), শুধু এখানে আর ব্যবহার হচ্ছে না।
 
         // ── Model Test — শুধু QBank মোডে (এন্ট্রি পয়েন্ট এখানেই, প্রশ্ন আসে Quiz sheet থেকে) —
         // Job ইউজারের জন্য সরাসরি জেনারেট-ফর্ম, Student ইউজারের জন্য আগে subject picker ──
@@ -342,6 +352,83 @@ private fun SubjectCard(
             } else {
                 Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
                     modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+// ── QBank Subject Card — গ্রিড (২-কলাম) এ দেখানো হয়, সাবজেক্টের ভিতরে কতগুলো
+// অধ্যায় (সাবটপিক) আছে সেটা দেখায় — মোট প্রশ্ন সংখ্যা না ──
+@Composable
+private fun QBankSubjectCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {}
+) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+    val qbankAccent  = Color(0xFF0891B2)
+
+    Card(
+        modifier  = Modifier.fillMaxWidth()
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, qbankAccent.copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                        .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f)))),
+                    contentAlignment = Alignment.Center
+                ) { Text(subjectIcon(subject.name), fontSize = 20.sp) }
+                Spacer(Modifier.weight(1f))
+                if (!reorderEnabled) {
+                    Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(12.dp))
+                }
+            }
+
+            Text(subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("📂", fontSize = 10.sp)
+                Text("${subject.subTopics.size} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
+            }
+
+            // Progress bar
+            Box(
+                Modifier.fillMaxWidth().height(5.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(subject.progressPct / 100f).fillMaxHeight()
+                        .background(Brush.horizontalGradient(listOf(qbankAccent, Color(0xFF22D3EE))))
+                )
+            }
+            Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
+                fontFamily = NotoSansBengali)
+
+            if (reorderEnabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    IconButton(onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isFirst) qbankAccent else Color(0xFFCBD5E1))
+                    }
+                    IconButton(onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isLast) qbankAccent else Color(0xFFCBD5E1))
+                    }
+                }
             }
         }
     }
@@ -615,16 +702,40 @@ private fun QBankTopicCard(
         return
     }
 
+    val accent = when (st.questionTypeLabel) {
+        "written" -> Color(0xFF7C3AED)   // বেগুনি — Written
+        "mixed"   -> Color(0xFFEA580C)   // কমলা — Mixed (MCQ + Written দুটোই)
+        else      -> Color(0xFF0891B2)   // সায়ান — MCQ (ডিফল্ট)
+    }
+    val typeIcon  = when (st.questionTypeLabel) { "written" -> "✍️"; "mixed" -> "🔀"; else -> "🔘" }
+    val typeLabel = when (st.questionTypeLabel) { "written" -> "Written"; "mixed" -> "মিশ্র"; else -> "MCQ" }
+
     Card(
         modifier  = Modifier.fillMaxWidth()
             .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
-        shape     = RoundedCornerShape(14.dp),
+        shape     = RoundedCornerShape(16.dp),
         colors    = CardDefaults.cardColors(containerColor = surfaceColor),
-        elevation = CardDefaults.cardElevation(1.dp)
+        elevation = CardDefaults.cardElevation(1.dp),
+        border    = BorderStroke(1.dp, accent.copy(alpha = 0.16f))
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📋", fontSize = 20.sp, modifier = Modifier.weight(1f))
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // ── প্রশ্নের ধরন ব্যাজ — MCQ / Written / মিশ্র ──
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = accent.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(typeIcon, fontSize = 9.sp)
+                        Text(typeLabel, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                            color = accent, fontFamily = NotoSansBengali)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
                 if (reorderEnabled) {
                     IconButton(
                         onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(24.dp)
@@ -638,6 +749,9 @@ private fun QBankTopicCard(
                         Icon(Icons.Default.KeyboardArrowDown, null,
                             modifier = Modifier.size(18.dp), tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1))
                     }
+                } else {
+                    Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(11.dp))
                 }
             }
             Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
