@@ -158,6 +158,11 @@ fun QuestionListScreen(
         listState.scrollToItem(0)
     }
 
+    // ── Model Test চলাকালীন Written প্রশ্ন হলে টাইপ-করে-মেলানোর বদলে
+    //    "উত্তর দেখুন" + ঠিক/ভুল সেলফ-গ্রেড UI দেখাতে হবে ──
+    val vmState by viewModel.state.collectAsState()
+    val isModelTest = vmState.activeModelTest != null
+
     val readingIdx by remember { derivedStateOf { pageOffset + listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
 
@@ -265,6 +270,8 @@ fun QuestionListScreen(
                                     onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
                                     onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                                     onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
+                                    isModelTest = isModelTest,
+                                    onWrittenSelfGrade = { correct -> viewModel.answerWrittenSelfGrade(globalIdx, correct) },
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
                                     onStudyDone = onStudyDoneWithScroll,
                                     onReport    = { reportIdx = globalIdx },
@@ -284,6 +291,8 @@ fun QuestionListScreen(
                             onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
                             onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                             onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
+                            isModelTest = isModelTest,
+                            onWrittenSelfGrade = { correct -> viewModel.answerWrittenSelfGrade(globalIdx, correct) },
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
                             onStudyDone = onStudyDoneWithScroll,
                             onReport    = { reportIdx = globalIdx },
