@@ -316,17 +316,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
             _state.value.showResult -> {
                 val fromModelTest = _state.value.activeModelTest != null
+                val fromMock      = path.subject == "Mock Test"
                 // মডেল টেস্ট হলে NavPath-এ যে "subject" থাকে সেটা display label (যেমন "সকল বিষয় (মিশ্র)"),
                 // কিন্তু স্টোরেজ/জোন খুলতে আসল subjectKey লাগে — সেটা modelTestSubject-এ এখনো ধরা আছে
                 val modelSubjectKey = _state.value.modelTestSubject
                 _state.update {
                     it.copy(showResult = false, isQuizActive = false, result = null,
-                            navPath = NavPath(path.subject), timerSec = 0,
+                            navPath = if (fromMock) NavPath() else NavPath(path.subject), timerSec = 0,
                             activeModelTest = null, activeModelTestType = null)
                 }
                 // উত্তর দেওয়ার পর progress আপডেট হয়েছে — সঠিক লিস্টে ফিরে যাও
                 if (fromModelTest) {
                     if (modelSubjectKey.isNotBlank()) openModelTestZone(modelSubjectKey)
+                } else if (fromMock) {
+                    // Mock Test — "Mock Test" কোনো আসল subject না, তাই subTopic rebuild না করে
+                    // সরাসরি বেস subject list এ ফিরে যাও (subjects আগে থেকেই লোড করা আছে)।
+                    viewModelScope.launch {
+                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                        rebuildSubjects(content, _state.value.mode)
+                    }
                 } else if (path.subject != null) {
                     viewModelScope.launch {
                         val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
@@ -342,6 +350,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                              activeModelTest = null, activeModelTestType = null)
                 }
                 if (modelSubjectKey.isNotBlank()) openModelTestZone(modelSubjectKey)
+            }
+            // Mock Test চলাকালীন (submit না করে) back চাপলে → "Mock Test" নামের ভুয়া subTopic
+            // list খুঁজতে যাওয়া যাবে না, সরাসরি বেস subject list এ ফিরে যাও।
+            path.subject == "Mock Test" -> {
+                _state.update {
+                    it.copy(navPath = NavPath(), isQuizActive = false, questions = emptyList(), timerSec = 0)
+                }
             }
             path.subTopic != null -> {
                 _state.update { it.copy(navPath = NavPath(path.subject)) }
@@ -536,11 +551,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         startModelTest(mt, type)
     }
 
-    fun openMockZone() {
-        _state.update { it.copy(isMockZone = true, navPath = NavPath()) }
+    /** Mock Test রেজাল্ট স্ক্রিন থেকে "আবার দাও" — আগের mockConfig (selectedTopics/limit)
+     *  দিয়েই নতুন করে র‍্যান্ডম প্রশ্ন সেট শুরু হবে। */
+    fun retryMock() {
+        startMock()
+    }
+
+    /**
+     * @param mode Home থেকে Quiz/QBank ট্যাব প্রথমবার ভিজিট না করেই সরাসরি Mock Test
+     * খোলা হলে এই ViewModel এর state.mode তখনো ডিফল্ট (QUIZ) থাকতে পারে। সেক্ষেত্রে
+     * CoreScreen এর mode-sync LaunchedEffect (state.mode != mode হলে setMode() কল করে)
+     * পরে গিয়ে এই isMockZone=true ফ্ল্যাগটা রিসেট করে ফেলত (setMode সবসময় isMockZone=false
+     * করে দেয়)। তাই এখানেই mode সেট করে দেওয়া হচ্ছে যাতে LaunchedEffect এর শর্ত মিলে যায়
+     * এবং setMode() আর কল না হয়।
+     */
+    fun openMockZone(mode: StudyMode = _state.value.mode) {
+        _state.update { it.copy(mode = mode, isMockZone = true, navPath = NavPath()) }
         viewModelScope.launch {
             val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            rebuildSubjects(content, _state.value.mode, forMock = true)
+            rebuildSubjects(content, mode, forMock = true)
         }
     }
 
@@ -590,7 +619,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startMock() {
         viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            // ── লোকাল থেকে প্রশ্ন নেওয়া নিশ্চিত করা ──
+            // repo.getContent() নিজে আগে memory cache / disk cache চেক করে, কিন্তু Home
+            // থেকে সরাসরি Mock Test শুরু করলে (Quiz/QBank ট্যাব কখনো ভিজিট না করেই) কোনো
+            // মুহূর্তে cache miss হলে খালি AppContent() পড়ে যেতে পারত। তাই এখানে আগে
+            // shared memory cache (ContentRepository.getMemCache()) সরাসরি চেক করি —
+            // সেটা থাকলে নেটওয়ার্ক/সাসপেন্ড কল ছাড়াই তাৎক্ষণিক লোকাল ডেটা পাওয়া যায়।
+            val content = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()
+                ?: (repo.getContent() as? DataState.Success)?.data
+                ?: AppContent()
             val cfg     = _state.value.mockConfig
             val mode    = _state.value.mode
             val pool    = when (mode) {
@@ -610,7 +647,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(isMockZone = false, questions = questions, isQuizActive = true,
                         showResult = false, result = null, answeredCount = 0,
-                        navPath = NavPath("Mock Test"))
+                        // NOTE: আগে এখানে NavPath("Mock Test") (শুধু subject, subTopic=null)
+                        // ব্যবহার হতো — NavPath.depth() তখন 1 হতো, ফলে CoreScreen ভুলবশত
+                        // SubTopicListScreen দেখাত (প্রশ্ন লিস্ট না দেখিয়ে "0 টি অধ্যায়" খালি স্ক্রিন)।
+                        // subject+subTopic দুটোই সেট করে depth()==2 নিশ্চিত করা হলো যাতে
+                        // QuestionListScreen সঠিকভাবে রেন্ডার হয়।
+                        navPath = NavPath("Mock Test", "প্রশ্ন"))
             }
             startTimer(questions.size)
         }
@@ -917,11 +959,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                                   .groupBy { it.subTopic }
                                   .map { (st, stQs) ->
                                       SubTopicEntry(
-                                          name    = st,
-                                          subject = subj,
-                                          totalQ  = stQs.size,
-                                          doneQ   = stQs.count { progressMap.contains("${mode.name}:${it.id}") },
-                                          isWeak  = isWeak(st)
+                                          name         = st,
+                                          subject      = subj,
+                                          totalQ       = stQs.size,
+                                          doneQ        = stQs.count { progressMap.contains("${mode.name}:${it.id}") },
+                                          isWeak       = isWeak(st),
+                                          mcqCount     = stQs.count { it.isMcq() },
+                                          writtenCount = stQs.count { it.isWritten() }
                                       )
                                   }
                 )
@@ -950,8 +994,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         val order = content.subTopicOrder[mode.name]?.get(encodedTag)?.get(subject) ?: emptyMap()
         val subTopics = items.filter { it.subTopic.isNotBlank() }.groupBy { it.subTopic }.map { (st, qs) ->
-            SubTopicEntry(name = st, subject = subject, totalQ = qs.size,
-                          doneQ = qs.count { progressMap.contains("${mode.name}:${it.id}") }, isWeak = isWeak(st))
+            SubTopicEntry(
+                name         = st,
+                subject      = subject,
+                totalQ       = qs.size,
+                doneQ        = qs.count { progressMap.contains("${mode.name}:${it.id}") },
+                isWeak       = isWeak(st),
+                mcqCount     = qs.count { it.isMcq() },
+                writtenCount = qs.count { it.isWritten() }
+            )
         }
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
 
