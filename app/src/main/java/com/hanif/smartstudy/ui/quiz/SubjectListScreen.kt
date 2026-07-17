@@ -719,24 +719,8 @@ private fun QBankTopicCard(
         border    = BorderStroke(1.dp, accent.copy(alpha = 0.16f))
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // ── প্রশ্নের ধরন ব্যাজ — MCQ / Written / মিশ্র ──
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = accent.copy(alpha = 0.12f)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Text(typeIcon, fontSize = 9.sp)
-                        Text(typeLabel, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                            color = accent, fontFamily = NotoSansBengali)
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                if (reorderEnabled) {
+            if (reorderEnabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     IconButton(
                         onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(24.dp)
                     ) {
@@ -749,14 +733,23 @@ private fun QBankTopicCard(
                         Icon(Icons.Default.KeyboardArrowDown, null,
                             modifier = Modifier.size(18.dp), tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1))
                     }
-                } else {
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
                         modifier = Modifier.size(11.dp))
                 }
             }
             Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
-            Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+            // ── প্রশ্ন সংখ্যার পাশেই প্রশ্নের ধরন (MCQ / Written / মিশ্র) প্লেইন টেক্সট আকারে ──
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+                Text("·", fontSize = 10.sp, color = mutedColor)
+                Text(typeIcon, fontSize = 10.sp)
+                Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                    color = accent, fontFamily = NotoSansBengali)
+            }
             Box(
                 Modifier.fillMaxWidth().height(4.dp)
                     .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
