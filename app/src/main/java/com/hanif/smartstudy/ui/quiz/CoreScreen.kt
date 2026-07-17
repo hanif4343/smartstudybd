@@ -133,6 +133,11 @@ fun CoreScreen(
                 onRetry = {
                     if (state.activeModelTest != null) {
                         viewModel.retryModelTest()
+                    } else if (state.navPath.subject == "Mock Test") {
+                        // Mock Test: navPath.subTopic আসল কোনো subTopic না (শুধু নেভিগেশন
+                        // depth ঠিক রাখতে বসানো), তাই navigateToSubTopic() না করে আগের
+                        // mockConfig দিয়েই নতুন র‍্যান্ডম সেট শুরু করি।
+                        viewModel.retryMock()
                     } else {
                         // Same topic reload
                         val subj = state.navPath.subject
