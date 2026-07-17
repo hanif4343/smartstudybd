@@ -286,10 +286,10 @@ fun MainScreen(
                     onOpenMockTest = { isQBank ->
                         if (isQBank) {
                             currentTab = BottomTab.QBANK
-                            qbankViewModel.openMockZone()
+                            qbankViewModel.openMockZone(StudyMode.QBANK)
                         } else {
                             currentTab = BottomTab.QUIZ
-                            quizViewModel.openMockZone()
+                            quizViewModel.openMockZone(StudyMode.QUIZ)
                         }
                     },
                     onOpenFocusMode = { showFocusModeInfo = true }
