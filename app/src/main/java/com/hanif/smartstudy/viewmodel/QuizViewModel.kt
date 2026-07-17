@@ -689,6 +689,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Model Test-এর Written প্রশ্নের জন্য — টাইপ করে উত্তর মেলানোর বদলে "উত্তর দেখুন"
+     * বাটনে আসল উত্তর দেখানো হয়, তারপর ইউজার নিজেই "ঠিক পেরেছি"/"ভুল হয়েছে" বেছে নেয়।
+     * এখানে সরাসরি AnswerState.WrittenSubmitted ব্যবহার করা হচ্ছে (userText খালি, matchPct
+     * 100/0) — তাতে submitQuiz() এ MCQ-র মতোই correct/wrong গণনা হয়ে যায়, ফলে একই মডেল
+     * টেস্টে MCQ ও Written প্রশ্ন মিশিয়ে দিলেও রেজাল্ট ঠিকভাবে হিসাব হয়।
+     */
+    fun answerWrittenSelfGrade(questionIndex: Int, isCorrect: Boolean) {
+        val questions = _state.value.questions.toMutableList()
+        val q = questions.getOrNull(questionIndex) ?: return
+        if (q.answerState !is AnswerState.Unanswered) return
+        questions[questionIndex] = q.copy(
+            answerState = AnswerState.WrittenSubmitted(userText = "", matchPct = if (isCorrect) 100 else 0, isCorrect = isCorrect)
+        )
+        _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
+        _feedbackEvent.value = isCorrect
+        markProgress(q.id, _state.value.mode)
+        viewModelScope.launch {
+            if (isCorrect) {
+                cache.incrementCorrect()
+                removeWrongQIdByMode(q.id, _state.value.mode)
+            } else {
+                cache.incrementWrong()
+                saveWeakTopic(q.subject, q.subTopic)
+                saveWrongQId(q.id, _state.value.mode)
+            }
+        }
+    }
+
     fun answerWritten(questionIndex: Int, userText: String): Int {
         val questions = _state.value.questions.toMutableList()
         val q = questions.getOrNull(questionIndex) ?: return 0
