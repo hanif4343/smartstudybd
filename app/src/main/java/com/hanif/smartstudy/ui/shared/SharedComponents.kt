@@ -383,11 +383,11 @@ fun QuestionCard(
                 item.isMcq() && mode != StudyMode.STUDY -> {
                     McqOptions(item = item, onAnswer = onMcqAnswer)
                 }
-                item.isWritten() && mode != StudyMode.STUDY && isModelTest -> {
-                    WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
-                }
                 item.isWritten() && mode != StudyMode.STUDY -> {
-                    WrittenInput(item = item, onSubmit = onWritten, onDraftChange = onWrittenDraft)
+                    // ── সব Written প্রশ্নেই (Model Test সহ Quiz/QBank-এর সাধারণ Written) এখন
+                    // টাইপ-করে-মেলানোর বদলে "উত্তর দেখুন" + ঠিক/ভুল সেলফ-গ্রেড UI ব্যবহার হয় —
+                    // এতে ফলাফল গণনা MCQ-এর মতোই নির্ভুল ও সামঞ্জস্যপূর্ণ হয়। ──
+                    WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
                 }
                 else -> {}
             }
