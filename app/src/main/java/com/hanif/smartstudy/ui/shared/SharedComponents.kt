@@ -1841,19 +1841,22 @@ fun AdminFieldEditDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // ── পুরো প্রশ্ন কার্ড ডিলিট বাটন — শুধু এই ফিল্ড না,
-                        // প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সহ পুরো কার্ডটাই ডিলিট হয় ──
-                        Surface(
-                            onClick  = { if (!isSaving && !isDeleting) showDeleteConfirm = true },
-                            shape    = RoundedCornerShape(20.dp),
-                            color    = RedWrong.copy(alpha = 0.12f)
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "পুরো প্রশ্ন কার্ড ডিলিট করুন",
-                                tint = RedWrong,
-                                modifier = Modifier.padding(6.dp).size(18.dp)
-                            )
+                        // ── পুরো প্রশ্ন কার্ড ডিলিট বাটন — শুধু "প্রশ্ন" (question) ফিল্ড
+                        // ইডিটে দেখাবে। উত্তর/ব্যাখ্যা/টেকনিক/অপশন ইডিটে এই বাটন থাকবে না,
+                        // যাতে ভুলবশত অন্য ফিল্ড ইডিট করার সময় পুরো প্রশ্ন কার্ড ডিলিট না হয়ে যায় ──
+                        if (fieldId == "question") {
+                            Surface(
+                                onClick  = { if (!isSaving && !isDeleting) showDeleteConfirm = true },
+                                shape    = RoundedCornerShape(20.dp),
+                                color    = RedWrong.copy(alpha = 0.12f)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "পুরো প্রশ্ন কার্ড ডিলিট করুন",
+                                    tint = RedWrong,
+                                    modifier = Modifier.padding(6.dp).size(18.dp)
+                                )
+                            }
                         }
                         Surface(
                             shape = RoundedCornerShape(20.dp),
