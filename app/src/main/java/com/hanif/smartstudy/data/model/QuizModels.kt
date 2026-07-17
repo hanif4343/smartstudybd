@@ -153,9 +153,19 @@ data class SubTopicEntry(
     // virtual/special card যেটা ট্যাপ করলে ওই subject এর Model Test list খোলে।
     // Study ও QBank দুই জায়গাতেই একই সোর্স (Firebase: ModelTests/{subject}) থেকে আসে।
     val isModelTest     : Boolean = false,
-    val modelTestCount  : Int     = 0       // কতগুলো Model Test আছে ওই subject-এ (সাবটাইটেলে দেখানোর জন্য)
+    val modelTestCount  : Int     = 0,      // কতগুলো Model Test আছে ওই subject-এ (সাবটাইটেলে দেখানোর জন্য)
+    // ── QBank: এই সাবটপিকের প্রশ্নগুলো MCQ নাকি Written — কার্ডে ব্যাজ দেখানোর জন্য ──
+    val mcqCount     : Int = 0,
+    val writtenCount : Int = 0
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
+
+    // "mcq" | "written" | "mixed" — কার্ডে ব্যাজ/আইকন দেখাতে ব্যবহার হয়
+    val questionTypeLabel: String get() = when {
+        mcqCount > 0 && writtenCount > 0 -> "mixed"
+        writtenCount > 0                 -> "written"
+        else                              -> "mcq"
+    }
 }
 
 // ── Model Test — এডমিন-কিউরেটেড, ফিক্সড, সবার জন্য একই ──
