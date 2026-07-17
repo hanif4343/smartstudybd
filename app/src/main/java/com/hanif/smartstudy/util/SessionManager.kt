@@ -14,6 +14,15 @@ import kotlinx.coroutines.runBlocking
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "smart_study_prefs")
 
+// ── Typing Practice: একটা সেশনের সংক্ষিপ্ত রেকর্ড (হিস্ট্রি লিস্টে দেখানোর জন্য) ──
+data class TypingHistoryEntry(
+    val date     : String,
+    val wpm      : Int,
+    val rawWpm   : Int,
+    val accuracy : Int,
+    val timeSec  : Int
+)
+
 class SessionManager(private val context: Context) {
     private val gson = Gson()
 
@@ -45,6 +54,10 @@ class SessionManager(private val context: Context) {
         val KEY_MORNING_ON       = booleanPreferencesKey("morning_on")
         val KEY_MORNING_HOUR     = intPreferencesKey("morning_hour")
         val KEY_MORNING_MIN      = intPreferencesKey("morning_min")
+
+        // ── Typing Practice: বেস্ট WPM + সাম্প্রতিক সেশনগুলোর হিস্ট্রি ──
+        val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
+        val KEY_TYPING_HISTORY   = stringPreferencesKey("typing_history")   // JSON: [{date,wpm,rawWpm,accuracy,timeSec}]
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -356,6 +369,49 @@ class SessionManager(private val context: Context) {
             val type = object : TypeToken<List<Map<String, Any>>>() {}.type
             val list: List<Map<String, Any>> = gson.fromJson(json, type) ?: emptyList()
             list.map { (it["date"] as? String ?: "") to ((it["xp"] as? Double)?.toInt() ?: 0) }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    // ── Typing Practice: বেস্ট WPM (persist) + সাম্প্রতিক সেশন হিস্ট্রি ──
+    // আগে এই ডেটা কোথাও সেভ হতো না — TypingPracticeScreen প্রতিবার bestWpm=0
+    // দিয়ে খুলত, ফলে "🏆 Best WPM"/"নতুন Record!" ফিচারটা আসলে কখনো কাজ করত না।
+
+    fun getTypingBestWpm(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_BEST_WPM] ?: 0
+    }
+
+    /** একটা সেশন শেষ হলে কল করো — বেস্ট WPM আপডেট (দরকার হলে) + হিস্ট্রিতে যোগ (সর্বশেষ ১৫টা রাখা হয়) */
+    suspend fun recordTypingResult(wpm: Int, rawWpm: Int, accuracy: Int, timeSec: Int) {
+        val prefs = context.dataStore.data.first()
+        val bestSoFar = prefs[KEY_TYPING_BEST_WPM] ?: 0
+        val json  = prefs[KEY_TYPING_HISTORY] ?: "[]"
+        val type  = object : TypeToken<MutableList<Map<String, Any>>>() {}.type
+        val list: MutableList<Map<String, Any>> = try { gson.fromJson(json, type) } catch (e: Exception) { mutableListOf() }
+        list.add(mapOf(
+            "date" to todayString(), "wpm" to wpm, "rawWpm" to rawWpm,
+            "accuracy" to accuracy, "timeSec" to timeSec
+        ))
+        val trimmed = if (list.size > 15) list.takeLast(15) else list
+        context.dataStore.edit {
+            it[KEY_TYPING_HISTORY] = gson.toJson(trimmed)
+            if (wpm > bestSoFar) it[KEY_TYPING_BEST_WPM] = wpm
+        }
+    }
+
+    fun getTypingHistory(): List<TypingHistoryEntry> = runBlocking {
+        val json = context.dataStore.data.first()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
+        return@runBlocking try {
+            val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+            val list: List<Map<String, Any>> = gson.fromJson(json, type) ?: emptyList()
+            list.map {
+                TypingHistoryEntry(
+                    date     = it["date"] as? String ?: "",
+                    wpm      = (it["wpm"] as? Double)?.toInt() ?: 0,
+                    rawWpm   = (it["rawWpm"] as? Double)?.toInt() ?: 0,
+                    accuracy = (it["accuracy"] as? Double)?.toInt() ?: 0,
+                    timeSec  = (it["timeSec"] as? Double)?.toInt() ?: 0
+                )
+            }.reversed()   // সর্বশেষটা আগে
         } catch (e: Exception) { emptyList() }
     }
 
