@@ -205,6 +205,9 @@ fun QuestionCard(
     onMcqAnswer    : (Int) -> Unit,
     onWritten      : (String) -> Int,
     onWrittenDraft : (String) -> Unit = {},
+    // ── Model Test-এর Written প্রশ্নে: টাইপ করার বদলে "উত্তর দেখুন" + ঠিক/ভুল বাটন ──
+    isModelTest        : Boolean = false,
+    onWrittenSelfGrade : (Boolean) -> Unit = {},
     onBookmark     : () -> Unit,
     onStudyDone    : () -> Unit = {},
     onReport       : () -> Unit,
@@ -379,6 +382,9 @@ fun QuestionCard(
             when {
                 item.isMcq() && mode != StudyMode.STUDY -> {
                     McqOptions(item = item, onAnswer = onMcqAnswer)
+                }
+                item.isWritten() && mode != StudyMode.STUDY && isModelTest -> {
+                    WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
                 }
                 item.isWritten() && mode != StudyMode.STUDY -> {
                     WrittenInput(item = item, onSubmit = onWritten, onDraftChange = onWrittenDraft)
@@ -878,6 +884,95 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int, onDraftChange: (
             colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
         ) {
             Text("🔍 উত্তর মিলিয়ে দেখো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// Model Test — Written প্রশ্ন: টাইপ করে মেলানোর বদলে "উত্তর দেখুন" বাটনে
+// আসল উত্তর দেখানো হয়, তারপর ইউজার নিজেই "ঠিক পেরেছি" / "ভুল হয়েছে" ট্যাপ করে —
+// এতে MCQ-এর মতোই সরাসরি correct/wrong ধরা পড়ে, ফলে একই টেস্টে MCQ+Written মিশিয়ে
+// দিলেও রেজাল্ট সঠিকভাবে হিসাব করা যায়।
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun WrittenRevealSelfGrade(item: QuestionItem, onGrade: (Boolean) -> Unit) {
+    val submitted = item.answerState as? AnswerState.WrittenSubmitted
+    var isRevealed by remember(item.id) { mutableStateOf(false) }
+    val isDark = LocalDarkMode.current.value
+
+    when {
+        submitted != null -> {
+            // ── আগেই গ্রেড হয়ে গেছে — ফলাফল দেখাও ──
+            val isCorrect = submitted.isCorrect
+            Card(
+                shape  = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        isCorrect && isDark  -> Color(0xFF052E16)
+                        isCorrect            -> Color(0xFFF0FDF4)
+                        !isCorrect && isDark -> Color(0xFF3D1010)
+                        else                 -> Color(0xFFFFF1F2)
+                    }
+                ),
+                border = BorderStroke(1.dp, if (isCorrect) GreenOk else RedWrong)
+            ) {
+                Text(
+                    if (isCorrect) "✅ ঠিক পেরেছেন" else "❌ ভুল হয়েছে",
+                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                    color = if (isCorrect) Color(0xFF166534) else Color(0xFF9F1239),
+                    fontFamily = NotoSansBengali,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+        !isRevealed -> {
+            // ── প্রথম ধাপ: শুধু "উত্তর দেখুন" বাটন — অপশন/টাইপিং কিছুই নেই ──
+            Button(
+                onClick  = { isRevealed = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+            ) {
+                Icon(Icons.Default.Visibility, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("উত্তর দেখুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            }
+        }
+        else -> {
+            // ── দ্বিতীয় ধাপ: উত্তর দেখানো হলো, এবার ইউজার নিজেই বিচার করবে ──
+            Column {
+                if (item.answer.isNotBlank()) {
+                    Card(
+                        shape  = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                        )
+                    ) {
+                        Text(item.answer, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp,
+                            modifier = Modifier.padding(12.dp))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick  = { onGrade(true) },
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = GreenOk)
+                    ) {
+                        Text("✅ ঠিক পেরেছি", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
+                    Button(
+                        onClick  = { onGrade(false) },
+                        modifier = Modifier.weight(1f),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = RedWrong)
+                    ) {
+                        Text("❌ ভুল হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
+                }
+            }
         }
     }
 }
