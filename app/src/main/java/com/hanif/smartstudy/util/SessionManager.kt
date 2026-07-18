@@ -97,8 +97,6 @@ class SessionManager(private val context: Context) {
         val KEY_STREAK_LAST_DATE = stringPreferencesKey("streak_last_date")
         // Achievements (JSON set of earned ids)
         val KEY_ACHIEVEMENTS     = stringPreferencesKey("achievements")
-        // Typing practice best WPM
-        val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         // Pending sync count
         val KEY_PENDING_SYNC     = intPreferencesKey("pending_sync_count")
 
@@ -530,17 +528,6 @@ class SessionManager(private val context: Context) {
     }
 
     fun hasAchievement(id: String): Boolean = getAchievements().contains(id)
-
-    // ── Typing practice ───────────────────────────────────────
-
-    fun getTypingBestWpm(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_BEST_WPM] ?: 0
-    }
-
-    suspend fun saveTypingWpm(wpm: Int) {
-        val best = getTypingBestWpm()
-        if (wpm > best) context.dataStore.edit { it[KEY_TYPING_BEST_WPM] = wpm }
-    }
 
     // ── Pending sync ──────────────────────────────────────────
 
