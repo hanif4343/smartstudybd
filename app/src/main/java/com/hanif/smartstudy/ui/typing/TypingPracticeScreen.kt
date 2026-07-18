@@ -24,9 +24,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
+import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.MistakeErrorType
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.Hand
+import com.hanif.smartstudy.util.HandKeyMap
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.TtsManager
+import com.hanif.smartstudy.util.TypingErrorAnalyzer
 import com.hanif.smartstudy.util.TypingHistoryEntry
+import com.hanif.smartstudy.util.TypingMistakeLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -79,13 +86,29 @@ private fun difficultyColor(d: String) = when (d) {
 private fun poolFor(difficulty: String): List<PassageInfo> =
     if (difficulty == "all") PASSAGES else PASSAGES.filter { it.difficulty == difficulty }
 
+/** AI Adaptive Session-এ live generation ব্যর্থ হলে এখান থেকে ভাষা-মিলিয়ে একটা random fallback প্যাসেজ —
+ *  দেখো TypingAdaptiveContentProvider.kt */
+fun fallbackPassageFor(language: String): String {
+    val pool = PASSAGES.filter {
+        val isBn = it.text.any { c -> c.code in 0x0980..0x09FF }
+        if (language == "bn") isBn else !isBn
+    }.ifEmpty { PASSAGES }
+    return pool.random().text
+}
+
 data class TypingResult(
     val wpm         : Int,   // Net WPM — সঠিকভাবে টাইপ করা অক্ষরের ভিত্তিতে, এটাই মূল ফলাফল
     val rawWpm      : Int,   // Raw/Gross WPM — ভুলসহ মোট টাইপ করা অক্ষরের ভিত্তিতে
     val accuracy    : Int,
     val timeSec     : Int,
     val correctChars: Int,
-    val totalChars  : Int
+    val totalChars  : Int,
+    // ── ধাপ ৪: হাত-ভিত্তিক ও sync-loss ইনসাইট (সব ডিফল্ট ০, পুরনো caller ভাঙবে না) ──
+    val leftCorrect : Int = 0,
+    val leftWrong   : Int = 0,
+    val rightCorrect: Int = 0,
+    val rightWrong  : Int = 0,
+    val syncLossCount: Int = 0
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -126,6 +149,37 @@ fun TypingPracticeScreen(
     var incorrectKeystrokes by remember { mutableStateOf(0) }
     var totalKeystrokes     by remember { mutableStateOf(0) }
 
+    // ── Word-level mistake tracking (Phase ১) — প্যাসেজ বদলালে word-span/ভাষা recompute হয়,
+    // loggedWordEnds দিয়ে প্রতিটা শব্দ ঠিক একবারই লগ হয় (বাউন্ডারি একাধিকবার পার হলেও না) ──
+    val wordSpans   = remember(passage) { TypingErrorAnalyzer.wordSpans(passage) }
+    val passageLang = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
+    var loggedWordEnds by remember { mutableStateOf(setOf<Int>()) }
+
+    // ── ধাপ ৪: বাম/ডান হাতের সঠিক-ভুল অক্ষর গণনা (session-local, শেষে Room-এ flush হবে) ──
+    var leftCorrectChars  by remember { mutableStateOf(0) }
+    var leftWrongChars    by remember { mutableStateOf(0) }
+    var rightCorrectChars by remember { mutableStateOf(0) }
+    var rightWrongChars   by remember { mutableStateOf(0) }
+    var syncLossCount     by remember { mutableStateOf(0) }
+
+    // ── ধাপ ৪: Daily Discipline Mode — non-coercive, শুধু progress track/দেখানো হয় ──
+    var disciplineOn      by remember { mutableStateOf(false) }
+    var dailyGoalMin      by remember { mutableStateOf(60) }
+    var todaySecondsBefore by remember { mutableStateOf(0) }   // এই সেশন শুরুর আগে আজকে যত সেকেন্ড হয়েছিল
+    LaunchedEffect(Unit) {
+        val rawPref = session.getTypingDisciplineRaw()
+        disciplineOn = rawPref ?: (session.getCurrentUser()?.isAdmin() == true).also {
+            // প্রথমবার — কখনো explicit সেট করা হয়নি, তাই admin হলে default অন করে persist করা হলো
+            if (it) session.setTypingDisciplineOn(true)
+        }
+        dailyGoalMin = session.getTypingDailyGoalMinutes()
+        todaySecondsBefore = session.getTypingTodaySeconds()
+        TtsManager.init(ctx)   // একাধিকবার কল করলেও সমস্যা নেই — ইতিমধ্যে init হলে কিছুই করে না
+    }
+    val vibrator = remember {
+        ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+    }
+
     // Timer
     LaunchedEffect(isStarted, isFinished) {
         if (isStarted && !isFinished) {
@@ -148,7 +202,10 @@ fun TypingPracticeScreen(
             val acc = if (totalKeystrokes > 0) (correctKeystrokes * 100 / totalKeystrokes) else 100
             val r = TypingResult(
                 wpm = netWpm, rawWpm = rawWpm, accuracy = acc, timeSec = timeSec,
-                correctChars = correctKeystrokes, totalChars = totalKeystrokes
+                correctChars = correctKeystrokes, totalChars = totalKeystrokes,
+                leftCorrect = leftCorrectChars, leftWrong = leftWrongChars,
+                rightCorrect = rightCorrectChars, rightWrong = rightWrongChars,
+                syncLossCount = syncLossCount
             )
             result = r
             onResult(r)
@@ -156,6 +213,31 @@ fun TypingPracticeScreen(
                 session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
                 bestWpm = maxOf(bestWpm, r.wpm)
                 history = session.getTypingHistory()
+
+                // ── ধাপ ৪: এই সেশনের হাত-ভিত্তিক ডেটা Room-এ cumulative করে যোগ ──
+                val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+                AppDatabase.getInstance(ctx).typingHandStatsDao().addSessionDelta(
+                    userId       = userId,
+                    leftCorrect  = leftCorrectChars.toLong(),
+                    leftWrong    = leftWrongChars.toLong(),
+                    rightCorrect = rightCorrectChars.toLong(),
+                    rightWrong   = rightWrongChars.toLong()
+                )
+
+                // ── ধাপ ৪: Daily Discipline — আজকের মোট টাইপিং-সময়ে যোগ (মোড অফ থাকলেও
+                // ট্র্যাক করা হয়, যাতে পরে অন করলে আজকের ডেটা মিস না হয়; শুধু ব্যানারটা
+                // অফ থাকলে দেখানো হয় না — কিছুই জোর করে আটকানো হয় না) ──
+                session.addTypingSecondsToday(timeSec)
+                todaySecondsBefore = session.getTypingTodaySeconds()
+
+                // ── ধাপ ৪: sync-loss (ধরন B) ধরা পড়লে সেশন-শেষে ছোট ভয়েস-টিপ (মাঝপথে না,
+                // কারণ মাঝপথে ভয়েস মনোযোগ আরও ভাঙতে পারে — রোডম্যাপ সেকশন ৫.১) ──
+                if (syncLossCount > 0) {
+                    TtsManager.speak(
+                        "তুমি এই সেশনে $syncLossCount বার টেক্সট ট্র্যাক হারিয়েছ। ধীরে টাইপ করো, একবারে কয়েকটা শব্দ পড়ে তারপর টাইপ করো।",
+                        key = "typing_sync_tip"
+                    )
+                }
             }
         }
     }
@@ -168,7 +250,41 @@ fun TypingPracticeScreen(
         if (capped.length > userInput.length) {
             for (i in userInput.length until capped.length) {
                 totalKeystrokes++
-                if (i < passage.length && capped[i] == passage[i]) correctKeystrokes++ else incorrectKeystrokes++
+                val isCorrect = i < passage.length && capped[i] == passage[i]
+                if (isCorrect) correctKeystrokes++ else incorrectKeystrokes++
+                // ── ধাপ ৪: এই ক্যারেক্টারটা target প্যাসেজে কোন হাতে পড়ে সেই অনুযায়ী গণনা ──
+                if (i < passage.length && HandKeyMap.isTrackable(passage[i])) {
+                    when (HandKeyMap.handOf(passage[i])) {
+                        Hand.LEFT  -> if (isCorrect) leftCorrectChars++  else leftWrongChars++
+                        Hand.RIGHT -> if (isCorrect) rightCorrectChars++ else rightWrongChars++
+                    }
+                }
+            }
+            // ── এই কী-প্রেসে কোনো শব্দ-বাউন্ডারি (স্পেস বা প্যাসেজের শেষ) পার হলে,
+            // সেই শব্দটা target-এর সাথে মিলিয়ে mistake/correct হিসেবে Room-এ লগ হবে।
+            // এটাই AI adaptive practice ও hand-balance analysis-এর ভিত্তি ডেটা তৈরি করে। ──
+            for (span in wordSpans) {
+                if (span.end > userInput.length && span.end <= capped.length && span.end !in loggedWordEnds) {
+                    loggedWordEnds = loggedWordEnds + span.end
+                    val typedWord = capped.substring(span.start, span.end)
+                    if (typedWord != span.word) {
+                        // ── ধরন B (sync-loss) real-time ধরা পড়লে হালকা ভাইব্রেশন —
+                        // মাঝপথে ভয়েস না দেওয়ার কারণ: রোডম্যাপ সেকশন ৫.১ ──
+                        if (TypingErrorAnalyzer.classify(span.word, typedWord) == MistakeErrorType.SYNC_LOSS) {
+                            syncLossCount++
+                            vibrator?.let { v ->
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    v.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                } else {
+                                    @Suppress("DEPRECATION") v.vibrate(60)
+                                }
+                            }
+                        }
+                        scope.launch { TypingMistakeLogger.logMistake(ctx, span.word, typedWord, passageLang) }
+                    } else {
+                        scope.launch { TypingMistakeLogger.logCorrect(ctx, span.word, passageLang) }
+                    }
+                }
             }
         }
         userInput = capped
@@ -186,6 +302,12 @@ fun TypingPracticeScreen(
         correctKeystrokes   = 0
         incorrectKeystrokes = 0
         totalKeystrokes     = 0
+        loggedWordEnds      = emptySet()
+        leftCorrectChars  = 0
+        leftWrongChars    = 0
+        rightCorrectChars = 0
+        rightWrongChars   = 0
+        syncLossCount     = 0
     }
 
     Scaffold(
@@ -216,6 +338,12 @@ fun TypingPracticeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
+            // ── ধাপ ৪: Daily Discipline Mode ব্যানার — শুধু মোড অন থাকলেই দেখা যায়,
+            // কিছু আটকায় না, শুধু আজকের progress দেখায় (non-coercive) ──
+            if (disciplineOn) {
+                DailyGoalBanner(todaySeconds = todaySecondsBefore, goalMinutes = dailyGoalMin)
+            }
 
             // Stats row
             StatsRow(
@@ -373,6 +501,38 @@ fun TypingPracticeScreen(
 }
 
 @Composable
+private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
+    val goalSeconds = (goalMinutes * 60).coerceAtLeast(1)
+    val progress = (todaySeconds.toFloat() / goalSeconds).coerceIn(0f, 1f)
+    val doneMin = todaySeconds / 60
+    val reached = todaySeconds >= goalSeconds
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            if (reached) Color(0xFFECFDF5) else Color(0xFFFFFBEB)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, if (reached) GreenOk.copy(alpha = 0.4f) else AmberMid.copy(alpha = 0.4f)
+        )
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                if (reached) "🎯 আজকের লক্ষ্য পূরণ হয়েছে! ($doneMin/$goalMinutes মিনিট)"
+                else "🎯 আজকে $doneMin/$goalMinutes মিনিট টাইপ করেছ",
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                color = if (reached) GreenOk else Color(0xFFB45309)
+            )
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = if (reached) GreenOk else AmberMid,
+                trackColor = (if (reached) GreenOk else AmberMid).copy(alpha = 0.15f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun StatsRow(elapsedSec: Int, userInput: String, passage: String, isStarted: Boolean, correctKeystrokes: Int) {
     val mins = elapsedSec / 60
     val secs = elapsedSec % 60
@@ -464,6 +624,27 @@ private fun ResultCard(
             Text("${grade.first} Grade — ${grade.second}", fontSize = 13.sp,
                 color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+
+            // ── ধাপ ৪: হাত-ভিত্তিক ইনসাইট — যথেষ্ট ডেটা থাকলেই দেখানো হয় (নাহলে বিভ্রান্তিকর) ──
+            val leftTotal  = result.leftCorrect + result.leftWrong
+            val rightTotal = result.rightCorrect + result.rightWrong
+            if (leftTotal >= 15 && rightTotal >= 15) {
+                val leftErr  = result.leftWrong * 100 / leftTotal
+                val rightErr = result.rightWrong * 100 / rightTotal
+                val insight = when {
+                    rightErr > leftErr + 5 -> "✋ এই সেশনে ডান হাতে ভুলের হার বেশি ($rightErr% বনাম $leftErr%)"
+                    leftErr > rightErr + 5 -> "✋ এই সেশনে বাম হাতে ভুলের হার বেশি ($leftErr% বনাম $rightErr%)"
+                    else -> null
+                }
+                insight?.let {
+                    Text(it, fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (result.syncLossCount > 0) {
+                Text("🔄 ${result.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ — ধীরে টাইপ করার চেষ্টা করো",
+                    fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
+            }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onRetry, modifier = Modifier.weight(1f),
