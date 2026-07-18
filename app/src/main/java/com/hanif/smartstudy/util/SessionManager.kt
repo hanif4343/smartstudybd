@@ -58,6 +58,14 @@ class SessionManager(private val context: Context) {
         // ── Typing Practice: বেস্ট WPM + সাম্প্রতিক সেশনগুলোর হিস্ট্রি ──
         val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         val KEY_TYPING_HISTORY   = stringPreferencesKey("typing_history")   // JSON: [{date,wpm,rawWpm,accuracy,timeSec}]
+
+        // ── Typing Practice: Daily Discipline Mode (optional, non-coercive) —
+        // চালু থাকলে প্রতিদিনের টাইপিং-সময় ট্র্যাক হয় ও লক্ষ্যের সাপেক্ষে progress দেখানো হয়।
+        // hard-lock করা হয় না (দেখো রোডম্যাপ সেকশন ৫.৩ — Focus Mode-এর non-coercive philosophy অনুসরণ) ──
+        val KEY_TYPING_DISCIPLINE_ON   = booleanPreferencesKey("typing_discipline_on")
+        val KEY_TYPING_DAILY_GOAL_MIN  = intPreferencesKey("typing_daily_goal_min")   // ডিফল্ট ৬০
+        val KEY_TYPING_TODAY_SECONDS   = intPreferencesKey("typing_today_seconds")
+        val KEY_TYPING_TODAY_DATE      = stringPreferencesKey("typing_today_date")
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -415,7 +423,50 @@ class SessionManager(private val context: Context) {
         } catch (e: Exception) { emptyList() }
     }
 
-    // ── App time ─────────────────────────────────────────────
+    // ── Typing Practice: Daily Discipline Mode ──
+    // non-coercive — hard-lock করা হয় না, শুধু progress track ও দেখানো হয়
+
+    fun isTypingDisciplineOn(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_DISCIPLINE_ON] ?: false
+    }
+
+    /** কখনো explicit সেট করা না থাকলে null ফেরত দেয় — caller admin-কিনা দেখে ডিফল্ট ঠিক করতে পারে */
+    fun getTypingDisciplineRaw(): Boolean? = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_DISCIPLINE_ON]
+    }
+
+    suspend fun setTypingDisciplineOn(on: Boolean) {
+        context.dataStore.edit { it[KEY_TYPING_DISCIPLINE_ON] = on }
+    }
+
+    fun getTypingDailyGoalMinutes(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_DAILY_GOAL_MIN] ?: 60
+    }
+
+    suspend fun setTypingDailyGoalMinutes(minutes: Int) {
+        context.dataStore.edit { it[KEY_TYPING_DAILY_GOAL_MIN] = minutes }
+    }
+
+    /** আজকে এখন পর্যন্ত মোট কত সেকেন্ড টাইপ করা হয়েছে — তারিখ বদলালে স্বয়ংক্রিয়ভাবে ০ থেকে শুরু হয় */
+    fun getTypingTodaySeconds(): Int = runBlocking {
+        val prefs = context.dataStore.data.first()
+        val savedDate = prefs[KEY_TYPING_TODAY_DATE] ?: ""
+        if (savedDate != todayString()) 0 else (prefs[KEY_TYPING_TODAY_SECONDS] ?: 0)
+    }
+
+    /** একটা টাইপিং সেশন শেষ হলে কল করো — আজকের মোট সময়ে যোগ হবে (তারিখ বদলালে আগে রিসেট হয়) */
+    suspend fun addTypingSecondsToday(seconds: Int) {
+        val prefs = context.dataStore.data.first()
+        val savedDate = prefs[KEY_TYPING_TODAY_DATE] ?: ""
+        val today = todayString()
+        val base = if (savedDate == today) (prefs[KEY_TYPING_TODAY_SECONDS] ?: 0) else 0
+        context.dataStore.edit {
+            it[KEY_TYPING_TODAY_DATE]    = today
+            it[KEY_TYPING_TODAY_SECONDS] = base + seconds
+        }
+    }
+
+
 
     suspend fun recordSessionMinutes(minutes: Int) {
         context.dataStore.edit {
