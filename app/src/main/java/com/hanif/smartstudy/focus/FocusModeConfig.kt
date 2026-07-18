@@ -26,4 +26,11 @@ object FocusModeConfig {
     /** ব্যাকগ্রাউন্ডে থাকা অবস্থায় কত মিনিট পরপর reminder notification যাবে
      *  (Part ৪ এ ব্যবহৃত হবে — এখনই সংযুক্ত করা হয়নি) */
     const val REMINDER_INTERVAL_MINUTES: Int = 10
+
+    /** "🎯 আজ ফোকাস" সাবজেক্ট-লিস্টে টাইপিং প্র্যাকটিসকে একটা বিশেষ এন্ট্রি হিসেবে যোগ করা হয় —
+     *  আলাদা কোনো নতুন "Discipline Mode" সিস্টেম না বানিয়ে, একই ফোকাস-মোড সেকশন/নোটিফিকেশন
+     *  পাইপলাইন (FocusWarningOverlay/FocusNudgeSheet/FocusReminderReceiver) পুনর্ব্যবহার করা হয়।
+     *  MainScreen.kt-এ এই স্ট্রিং দেখেই বোঝা হয় "start/resume" করলে Study subject না, টাইপিং
+     *  স্ক্রিন খুলতে হবে (দেখো MainScreen.kt-এর onStart/onResume)। */
+    const val TYPING_FOCUS_SUBJECT: String = "⌨️ টাইপিং প্র্যাকটিস"
 }
