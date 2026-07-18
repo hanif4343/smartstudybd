@@ -65,6 +65,12 @@ fun FocusWarningOverlay(
         daysLeft == 1 -> "আগামীকাল"
         else          -> "$daysLeft দিন পরে"
     }
+    // টাইপিং প্র্যাকটিস subject হলে "পড়া/📖" এর বদলে "প্র্যাকটিস/⌨️" ভাষা — অন্য সাবজেক্টের
+    // ফ্লো/লজিক হুবহু একই থাকে, শুধু টেক্সট/আইকন adaptive
+    val isTyping   = subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT
+    val focusPhrase = if (isTyping) "প্র্যাকটিসে" else "পড়ায়"     // "...ে মনোযোগ দিন" বাক্যে বসবে
+    val startVerb   = if (isTyping) "প্র্যাকটিস" else "পড়া"        // "এখনই ... শুরু করি" বাক্যে বসবে
+    val actionIcon  = if (isTyping) "⌨️" else "📖"
 
     Box(
         modifier = Modifier
@@ -99,7 +105,7 @@ fun FocusWarningOverlay(
                 )
 
                 Text(
-                    "$subject পড়ায় মনোযোগ দিন",
+                    "$subject $focusPhrase মনোযোগ দিন",
                     fontSize   = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color      = Color.White,
@@ -116,7 +122,7 @@ fun FocusWarningOverlay(
                     colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBBF24))
                 ) {
                     Text(
-                        "📖 এখনই পড়া শুরু করি",
+                        "$actionIcon এখনই $startVerb শুরু করি",
                         fontSize   = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color      = Color(0xFF1E1B4B),
