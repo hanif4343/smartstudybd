@@ -44,6 +44,11 @@ fun FocusNudgeSheet(
     onDismiss : () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isTyping   = subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT
+    val topLabel   = if (isTyping) "এখন প্র্যাকটিসের সময়" else "এখন পড়ার সময়"
+    val finishVerb = if (isTyping) "শেষ করো আগে" else "শেষ করো আগে"
+    val resumeIcon = if (isTyping) "⌨️" else "📖"
+    val resumeVerb = if (isTyping) "প্র্যাকটিসে ফিরে যাই" else "পড়ায় ফিরে যাই"
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -54,7 +59,7 @@ fun FocusNudgeSheet(
             Text("⏳", fontSize = 40.sp)
 
             Text(
-                "এখন পড়ার সময়",
+                topLabel,
                 fontSize   = 17.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = NotoSansBengali,
@@ -62,7 +67,7 @@ fun FocusNudgeSheet(
             )
 
             Text(
-                "$subject শেষ করো আগে",
+                "$subject $finishVerb",
                 fontSize   = 13.sp,
                 fontFamily = NotoSansBengali,
                 color      = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -77,7 +82,7 @@ fun FocusNudgeSheet(
                 shape    = RoundedCornerShape(14.dp),
                 colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
             ) {
-                Text("📖 পড়ায় ফিরে যাই", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                Text("$resumeIcon $resumeVerb", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color.White, fontFamily = NotoSansBengali)
             }
 
