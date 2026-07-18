@@ -132,7 +132,9 @@ class FocusReminderReceiver : BroadcastReceiver() {
             daysLeft == 1 -> "আগামীকাল পরীক্ষা"
             else          -> "$daysLeft দিন পরে পরীক্ষা"
         }
-        val body = "$subject পড়ায় ফিরে যাও — $dayTxt ⏰"
+        val isTyping = subject == FocusModeConfig.TYPING_FOCUS_SUBJECT
+        val resumeTxt = if (isTyping) "প্র্যাকটিসে ফিরে যাও" else "পড়ায় ফিরে যাও"
+        val body = "$subject $resumeTxt — $dayTxt ⏰"
 
         val tapIntent = PendingIntent.getActivity(
             context, REQUEST_CODE,
