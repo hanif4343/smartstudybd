@@ -234,7 +234,7 @@ fun MainScreen(
     if (showFocusModeInfo) {
         val studyState by studyViewModel.state.collectAsStateWithLifecycle()
         com.hanif.smartstudy.focus.FocusModeInfoScreen(
-            subjects = studyState.subjects.map { it.name },
+            subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + studyState.subjects.map { it.name },
             onBack   = { showFocusModeInfo = false }
         )
         return
@@ -364,8 +364,12 @@ fun MainScreen(
             subject  = fs.subject,
             daysLeft = fs.daysUntilExam(),
             onStart  = {
-                currentTab = BottomTab.STUDY
-                studyViewModel.navigateToSubject(fs.subject)
+                if (fs.subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
+                    showTyping = true
+                } else {
+                    currentTab = BottomTab.STUDY
+                    studyViewModel.navigateToSubject(fs.subject)
+                }
                 focusWarning = null
             },
             onDismiss = { focusWarning = null }
@@ -376,8 +380,12 @@ fun MainScreen(
         com.hanif.smartstudy.focus.FocusNudgeSheet(
             subject   = focusState.subject,
             onResume  = {
-                currentTab = BottomTab.STUDY
-                studyViewModel.navigateToSubject(focusState.subject)
+                if (focusState.subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
+                    showTyping = true
+                } else {
+                    currentTab = BottomTab.STUDY
+                    studyViewModel.navigateToSubject(focusState.subject)
+                }
                 pendingFocusNudgeTab = null
             },
             onTurnOff = {
