@@ -39,6 +39,11 @@ android {
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
         buildConfigField "String", "FIREBASE_DB_SECRET", "\"%%FIREBASE_DB_SECRET%%\""
+        // ── টাইপিং AI Adaptive Session — admin-app-এর Cloudflare Worker endpoint
+        // (cloudflare-worker/typing-sentence-worker.js) — এখানে আসল AI provider
+        // key কিছুই নেই, শুধু endpoint URL আর একটা shared secret token ──
+        buildConfigField "String", "TYPING_AI_ENDPOINT", "\"%%TYPING_AI_ENDPOINT%%\""
+        buildConfigField "String", "TYPING_AI_SECRET",   "\"%%TYPING_AI_SECRET%%\""
 
         // ── Real-time data mode ──
         // true  → online হলে সবসময় Firebase থেকে fresh data (testing/development)
