@@ -128,8 +128,14 @@ fun SubjectListScreen(
         }
 
         // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
+        // (টাইপিং প্র্যাকটিসও এই একই সাবজেক্ট-তালিকায় একটা এন্ট্রি হিসেবে আছে, যাতে একই
+        // ফোকাস-মোড সেকশন ও নোটিফিকেশন পাইপলাইন টাইপিং-এর জন্যও ব্যবহার করা যায়)
         if (mode == StudyMode.STUDY && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
-            item { com.hanif.smartstudy.focus.FocusTodayCard(subjects = subjects.map { it.name }) }
+            item {
+                com.hanif.smartstudy.focus.FocusTodayCard(
+                    subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + subjects.map { it.name }
+                )
+            }
         }
 
         // (দুর্বল টপিক শুধু Profile/Stats পেজে দেখাবে)
