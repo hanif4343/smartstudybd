@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,10 +29,8 @@ import kotlinx.coroutines.launch
 
 /**
  * 🏁 Typing Race — বন্ধুর সাথে সরাসরি প্রতিযোগিতা।
- * ChallengeHubScreen-এর মতো বড় মাল্টি-স্ক্রিন সিস্টেম না, ইচ্ছাকৃতভাবে একটা কমপ্যাক্ট
- * ফাইলে রাখা হয়েছে যাতে স্কোপ/ঝুঁকি ম্যানেজেবল থাকে — পরে চাইলে একাধিক স্ক্রিনে ভাগ করা যাবে।
- * দেখো SmartStudyBD-টাইপিং-অডিট-ও-রোডম্যাপ.md সেকশন ১০।
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TypingRaceScreen(onBack: () -> Unit) {
     val ctx     = LocalContext.current
@@ -54,7 +53,7 @@ fun TypingRaceScreen(onBack: () -> Unit) {
     var lastProgressPush by remember { mutableStateOf(0L) }
     var hasFinished       by remember { mutableStateOf(false) }
 
-    // ── আমার পেন্ডিং ইনভাইট শোনা (কোনো race সিলেক্ট করা না থাকলে) ──
+    // ── আমার পেন্ডিং ইনভাইট শোনা ──
     LaunchedEffect(myPhone) {
         if (myPhone.isBlank()) return@LaunchedEffect
         repo.observeMyRaceInvites(myPhone).collect { pendingInvites = it }
@@ -68,7 +67,7 @@ fun TypingRaceScreen(onBack: () -> Unit) {
         repo.observeRace(id).collect { race = it }
     }
 
-    // ── ACTIVE হওয়ার সাথে সাথে local timer শুরু (WPM হিসাবের রেফারেন্স পয়েন্ট) ──
+    // ── ACTIVE হওয়ার সাথে সাথে local timer শুরু ──
     LaunchedEffect(race?.status) {
         if (race?.getStatus() == RaceStatus.ACTIVE && startedAtLocal == 0L) {
             startedAtLocal = System.currentTimeMillis()
@@ -147,7 +146,7 @@ fun TypingRaceScreen(onBack: () -> Unit) {
                                 }
                             }
                         }
-                        Divider()
+                        HorizontalDivider()
                     }
 
                     // ── নতুন রেস তৈরি ──
@@ -244,7 +243,6 @@ private fun RaceWaitingRoom(r: TypingRace, myPhone: String, onStart: () -> Unit)
 private fun RaceLiveArea(r: TypingRace, myPhone: String, userInput: String, onInputChange: (String) -> Unit) {
     val passage = r.passage
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // ── দুজনের live progress bar ──
         r.participants.values.forEach { p ->
             val isMe = p.phone == myPhone
             val frac = if (passage.isNotEmpty()) (p.progress.toFloat() / passage.length).coerceIn(0f, 1f) else 0f
@@ -275,9 +273,8 @@ private fun RaceLiveArea(r: TypingRace, myPhone: String, userInput: String, onIn
 @Composable
 private fun RaceResult(r: TypingRace, myPhone: String, onExit: () -> Unit) {
     val winner = r.winner()
-    val me     = r.myParticipant(myPhone)
-    val iWon   = winner?.phone == myPhone
     Column(verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        val iWon = winner?.phone == myPhone
         Text(if (iWon) "🏆 তুমি জিতেছ!" else "🥈 এবার হলো না", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
         r.participants.values.sortedByDescending { it.finalWpm }.forEach { p ->
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
