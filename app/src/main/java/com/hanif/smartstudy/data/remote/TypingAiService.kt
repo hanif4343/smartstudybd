@@ -40,7 +40,8 @@ object TypingAiService {
     suspend fun generatePassage(
         weakWords : List<String>,
         language  : String,   // "bn" | "en"
-        difficulty: String    // "easy" | "medium" | "hard"
+        difficulty: String,   // "easy" | "medium" | "hard"
+        weakHand  : String? = null   // "left" | "right" | null — দেখো HandKeyMap.kt
     ): AiPassageResult? = withContext(Dispatchers.IO) {
         if (weakWords.isEmpty() || BuildConfig.TYPING_AI_ENDPOINT.isBlank()) return@withContext null
         try {
@@ -48,6 +49,7 @@ object TypingAiService {
                 put("weakWords", JSONArray(weakWords))
                 put("language", language)
                 put("difficulty", difficulty)
+                if (!weakHand.isNullOrBlank()) put("weakHand", weakHand)
             }
             val request = Request.Builder()
                 .url(BuildConfig.TYPING_AI_ENDPOINT)
