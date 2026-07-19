@@ -23,30 +23,32 @@ object TypingAdaptiveContentProvider {
     sealed class Source { object Cache : Source(); object LiveAi : Source(); object Fallback : Source() }
     data class Result(val passage: String, val source: Source)
 
-    private fun cacheKey(language: String, weakWords: List<String>): String =
-        language + ":" + weakWords.map { it.trim() }.filter { it.isNotEmpty() }.sorted().joinToString(",")
+    private fun cacheKey(language: String, weakWords: List<String>, weakHand: String?): String =
+        language + ":" + (weakHand ?: "none") + ":" +
+            weakWords.map { it.trim() }.filter { it.isNotEmpty() }.sorted().joinToString(",")
 
     suspend fun getBlendedPassage(
         context   : Context,
         weakWords : List<String>,
         language  : String,
-        difficulty: String = "medium"
+        difficulty: String = "medium",
+        weakHand  : String? = null   // "left" | "right" | null — দেখো HandKeyMap.kt/এর ব্যবহার TypingPracticeScreen.kt-এ
     ): Result {
         if (weakWords.isEmpty()) {
             return Result(fallbackPassageFor(language), Source.Fallback)
         }
 
         val dao = AppDatabase.getInstance(context).generatedPassageCacheDao()
-        val key = cacheKey(language, weakWords)
+        val key = cacheKey(language, weakWords, weakHand)
 
-        // ১) cache — একই শব্দ-সেটের জন্য সাম্প্রতিক জেনারেশন থাকলে সেটাই ব্যবহার
+        // ১) cache — একই শব্দ-সেট + একই হাত-বায়াসের জন্য সাম্প্রতিক জেনারেশন থাকলে সেটাই ব্যবহার
         val cached = dao.get(key)
         if (cached != null && System.currentTimeMillis() - cached.createdAt < CACHE_VALID_MS) {
             return Result(cached.passage, Source.Cache)
         }
 
         // ২) live AI call
-        val aiResult = TypingAiService.generatePassage(weakWords, language, difficulty)
+        val aiResult = TypingAiService.generatePassage(weakWords, language, difficulty, weakHand)
         if (aiResult != null) {
             dao.upsert(
                 GeneratedPassageCacheEntity(
