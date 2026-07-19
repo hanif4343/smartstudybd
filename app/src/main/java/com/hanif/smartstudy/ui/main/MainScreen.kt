@@ -51,6 +51,7 @@ fun MainScreen(
     var currentTab     by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch     by remember { mutableStateOf(false) }
     var showTyping     by remember { mutableStateOf(false) }
+    var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
@@ -103,6 +104,7 @@ fun MainScreen(
         when {
             showSearch                    -> showSearch = false
             showTyping                    -> showTyping = false
+            showTypingRace                -> showTypingRace = false
             showFocusModeInfo             -> showFocusModeInfo = false
             currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
             else                          -> showExitDialog = true
@@ -226,9 +228,14 @@ fun MainScreen(
     }
     if (showTyping) {
         TypingPracticeScreen(
-            onBack   = { showTyping = false },
-            onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }
+            onBack     = { showTyping = false },
+            onResult   = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") },
+            onOpenRace = { showTyping = false; showTypingRace = true }
         )
+        return
+    }
+    if (showTypingRace) {
+        com.hanif.smartstudy.ui.typing.TypingRaceScreen(onBack = { showTypingRace = false })
         return
     }
     if (showFocusModeInfo) {
