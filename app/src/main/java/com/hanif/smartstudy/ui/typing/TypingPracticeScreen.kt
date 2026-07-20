@@ -105,6 +105,31 @@ private fun poolFor(difficulty: String): List<PassageInfo> =
  *  একই ফর্মে আনা হলো, যাতে তুলনাটা নির্ভরযোগ্য হয়। */
 private fun normalizeBn(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC)
 
+/** ড়/ঢ়/য়-এর মতো নুক্তা-অক্ষর Unicode-এর নিয়মেই composition-exclusion তালিকায় আছে —
+ *  মানে NFC normalize করলেও এগুলো ভেঙে থাকে (base + ় দুই আলাদা ক্যারেক্টার হিসেবে)।
+ *  এতে মান (value) মেলাতে সমস্যা নেই, কিন্তু রঙ করার সময় যদি base আর নুক্তাকে আলাদা
+ *  স্টাইল-স্প্যানে ফেলা হয়, তাহলে টেক্সট শেপিং ভেঙে যায় আর নুক্তাটা বেস থেকে বিচ্ছিন্ন
+ *  হয়ে একলা ডটেড-সার্কেল হিসেবে রেন্ডার হয়। তাই একটা visual অক্ষর (base + তার সাথে লেগে
+ *  থাকা combining/nukta মার্ক) — পুরোটাকে একসাথে একটাই ইউনিট (grapheme cluster) ধরে
+ *  একটাই স্টাইল দেওয়া হয়, যাতে শেপিং কখনো না ভাঙে। */
+private fun graphemeClusters(s: String): List<IntRange> {
+    if (s.isEmpty()) return emptyList()
+    val ranges = mutableListOf<IntRange>()
+    var start = 0
+    for (i in 1..s.length) {
+        val atEnd = i == s.length
+        val isCombining = !atEnd && (
+            Character.getType(s[i]) == Character.NON_SPACING_MARK.toInt() ||
+            Character.getType(s[i]) == Character.COMBINING_SPACING_MARK.toInt()
+        )
+        if (!isCombining) {
+            ranges.add(start until i)
+            start = i
+        }
+    }
+    return ranges
+}
+
 /** Adaptive Session-এ ভাষা মিশে না যাওয়ার জন্য — শুধু একটা ভাষার প্যাসেজ পুল */
 private fun poolForLanguage(language: String): List<PassageInfo> =
     PASSAGES.filter { TypingErrorAnalyzer.detectLanguage(it.text) == language }.ifEmpty { PASSAGES }
@@ -735,19 +760,25 @@ fun TypingPracticeScreen(
                     val currentWordSpan = remember(wordSpans, targetPos) {
                         wordSpans.firstOrNull { targetPos in it.start..it.end }
                     }
+                    val passageClusters = remember(passage) { graphemeClusters(passage) }
                     Text(
                         buildAnnotatedString {
-                            passage.forEachIndexed { i, ch ->
-                                val inCurrentWord = currentWordSpan != null && i >= currentWordSpan.start && i < currentWordSpan.end
+                            for (cluster in passageClusters) {
+                                val cStart = cluster.first
+                                val cEndExclusive = cluster.last + 1
+                                val inCurrentWord = currentWordSpan != null && cStart >= currentWordSpan.start && cStart < currentWordSpan.end
                                 val style = when {
-                                    i >= targetPos -> SpanStyle(
+                                    // পুরো cluster এখনো টাইপ হয়নি (আংশিক টাইপ হলেও পুরোটাই
+                                    // "pending" রাখা হচ্ছে, যাতে base + নুক্তা কখনো আলাদা
+                                    // স্টাইলে না পড়ে আর ডটেড-সার্কেল না দেখায়)
+                                    targetPos < cEndExclusive -> SpanStyle(
                                         color = MaterialTheme.colorScheme.onSurface,
                                         background = if (inCurrentWord) Color(0xFFDBEAFE) else Color.Unspecified
                                     )
-                                    resolvedCorrect[i] == true -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
-                                    else                        -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                    cluster.all { resolvedCorrect[it] == true } -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                    else -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
                                 }
-                                withStyle(style) { append(ch) }
+                                withStyle(style) { append(passage.substring(cStart, cEndExclusive)) }
                             }
                         },
                         fontSize = 15.sp, fontWeight = FontWeight.Medium,
