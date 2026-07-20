@@ -219,6 +219,21 @@ fun MainScreen(
     var pendingFocusNudgeTab by remember { mutableStateOf<BottomTab?>(null) }
     val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE, BottomTab.MENU) }
 
+    // ── Home-এর "Typing" টাইল বা Menu-এর "Typing Practice" রো থেকে সরাসরি
+    // showTyping=true হয়ে যেত — bottom-tab নাজ (nudge) সিস্টেম বাইপাস হয়ে
+    // যাচ্ছিল। এখন ফোকাস মোড অন্য কোনো সাবজেক্টে সক্রিয় থাকলে (টাইপিং নিজেই
+    // ফোকাস সাবজেক্ট না হলে), একই FocusNudgeSheet/নোটিফিকেশন পাইপলাইন দিয়েই
+    // ইন্টারসেপ্ট হবে — বাকি সব জায়গার মতোই সেম আচরণ। ──
+    var pendingTypingNudge by remember { mutableStateOf(false) }
+    fun openTypingWithFocusCheck() {
+        if (focusState.isEffectivelyActive() &&
+            focusState.subject != com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
+            pendingTypingNudge = true
+        } else {
+            showTyping = true
+        }
+    }
+
     if (showSearch) {
         LaunchedEffect(Unit) { unlockAchievement("search_used") }
         GlobalSearchScreen(
@@ -226,11 +241,15 @@ fun MainScreen(
         )
         return
     }
+    // ── Study সাবজেক্টের তালিকা — এখন টাইপিং স্ক্রিনের নিজস্ব "🎯 আজ ফোকাস" কার্ডেও লাগে,
+    // তাই showFocusModeInfo ব্লকের বদলে এখানে একবারই collect করা হচ্ছে ──
+    val studyStateForFocus by studyViewModel.state.collectAsStateWithLifecycle()
     if (showTyping) {
         TypingPracticeScreen(
             onBack     = { showTyping = false },
             onResult   = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") },
-            onOpenRace = { showTyping = false; showTypingRace = true }
+            onOpenRace = { showTyping = false; showTypingRace = true },
+            focusStudySubjects = studyStateForFocus.subjects.map { it.name }
         )
         return
     }
@@ -239,9 +258,8 @@ fun MainScreen(
         return
     }
     if (showFocusModeInfo) {
-        val studyState by studyViewModel.state.collectAsStateWithLifecycle()
         com.hanif.smartstudy.focus.FocusModeInfoScreen(
-            subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + studyState.subjects.map { it.name },
+            subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + studyStateForFocus.subjects.map { it.name },
             onBack   = { showFocusModeInfo = false }
         )
         return
@@ -289,7 +307,7 @@ fun MainScreen(
                     onOpenQuizTab  = { currentTab = BottomTab.QUIZ },
                     onOpenQBankTab = { currentTab = BottomTab.QBANK },
                     onOpenStudyTab = { currentTab = BottomTab.STUDY },
-                    onOpenTyping   = { showTyping = true },
+                    onOpenTyping   = { openTypingWithFocusCheck() },
                     onOpenMockTest = { isQBank ->
                         if (isQBank) {
                             currentTab = BottomTab.QBANK
@@ -342,7 +360,7 @@ fun MainScreen(
                     vm                   = menuViewModel,
                     onLogout             = onLogout,
                     onSearchClick        = { showSearch = true },
-                    onTypingClick        = { showTyping = true },
+                    onTypingClick        = { openTypingWithFocusCheck() },
                     initialPage          = menuInitialPage,
                     quizViewModel        = quizViewModel,
                     highlightRoutineItemId   = pendingRoutineItemId,
@@ -401,6 +419,25 @@ fun MainScreen(
                 pendingFocusNudgeTab = null
             },
             onDismiss = { pendingFocusNudgeTab = null }
+        )
+    }
+
+    // ── Home/Menu থেকে Typing Practice খুলতে চাইলে, কিন্তু ফোকাস মোড অন্য
+    // সাবজেক্টে সক্রিয় থাকলে — বাকি সব জায়গার মতোই সেম FocusNudgeSheet ──
+    if (pendingTypingNudge) {
+        com.hanif.smartstudy.focus.FocusNudgeSheet(
+            subject   = focusState.subject,
+            onResume  = {
+                currentTab = BottomTab.STUDY
+                studyViewModel.navigateToSubject(focusState.subject)
+                pendingTypingNudge = false
+            },
+            onTurnOff = {
+                scope.launch { focusStore.deactivate() }
+                showTyping = true
+                pendingTypingNudge = false
+            },
+            onDismiss = { pendingTypingNudge = false }
         )
     }
     } // Box (focus overlay wrapper)
