@@ -75,24 +75,40 @@ fun TypingRaceScreen(onBack: () -> Unit) {
     }
 
     // ── টাইপ করার সাথে সাথে throttled progress push + সম্পূর্ণ হলে finish ──
+    // (Practice স্ক্রিনের একই বাগ এখানেও ছিল: raw index-tুলনায় ড়/ঢ়/য়-জাতীয়
+    // নুক্তা-অক্ষর ভুল ধরত, আর একটা এক্সট্রা ক্যারেক্টার — যেমন ডাবল স্পেস —
+    // ঢুকলে বাকি পুরো টাইপিং ভুল হিসেবে গণনা হতো। এখানেও NFC normalize +
+    // resync-aware তুলনা ব্যবহার করা হলো — দেখো normalizeBn(), TypingPracticeScreen.kt) ──
     LaunchedEffect(userInput) {
         val r = race ?: return@LaunchedEffect
         if (r.getStatus() != RaceStatus.ACTIVE || hasFinished || startedAtLocal == 0L) return@LaunchedEffect
-        val passage = r.passage
-        val correct = userInput.indices.count { it < passage.length && userInput[it] == passage[it] }
+        val passage = normalizeBn(r.passage)
+        val typed   = normalizeBn(userInput)
+
+        var target = 0
+        var correct = 0
+        for (ch in typed) {
+            if (target >= passage.length) break
+            when {
+                ch == passage[target] -> { correct++; target++ }
+                ch == ' ' && passage[target] != ' ' -> { /* এক্সট্রা স্পেস — target এগোয় না, resync */ }
+                else -> { target++ }
+            }
+        }
+
         val timeSec = ((System.currentTimeMillis() - startedAtLocal) / 1000).coerceAtLeast(1)
         val minutes = timeSec / 60.0
         val wpm     = if (minutes > 0) (correct / 5.0 / minutes).toInt().coerceAtLeast(0) else 0
 
-        if (userInput.length >= passage.length) {
+        if (target >= passage.length) {
             hasFinished = true
-            val acc = if (userInput.isNotEmpty()) (correct * 100 / userInput.length) else 100
+            val acc = if (typed.isNotEmpty()) (correct * 100 / typed.length) else 100
             scope.launch { repo.finishRace(r.id, myPhone, wpm, acc) }
         } else {
             val now = System.currentTimeMillis()
             if (now - lastProgressPush > 1200) {
                 lastProgressPush = now
-                scope.launch { repo.updateRaceProgress(r.id, myPhone, userInput.length, wpm) }
+                scope.launch { repo.updateRaceProgress(r.id, myPhone, target, wpm) }
             }
         }
     }
@@ -241,7 +257,7 @@ private fun RaceWaitingRoom(r: TypingRace, myPhone: String, onStart: () -> Unit)
 
 @Composable
 private fun RaceLiveArea(r: TypingRace, myPhone: String, userInput: String, onInputChange: (String) -> Unit) {
-    val passage = r.passage
+    val passage = normalizeBn(r.passage)
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         r.participants.values.forEach { p ->
             val isMe = p.phone == myPhone
