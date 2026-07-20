@@ -109,7 +109,7 @@ private fun poolFor(difficulty: String): List<PassageInfo> =
  *  এই দুই ফর্ম মিলত না, তাই কিবোর্ড আর প্যাসেজ টেক্সট আলাদা ফর্ম ব্যবহার করলে সঠিক
  *  টাইপ করা সত্ত্বেও ভুল ধরত। প্যাসেজ ও ইউজার-ইনপুট দুটোকেই NFC-তে normalize করে
  *  একই ফর্মে আনা হলো, যাতে তুলনাটা নির্ভরযোগ্য হয়। */
-private fun normalizeBn(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC)
+internal fun normalizeBn(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC)
 
 /** ড়/ঢ়/য়-এর মতো নুক্তা-অক্ষর Unicode-এর নিয়মেই composition-exclusion তালিকায় আছে —
  *  মানে NFC normalize করলেও এগুলো ভেঙে থাকে (base + ় দুই আলাদা ক্যারেক্টার হিসেবে)।
@@ -324,10 +324,20 @@ fun TypingPracticeScreen(
 
             // ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ শেষ হলেও কমপক্ষে
             // FREE_MODE_MIN_SECONDS (৫ মিনিট) পার না হওয়া পর্যন্ত একই ডিফিকাল্টির
-            // পরের প্যাসেজে লুপ করে, যাতে একটানা লেখার প্র্যাকটিস হয় ──
+            // পরের প্যাসেজে লুপ করে, যাতে একটানা লেখার প্র্যাকটিস হয়। প্রতিটা
+            // ডিফিকাল্টি পুলে বাংলা ও ইংরেজি প্যাসেজ মিশানো আছে — তাই লুপ করার সময়
+            // শুধু বর্তমান প্যাসেজের ভাষার মধ্যেই থাকা হয়, নাহলে মাঝপথে হঠাৎ
+            // বাংলা থেকে ইংরেজিতে (বা উল্টো) বদলে গিয়ে কিবোর্ড অ্যাপই বদলাতে হতো ──
             if (sessionMode == "free" && elapsedSec < FREE_MODE_MIN_SECONDS) {
                 val pool = poolFor(selectedDifficulty)
-                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                val currentLang = TypingErrorAnalyzer.detectLanguage(passage)
+                val sameLangIdx = pool.indices.filter {
+                    TypingErrorAnalyzer.detectLanguage(pool[it].text) == currentLang
+                }
+                val candidates = if (sameLangIdx.size > 1) sameLangIdx else pool.indices.toList()
+                val curPos  = candidates.indexOf(passageIndex).let { if (it >= 0) it else 0 }
+                val nextPos = (curPos + 1).mod(candidates.size.coerceAtLeast(1))
+                val nextIdx = candidates.getOrElse(nextPos) { 0 }
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
@@ -507,9 +517,10 @@ fun TypingPracticeScreen(
                     ch == passage[target] -> {
                         correctKeystrokes++
                         if (HandKeyMap.isTrackable(passage[target])) {
-                            when (HandKeyMap.handOf(passage[target])) {
+                            when (HandKeyMap.clusterHandOf(passage, target)) {
                                 Hand.LEFT  -> leftCorrectChars++
                                 Hand.RIGHT -> rightCorrectChars++
+                                null       -> {} // নুক্তা অংশ — আগের base-এর সাথেই এক কী-প্রেস হিসেবে গোনা হয়ে গেছে
                             }
                         }
                         newTypedTargetIndex = newTypedTargetIndex + target
@@ -525,9 +536,10 @@ fun TypingPracticeScreen(
                     else -> {
                         incorrectKeystrokes++
                         if (HandKeyMap.isTrackable(passage[target])) {
-                            when (HandKeyMap.handOf(passage[target])) {
+                            when (HandKeyMap.clusterHandOf(passage, target)) {
                                 Hand.LEFT  -> leftWrongChars++
                                 Hand.RIGHT -> rightWrongChars++
+                                null       -> {} // নুক্তা অংশ — আগের base-এর সাথেই এক কী-প্রেস হিসেবে গোনা হয়ে গেছে
                             }
                         }
                         newTypedTargetIndex = newTypedTargetIndex + target
