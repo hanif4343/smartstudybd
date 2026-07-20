@@ -49,6 +49,12 @@ private const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECOND
 // প্রতিটা ভাষায় ঠিক ১০ মিনিট (৬০০ সেকেন্ড) — দেখো রোডম্যাপ সেকশন ৮ ──
 private const val EXAM_PHASE_SECONDS = 600
 
+// ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ (৭০-৮০ অক্ষর) সাধারণ স্পিডে
+// মাত্র ১৫-২০ সেকেন্ডে শেষ হয়ে যায়, তাতে একটানা লেখার অনুশীলন হয় না। তাই এখন
+// এই মোডেও adaptive/exam-এর মতোই — এক প্যাসেজ শেষ হলে পরেরটায় লুপ করে, যতক্ষণ
+// না কমপক্ষে এই সময় (৫ মিনিট) পার হয়। এরপর যে প্যাসেজ চলছিল সেটা শেষ হলেই সেশন থামে ──
+private const val FREE_MODE_MIN_SECONDS = 300
+
 private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
 private val RedWrong  = Color(0xFFEF4444)
@@ -164,7 +170,12 @@ data class TypingResult(
 fun TypingPracticeScreen(
     onBack    : () -> Unit,
     onResult  : (TypingResult) -> Unit = {},
-    onOpenRace: () -> Unit = {}
+    onOpenRace: () -> Unit = {},
+    // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
+    // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
+    // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
+    // যোগ হয় (SubjectListScreen.kt-এর একই প্যাটার্নে) ──
+    focusStudySubjects: List<String> = emptyList()
 ) {
     // ── Persistence — Best WPM ও সাম্প্রতিক হিস্ট্রি এখন সরাসরি এই স্ক্রিনই লোড/সেভ
     // করে (SessionManager দিয়ে) — আগে bestWpm বাইরে থেকে প্যারামিটার হিসেবে আসার কথা
@@ -302,6 +313,20 @@ fun TypingPracticeScreen(
             // ইতি নিচের আলাদা effect-এ হ্যান্ডল হয়) ──
             if (sessionMode == "exam") {
                 val pool = poolForLanguage(examPhase)
+                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                passageIndex = nextIdx
+                passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
+                userInput    = ""
+                typedTargetIndex = emptyList()
+                loggedWordEnds = emptySet()
+                return@LaunchedEffect
+            }
+
+            // ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ শেষ হলেও কমপক্ষে
+            // FREE_MODE_MIN_SECONDS (৫ মিনিট) পার না হওয়া পর্যন্ত একই ডিফিকাল্টির
+            // পরের প্যাসেজে লুপ করে, যাতে একটানা লেখার প্র্যাকটিস হয় ──
+            if (sessionMode == "free" && elapsedSec < FREE_MODE_MIN_SECONDS) {
+                val pool = poolFor(selectedDifficulty)
                 val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
@@ -682,6 +707,14 @@ fun TypingPracticeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
+            // ── ফোকাস মোড: SubjectListScreen.kt-এর "🎯 আজ ফোকাস" কার্ডের সেম —
+            // এখন Study ট্যাবের পাশাপাশি টাইপিং স্ক্রিন থেকেও চালু করা যায় ──
+            if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+                com.hanif.smartstudy.focus.FocusTodayCard(
+                    subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + focusStudySubjects
+                )
+            }
 
             // ── ধাপ ৪: Daily Discipline Mode ব্যানার — শুধু মোড অন থাকলেই দেখা যায়,
             // কিছু আটকায় না, শুধু আজকের progress দেখায় (non-coercive) ──
