@@ -24,7 +24,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.window.Dialog
 import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.CustomPassageEntity
 import com.hanif.smartstudy.data.local.MistakeErrorType
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.Hand
@@ -48,6 +50,12 @@ private const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECOND
 // ── BCC Exam Simulation Mode — বাস্তব বাংলাদেশ কম্পিউটার কাউন্সিল পরীক্ষার নিয়ম অনুযায়ী
 // প্রতিটা ভাষায় ঠিক ১০ মিনিট (৬০০ সেকেন্ড) — দেখো রোডম্যাপ সেকশন ৮ ──
 private const val EXAM_PHASE_SECONDS = 600
+
+// ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ (৭০-৮০ অক্ষর) সাধারণ স্পিডে
+// মাত্র ১৫-২০ সেকেন্ডে শেষ হয়ে যায়, তাতে একটানা লেখার অনুশীলন হয় না। তাই এখন
+// এই মোডেও adaptive/exam-এর মতোই — এক প্যাসেজ শেষ হলে পরেরটায় লুপ করে, যতক্ষণ
+// না কমপক্ষে এই সময় (৫ মিনিট) পার হয়। এরপর যে প্যাসেজ চলছিল সেটা শেষ হলেই সেশন থামে ──
+private const val FREE_MODE_MIN_SECONDS = 300
 
 private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
@@ -85,6 +93,7 @@ private fun difficultyLabel(d: String) = when (d) {
     "easy"   -> "সহজ"
     "medium" -> "মাঝারি"
     "hard"   -> "কঠিন"
+    "custom" -> "আমার প্যাসেজ"
     else     -> "সব"
 }
 
@@ -92,11 +101,64 @@ private fun difficultyColor(d: String) = when (d) {
     "easy"   -> GreenOk
     "medium" -> AmberMid
     "hard"   -> RedWrong
+    "custom" -> Color(0xFF7C3AED)
     else     -> Indigo600
 }
 
 private fun poolFor(difficulty: String): List<PassageInfo> =
     if (difficulty == "all") PASSAGES else PASSAGES.filter { it.difficulty == difficulty }
+
+/** বাংলা নুক্তা-অক্ষর (ড়/ঢ়/য়) দুই রকম Unicode ফর্মে আসতে পারে — একক কোডপয়েন্ট
+ *  (precomposed), অথবা base+nukta দুই কোডপয়েন্টের যোগফল (decomposed)। Java-র
+ *  Normalizer.NFC ব্যবহার করে প্রথমে এই ফাংশনটা টেক্সটকে "ভেঙে" (decomposed) রাখতো,
+ *  কারণ Unicode-এর composition-exclusion নিয়মেই এই তিনটা অক্ষর NFC দিয়ে আর জোড়া
+ *  লাগে না। মান (value) মেলাতে এটা ঠিকই কাজ করতো, কিন্তু ডিভাইসের বাংলা ফন্ট এই
+ *  ভাঙা (২-কোডপয়েন্ট) সিকোয়েন্সটা ঠিকভাবে জোড়া লাগিয়ে দেখাতে পারছিল না — ফলে
+ *  নুক্তাটা বেস অক্ষর থেকে বিচ্ছিন্ন হয়ে একলা ডটেড-সার্কেল হিসেবে রেন্ডার হচ্ছিল
+ *  (রং করার কোডে কোনো সমস্যা ছিল না — এটা আসলে raw string-এই ভাঙা থাকার কারণে,
+ *  এমনকি প্লেইন টেক্সটফিল্ডেও দেখা যাচ্ছিল)।
+ *
+ *  তাই এখন উল্টো পথে যাওয়া হলো: base+nukta পেলেই নিজে থেকে জোড়া লাগিয়ে single
+ *  precomposed কোডপয়েন্টে নিয়ে আসা হয় (Java Normalizer ব্যবহার না করে, ম্যানুয়ালি) —
+ *  এতে সবসময় ফন্টের রেডি-মেড গ্লিফ ব্যবহার হয়, ভাঙা-জোড়া লাগানোর কোনো ঝুঁকি থাকে
+ *  না, আর প্যাসেজ ও টাইপ করা টেক্সট — দুটোই একই ফর্মে থাকায় মান-তুলনাও নির্ভরযোগ্য। */
+internal fun normalizeBn(s: String): String {
+    if (s.indexOf('\u09BC') < 0) return s   // নুক্তা নেই — কিছু করার দরকার নেই (দ্রুত পথ)
+    val sb = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        val next = if (i + 1 < s.length) s[i + 1] else null
+        val composed = if (next == '\u09BC') when (c) {
+            '\u09A1' -> '\u09DC' // ড + ় → ড়
+            '\u09A2' -> '\u09DD' // ঢ + ় → ঢ়
+            '\u09AF' -> '\u09DF' // য + ় → য়
+            else -> null
+        } else null
+        if (composed != null) {
+            sb.append(composed)
+            i += 2
+        } else {
+            sb.append(c)
+            i += 1
+        }
+    }
+    return sb.toString()
+}
+
+/** টাইপ করা টেক্সটকে "সম্পূর্ণ (locked)" শব্দ আর "চলমান" শব্দে ভাগ করে — একাধিক
+ *  পরপর স্পেস (ডাবল স্পেস টাইপো) একটাই বিভাজক হিসেবে গণ্য হয় (regex " +"), তাই
+ *  ভুলবশত এক্সট্রা স্পেসে কোনো ফাঁকা "শব্দ" ঢুকে বাকি সব শব্দের ইনডেক্স শিফট হয়ে
+ *  যায় না — এটাই মূল কারণ যে আগে ডাবল-স্পেসে পুরো বাকি অংশ ভুল দেখাতো। */
+internal data class TypedWordSplit(val completed: List<String>, val current: String)
+internal fun splitTypedWords(normalized: String): TypedWordSplit {
+    val trimmed = normalized.trimEnd(' ')
+    val raw = if (trimmed.isEmpty()) emptyList() else trimmed.split(Regex(" +"))
+    val wordBoundaryJustCrossed = normalized.endsWith(' ') && trimmed.isNotEmpty()
+    val completed = if (wordBoundaryJustCrossed) raw else raw.dropLast(1)
+    val current   = if (wordBoundaryJustCrossed) "" else raw.lastOrNull() ?: ""
+    return TypedWordSplit(completed, current)
+}
 
 /** Adaptive Session-এ ভাষা মিশে না যাওয়ার জন্য — শুধু একটা ভাষার প্যাসেজ পুল */
 private fun poolForLanguage(language: String): List<PassageInfo> =
@@ -132,7 +194,12 @@ data class TypingResult(
 fun TypingPracticeScreen(
     onBack    : () -> Unit,
     onResult  : (TypingResult) -> Unit = {},
-    onOpenRace: () -> Unit = {}
+    onOpenRace: () -> Unit = {},
+    // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
+    // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
+    // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
+    // যোগ হয় (SubjectListScreen.kt-এর একই প্যাটার্নে) ──
+    focusStudySubjects: List<String> = emptyList()
 ) {
     // ── Persistence — Best WPM ও সাম্প্রতিক হিস্ট্রি এখন সরাসরি এই স্ক্রিনই লোড/সেভ
     // করে (SessionManager দিয়ে) — আগে bestWpm বাইরে থেকে প্যারামিটার হিসেবে আসার কথা
@@ -164,9 +231,29 @@ fun TypingPracticeScreen(
     }
 
     var selectedDifficulty by remember { mutableStateOf("all") }
+    // ── নিজের যোগ করা প্যাসেজ (লোকাল-অনলি) — "আমার প্যাসেজ" ফিল্টার বেছে নিলে
+    // এখান থেকেই রান হয়। নিজের সব প্যাসেজ একবার শেষ হয়ে গেলে, এই সেশনে যে ভুলগুলো
+    // হয়েছে তা দিয়ে AI পরের ৫ মিনিটের জন্য নতুন প্যাসেজ বানিয়ে দেয় (adaptive
+    // মোডের phase-২ AI-ইঞ্জিনই পুনরায় ব্যবহার করা হয়েছে, দেখো নিচে) ──
+    var customPassages    by remember { mutableStateOf(listOf<CustomPassageEntity>()) }
+    var showAddPassageDialog by remember { mutableStateOf(false) }
+    var customPassageInput   by remember { mutableStateOf("") }
+    var customCyclesDone     by remember { mutableStateOf(0) }   // নিজের পুরো তালিকা কতবার শেষ হয়েছে
+    var customAiFetching     by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
+    }
     var passageIndex by remember { mutableStateOf(0) }
-    var passage      by remember { mutableStateOf(PASSAGES[0].text) }
+    var passage      by remember { mutableStateOf(normalizeBn(PASSAGES[0].text)) }
     var userInput    by remember { mutableStateOf("") }
+    // ── Word-by-word matching (selftyping.com/10fastfingers-এর স্ট্যান্ডার্ড পদ্ধতি) —
+    // প্যাসেজকে স্পেস দিয়ে শব্দে ভাগ করা হয়। একটা শব্দ পুরোপুরি টাইপ করে স্পেস চাপলেই
+    // (বা প্যাসেজের একদম শেষ শব্দ হলে) সেটা "লক" হয়ে যায় — ঠিক/ভুল চিরস্থায়ীভাবে ফিক্স
+    // হয়ে যায়, পরে যাই হোক না কেন আর বদলায় না। এতে ১টা শব্দে ভুল হলেও আগে/পরের অন্য
+    // কোনো শব্দ প্রভাবিত হয় না — char-by-char index-তুলনার cascading সমস্যা পুরোপুরি
+    // এড়ানো যায়। ডাবল-স্পেসও এমনিতেই সমাধান হয়ে যায়, কারণ একাধিক স্পেসকে একটাই
+    // শব্দ-বিভাজক ধরা হয় (দেখো splitTypedWords())। ──
+    var frozenWordResults by remember { mutableStateOf(listOf<Boolean>()) }
     var isStarted    by remember { mutableStateOf(false) }
     var isFinished   by remember { mutableStateOf(false) }
     var elapsedSec   by remember { mutableStateOf(0) }
@@ -175,6 +262,16 @@ fun TypingPracticeScreen(
     // ── AI Adaptive Session — "free" (স্বাভাবিক প্র্যাকটিস) বনাম "adaptive" (দুই-ধাপ) ──
     var sessionMode      by remember { mutableStateOf("free") }   // "free" | "adaptive"
     var sessionLanguage  by remember { mutableStateOf("bn") }     // adaptive মোডে ভাষা মিশবে না
+
+    /** "প্র্যাকটিস" মোডের বর্তমান পুল — difficulty অনুযায়ী (বা "custom" হলে নিজের
+     *  প্যাসেজ), এবং টপ বারের 🌐 ভাষা সিলেক্টর অনুযায়ী ফিল্টার করা। ভাষা-ফিল্টারে
+     *  পুল খালি হয়ে গেলে (যেমন কোনো ভাষায় passage না থাকলে) আনফিল্টার্ড পুলে ফিরে যায় */
+    fun currentPool(): List<PassageInfo> {
+        val base = if (selectedDifficulty == "custom") customPassages.map { PassageInfo(it.text, "custom") }
+                   else poolFor(selectedDifficulty)
+        if (selectedDifficulty == "custom") return base   // নিজের প্যাসেজ ভাষা-ফিল্টার হয় না
+        return base.filter { TypingErrorAnalyzer.detectLanguage(it.text) == sessionLanguage }.ifEmpty { base }
+    }
     var adaptivePhase    by remember { mutableStateOf(1) }        // 1 | 2
     var sessionMistakeWords by remember { mutableStateOf(listOf<String>()) } // phase-১-এ session-local ভুল শব্দ
     var phase2Passage    by remember { mutableStateOf<String?>(null) }
@@ -188,20 +285,28 @@ fun TypingPracticeScreen(
     var examBanglaResult   by remember { mutableStateOf<TypingResult?>(null) }
     var showExamPhaseTransition by remember { mutableStateOf(false) }
 
-    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং ──
-    // আগে accuracy বের হতো ফাইনাল স্ট্রিং-কে প্যাসেজের সাথে পজিশন-বাই-পজিশন মিলিয়ে —
-    // মাঝপথে ১টা অক্ষর মিস/এক্সট্রা হয়ে গেলে তারপরের পুরো অংশ ভুলভাবে "লাল" দেখাত
-    // (cascading mismatch), যদিও ইউজার আসলে ঠিকই টাইপ করছিল। এখন প্রতিটা কী-প্রেসের
-    // মুহূর্তেই (target অক্ষরের সাথে মিলিয়ে) ঠিক/ভুল গণনা হয়, তাই ফলাফল নির্ভরযোগ্য।
+    // ── স্টাডি টাইপিং মোড — Study sheet-এর subject/sub_topic থেকে কনটেন্ট পুল করে
+    // প্যাসেজ হিসেবে দেখায়, একটা আইটেম একবার টাইপ হলে আর ফেরত আসে না ──
+    var studySubjectList  by remember { mutableStateOf<List<String>>(emptyList()) }
+    var studySubTopicList by remember { mutableStateOf<List<String>>(emptyList()) }
+    var studySubject      by remember { mutableStateOf<String?>(null) }
+    var studySubTopic     by remember { mutableStateOf<String?>(null) }
+    var studyCurrentId    by remember { mutableStateOf<String?>(null) }
+    var studyPoolTotal    by remember { mutableStateOf(0) }
+    var studyPoolUsed     by remember { mutableStateOf(0) }
+    var studyExhausted    by remember { mutableStateOf(false) }
+    var studyLoading      by remember { mutableStateOf(false) }
+
+    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
+    // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
+    // মুহূর্তে (target শব্দ vs typed শব্দ) হয়, char-by-char resync-pointer দিয়ে না ──
     var correctKeystrokes   by remember { mutableStateOf(0) }
     var incorrectKeystrokes by remember { mutableStateOf(0) }
     var totalKeystrokes     by remember { mutableStateOf(0) }
 
-    // ── Word-level mistake tracking (Phase ১) — প্যাসেজ বদলালে word-span/ভাষা recompute হয়,
-    // loggedWordEnds দিয়ে প্রতিটা শব্দ ঠিক একবারই লগ হয় (বাউন্ডারি একাধিকবার পার হলেও না) ──
-    val wordSpans   = remember(passage) { TypingErrorAnalyzer.wordSpans(passage) }
-    val passageLang = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
-    var loggedWordEnds by remember { mutableStateOf(setOf<Int>()) }
+    // ── Word-level mistake tracking (Phase ১) ──
+    val passageWords = remember(passage) { passage.split(' ') }
+    val passageLang  = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
 
     // ── ধাপ ৪: বাম/ডান হাতের সঠিক-ভুল অক্ষর গণনা (session-local, শেষে Room-এ flush হবে) ──
     var leftCorrectChars  by remember { mutableStateOf(0) }
@@ -228,6 +333,13 @@ fun TypingPracticeScreen(
         ctx.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
     }
 
+    // ── টপ বার রিডিজাইন — "অনুশীলনের ধরন" রো কোলাপসিবল (ডিফল্ট খোলা), History এখন
+    // popup/dialog, Focus mode-এর নিজস্ব আইকন এন্ট্রি পয়েন্ট ──
+    var modeTypeExpanded by remember { mutableStateOf(true) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var showFocusCard by remember { mutableStateOf(false) }
+    var showLangMenu by remember { mutableStateOf(false) }   // 🌐 বাংলা/English সিলেক্টর
+
     // Timer
     LaunchedEffect(isStarted, isFinished) {
         if (isStarted && !isFinished) {
@@ -240,7 +352,17 @@ fun TypingPracticeScreen(
 
     // Check completion
     LaunchedEffect(userInput) {
-        if (isStarted && userInput.length >= passage.length && !isFinished) {
+        // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage নেই (হার্ড কপি বই দেখে
+        // নিজের ইচ্ছামতো টাইপ করা হয়), তাই word-matching/completion লজিকের কোনো মানে
+        // নেই — এই মোডে ইউজার নিজেই "শেষ করুন" বাটনে চাপলে সেশন শেষ হবে (নিচে দেখো) ──
+        if (sessionMode == "freetyping") return@LaunchedEffect
+
+        // ── "শেষ হয়েছে কিনা" — সব শব্দ লক হয়ে গেছে, অথবা শেষ শব্দটাই এখন ঠিক
+        // টাইপ হয়ে গেছে (শেষ শব্দের পর সাধারণত স্পেস চাপা হয় না) ──
+        val split = splitTypedWords(userInput)
+        val allDone = split.completed.size >= passageWords.size ||
+            (split.completed.size == passageWords.size - 1 && split.current == passageWords.lastOrNull())
+        if (isStarted && allDone && !isFinished) {
 
             // ── Adaptive Session — phase ১: পুরো প্যাসেজ শেষ হলেও সেশন শেষ না, পরের
             // random প্যাসেজে লুপ করবে (টাইমার/স্ট্যাটস চলতেই থাকবে), যতক্ষণ না
@@ -249,9 +371,9 @@ fun TypingPracticeScreen(
                 val pool = poolForLanguage(sessionLanguage)
                 val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
                 passageIndex = nextIdx
-                passage      = pool.getOrNull(nextIdx)?.text ?: passage
+                passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                loggedWordEnds = emptySet()
+                frozenWordResults = emptyList()
                 return@LaunchedEffect
             }
 
@@ -262,9 +384,67 @@ fun TypingPracticeScreen(
                 val pool = poolForLanguage(examPhase)
                 val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
                 passageIndex = nextIdx
-                passage      = pool.getOrNull(nextIdx)?.text ?: passage
+                passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                loggedWordEnds = emptySet()
+                frozenWordResults = emptyList()
+                return@LaunchedEffect
+            }
+
+            // ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ শেষ হলেও কমপক্ষে
+            // FREE_MODE_MIN_SECONDS (৫ মিনিট) পার না হওয়া পর্যন্ত একই ডিফিকাল্টির
+            // পরের প্যাসেজে লুপ করে, যাতে একটানা লেখার প্র্যাকটিস হয়। প্রতিটা
+            // ডিফিকাল্টি পুলে বাংলা ও ইংরেজি প্যাসেজ মিশানো আছে — তাই লুপ করার সময়
+            // শুধু বর্তমান প্যাসেজের ভাষার মধ্যেই থাকা হয়, নাহলে মাঝপথে হঠাৎ
+            // বাংলা থেকে ইংরেজিতে (বা উল্টো) বদলে গিয়ে কিবোর্ড অ্যাপই বদলাতে হতো ──
+            if (sessionMode == "free" && elapsedSec < FREE_MODE_MIN_SECONDS) {
+                val pool = currentPool()
+                if (pool.isEmpty()) {
+                    // "আমার প্যাসেজ" বেছে নেওয়া কিন্তু এখনো কিছু যোগ করা হয়নি
+                    isFinished = true
+                    return@LaunchedEffect
+                }
+
+                if (selectedDifficulty == "custom") {
+                    // ── নিজের সেভ করা প্যাসেজ — একটা শেষ হলে পরেরটায় লুপ করে। পুরো
+                    // তালিকা একবার শেষ হয়ে গেলে (index আবার ০-তে ফিরলে), এই সেশনে
+                    // যে শব্দগুলোয় ভুল হয়েছে সেগুলো দিয়ে AI একটা নতুন প্যাসেজ বানিয়ে
+                    // দেয় — বাকি সময়টা সেই টার্গেটেড প্যাসেজেই লুপ চলতে থাকে ──
+                    val nextIdx = (passageIndex + 1).mod(pool.size)
+                    if (nextIdx == 0 && !customAiFetching) {
+                        customCyclesDone++
+                        customAiFetching = true
+                        scope.launch {
+                            val weak = sessionMistakeWords.distinct().take(10)
+                            val res = TypingAdaptiveContentProvider.getBlendedPassage(
+                                ctx, weak, passageLang, "medium", null
+                            )
+                            passage = normalizeBn(res.passage)
+                            passageIndex = 0
+                            userInput = ""
+                            frozenWordResults = emptyList()
+                            customAiFetching = false
+                        }
+                        return@LaunchedEffect
+                    }
+                    passageIndex = nextIdx
+                    passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
+                    userInput    = ""
+                    frozenWordResults = emptyList()
+                    return@LaunchedEffect
+                }
+
+                val currentLang = TypingErrorAnalyzer.detectLanguage(passage)
+                val sameLangIdx = pool.indices.filter {
+                    TypingErrorAnalyzer.detectLanguage(pool[it].text) == currentLang
+                }
+                val candidates = if (sameLangIdx.size > 1) sameLangIdx else pool.indices.toList()
+                val curPos  = candidates.indexOf(passageIndex).let { if (it >= 0) it else 0 }
+                val nextPos = (curPos + 1).mod(candidates.size.coerceAtLeast(1))
+                val nextIdx = candidates.getOrElse(nextPos) { 0 }
+                passageIndex = nextIdx
+                passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
+                userInput    = ""
+                frozenWordResults = emptyList()
                 return@LaunchedEffect
             }
 
@@ -284,6 +464,7 @@ fun TypingPracticeScreen(
             )
             result = r
             onResult(r)
+            if (sessionMode == "study") markCurrentStudyItemUsed()
             scope.launch {
                 session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
                 bestWpm = maxOf(bestWpm, r.wpm)
@@ -413,65 +594,98 @@ fun TypingPracticeScreen(
         }
     }
 
-    // ── প্রতিটা কী-প্রেস কেপচার করে target অক্ষরের সাথে সাথেই মিলিয়ে ঠিক/ভুল গণনা ──
+    // ── Word-by-word matching — একটা শব্দ পুরো টাইপ করে স্পেস চাপলেই (বা প্যাসেজের
+    // শেষ শব্দ হলে) সেটা "লক" হয়ে যায়, চিরস্থায়ীভাবে ঠিক/ভুল ফিক্স হয়ে যায়। এতে
+    // একটা শব্দে ভুল হলে শুধু সেই শব্দটাই প্রভাবিত হয়, বাকি সব শব্দ (আগে/পরে)
+    // সম্পূর্ণ স্বাধীন থাকে — char-by-char index-তুলনার cascading সমস্যা এখানে
+    // আর নেইই (কোনো resync-heuristic লাগে না, কাঠামোগতভাবেই এড়ানো)। ──
     fun onInputChange(new: String) {
         if (isFinished) return
         if (!isStarted && new.isNotEmpty()) isStarted = true
-        val capped = new.take(passage.length)
-        if (capped.length > userInput.length) {
-            for (i in userInput.length until capped.length) {
-                totalKeystrokes++
-                val isCorrect = i < passage.length && capped[i] == passage[i]
-                if (isCorrect) correctKeystrokes++ else incorrectKeystrokes++
-                // ── ধাপ ৪: এই ক্যারেক্টারটা target প্যাসেজে কোন হাতে পড়ে সেই অনুযায়ী গণনা ──
-                if (i < passage.length && HandKeyMap.isTrackable(passage[i])) {
-                    when (HandKeyMap.handOf(passage[i])) {
-                        Hand.LEFT  -> if (isCorrect) leftCorrectChars++  else leftWrongChars++
-                        Hand.RIGHT -> if (isCorrect) rightCorrectChars++ else rightWrongChars++
-                    }
-                }
-            }
-            // ── এই কী-প্রেসে কোনো শব্দ-বাউন্ডারি (স্পেস বা প্যাসেজের শেষ) পার হলে,
-            // সেই শব্দটা target-এর সাথে মিলিয়ে mistake/correct হিসেবে Room-এ লগ হবে।
-            // এটাই AI adaptive practice ও hand-balance analysis-এর ভিত্তি ডেটা তৈরি করে। ──
-            for (span in wordSpans) {
-                if (span.end > userInput.length && span.end <= capped.length && span.end !in loggedWordEnds) {
-                    loggedWordEnds = loggedWordEnds + span.end
-                    val typedWord = capped.substring(span.start, span.end)
-                    if (typedWord != span.word) {
-                        // ── Adaptive Session phase-১: এই সেশনের ভুল শব্দ জমা রাখা (দুর্বল-শব্দ
-                        // ভিত্তিক AI প্যাসেজ বানানোর ইনপুট — sync-loss বাদে, কারণ সেটা বানান-ভুল না) ──
-                        val errType = TypingErrorAnalyzer.classify(span.word, typedWord)
-                        if (sessionMode == "adaptive" && adaptivePhase == 1 && errType != MistakeErrorType.SYNC_LOSS) {
-                            sessionMistakeWords = sessionMistakeWords + span.word
-                        }
-                        // ── ধরন B (sync-loss) real-time ধরা পড়লে হালকা ভাইব্রেশন —
-                        // মাঝপথে ভয়েস না দেওয়ার কারণ: রোডম্যাপ সেকশন ৫.১ ──
-                        if (errType == MistakeErrorType.SYNC_LOSS) {
-                            syncLossCount++
-                            vibrator?.let { v ->
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    v.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                                } else {
-                                    @Suppress("DEPRECATION") v.vibrate(60)
-                                }
+        val normalized = normalizeBn(new)
+
+        val oldSplit = splitTypedWords(userInput)
+        val newSplit = splitTypedWords(normalized)
+
+        // নতুন করে "লক" হওয়া শব্দ থাকলে (আগের চেয়ে বেশি সম্পূর্ণ শব্দ) — সেগুলোই
+        // একবার করে গণনা/লগ হবে, ইতিমধ্যে লক হওয়া শব্দ আর ছোঁয়া হবে না।
+        if (newSplit.completed.size > frozenWordResults.size) {
+            var results = frozenWordResults
+            for (i in frozenWordResults.size until newSplit.completed.size) {
+                val target    = passageWords.getOrNull(i) ?: break
+                val typedWord = newSplit.completed[i]
+                val isCorrect = typedWord == target
+
+                // ── ক্যারেক্টার-ভিত্তিক গণনা (WPM/accuracy আন্তর্জাতিক সূত্র + হাত-ব্যালান্স) ──
+                val len = maxOf(target.length, typedWord.length)
+                for (j in 0 until len) {
+                    totalKeystrokes++
+                    val tc = target.getOrNull(j)
+                    val yc = typedWord.getOrNull(j)
+                    if (tc != null && tc == yc) {
+                        correctKeystrokes++
+                        if (HandKeyMap.isTrackable(tc)) {
+                            when (HandKeyMap.handOf(tc)) {
+                                Hand.LEFT  -> leftCorrectChars++
+                                Hand.RIGHT -> rightCorrectChars++
                             }
                         }
-                        scope.launch { TypingMistakeLogger.logMistake(ctx, span.word, typedWord, passageLang) }
                     } else {
-                        scope.launch { TypingMistakeLogger.logCorrect(ctx, span.word, passageLang) }
+                        incorrectKeystrokes++
+                        if (tc != null && HandKeyMap.isTrackable(tc)) {
+                            when (HandKeyMap.handOf(tc)) {
+                                Hand.LEFT  -> leftWrongChars++
+                                Hand.RIGHT -> rightWrongChars++
+                            }
+                        }
                     }
                 }
+                if (i < passageWords.size - 1) {
+                    // শব্দের পরের স্পেসটাও ১টা কী-প্রেস হিসেবে গোনা (সঠিক শব্দ মানেই স্পেসও ঠিক)
+                    totalKeystrokes++
+                    if (isCorrect) correctKeystrokes++ else incorrectKeystrokes++
+                }
+
+                // ── mistake/correct লগিং — AI adaptive practice ও sync-loss ইনসাইটের ভিত্তি ──
+                if (!isCorrect) {
+                    val errType = TypingErrorAnalyzer.classify(target, typedWord)
+                    val collectMistakes = (sessionMode == "adaptive" && adaptivePhase == 1) ||
+                        (sessionMode == "free" && selectedDifficulty == "custom")
+                    if (collectMistakes && errType != MistakeErrorType.SYNC_LOSS) {
+                        sessionMistakeWords = sessionMistakeWords + target
+                    }
+                    if (errType == MistakeErrorType.SYNC_LOSS) {
+                        syncLossCount++
+                        vibrator?.let { v ->
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                v.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                            } else {
+                                @Suppress("DEPRECATION") v.vibrate(60)
+                            }
+                        }
+                    }
+                    scope.launch { TypingMistakeLogger.logMistake(ctx, target, typedWord, passageLang) }
+                } else {
+                    scope.launch { TypingMistakeLogger.logCorrect(ctx, target, passageLang) }
+                }
+
+                results = results + isCorrect
             }
+            frozenWordResults = results
+        } else if (newSplit.completed.size < oldSplit.completed.size) {
+            // ── ব্যাকস্পেস দিয়ে আগের শব্দে ফিরে গেলে — সেই শব্দ(গুলো)-র লক তুলে নেওয়া ──
+            frozenWordResults = frozenWordResults.take(newSplit.completed.size)
         }
-        userInput = capped
+
+        userInput = normalized
     }
 
-    fun reset(newIndex: Int = passageIndex, pool: List<PassageInfo> = poolFor(selectedDifficulty)) {
+    fun reset(newIndex: Int = passageIndex, pool: List<PassageInfo> = currentPool()) {
         val idx = if (pool.isNotEmpty()) newIndex.mod(pool.size) else 0
         passageIndex = idx
-        passage      = pool.getOrNull(idx)?.text ?: PASSAGES[0].text
+        passage      = normalizeBn(pool.getOrNull(idx)?.text ?: PASSAGES[0].text)
         userInput    = ""
+        frozenWordResults = emptyList()
         isStarted    = false
         isFinished   = false
         elapsedSec   = 0
@@ -479,7 +693,6 @@ fun TypingPracticeScreen(
         correctKeystrokes   = 0
         incorrectKeystrokes = 0
         totalKeystrokes     = 0
-        loggedWordEnds      = emptySet()
         leftCorrectChars  = 0
         leftWrongChars    = 0
         rightCorrectChars = 0
@@ -509,9 +722,9 @@ fun TypingPracticeScreen(
         showPhaseTransition = false
         val pool = poolForLanguage(language)
         passageIndex = 0
-        passage      = pool.firstOrNull()?.text ?: PASSAGES[0].text
-        userInput = ""; isStarted = false; isFinished = false; elapsedSec = 0; result = null
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
@@ -524,10 +737,61 @@ fun TypingPracticeScreen(
         showExamPhaseTransition = false
         val pool = poolForLanguage("en")
         passageIndex = 0
-        passage      = pool.firstOrNull()?.text ?: PASSAGES[0].text
-        userInput = ""; isStarted = false; isFinished = false; elapsedSec = 0; result = null
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+    }
+
+    /** "⌨️ ফ্রি টাইপিং" বাটনে ট্যাপ করলে কল হয় — কোনো passage/target টেক্সট থাকে না,
+     *  হার্ড কপি বই দেখে ইউজার নিজের ইচ্ছামতো টাইপ করে; শুধু স্পিড লাইভ কাউন্ট হয়,
+     *  আর ইউজার নিজে "✅ শেষ করুন" চাপলে সেশন শেষ হয় (দেখো finishFreeTyping()) */
+    fun startFreeTyping() {
+        sessionMode = "freetyping"
+        userInput = ""
+        frozenWordResults = emptyList()
+        isStarted = false
+        isFinished = false
+        elapsedSec = 0
+        result = null
+        correctKeystrokes = 0
+        incorrectKeystrokes = 0
+        totalKeystrokes = 0
+        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0
+        syncLossCount = 0
+    }
+
+    /** ফ্রি টাইপিং মোডে টেক্সট বদলালে কল হয় — কোনো target passage-এর সাথে তুলনা করা হয় না,
+     *  শুধু মোট অক্ষর গোনা হয় (WPM হিসেবের জন্য) */
+    fun onFreeTypingInputChange(new: String) {
+        if (isFinished) return
+        if (!isStarted && new.isNotEmpty()) isStarted = true
+        userInput = new
+        totalKeystrokes = new.length
+        correctKeystrokes = new.length
+    }
+
+    /** ফ্রি টাইপিং সেশন — ইউজার নিজে "✅ শেষ করুন" চাপলে কল হয়, যেহেতু নির্দিষ্ট কোনো
+     *  শেষ-বিন্দু (passage length) নেই। ফলাফল অন্য মোডগুলোর মতোই history/best-WPM-এ জমা হয় */
+    fun finishFreeTyping() {
+        isFinished = true
+        val timeSec = elapsedSec.coerceAtLeast(1)
+        val minutes = timeSec / 60.0
+        val len = userInput.length
+        val wpm = if (minutes > 0) (len / 5.0 / minutes).toInt() else 0
+        val r = TypingResult(
+            wpm = wpm, rawWpm = wpm, accuracy = 100, timeSec = timeSec,
+            correctChars = len, totalChars = len
+        )
+        result = r
+        onResult(r)
+        scope.launch {
+            session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
+            bestWpm = maxOf(bestWpm, r.wpm)
+            history = session.getTypingHistory()
+            session.addTypingSecondsToday(timeSec)
+            todaySecondsBefore = session.getTypingTodaySeconds()
+        }
     }
 
     /** ইংরেজি ফেজ শেষে ট্রানজিশন কার্ডের বাটনে ট্যাপ করলে কল হয় — বাংলা ফেজ শুরু,
@@ -537,9 +801,9 @@ fun TypingPracticeScreen(
         showExamPhaseTransition = false
         val pool = poolForLanguage("bn")
         passageIndex = 0
-        passage      = pool.firstOrNull()?.text ?: PASSAGES[0].text
-        userInput = ""; isStarted = false; isFinished = false; elapsedSec = 0
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
@@ -548,13 +812,122 @@ fun TypingPracticeScreen(
      *  চলতেই থাকে (আলাদা রিসেট হয় না) যাতে ফাইনাল রেজাল্ট পুরো সেশনের সমন্বিত হয় */
     fun startPhase2() {
         adaptivePhase = 2
-        passage = phase2Passage ?: fallbackPassageFor(sessionLanguage)
-        userInput = ""
-        loggedWordEnds = emptySet()
+        passage = normalizeBn(phase2Passage ?: fallbackPassageFor(sessionLanguage))
+        userInput = ""; frozenWordResults = emptyList()
         isFinished = false
         showPhaseTransition = false
         // isStarted/elapsedSec/correctKeystrokes ইত্যাদি ইচ্ছাকৃতভাবে অপরিবর্তিত —
         // পুরো adaptive session-এর একটাই সমন্বিত ফাইনাল রেজাল্ট হবে
+    }
+
+    /** Study sheet-এর একটা আইটেম (question/explanation/technique) জোড়া দিয়ে একটাই
+     *  টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়" গোছের
+     *  পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে */
+    fun buildStudyPassageText(item: com.hanif.smartstudy.data.local.QuestionEntity): String =
+        listOfNotNull(
+            item.question.takeIf { it.isNotBlank() },
+            item.explanation.takeIf { it.isNotBlank() },
+            item.technique.takeIf { it.isNotBlank() }
+        ).joinToString(" ").trim()
+
+    /** একটা sub_topic-এর জন্য used-id বাদ দিয়ে নতুন একটা আইটেম তুলে প্যাসেজ বানায়।
+     *  পুল খালি হয়ে গেলে (সব টাইপ হয়ে গেছে) studyExhausted = true হয়ে UI-তে
+     *  "✅ সব প্যাসেজ টাইপ করা হয়ে গেছে" বার্তা + রিসেট বাটন দেখায় */
+    fun loadStudyPool(subject: String, subTopic: String) {
+        studyLoading = true
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            val progressDao = AppDatabase.getInstance(ctx).studyTypingProgressDao()
+            val user = session.getCurrentUser()
+            val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+
+            val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+            val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
+                .filter { buildStudyPassageText(it).isNotBlank() }
+            val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
+            val available = visible.filter { it.fbKey !in usedIds }
+
+            studyPoolTotal = visible.size
+            studyPoolUsed  = visible.count { it.fbKey in usedIds }
+            studyExhausted = visible.isNotEmpty() && available.isEmpty()
+
+            val pick = available.randomOrNull()
+            if (pick != null) {
+                studyCurrentId = pick.fbKey
+                passage = normalizeBn(buildStudyPassageText(pick))
+            } else {
+                studyCurrentId = null
+                passage = ""
+            }
+            userInput = ""; frozenWordResults = emptyList()
+            isStarted = false; isFinished = false; elapsedSec = 0; result = null
+            correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+            leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+            studyLoading = false
+        }
+    }
+
+    /** সাবজেক্ট বেছে নেওয়ার সাথে সাথে সেই সাবজেক্টের sub_topic লিস্ট লোড করে */
+    fun loadStudySubTopics(subject: String) {
+        studySubject = subject
+        studySubTopic = null
+        studySubTopicList = emptyList()
+        studyCurrentId = null
+        passage = ""
+        studyExhausted = false
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            studySubTopicList = dao.getSubTopics("STUDY", subject)
+        }
+    }
+
+    /** "📚 Study Typing" ট্যাবে ট্যাপ করলে কল হয় — প্রথমে সাবজেক্ট লিস্ট লোড হয়,
+     *  ইউজার সাবজেক্ট → সাব-টপিক বেছে নিলে তবেই প্যাসেজ পুল তৈরি হয় */
+    fun startStudyMode() {
+        sessionMode = "study"
+        studySubject = null
+        studySubTopic = null
+        studyCurrentId = null
+        studySubTopicList = emptyList()
+        studyExhausted = false
+        passage = ""
+        userInput = ""; frozenWordResults = emptyList()
+        isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            studySubjectList = dao.getSubjects("STUDY")
+        }
+    }
+
+    /** টাইপিং শেষ হলে (finishStudyItem হুকের ভেতর থেকে) আইটেমটাকে "used" হিসেবে সেভ করে,
+     *  যাতে এই sub_topic-এ আবার এলে এই আইটেমটা দ্বিতীয়বার না আসে */
+    fun markCurrentStudyItemUsed() {
+        val subject = studySubject ?: return
+        val subTopic = studySubTopic ?: return
+        val id = studyCurrentId ?: return
+        scope.launch {
+            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            AppDatabase.getInstance(ctx).studyTypingProgressDao().markUsed(
+                com.hanif.smartstudy.data.local.StudyTypingProgressEntity(
+                    userId = userId, subject = subject, subTopic = subTopic,
+                    contentId = id, typedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /** "🔄 এই টপিক রিসেট করো" বাটনে ট্যাপ করলে কল হয় — শুধু এই sub_topic-এর used
+     *  id গুলোই মোছে (পুরো ট্র্যাকিং টেবিল না), তারপর পুল আবার লোড হয় */
+    fun resetCurrentStudySubTopic() {
+        val subject = studySubject ?: return
+        val subTopic = studySubTopic ?: return
+        scope.launch {
+            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            AppDatabase.getInstance(ctx).studyTypingProgressDao().resetSubTopic(userId, subject, subTopic)
+            loadStudyPool(subject, subTopic)
+        }
     }
 
     Scaffold(
@@ -564,6 +937,32 @@ fun TypingPracticeScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                 actions = {
+                    // ── 🎯 Focus mode — নিজস্ব আইকন এন্ট্রি পয়েন্ট, existing ফাংশনালিটি
+                    // (FocusTodayCard) অপরিবর্তিত, শুধু এখান থেকে দেখা/লুকানো যায় ──
+                    if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+                        IconButton(onClick = { showFocusCard = !showFocusCard }) {
+                            Icon(
+                                Icons.Default.GpsFixed, contentDescription = "Focus mode",
+                                tint = if (showFocusCard) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // ── আজকের মোট টাইপিং সময় ব্যাজ ──
+                    if (todaySecondsBefore > 0) {
+                        Box(
+                            Modifier.padding(end = 6.dp)
+                                .background(Color(0xFFEFF6FF), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("⏱️ আজ ${todaySecondsBefore / 60}min", fontSize = 11.sp, color = Indigo600,
+                                fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                        }
+                    }
+                    // ── 📜 History — এখন popup/dialog আকারে খোলে ──
+                    IconButton(onClick = { showHistoryDialog = true }) {
+                        Icon(Icons.Default.History, contentDescription = "History",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     // Best WPM badge — এখন আসলেই persist হয়ে সঠিক মান দেখায়
                     if (bestWpm > 0) {
                         Box(
@@ -586,22 +985,128 @@ fun TypingPracticeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
+            // ── 📜 History popup — পেছনের স্ক্রিন লক থাকে (Dialog), ভেতরে স্ক্রল করা যায়,
+            // নতুন-থেকে-পুরনো (newest-first, session.getTypingHistory() নিজেই এভাবে দেয়),
+            // উপরে ও নিচে Close বাটন ──
+            if (showHistoryDialog) {
+                Dialog(onDismissRequest = { showHistoryDialog = false }) {
+                    Card(
+                        Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📜 সাম্প্রতিক ফলাফল", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = NotoSansBengali)
+                                TextButton(onClick = { showHistoryDialog = false }) {
+                                    Text("✕ Close", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            if (history.isEmpty()) {
+                                Text("এখনো কোনো ফলাফল নেই।", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 16.dp))
+                            } else {
+                                Column(
+                                    Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    history.forEach { h ->
+                                        Row(
+                                            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(h.date, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Text("${h.wpm} WPM", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                                                    color = Indigo600, fontFamily = NotoSansBengali)
+                                                Text("${h.accuracy}%", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                                    color = if (h.accuracy >= 90) GreenOk else if (h.accuracy >= 70) AmberMid else RedWrong,
+                                                    fontFamily = NotoSansBengali)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = { showHistoryDialog = false },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Close", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── ফোকাস মোড: SubjectListScreen.kt-এর "🎯 আজ ফোকাস" কার্ডের সেম —
+            // ফাংশনালিটি অপরিবর্তিত, শুধু এখন টপ বারের 🎯 আইকনে ট্যাপ করলে দেখা/লুকানো যায় ──
+            if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED && showFocusCard) {
+                com.hanif.smartstudy.focus.FocusTodayCard(
+                    subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + focusStudySubjects
+                )
+            }
+
             // ── ধাপ ৪: Daily Discipline Mode ব্যানার — শুধু মোড অন থাকলেই দেখা যায়,
             // কিছু আটকায় না, শুধু আজকের progress দেখায় (non-coercive) ──
             if (disciplineOn) {
                 DailyGoalBanner(todaySeconds = todaySecondsBefore, goalMinutes = dailyGoalMin)
             }
 
+            // ── নিজের প্যাসেজ একবার শেষ, এখন এই সেশনের ভুল থেকে AI দিয়ে পরের
+            // প্যাসেজ তৈরি হচ্ছে — সংক্ষিপ্ত সময়ের জন্য দেখানো হয় ──
+            if (customAiFetching) {
+                Surface(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFF3E8FF)
+                ) {
+                    Text(
+                        "🤖 তোমার ভুল থেকে AI নতুন প্যাসেজ বানাচ্ছে...",
+                        Modifier.padding(12.dp), fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED)
+                    )
+                }
+            }
+
+            // ── Study Typing মোডে যতক্ষণ না subject/sub_topic বেছে একটা প্যাসেজ লোড
+            // হয় (বা টপিক exhausted), ততক্ষণ Stats/Passage/Input বক্স দেখানোর দরকার নেই ──
+            if (sessionMode != "study" || passage.isNotBlank()) {
             // Stats row
+            // ── প্রগ্রেস বার/স্ট্যাট দেখানোর জন্য কতটুকু প্যাসেজ char হিসেবে "রিজলভড" —
+            // লক হওয়া শব্দগুলোর দৈর্ঘ্য (+ মাঝের স্পেস) + এখন চলমান শব্দের দৈর্ঘ্য ──
+            val resolvedCount = remember(userInput, passageWords, sessionMode) {
+                if (sessionMode == "freetyping") {
+                    userInput.length
+                } else {
+                    val split = splitTypedWords(userInput)
+                    var total = 0
+                    for (i in split.completed.indices) {
+                        total += (passageWords.getOrNull(i)?.length ?: 0)
+                        if (i < passageWords.size - 1) total += 1
+                    }
+                    total + split.current.length
+                }
+            }
             StatsRow(
                 elapsedSec        = elapsedSec,
-                userInput         = userInput,
+                resolvedCount     = resolvedCount,
                 passage           = passage,
                 isStarted         = isStarted,
-                correctKeystrokes = correctKeystrokes
+                correctKeystrokes = correctKeystrokes,
+                freeTypingMode    = sessionMode == "freetyping"
             )
 
-            // Passage display
+            // ── Passage display — "ফ্রি টাইপিং" মোডে কোনো passage/target টেক্সট দেখানো হয় না,
+            // ইউজার হার্ড কপি বই দেখে নিজের ইচ্ছামতো নিচের ফাঁকা বক্সে টাইপ করে ──
+            if (sessionMode != "freetyping") {
             Card(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(Color(0xFFFAFAFF)),
@@ -613,7 +1118,11 @@ fun TypingPracticeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            if (sessionMode == "adaptive" && adaptivePhase == 2) "🎯 তোমার জন্য বিশেষভাবে তৈরি" else "📖 Passage",
+                            when {
+                                sessionMode == "study" -> "📚 ${studySubject ?: ""} · ${studySubTopic ?: ""}"
+                                sessionMode == "adaptive" && adaptivePhase == 2 -> "🎯 তোমার জন্য বিশেষভাবে তৈরি"
+                                else -> "📖 Passage"
+                            },
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -626,7 +1135,8 @@ fun TypingPracticeScreen(
                                 Text(srcLabel, fontSize = 9.sp, fontFamily = NotoSansBengali,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        val diff = poolFor(selectedDifficulty).getOrNull(passageIndex)?.difficulty
+                        if (sessionMode != "study") {
+                        val diff = currentPool().getOrNull(passageIndex)?.difficulty
                             ?: PASSAGES.getOrNull(passageIndex)?.difficulty ?: "medium"
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
@@ -637,43 +1147,74 @@ fun TypingPracticeScreen(
                                 color = difficultyColor(diff), fontFamily = NotoSansBengali)
                         }
                         }
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
 
-                    // Colored passage showing correct/wrong chars + current-word হাইলাইট
-                    // (selftyping.com-এর মতো — এখন কোন শব্দে আছি সেটা স্পষ্ট বোঝা যায়,
-                    // দেখো রোডম্যাপ সেকশন ৪-এর "sync-loss/ধরন B" আলোচনা)
-                    val currentWordSpan = remember(wordSpans, userInput.length) {
-                        wordSpans.firstOrNull { userInput.length in it.start..it.end }
-                    }
+                    // ── Colored passage — word-by-word (selftyping.com/10fastfingers-এর
+                    // স্ট্যান্ডার্ড পদ্ধতি): প্রতিটা "লক" হওয়া শব্দ একটাই রঙ পায় (পুরো
+                    // শব্দ সঠিক হলে সবুজ, নাহলে লাল) — একটা শব্দে ভুল হলে আগে/পরের অন্য
+                    // কোনো শব্দ প্রভাবিত হয় না। বর্তমান (এখনো টাইপ করা হচ্ছে) শব্দে
+                    // লাইভ ক্যারেক্টার-বাই-ক্যারেক্টার ফিডব্যাক দেখানো হয়। ──
+                    val split = remember(userInput) { splitTypedWords(userInput) }
                     Text(
                         buildAnnotatedString {
-                            passage.forEachIndexed { i, ch ->
-                                val inCurrentWord = currentWordSpan != null && i >= currentWordSpan.start && i < currentWordSpan.end
-                                val style = when {
-                                    i >= userInput.length -> SpanStyle(
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        background = if (inCurrentWord) Color(0xFFDBEAFE) else Color.Unspecified
-                                    )
-                                    userInput[i] == ch   -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
-                                    else                 -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                            passageWords.forEachIndexed { wIdx, word ->
+                                if (wIdx > 0) append(" ")
+                                when {
+                                    wIdx < frozenWordResults.size -> {
+                                        val ok = frozenWordResults[wIdx]
+                                        val style = if (ok) SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                                    else SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                        withStyle(style) { append(word) }
+                                    }
+                                    wIdx == frozenWordResults.size -> {
+                                        // বর্তমান শব্দ — প্রতিটা অক্ষর আলাদাভাবে লাইভ মিলিয়ে দেখানো হয়
+                                        for (ci in word.indices) {
+                                            val typedChar = split.current.getOrNull(ci)
+                                            val style = when {
+                                                typedChar == null -> SpanStyle(
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    background = Color(0xFFDBEAFE)
+                                                )
+                                                typedChar == word[ci] -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                                else -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                            }
+                                            withStyle(style) { append(word[ci]) }
+                                        }
+                                        // ইউজার যদি শব্দের চেয়ে বেশি অক্ষর টাইপ করে ফেলে (ভুল করে
+                                        // এক্সট্রা অক্ষর), সেগুলোও দেখানো হয় — যাতে ও বুঝতে পারে
+                                        if (split.current.length > word.length) {
+                                            withStyle(SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))) {
+                                                append(split.current.substring(word.length))
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(word) }
+                                    }
                                 }
-                                withStyle(style) { append(ch) }
                             }
                         },
-                        fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                        lineHeight = 26.sp, letterSpacing = 0.3.sp
+                        fontSize = 17.sp, fontWeight = FontWeight.Medium,
+                        lineHeight = 29.sp, letterSpacing = 0.3.sp
                     )
                 }
+            }
             }
 
             // Input field
             OutlinedTextField(
                 value         = userInput,
-                onValueChange = { if (!isFinished) onInputChange(it) },
+                onValueChange = {
+                    if (sessionMode == "freetyping") onFreeTypingInputChange(it)
+                    else if (!isFinished) onInputChange(it)
+                },
                 modifier      = Modifier.fillMaxWidth(),
                 label         = { Text(
-                    if (!isStarted) "এখানে type করা শুরু করুন..." else "টাইপ চলছে...",
+                    if (sessionMode == "freetyping") {
+                        if (!isStarted) "বই দেখে এখানে টাইপ করা শুরু করুন..." else "টাইপ চলছে..."
+                    } else if (!isStarted) "এখানে type করা শুরু করুন..." else "টাইপ চলছে...",
                     fontFamily = NotoSansBengali
                 )},
                 shape         = RoundedCornerShape(14.dp),
@@ -687,15 +1228,32 @@ fun TypingPracticeScreen(
                     imeAction = ImeAction.None,
                     autoCorrect = false
                 ),
-                minLines = 3
+                minLines = if (sessionMode == "freetyping") 10 else 4
             )
+
+            // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
+            // "✅ শেষ করুন" চাপলেই সেশন থামবে এবং ফলাফল দেখাবে ──
+            if (sessionMode == "freetyping" && isStarted && !isFinished) {
+                Button(
+                    onClick = { finishFreeTyping() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488))
+                ) {
+                    Text("✅ শেষ করুন", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali)
+                }
+            }
 
             // Hint: timer starts on typing
             if (!isStarted) {
-                Text("💡 Type করলেই Timer শুরু হবে",
+                Text(
+                    if (sessionMode == "freetyping") "💡 বই দেখে টাইপ শুরু করলেই Timer ও স্পিড কাউন্ট শুরু হবে"
+                    else "💡 Type করলেই Timer শুরু হবে",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
                     modifier = Modifier.align(Alignment.CenterHorizontally))
             }
+            } // sessionMode != "study" || passage.isNotBlank()
 
             // ── Adaptive Session — phase ১→২ ট্রানজিশন সামারি ──
             AnimatedVisibility(visible = showPhaseTransition) {
@@ -788,60 +1346,235 @@ fun TypingPracticeScreen(
                 result?.let { r ->
                     ResultCard(r, bestWpm,
                         sessionMistakeWords = sessionMistakeWords.distinct(),
-                        onRetry = { reset() },
+                        onRetry = {
+                            when {
+                                sessionMode == "freetyping" -> startFreeTyping()
+                                sessionMode == "study" -> {
+                                    // ── আবার — একই আইটেম, শুধু টাইপিং স্টেট রিসেট (used হিসেবে
+                                    // ইতিমধ্যে সেভ হয়ে গেছে, দ্বিতীয়বার সেভ করলেও ক্ষতি নেই — id একই থাকায় REPLACE হবে) ──
+                                    userInput = ""; frozenWordResults = emptyList()
+                                    isStarted = false; isFinished = false; elapsedSec = 0; result = null
+                                    correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+                                    leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+                                }
+                                else -> reset()
+                            }
+                        },
                         onNextPassage = {
-                            val pool = poolFor(selectedDifficulty)
-                            reset(passageIndex + 1, pool)
+                            when {
+                                sessionMode == "freetyping" -> startFreeTyping()
+                                sessionMode == "study" -> {
+                                    val subj = studySubject; val st = studySubTopic
+                                    if (subj != null && st != null) loadStudyPool(subj, st)
+                                }
+                                else -> {
+                                    val pool = currentPool()
+                                    reset(passageIndex + 1, pool)
+                                }
+                            }
                         }
                     )
                 }
             }
 
-            // ── সাম্প্রতিক ফলাফল হিস্ট্রি — শুরু করার আগে দেখা যাবে ──
-            if (!isStarted && history.isNotEmpty()) {
-                TypingHistoryCard(history = history.take(5))
-            }
-
             // Difficulty filter + Passage selector
             if (!isStarted) {
-                // ── AI Adaptive Session মোড-সিলেক্টর ──
-                Text("🎯 অনুশীলনের ধরন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                // ── মোড-সিলেক্টর হেডার — এখন কোলাপসিবল (ডিফল্ট খোলা), ▼ চাপলে বন্ধ/খোলা টগল হয় ──
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🎯 অনুশীলনের ধরন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        // ── 🌐 ভাষা সিলেক্টর — "প্র্যাকটিস" মোডে passage পুল এই ভাষা
+                        // অনুযায়ী ফিল্টার হয় (দেখো currentPool()) ──
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { showLangMenu = true }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        if (sessionLanguage == "en") "🌐 English" else "🌐 বাংলা",
+                                        fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                            DropdownMenu(expanded = showLangMenu, onDismissRequest = { showLangMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("🌐 বাংলা", fontFamily = NotoSansBengali) },
+                                    onClick = {
+                                        sessionLanguage = "bn"; showLangMenu = false
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("🌐 English", fontFamily = NotoSansBengali) },
+                                    onClick = {
+                                        sessionLanguage = "en"; showLangMenu = false
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    IconButton(
+                        onClick = { modeTypeExpanded = !modeTypeExpanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            if (modeTypeExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = "টগল", tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                AnimatedVisibility(visible = modeTypeExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
                         color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = { sessionMode = "free"; adaptivePhase = 1 }
+                        onClick  = {
+                            sessionMode = "free"; adaptivePhase = 1
+                            // ── Study Typing মোড থেকে এলে passage খালি থাকতে পারে —
+                            // তখন একটা ভ্যালিড প্যাসেজ লোড করে দেওয়া নিশ্চিত করা হলো ──
+                            if (passage.isBlank()) reset(0, currentPool())
+                        }
                     ) {
-                        Text("✍️ ফ্রি প্র্যাকটিস", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        Text("✍️ প্র্যাকটিস", fontSize = 12.sp, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Bold,
                             color = if (sessionMode == "free") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
                     }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "freetyping") Color(0xFF0D9488) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startFreeTyping() }
+                    ) {
+                        Text("⌨️ ফ্রি টাইপিং", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "freetyping") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
                         color    = if (sessionMode == "adaptive") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
                         onClick  = { startAdaptiveSession(sessionLanguage) }
                     ) {
-                        Text("🎯 AI Adaptive", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        Text("🎯 AI Adaptive", fontSize = 12.sp, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Bold,
                             color = if (sessionMode == "adaptive") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
                     }
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                        color    = if (sessionMode == "exam") Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = { startExamSimulation() }
+                        color    = if (sessionMode == "study") Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startStudyMode() }
                     ) {
-                        Text("🏛️ BCC Exam", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        Text("📚 Study Typing", fontSize = 12.sp, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Bold,
-                            color = if (sessionMode == "exam") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (sessionMode == "study") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
                     }
                 }
+
+                if (sessionMode == "study") {
+                    // ── সাবজেক্ট চিপ ──
+                    if (studySubjectList.isNotEmpty()) {
+                        Text("বিষয় বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            studySubjectList.forEach { subj ->
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (studySubject == subj) Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { loadStudySubTopics(subj) }
+                                ) {
+                                    Text(subj, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        color = if (studySubject == subj) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    } else {
+                        Text("⏳ বিষয় লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    // ── সাব-টপিক চিপ ──
+                    if (studySubject != null && studySubTopicList.isNotEmpty()) {
+                        Text("সাব-টপিক বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            studySubTopicList.forEach { st ->
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (studySubTopic == st) Color(0xFF0E7490) else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { studySubTopic = st; loadStudyPool(studySubject!!, st) }
+                                ) {
+                                    Text(st, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        color = if (studySubTopic == st) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // ── প্রগ্রেস লেবেল, যেমন "কারক: ৮/১০ শেষ" ──
+                    if (studySubTopic != null && studyPoolTotal > 0) {
+                        Text("$studySubTopic: $studyPoolUsed/$studyPoolTotal শেষ",
+                            fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0891B2))
+                    }
+
+                    // ── পুরো টপিক শেষ হয়ে গেলে — রিসেট বাটন ──
+                    if (studyExhausted && studySubTopic != null) {
+                        Card(
+                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4))
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "✅ \"$studySubTopic\"-এর সব প্যাসেজ টাইপ করা হয়ে গেছে — অন্য টপিক বেছে নাও, অথবা এই টপিক রিসেট করো।",
+                                    fontSize = 12.sp, fontFamily = NotoSansBengali, color = GreenOk, fontWeight = FontWeight.Bold
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp), color = GreenOk,
+                                    onClick = { resetCurrentStudySubTopic() }
+                                ) {
+                                    Text("🔄 এই টপিক রিসেট করো", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        fontWeight = FontWeight.Bold, color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    } else if (studyLoading) {
+                        Text("⏳ প্যাসেজ লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                } // Column
+                } // AnimatedVisibility(modeTypeExpanded)
 
                 if (sessionMode == "exam") {
                     Card(
@@ -856,6 +1589,26 @@ fun TypingPracticeScreen(
                                 "⌨️ কীবোর্ড বিজয় লেআউটে বদলে নাও (পরীক্ষায় অভ্র চলে না)\n" +
                                 "🔤 প্রথমে ইংরেজি ১০ মিনিট, তারপর বাংলা ১০ মিনিট — কোনো spell-check সাহায্য নেই\n" +
                                 "🎯 গতির চেয়ে নির্ভুলতা বেশি গুরুত্বপূর্ণ",
+                                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
+
+                if (sessionMode == "freetyping") {
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDFA)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0D9488).copy(alpha = 0.3f))
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("⌨️ ফ্রি টাইপিং — কোনো নির্দিষ্ট Passage নেই", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali, color = Color(0xFF0F766E))
+                            Text(
+                                "📖 হাতের কাছে থাকা যেকোনো বই/কাগজ দেখে নিচের ফাঁকা বক্সে টাইপ করো\n" +
+                                "⏱️ টাইপ শুরু করলেই Timer ও স্পিড (WPM) লাইভ কাউন্ট শুরু হবে\n" +
+                                "✅ থামতে চাইলে \"শেষ করুন\" বাটনে চাপো",
                                 fontSize = 10.sp, fontFamily = NotoSansBengali,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
                             )
@@ -952,10 +1705,54 @@ fun TypingPracticeScreen(
                         }
                     }
 
+                    // ── "আমার প্যাসেজ" — লোকালি সেভ করা নিজের প্যাসেজ, + বাটনে নতুন যোগ করা যায় ──
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val selected = selectedDifficulty == "custom"
+                        Surface(
+                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                            color    = if (selected) difficultyColor("custom") else MaterialTheme.colorScheme.surfaceVariant,
+                            onClick  = {
+                                if (customPassages.isNotEmpty()) {
+                                    selectedDifficulty = "custom"
+                                    customCyclesDone = 0
+                                    reset(0, customPassages.map { PassageInfo(it.text, "custom") })
+                                } else {
+                                    showAddPassageDialog = true
+                                }
+                            }
+                        ) {
+                            Text(
+                                "✍️ আমার প্যাসেজ (${customPassages.size})", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { showAddPassageDialog = true },
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text("+ যোগ করুন", fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     Spacer(Modifier.height(4.dp))
                     Text("📝 Passage বেছে নিন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    val pool = poolFor(selectedDifficulty)
+                    val pool = currentPool()
+                    if (selectedDifficulty == "custom" && pool.isEmpty()) {
+                        Text(
+                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — উপরের \"+ যোগ করুন\" বাটনে চাপুন।",
+                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     pool.forEachIndexed { i, p ->
                         OutlinedButton(
                             onClick = { reset(i, pool) },
@@ -979,6 +1776,58 @@ fun TypingPracticeScreen(
                 }
             }
         }
+    }
+
+    // ── নিজের প্যাসেজ যোগ করার ডায়ালগ — শুধু লোকালি সেভ হয় (Room), কোথাও পাঠানো হয় না ──
+    if (showAddPassageDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddPassageDialog = false },
+            title = { Text("✍️ নিজের প্যাসেজ যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "যেকোনো বাংলা বা ইংরেজি লেখা পেস্ট/টাইপ করুন — শুধু আপনার ফোনেই সেভ থাকবে।",
+                        fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customPassageInput,
+                        onValueChange = { customPassageInput = it },
+                        modifier = Modifier.fillMaxWidth().height(160.dp),
+                        placeholder = { Text("এখানে প্যাসেজ লিখুন...", fontFamily = NotoSansBengali) }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customPassageInput.trim().length >= 10,
+                    onClick = {
+                        val text = normalizeBn(customPassageInput.trim())
+                        scope.launch {
+                            AppDatabase.getInstance(ctx).customPassageDao().insert(
+                                CustomPassageEntity(
+                                    text = text,
+                                    language = TypingErrorAnalyzer.detectLanguage(text),
+                                    createdAt = System.currentTimeMillis()
+                                )
+                            )
+                            customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
+                            selectedDifficulty = "custom"
+                            customCyclesDone = 0
+                            reset(0, customPassages.map { PassageInfo(it.text, "custom") })
+                            customPassageInput = ""
+                            showAddPassageDialog = false
+                        }
+                    }
+                ) { Text("সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddPassageDialog = false; customPassageInput = "" }) {
+                    Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
     }
 }
 
@@ -1015,10 +1864,15 @@ private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
 }
 
 @Composable
-private fun StatsRow(elapsedSec: Int, userInput: String, passage: String, isStarted: Boolean, correctKeystrokes: Int) {
+private fun StatsRow(
+    elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
+    // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
+    // Progress% ও "resolved/total" এর বদলে শুধু এখন পর্যন্ত মোট টাইপ করা অক্ষর সংখ্যা দেখানো হয় ──
+    freeTypingMode: Boolean = false
+) {
     val mins = elapsedSec / 60
     val secs = elapsedSec % 60
-    val progress = if (passage.isNotEmpty()) userInput.length.toFloat() / passage.length else 0f
+    val progress = if (!freeTypingMode && passage.isNotEmpty()) resolvedCount.toFloat() / passage.length else 0f
     // লাইভ WPM এখন correct keystroke ভিত্তিক (৫-ক্যারেক্টার/word স্ট্যান্ডার্ড) — final হিসাবের
     // সাথে সামঞ্জস্যপূর্ণ, স্পেস-স্প্লিট word count-এর চেয়ে বেশি সঠিক অনুমান দেয়
     val liveWpm = if (elapsedSec > 0 && isStarted) {
@@ -1031,14 +1885,20 @@ private fun StatsRow(elapsedSec: Int, userInput: String, passage: String, isStar
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatBox("⏱️", "%02d:%02d".format(mins, secs), "সময়", Color(0xFF60A5FA))
                 StatBox("⌨️", "$liveWpm", "WPM", Color(0xFF4ADE80))
-                StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFFA78BFA))
-                StatBox("📝", "${userInput.length}/${passage.length}", "অক্ষর", Color(0xFFFBBF24))
+                if (freeTypingMode) {
+                    StatBox("🔴", if (isStarted) "চলছে" else "—", "স্ট্যাটাস", Color(0xFFA78BFA))
+                } else {
+                    StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFFA78BFA))
+                }
+                StatBox("📝", if (freeTypingMode) "$resolvedCount" else "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFFBBF24))
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = Indigo600, trackColor = Color.White.copy(0.2f)
-            )
+            if (!freeTypingMode) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Indigo600, trackColor = Color.White.copy(0.2f)
+                )
+            }
         }
     }
 }
@@ -1234,34 +2094,3 @@ private fun ResultStat(label: String, value: String, color: Color, dark: Boolean
     }
 }
 
-// ── সাম্প্রতিক সেশন হিস্ট্রি — শেষ ৫টা রেজাল্ট ছোট লিস্টে দেখায় (আগে এই ডেটা
-// কোথাও সেভই হতো না, তাই কোনো হিস্ট্রি ছিল না) ──
-@Composable
-private fun TypingHistoryCard(history: List<TypingHistoryEntry>) {
-    Card(
-        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE0E7FF))
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("📜 সাম্প্রতিক ফলাফল", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            history.forEach { h ->
-                Row(
-                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(h.date, fontSize = 11.sp, fontFamily = NotoSansBengali,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("${h.wpm} WPM", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Indigo600, fontFamily = NotoSansBengali)
-                        Text("${h.accuracy}%", fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                            color = if (h.accuracy >= 90) GreenOk else if (h.accuracy >= 70) AmberMid else RedWrong,
-                            fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-        }
-    }
-}
