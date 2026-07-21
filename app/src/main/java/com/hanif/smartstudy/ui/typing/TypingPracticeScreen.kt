@@ -104,36 +104,56 @@ private fun difficultyColor(d: String) = when (d) {
 private fun poolFor(difficulty: String): List<PassageInfo> =
     if (difficulty == "all") PASSAGES else PASSAGES.filter { it.difficulty == difficulty }
 
-/** বাংলা নুক্তা-অক্ষর (ড়/ঢ়/য়) দুই রকম Unicode ফর্মে আসতে পারে — একক কোডপয়েন্ট, অথবা
- *  base+nukta দুই কোডপয়েন্টের যোগফল। দেখতে হুবহু একইরকম হলেও char-by-char তুলনায়
- *  এই দুই ফর্ম মিলত না, তাই কিবোর্ড আর প্যাসেজ টেক্সট আলাদা ফর্ম ব্যবহার করলে সঠিক
- *  টাইপ করা সত্ত্বেও ভুল ধরত। প্যাসেজ ও ইউজার-ইনপুট দুটোকেই NFC-তে normalize করে
- *  একই ফর্মে আনা হলো, যাতে তুলনাটা নির্ভরযোগ্য হয়। */
-internal fun normalizeBn(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC)
-
-/** ড়/ঢ়/য়-এর মতো নুক্তা-অক্ষর Unicode-এর নিয়মেই composition-exclusion তালিকায় আছে —
- *  মানে NFC normalize করলেও এগুলো ভেঙে থাকে (base + ় দুই আলাদা ক্যারেক্টার হিসেবে)।
- *  এতে মান (value) মেলাতে সমস্যা নেই, কিন্তু রঙ করার সময় যদি base আর নুক্তাকে আলাদা
- *  স্টাইল-স্প্যানে ফেলা হয়, তাহলে টেক্সট শেপিং ভেঙে যায় আর নুক্তাটা বেস থেকে বিচ্ছিন্ন
- *  হয়ে একলা ডটেড-সার্কেল হিসেবে রেন্ডার হয়। তাই একটা visual অক্ষর (base + তার সাথে লেগে
- *  থাকা combining/nukta মার্ক) — পুরোটাকে একসাথে একটাই ইউনিট (grapheme cluster) ধরে
- *  একটাই স্টাইল দেওয়া হয়, যাতে শেপিং কখনো না ভাঙে। */
-private fun graphemeClusters(s: String): List<IntRange> {
-    if (s.isEmpty()) return emptyList()
-    val ranges = mutableListOf<IntRange>()
-    var start = 0
-    for (i in 1..s.length) {
-        val atEnd = i == s.length
-        val isCombining = !atEnd && (
-            Character.getType(s[i]) == Character.NON_SPACING_MARK.toInt() ||
-            Character.getType(s[i]) == Character.COMBINING_SPACING_MARK.toInt()
-        )
-        if (!isCombining) {
-            ranges.add(start until i)
-            start = i
+/** বাংলা নুক্তা-অক্ষর (ড়/ঢ়/য়) দুই রকম Unicode ফর্মে আসতে পারে — একক কোডপয়েন্ট
+ *  (precomposed), অথবা base+nukta দুই কোডপয়েন্টের যোগফল (decomposed)। Java-র
+ *  Normalizer.NFC ব্যবহার করে প্রথমে এই ফাংশনটা টেক্সটকে "ভেঙে" (decomposed) রাখতো,
+ *  কারণ Unicode-এর composition-exclusion নিয়মেই এই তিনটা অক্ষর NFC দিয়ে আর জোড়া
+ *  লাগে না। মান (value) মেলাতে এটা ঠিকই কাজ করতো, কিন্তু ডিভাইসের বাংলা ফন্ট এই
+ *  ভাঙা (২-কোডপয়েন্ট) সিকোয়েন্সটা ঠিকভাবে জোড়া লাগিয়ে দেখাতে পারছিল না — ফলে
+ *  নুক্তাটা বেস অক্ষর থেকে বিচ্ছিন্ন হয়ে একলা ডটেড-সার্কেল হিসেবে রেন্ডার হচ্ছিল
+ *  (রং করার কোডে কোনো সমস্যা ছিল না — এটা আসলে raw string-এই ভাঙা থাকার কারণে,
+ *  এমনকি প্লেইন টেক্সটফিল্ডেও দেখা যাচ্ছিল)।
+ *
+ *  তাই এখন উল্টো পথে যাওয়া হলো: base+nukta পেলেই নিজে থেকে জোড়া লাগিয়ে single
+ *  precomposed কোডপয়েন্টে নিয়ে আসা হয় (Java Normalizer ব্যবহার না করে, ম্যানুয়ালি) —
+ *  এতে সবসময় ফন্টের রেডি-মেড গ্লিফ ব্যবহার হয়, ভাঙা-জোড়া লাগানোর কোনো ঝুঁকি থাকে
+ *  না, আর প্যাসেজ ও টাইপ করা টেক্সট — দুটোই একই ফর্মে থাকায় মান-তুলনাও নির্ভরযোগ্য। */
+internal fun normalizeBn(s: String): String {
+    if (s.indexOf('\u09BC') < 0) return s   // নুক্তা নেই — কিছু করার দরকার নেই (দ্রুত পথ)
+    val sb = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        val next = if (i + 1 < s.length) s[i + 1] else null
+        val composed = if (next == '\u09BC') when (c) {
+            '\u09A1' -> '\u09DC' // ড + ় → ড়
+            '\u09A2' -> '\u09DD' // ঢ + ় → ঢ়
+            '\u09AF' -> '\u09DF' // য + ় → য়
+            else -> null
+        } else null
+        if (composed != null) {
+            sb.append(composed)
+            i += 2
+        } else {
+            sb.append(c)
+            i += 1
         }
     }
-    return ranges
+    return sb.toString()
+}
+
+/** টাইপ করা টেক্সটকে "সম্পূর্ণ (locked)" শব্দ আর "চলমান" শব্দে ভাগ করে — একাধিক
+ *  পরপর স্পেস (ডাবল স্পেস টাইপো) একটাই বিভাজক হিসেবে গণ্য হয় (regex " +"), তাই
+ *  ভুলবশত এক্সট্রা স্পেসে কোনো ফাঁকা "শব্দ" ঢুকে বাকি সব শব্দের ইনডেক্স শিফট হয়ে
+ *  যায় না — এটাই মূল কারণ যে আগে ডাবল-স্পেসে পুরো বাকি অংশ ভুল দেখাতো। */
+internal data class TypedWordSplit(val completed: List<String>, val current: String)
+internal fun splitTypedWords(normalized: String): TypedWordSplit {
+    val trimmed = normalized.trimEnd(' ')
+    val raw = if (trimmed.isEmpty()) emptyList() else trimmed.split(Regex(" +"))
+    val wordBoundaryJustCrossed = normalized.endsWith(' ') && trimmed.isNotEmpty()
+    val completed = if (wordBoundaryJustCrossed) raw else raw.dropLast(1)
+    val current   = if (wordBoundaryJustCrossed) "" else raw.lastOrNull() ?: ""
+    return TypedWordSplit(completed, current)
 }
 
 /** Adaptive Session-এ ভাষা মিশে না যাওয়ার জন্য — শুধু একটা ভাষার প্যাসেজ পুল */
@@ -210,11 +230,14 @@ fun TypingPracticeScreen(
     var passageIndex by remember { mutableStateOf(0) }
     var passage      by remember { mutableStateOf(normalizeBn(PASSAGES[0].text)) }
     var userInput    by remember { mutableStateOf("") }
-    // ── প্রতিটা টাইপ করা ক্যারেক্টার প্যাসেজের কোন পজিশনের সাথে "মিলেছে" তার ম্যাপ —
-    // (userInput-এর সমান সাইজ, প্যারালাল লিস্ট)। -1 মানে এই ক্যারেক্টারটা এক্সট্রা/বাড়তি
-    // (যেমন ভুলবশত ডাবল স্পেস) — এটা প্যাসেজের কোনো পজিশন "খরচ" করে না, তাই এর পরের
-    // টাইপিং আবার ঠিকভাবেই মিলবে, পুরো বাকি অংশ লাল হয়ে যাবে না (auto-resync) ──
-    var typedTargetIndex by remember { mutableStateOf(listOf<Int>()) }
+    // ── Word-by-word matching (selftyping.com/10fastfingers-এর স্ট্যান্ডার্ড পদ্ধতি) —
+    // প্যাসেজকে স্পেস দিয়ে শব্দে ভাগ করা হয়। একটা শব্দ পুরোপুরি টাইপ করে স্পেস চাপলেই
+    // (বা প্যাসেজের একদম শেষ শব্দ হলে) সেটা "লক" হয়ে যায় — ঠিক/ভুল চিরস্থায়ীভাবে ফিক্স
+    // হয়ে যায়, পরে যাই হোক না কেন আর বদলায় না। এতে ১টা শব্দে ভুল হলেও আগে/পরের অন্য
+    // কোনো শব্দ প্রভাবিত হয় না — char-by-char index-তুলনার cascading সমস্যা পুরোপুরি
+    // এড়ানো যায়। ডাবল-স্পেসও এমনিতেই সমাধান হয়ে যায়, কারণ একাধিক স্পেসকে একটাই
+    // শব্দ-বিভাজক ধরা হয় (দেখো splitTypedWords())। ──
+    var frozenWordResults by remember { mutableStateOf(listOf<Boolean>()) }
     var isStarted    by remember { mutableStateOf(false) }
     var isFinished   by remember { mutableStateOf(false) }
     var elapsedSec   by remember { mutableStateOf(0) }
@@ -236,20 +259,16 @@ fun TypingPracticeScreen(
     var examBanglaResult   by remember { mutableStateOf<TypingResult?>(null) }
     var showExamPhaseTransition by remember { mutableStateOf(false) }
 
-    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং ──
-    // আগে accuracy বের হতো ফাইনাল স্ট্রিং-কে প্যাসেজের সাথে পজিশন-বাই-পজিশন মিলিয়ে —
-    // মাঝপথে ১টা অক্ষর মিস/এক্সট্রা হয়ে গেলে তারপরের পুরো অংশ ভুলভাবে "লাল" দেখাত
-    // (cascading mismatch), যদিও ইউজার আসলে ঠিকই টাইপ করছিল। এখন প্রতিটা কী-প্রেসের
-    // মুহূর্তেই (target অক্ষরের সাথে মিলিয়ে) ঠিক/ভুল গণনা হয়, তাই ফলাফল নির্ভরযোগ্য।
+    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
+    // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
+    // মুহূর্তে (target শব্দ vs typed শব্দ) হয়, char-by-char resync-pointer দিয়ে না ──
     var correctKeystrokes   by remember { mutableStateOf(0) }
     var incorrectKeystrokes by remember { mutableStateOf(0) }
     var totalKeystrokes     by remember { mutableStateOf(0) }
 
-    // ── Word-level mistake tracking (Phase ১) — প্যাসেজ বদলালে word-span/ভাষা recompute হয়,
-    // loggedWordEnds দিয়ে প্রতিটা শব্দ ঠিক একবারই লগ হয় (বাউন্ডারি একাধিকবার পার হলেও না) ──
-    val wordSpans   = remember(passage) { TypingErrorAnalyzer.wordSpans(passage) }
-    val passageLang = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
-    var loggedWordEnds by remember { mutableStateOf(setOf<Int>()) }
+    // ── Word-level mistake tracking (Phase ১) ──
+    val passageWords = remember(passage) { passage.split(' ') }
+    val passageLang  = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
 
     // ── ধাপ ৪: বাম/ডান হাতের সঠিক-ভুল অক্ষর গণনা (session-local, শেষে Room-এ flush হবে) ──
     var leftCorrectChars  by remember { mutableStateOf(0) }
@@ -288,11 +307,12 @@ fun TypingPracticeScreen(
 
     // Check completion
     LaunchedEffect(userInput) {
-        // ── এক্সট্রা/বাড়তি ক্যারেক্টার (যেমন ডাবল স্পেস) প্যাসেজের পজিশন খরচ করে না, তাই
-        // "শেষ হয়েছে কিনা" এখন raw userInput.length দিয়ে না বরং কতটুকু প্যাসেজ আসলে
-        // resolve হয়েছে তা দিয়ে ঠিক হয় ──
-        val targetPos = (typedTargetIndex.lastOrNull { it >= 0 } ?: -1) + 1
-        if (isStarted && targetPos >= passage.length && !isFinished) {
+        // ── "শেষ হয়েছে কিনা" — সব শব্দ লক হয়ে গেছে, অথবা শেষ শব্দটাই এখন ঠিক
+        // টাইপ হয়ে গেছে (শেষ শব্দের পর সাধারণত স্পেস চাপা হয় না) ──
+        val split = splitTypedWords(userInput)
+        val allDone = split.completed.size >= passageWords.size ||
+            (split.completed.size == passageWords.size - 1 && split.current == passageWords.lastOrNull())
+        if (isStarted && allDone && !isFinished) {
 
             // ── Adaptive Session — phase ১: পুরো প্যাসেজ শেষ হলেও সেশন শেষ না, পরের
             // random প্যাসেজে লুপ করবে (টাইমার/স্ট্যাটস চলতেই থাকবে), যতক্ষণ না
@@ -303,8 +323,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                typedTargetIndex = emptyList()
-                loggedWordEnds = emptySet()
+                frozenWordResults = emptyList()
                 return@LaunchedEffect
             }
 
@@ -317,8 +336,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                typedTargetIndex = emptyList()
-                loggedWordEnds = emptySet()
+                frozenWordResults = emptyList()
                 return@LaunchedEffect
             }
 
@@ -341,8 +359,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                typedTargetIndex = emptyList()
-                loggedWordEnds = emptySet()
+                frozenWordResults = emptyList()
                 return@LaunchedEffect
             }
 
@@ -491,113 +508,88 @@ fun TypingPracticeScreen(
         }
     }
 
-    // ── প্রতিটা কী-প্রেস কেপচার করে target অক্ষরের সাথে সাথেই মিলিয়ে ঠিক/ভুল গণনা ──
-    // (আগে টাইপ করা ইনডেক্স আর প্যাসেজ ইনডেক্স সবসময় সমান ধরে নেওয়া হতো, তাই ভুলবশত
-    // একটা এক্সট্রা ক্যারেক্টার — যেমন ডাবল স্পেস — ঢুকে গেলে তার পরের পুরো অংশ শিফট
-    // হয়ে গিয়ে ভুলভাবে লাল দেখাত। এখন প্রতিটা টাইপ করা ক্যারেক্টার কোন প্যাসেজ-পজিশনের
-    // সাথে মিলল তা আলাদাভাবে ট্র্যাক করা হয় (typedTargetIndex), তাই একটা এক্সট্রা
-    // স্পেস শুধু ওই একটা কী-প্রেসকেই ভুল ধরে, প্যাসেজ-পয়েন্টার এগোয় না, ফলে পরের
-    // টাইপিং আবার ঠিক পজিশনের সাথেই মিলে যায় — auto-resync) ──
+    // ── Word-by-word matching — একটা শব্দ পুরো টাইপ করে স্পেস চাপলেই (বা প্যাসেজের
+    // শেষ শব্দ হলে) সেটা "লক" হয়ে যায়, চিরস্থায়ীভাবে ঠিক/ভুল ফিক্স হয়ে যায়। এতে
+    // একটা শব্দে ভুল হলে শুধু সেই শব্দটাই প্রভাবিত হয়, বাকি সব শব্দ (আগে/পরে)
+    // সম্পূর্ণ স্বাধীন থাকে — char-by-char index-তুলনার cascading সমস্যা এখানে
+    // আর নেইই (কোনো resync-heuristic লাগে না, কাঠামোগতভাবেই এড়ানো)। ──
     fun onInputChange(new: String) {
         if (isFinished) return
         if (!isStarted && new.isNotEmpty()) isStarted = true
         val normalized = normalizeBn(new)
 
-        var target = (typedTargetIndex.lastOrNull { it >= 0 } ?: -1) + 1
-        val oldTargetPos = target
-        var newTypedTargetIndex = typedTargetIndex
-        var consumedUpto = userInput.length
+        val oldSplit = splitTypedWords(userInput)
+        val newSplit = splitTypedWords(normalized)
 
-        if (normalized.length > userInput.length) {
-            for (i in userInput.length until normalized.length) {
-                if (target >= passage.length) break   // প্যাসেজ শেষ — বাড়তি ক্যারেক্টার আর গোনা হবে না
-                val ch = normalized[i]
-                totalKeystrokes++
-                when {
-                    ch == passage[target] -> {
+        // নতুন করে "লক" হওয়া শব্দ থাকলে (আগের চেয়ে বেশি সম্পূর্ণ শব্দ) — সেগুলোই
+        // একবার করে গণনা/লগ হবে, ইতিমধ্যে লক হওয়া শব্দ আর ছোঁয়া হবে না।
+        if (newSplit.completed.size > frozenWordResults.size) {
+            var results = frozenWordResults
+            for (i in frozenWordResults.size until newSplit.completed.size) {
+                val target    = passageWords.getOrNull(i) ?: break
+                val typedWord = newSplit.completed[i]
+                val isCorrect = typedWord == target
+
+                // ── ক্যারেক্টার-ভিত্তিক গণনা (WPM/accuracy আন্তর্জাতিক সূত্র + হাত-ব্যালান্স) ──
+                val len = maxOf(target.length, typedWord.length)
+                for (j in 0 until len) {
+                    totalKeystrokes++
+                    val tc = target.getOrNull(j)
+                    val yc = typedWord.getOrNull(j)
+                    if (tc != null && tc == yc) {
                         correctKeystrokes++
-                        if (HandKeyMap.isTrackable(passage[target])) {
-                            when (HandKeyMap.clusterHandOf(passage, target)) {
+                        if (HandKeyMap.isTrackable(tc)) {
+                            when (HandKeyMap.handOf(tc)) {
                                 Hand.LEFT  -> leftCorrectChars++
                                 Hand.RIGHT -> rightCorrectChars++
-                                null       -> {} // নুক্তা অংশ — আগের base-এর সাথেই এক কী-প্রেস হিসেবে গোনা হয়ে গেছে
                             }
                         }
-                        newTypedTargetIndex = newTypedTargetIndex + target
-                        target++
-                    }
-                    ch == ' ' && passage[target] != ' ' -> {
-                        // ── এক্সট্রা/বাড়তি স্পেস (যেমন ডাবল স্পেস) — শুধু এই কী-প্রেসটাই
-                        // ভুল ধরবে, target পজিশন এগোবে না, তাই পরের ক্যারেক্টার আবার
-                        // সঠিক পজিশনের সাথেই তুলনা হবে ──
+                    } else {
                         incorrectKeystrokes++
-                        newTypedTargetIndex = newTypedTargetIndex + -1
-                    }
-                    else -> {
-                        incorrectKeystrokes++
-                        if (HandKeyMap.isTrackable(passage[target])) {
-                            when (HandKeyMap.clusterHandOf(passage, target)) {
+                        if (tc != null && HandKeyMap.isTrackable(tc)) {
+                            when (HandKeyMap.handOf(tc)) {
                                 Hand.LEFT  -> leftWrongChars++
                                 Hand.RIGHT -> rightWrongChars++
-                                null       -> {} // নুক্তা অংশ — আগের base-এর সাথেই এক কী-প্রেস হিসেবে গোনা হয়ে গেছে
                             }
                         }
-                        newTypedTargetIndex = newTypedTargetIndex + target
-                        target++
                     }
                 }
-                consumedUpto = i + 1
-            }
+                if (i < passageWords.size - 1) {
+                    // শব্দের পরের স্পেসটাও ১টা কী-প্রেস হিসেবে গোনা (সঠিক শব্দ মানেই স্পেসও ঠিক)
+                    totalKeystrokes++
+                    if (isCorrect) correctKeystrokes++ else incorrectKeystrokes++
+                }
 
-            val capped = normalized.take(consumedUpto)
-
-            // ── এই কী-প্রেসে কোনো শব্দ-বাউন্ডারি (স্পেস বা প্যাসেজের শেষ) পার হলে,
-            // সেই শব্দটা target-এর সাথে মিলিয়ে mistake/correct হিসেবে Room-এ লগ হবে।
-            // এটাই AI adaptive practice ও hand-balance analysis-এর ভিত্তি ডেটা তৈরি করে।
-            // (typedWord এখন typedTargetIndex ম্যাপ থেকে বের করা হয়, কারণ এক্সট্রা
-            // ক্যারেক্টার থাকলে capped-এর ইনডেক্স আর span-এর প্যাসেজ-ইনডেক্স আর সমান না) ──
-            for (span in wordSpans) {
-                if (span.end > oldTargetPos && span.end <= target && span.end !in loggedWordEnds) {
-                    loggedWordEnds = loggedWordEnds + span.end
-                    val typedWord = buildString {
-                        for (idx in newTypedTargetIndex.indices) {
-                            val t = newTypedTargetIndex[idx]
-                            if (t in span.start until span.end) append(capped[idx])
-                        }
+                // ── mistake/correct লগিং — AI adaptive practice ও sync-loss ইনসাইটের ভিত্তি ──
+                if (!isCorrect) {
+                    val errType = TypingErrorAnalyzer.classify(target, typedWord)
+                    if (sessionMode == "adaptive" && adaptivePhase == 1 && errType != MistakeErrorType.SYNC_LOSS) {
+                        sessionMistakeWords = sessionMistakeWords + target
                     }
-                    if (typedWord != span.word) {
-                        // ── Adaptive Session phase-১: এই সেশনের ভুল শব্দ জমা রাখা (দুর্বল-শব্দ
-                        // ভিত্তিক AI প্যাসেজ বানানোর ইনপুট — sync-loss বাদে, কারণ সেটা বানান-ভুল না) ──
-                        val errType = TypingErrorAnalyzer.classify(span.word, typedWord)
-                        if (sessionMode == "adaptive" && adaptivePhase == 1 && errType != MistakeErrorType.SYNC_LOSS) {
-                            sessionMistakeWords = sessionMistakeWords + span.word
-                        }
-                        // ── ধরন B (sync-loss) real-time ধরা পড়লে হালকা ভাইব্রেশন —
-                        // মাঝপথে ভয়েস না দেওয়ার কারণ: রোডম্যাপ সেকশন ৫.১ ──
-                        if (errType == MistakeErrorType.SYNC_LOSS) {
-                            syncLossCount++
-                            vibrator?.let { v ->
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    v.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                                } else {
-                                    @Suppress("DEPRECATION") v.vibrate(60)
-                                }
+                    if (errType == MistakeErrorType.SYNC_LOSS) {
+                        syncLossCount++
+                        vibrator?.let { v ->
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                v.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                            } else {
+                                @Suppress("DEPRECATION") v.vibrate(60)
                             }
                         }
-                        scope.launch { TypingMistakeLogger.logMistake(ctx, span.word, typedWord, passageLang) }
-                    } else {
-                        scope.launch { TypingMistakeLogger.logCorrect(ctx, span.word, passageLang) }
                     }
+                    scope.launch { TypingMistakeLogger.logMistake(ctx, target, typedWord, passageLang) }
+                } else {
+                    scope.launch { TypingMistakeLogger.logCorrect(ctx, target, passageLang) }
                 }
-            }
 
-            typedTargetIndex = newTypedTargetIndex
-            userInput = capped
-        } else {
-            // ── ব্যাকস্পেস/ডিলিট — typedTargetIndex-ও নতুন দৈর্ঘ্যে ছেঁটে সিঙ্কে রাখা হচ্ছে ──
-            typedTargetIndex = typedTargetIndex.take(normalized.length)
-            userInput = normalized
+                results = results + isCorrect
+            }
+            frozenWordResults = results
+        } else if (newSplit.completed.size < oldSplit.completed.size) {
+            // ── ব্যাকস্পেস দিয়ে আগের শব্দে ফিরে গেলে — সেই শব্দ(গুলো)-র লক তুলে নেওয়া ──
+            frozenWordResults = frozenWordResults.take(newSplit.completed.size)
         }
+
+        userInput = normalized
     }
 
     fun reset(newIndex: Int = passageIndex, pool: List<PassageInfo> = poolFor(selectedDifficulty)) {
@@ -605,7 +597,7 @@ fun TypingPracticeScreen(
         passageIndex = idx
         passage      = normalizeBn(pool.getOrNull(idx)?.text ?: PASSAGES[0].text)
         userInput    = ""
-        typedTargetIndex = emptyList()
+        frozenWordResults = emptyList()
         isStarted    = false
         isFinished   = false
         elapsedSec   = 0
@@ -613,7 +605,6 @@ fun TypingPracticeScreen(
         correctKeystrokes   = 0
         incorrectKeystrokes = 0
         totalKeystrokes     = 0
-        loggedWordEnds      = emptySet()
         leftCorrectChars  = 0
         leftWrongChars    = 0
         rightCorrectChars = 0
@@ -644,8 +635,8 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage(language)
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; typedTargetIndex = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
@@ -659,8 +650,8 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage("en")
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; typedTargetIndex = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
@@ -672,8 +663,8 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage("bn")
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; typedTargetIndex = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0; loggedWordEnds = emptySet()
+        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
@@ -683,8 +674,7 @@ fun TypingPracticeScreen(
     fun startPhase2() {
         adaptivePhase = 2
         passage = normalizeBn(phase2Passage ?: fallbackPassageFor(sessionLanguage))
-        userInput = ""; typedTargetIndex = emptyList()
-        loggedWordEnds = emptySet()
+        userInput = ""; frozenWordResults = emptyList()
         isFinished = false
         showPhaseTransition = false
         // isStarted/elapsedSec/correctKeystrokes ইত্যাদি ইচ্ছাকৃতভাবে অপরিবর্তিত —
@@ -735,9 +725,20 @@ fun TypingPracticeScreen(
             }
 
             // Stats row
+            // ── প্রগ্রেস বার/স্ট্যাট দেখানোর জন্য কতটুকু প্যাসেজ char হিসেবে "রিজলভড" —
+            // লক হওয়া শব্দগুলোর দৈর্ঘ্য (+ মাঝের স্পেস) + এখন চলমান শব্দের দৈর্ঘ্য ──
+            val resolvedCount = remember(userInput, passageWords) {
+                val split = splitTypedWords(userInput)
+                var total = 0
+                for (i in split.completed.indices) {
+                    total += (passageWords.getOrNull(i)?.length ?: 0)
+                    if (i < passageWords.size - 1) total += 1
+                }
+                total + split.current.length
+            }
             StatsRow(
                 elapsedSec        = elapsedSec,
-                resolvedCount     = (typedTargetIndex.lastOrNull { it >= 0 } ?: -1) + 1,
+                resolvedCount     = resolvedCount,
                 passage           = passage,
                 isStarted         = isStarted,
                 correctKeystrokes = correctKeystrokes
@@ -782,48 +783,49 @@ fun TypingPracticeScreen(
                     }
                     Spacer(Modifier.height(8.dp))
 
-                    // Colored passage showing correct/wrong chars + current-word হাইলাইট
-                    // (selftyping.com-এর মতো — এখন কোন শব্দে আছি সেটা স্পষ্ট বোঝা যায়,
-                    // দেখো রোডম্যাপ সেকশন ৪-এর "sync-loss/ধরন B" আলোচনা)
-                    // ── প্যাসেজের প্রতিটা পজিশন আসলে "resolve" হয়েছে কিনা এবং ঠিক/ভুল —
-                    // এটা এখন raw userInput index দিয়ে না, typedTargetIndex ম্যাপ দিয়ে বের হয়,
-                    // তাই এক্সট্রা ক্যারেক্টার (যেমন ডাবল স্পেস) থাকলেও পরের অংশ ভুলভাবে
-                    // লাল দেখায় না ──
-                    val targetPos = remember(typedTargetIndex) {
-                        (typedTargetIndex.lastOrNull { it >= 0 } ?: -1) + 1
-                    }
-                    val resolvedCorrect = remember(typedTargetIndex, userInput, passage) {
-                        val map = HashMap<Int, Boolean>()
-                        for (idx in typedTargetIndex.indices) {
-                            val t = typedTargetIndex[idx]
-                            if (t >= 0 && idx < userInput.length && t < passage.length) {
-                                map[t] = userInput[idx] == passage[t]
-                            }
-                        }
-                        map
-                    }
-                    val currentWordSpan = remember(wordSpans, targetPos) {
-                        wordSpans.firstOrNull { targetPos in it.start..it.end }
-                    }
-                    val passageClusters = remember(passage) { graphemeClusters(passage) }
+                    // ── Colored passage — word-by-word (selftyping.com/10fastfingers-এর
+                    // স্ট্যান্ডার্ড পদ্ধতি): প্রতিটা "লক" হওয়া শব্দ একটাই রঙ পায় (পুরো
+                    // শব্দ সঠিক হলে সবুজ, নাহলে লাল) — একটা শব্দে ভুল হলে আগে/পরের অন্য
+                    // কোনো শব্দ প্রভাবিত হয় না। বর্তমান (এখনো টাইপ করা হচ্ছে) শব্দে
+                    // লাইভ ক্যারেক্টার-বাই-ক্যারেক্টার ফিডব্যাক দেখানো হয়। ──
+                    val split = remember(userInput) { splitTypedWords(userInput) }
                     Text(
                         buildAnnotatedString {
-                            for (cluster in passageClusters) {
-                                val cStart = cluster.first
-                                val cEndExclusive = cluster.last + 1
-                                val inCurrentWord = currentWordSpan != null && cStart >= currentWordSpan.start && cStart < currentWordSpan.end
-                                val style = when {
-                                    // পুরো cluster এখনো টাইপ হয়নি (আংশিক টাইপ হলেও পুরোটাই
-                                    // "pending" রাখা হচ্ছে, যাতে base + নুক্তা কখনো আলাদা
-                                    // স্টাইলে না পড়ে আর ডটেড-সার্কেল না দেখায়)
-                                    targetPos < cEndExclusive -> SpanStyle(
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        background = if (inCurrentWord) Color(0xFFDBEAFE) else Color.Unspecified
-                                    )
-                                    cluster.all { resolvedCorrect[it] == true } -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
-                                    else -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                            passageWords.forEachIndexed { wIdx, word ->
+                                if (wIdx > 0) append(" ")
+                                when {
+                                    wIdx < frozenWordResults.size -> {
+                                        val ok = frozenWordResults[wIdx]
+                                        val style = if (ok) SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                                    else SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                        withStyle(style) { append(word) }
+                                    }
+                                    wIdx == frozenWordResults.size -> {
+                                        // বর্তমান শব্দ — প্রতিটা অক্ষর আলাদাভাবে লাইভ মিলিয়ে দেখানো হয়
+                                        for (ci in word.indices) {
+                                            val typedChar = split.current.getOrNull(ci)
+                                            val style = when {
+                                                typedChar == null -> SpanStyle(
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    background = Color(0xFFDBEAFE)
+                                                )
+                                                typedChar == word[ci] -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                                else -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                            }
+                                            withStyle(style) { append(word[ci]) }
+                                        }
+                                        // ইউজার যদি শব্দের চেয়ে বেশি অক্ষর টাইপ করে ফেলে (ভুল করে
+                                        // এক্সট্রা অক্ষর), সেগুলোও দেখানো হয় — যাতে ও বুঝতে পারে
+                                        if (split.current.length > word.length) {
+                                            withStyle(SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))) {
+                                                append(split.current.substring(word.length))
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(word) }
+                                    }
                                 }
-                                withStyle(style) { append(passage.substring(cStart, cEndExclusive)) }
                             }
                         },
                         fontSize = 15.sp, fontWeight = FontWeight.Medium,
