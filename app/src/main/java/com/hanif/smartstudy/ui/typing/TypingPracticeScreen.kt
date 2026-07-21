@@ -298,6 +298,20 @@ fun TypingPracticeScreen(
     var studyExhausted    by remember { mutableStateOf(false) }
     var studyLoading      by remember { mutableStateOf(false) }
 
+    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
+    // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
+    // মুহূর্তে (target শব্দ vs typed শব্দ) হয়, char-by-char resync-pointer দিয়ে না ──
+    var correctKeystrokes   by remember { mutableStateOf(0) }
+    var incorrectKeystrokes by remember { mutableStateOf(0) }
+    var totalKeystrokes     by remember { mutableStateOf(0) }
+
+    // ── ধাপ ৪: বাম/ডান হাতের সঠিক-ভুল অক্ষর গণনা (session-local, শেষে Room-এ flush হবে) ──
+    var leftCorrectChars  by remember { mutableStateOf(0) }
+    var leftWrongChars    by remember { mutableStateOf(0) }
+    var rightCorrectChars by remember { mutableStateOf(0) }
+    var rightWrongChars   by remember { mutableStateOf(0) }
+    var syncLossCount     by remember { mutableStateOf(0) }
+
     /** Study sheet-এর একটা আইটেম (question/explanation/technique) জোড়া দিয়ে একটাই
      *  টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়" গোছের
      *  পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে */
@@ -409,23 +423,9 @@ fun TypingPracticeScreen(
     }
 
 
-    // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
-    // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
-    // মুহূর্তে (target শব্দ vs typed শব্দ) হয়, char-by-char resync-pointer দিয়ে না ──
-    var correctKeystrokes   by remember { mutableStateOf(0) }
-    var incorrectKeystrokes by remember { mutableStateOf(0) }
-    var totalKeystrokes     by remember { mutableStateOf(0) }
-
     // ── Word-level mistake tracking (Phase ১) ──
     val passageWords = remember(passage) { passage.split(' ') }
     val passageLang  = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
-
-    // ── ধাপ ৪: বাম/ডান হাতের সঠিক-ভুল অক্ষর গণনা (session-local, শেষে Room-এ flush হবে) ──
-    var leftCorrectChars  by remember { mutableStateOf(0) }
-    var leftWrongChars    by remember { mutableStateOf(0) }
-    var rightCorrectChars by remember { mutableStateOf(0) }
-    var rightWrongChars   by remember { mutableStateOf(0) }
-    var syncLossCount     by remember { mutableStateOf(0) }
 
     // ── ধাপ ৪: Daily Discipline Mode — non-coercive, শুধু progress track/দেখানো হয় ──
     var disciplineOn      by remember { mutableStateOf(false) }
