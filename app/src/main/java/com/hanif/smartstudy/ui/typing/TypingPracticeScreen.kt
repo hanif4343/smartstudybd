@@ -307,6 +307,11 @@ fun TypingPracticeScreen(
 
     // Check completion
     LaunchedEffect(userInput) {
+        // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage নেই (হার্ড কপি বই দেখে
+        // নিজের ইচ্ছামতো টাইপ করা হয়), তাই word-matching/completion লজিকের কোনো মানে
+        // নেই — এই মোডে ইউজার নিজেই "শেষ করুন" বাটনে চাপলে সেশন শেষ হবে (নিচে দেখো) ──
+        if (sessionMode == "freetyping") return@LaunchedEffect
+
         // ── "শেষ হয়েছে কিনা" — সব শব্দ লক হয়ে গেছে, অথবা শেষ শব্দটাই এখন ঠিক
         // টাইপ হয়ে গেছে (শেষ শব্দের পর সাধারণত স্পেস চাপা হয় না) ──
         val split = splitTypedWords(userInput)
@@ -655,6 +660,57 @@ fun TypingPracticeScreen(
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
 
+    /** "⌨️ ফ্রি টাইপিং" বাটনে ট্যাপ করলে কল হয় — কোনো passage/target টেক্সট থাকে না,
+     *  হার্ড কপি বই দেখে ইউজার নিজের ইচ্ছামতো টাইপ করে; শুধু স্পিড লাইভ কাউন্ট হয়,
+     *  আর ইউজার নিজে "✅ শেষ করুন" চাপলে সেশন শেষ হয় (দেখো finishFreeTyping()) */
+    fun startFreeTyping() {
+        sessionMode = "freetyping"
+        userInput = ""
+        frozenWordResults = emptyList()
+        isStarted = false
+        isFinished = false
+        elapsedSec = 0
+        result = null
+        correctKeystrokes = 0
+        incorrectKeystrokes = 0
+        totalKeystrokes = 0
+        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0
+        syncLossCount = 0
+    }
+
+    /** ফ্রি টাইপিং মোডে টেক্সট বদলালে কল হয় — কোনো target passage-এর সাথে তুলনা করা হয় না,
+     *  শুধু মোট অক্ষর গোনা হয় (WPM হিসেবের জন্য) */
+    fun onFreeTypingInputChange(new: String) {
+        if (isFinished) return
+        if (!isStarted && new.isNotEmpty()) isStarted = true
+        userInput = new
+        totalKeystrokes = new.length
+        correctKeystrokes = new.length
+    }
+
+    /** ফ্রি টাইপিং সেশন — ইউজার নিজে "✅ শেষ করুন" চাপলে কল হয়, যেহেতু নির্দিষ্ট কোনো
+     *  শেষ-বিন্দু (passage length) নেই। ফলাফল অন্য মোডগুলোর মতোই history/best-WPM-এ জমা হয় */
+    fun finishFreeTyping() {
+        isFinished = true
+        val timeSec = elapsedSec.coerceAtLeast(1)
+        val minutes = timeSec / 60.0
+        val len = userInput.length
+        val wpm = if (minutes > 0) (len / 5.0 / minutes).toInt() else 0
+        val r = TypingResult(
+            wpm = wpm, rawWpm = wpm, accuracy = 100, timeSec = timeSec,
+            correctChars = len, totalChars = len
+        )
+        result = r
+        onResult(r)
+        scope.launch {
+            session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
+            bestWpm = maxOf(bestWpm, r.wpm)
+            history = session.getTypingHistory()
+            session.addTypingSecondsToday(timeSec)
+            todaySecondsBefore = session.getTypingTodaySeconds()
+        }
+    }
+
     /** ইংরেজি ফেজ শেষে ট্রানজিশন কার্ডের বাটনে ট্যাপ করলে কল হয় — বাংলা ফেজ শুরু,
      *  সব কাউন্টার ফ্রেশ (প্রতিটা ফেজের নিজের আলাদা, স্বাধীন WPM/accuracy হবে) */
     fun startExamBanglaPhase() {
@@ -727,24 +783,31 @@ fun TypingPracticeScreen(
             // Stats row
             // ── প্রগ্রেস বার/স্ট্যাট দেখানোর জন্য কতটুকু প্যাসেজ char হিসেবে "রিজলভড" —
             // লক হওয়া শব্দগুলোর দৈর্ঘ্য (+ মাঝের স্পেস) + এখন চলমান শব্দের দৈর্ঘ্য ──
-            val resolvedCount = remember(userInput, passageWords) {
-                val split = splitTypedWords(userInput)
-                var total = 0
-                for (i in split.completed.indices) {
-                    total += (passageWords.getOrNull(i)?.length ?: 0)
-                    if (i < passageWords.size - 1) total += 1
+            val resolvedCount = remember(userInput, passageWords, sessionMode) {
+                if (sessionMode == "freetyping") {
+                    userInput.length
+                } else {
+                    val split = splitTypedWords(userInput)
+                    var total = 0
+                    for (i in split.completed.indices) {
+                        total += (passageWords.getOrNull(i)?.length ?: 0)
+                        if (i < passageWords.size - 1) total += 1
+                    }
+                    total + split.current.length
                 }
-                total + split.current.length
             }
             StatsRow(
                 elapsedSec        = elapsedSec,
                 resolvedCount     = resolvedCount,
                 passage           = passage,
                 isStarted         = isStarted,
-                correctKeystrokes = correctKeystrokes
+                correctKeystrokes = correctKeystrokes,
+                freeTypingMode    = sessionMode == "freetyping"
             )
 
-            // Passage display
+            // ── Passage display — "ফ্রি টাইপিং" মোডে কোনো passage/target টেক্সট দেখানো হয় না,
+            // ইউজার হার্ড কপি বই দেখে নিজের ইচ্ছামতো নিচের ফাঁকা বক্সে টাইপ করে ──
+            if (sessionMode != "freetyping") {
             Card(
                 Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(Color(0xFFFAFAFF)),
@@ -833,14 +896,20 @@ fun TypingPracticeScreen(
                     )
                 }
             }
+            }
 
             // Input field
             OutlinedTextField(
                 value         = userInput,
-                onValueChange = { if (!isFinished) onInputChange(it) },
+                onValueChange = {
+                    if (sessionMode == "freetyping") onFreeTypingInputChange(it)
+                    else if (!isFinished) onInputChange(it)
+                },
                 modifier      = Modifier.fillMaxWidth(),
                 label         = { Text(
-                    if (!isStarted) "এখানে type করা শুরু করুন..." else "টাইপ চলছে...",
+                    if (sessionMode == "freetyping") {
+                        if (!isStarted) "বই দেখে এখানে টাইপ করা শুরু করুন..." else "টাইপ চলছে..."
+                    } else if (!isStarted) "এখানে type করা শুরু করুন..." else "টাইপ চলছে...",
                     fontFamily = NotoSansBengali
                 )},
                 shape         = RoundedCornerShape(14.dp),
@@ -854,12 +923,28 @@ fun TypingPracticeScreen(
                     imeAction = ImeAction.None,
                     autoCorrect = false
                 ),
-                minLines = 3
+                minLines = if (sessionMode == "freetyping") 10 else 3
             )
+
+            // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
+            // "✅ শেষ করুন" চাপলেই সেশন থামবে এবং ফলাফল দেখাবে ──
+            if (sessionMode == "freetyping" && isStarted && !isFinished) {
+                Button(
+                    onClick = { finishFreeTyping() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488))
+                ) {
+                    Text("✅ শেষ করুন", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali)
+                }
+            }
 
             // Hint: timer starts on typing
             if (!isStarted) {
-                Text("💡 Type করলেই Timer শুরু হবে",
+                Text(
+                    if (sessionMode == "freetyping") "💡 বই দেখে টাইপ শুরু করলেই Timer ও স্পিড কাউন্ট শুরু হবে"
+                    else "💡 Type করলেই Timer শুরু হবে",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
                     modifier = Modifier.align(Alignment.CenterHorizontally))
             }
@@ -955,10 +1040,14 @@ fun TypingPracticeScreen(
                 result?.let { r ->
                     ResultCard(r, bestWpm,
                         sessionMistakeWords = sessionMistakeWords.distinct(),
-                        onRetry = { reset() },
+                        onRetry = { if (sessionMode == "freetyping") startFreeTyping() else reset() },
                         onNextPassage = {
-                            val pool = poolFor(selectedDifficulty)
-                            reset(passageIndex + 1, pool)
+                            if (sessionMode == "freetyping") {
+                                startFreeTyping()
+                            } else {
+                                val pool = poolFor(selectedDifficulty)
+                                reset(passageIndex + 1, pool)
+                            }
                         }
                     )
                 }
@@ -983,6 +1072,17 @@ fun TypingPracticeScreen(
                         Text("✍️ ফ্রি প্র্যাকটিস", fontSize = 11.sp, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Bold,
                             color = if (sessionMode == "free") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "freetyping") Color(0xFF0D9488) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startFreeTyping() }
+                    ) {
+                        Text("⌨️ ফ্রি টাইপিং", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "freetyping") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
                     }
@@ -1023,6 +1123,26 @@ fun TypingPracticeScreen(
                                 "⌨️ কীবোর্ড বিজয় লেআউটে বদলে নাও (পরীক্ষায় অভ্র চলে না)\n" +
                                 "🔤 প্রথমে ইংরেজি ১০ মিনিট, তারপর বাংলা ১০ মিনিট — কোনো spell-check সাহায্য নেই\n" +
                                 "🎯 গতির চেয়ে নির্ভুলতা বেশি গুরুত্বপূর্ণ",
+                                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
+
+                if (sessionMode == "freetyping") {
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDFA)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0D9488).copy(alpha = 0.3f))
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("⌨️ ফ্রি টাইপিং — কোনো নির্দিষ্ট Passage নেই", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali, color = Color(0xFF0F766E))
+                            Text(
+                                "📖 হাতের কাছে থাকা যেকোনো বই/কাগজ দেখে নিচের ফাঁকা বক্সে টাইপ করো\n" +
+                                "⏱️ টাইপ শুরু করলেই Timer ও স্পিড (WPM) লাইভ কাউন্ট শুরু হবে\n" +
+                                "✅ থামতে চাইলে \"শেষ করুন\" বাটনে চাপো",
                                 fontSize = 10.sp, fontFamily = NotoSansBengali,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
                             )
@@ -1182,10 +1302,15 @@ private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
 }
 
 @Composable
-private fun StatsRow(elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int) {
+private fun StatsRow(
+    elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
+    // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
+    // Progress% ও "resolved/total" এর বদলে শুধু এখন পর্যন্ত মোট টাইপ করা অক্ষর সংখ্যা দেখানো হয় ──
+    freeTypingMode: Boolean = false
+) {
     val mins = elapsedSec / 60
     val secs = elapsedSec % 60
-    val progress = if (passage.isNotEmpty()) resolvedCount.toFloat() / passage.length else 0f
+    val progress = if (!freeTypingMode && passage.isNotEmpty()) resolvedCount.toFloat() / passage.length else 0f
     // লাইভ WPM এখন correct keystroke ভিত্তিক (৫-ক্যারেক্টার/word স্ট্যান্ডার্ড) — final হিসাবের
     // সাথে সামঞ্জস্যপূর্ণ, স্পেস-স্প্লিট word count-এর চেয়ে বেশি সঠিক অনুমান দেয়
     val liveWpm = if (elapsedSec > 0 && isStarted) {
@@ -1198,14 +1323,20 @@ private fun StatsRow(elapsedSec: Int, resolvedCount: Int, passage: String, isSta
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatBox("⏱️", "%02d:%02d".format(mins, secs), "সময়", Color(0xFF60A5FA))
                 StatBox("⌨️", "$liveWpm", "WPM", Color(0xFF4ADE80))
-                StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFFA78BFA))
-                StatBox("📝", "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFFBBF24))
+                if (freeTypingMode) {
+                    StatBox("🔴", if (isStarted) "চলছে" else "—", "স্ট্যাটাস", Color(0xFFA78BFA))
+                } else {
+                    StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFFA78BFA))
+                }
+                StatBox("📝", if (freeTypingMode) "$resolvedCount" else "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFFBBF24))
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = Indigo600, trackColor = Color.White.copy(0.2f)
-            )
+            if (!freeTypingMode) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Indigo600, trackColor = Color.White.copy(0.2f)
+                )
+            }
         }
     }
 }
