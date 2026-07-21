@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.typing
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -296,6 +297,117 @@ fun TypingPracticeScreen(
     var studyPoolUsed     by remember { mutableStateOf(0) }
     var studyExhausted    by remember { mutableStateOf(false) }
     var studyLoading      by remember { mutableStateOf(false) }
+
+    /** Study sheet-এর একটা আইটেম (question/explanation/technique) জোড়া দিয়ে একটাই
+     *  টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়" গোছের
+     *  পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে */
+    fun buildStudyPassageText(item: com.hanif.smartstudy.data.local.QuestionEntity): String =
+        listOfNotNull(
+            item.question.takeIf { it.isNotBlank() },
+            item.explanation.takeIf { it.isNotBlank() },
+            item.technique.takeIf { it.isNotBlank() }
+        ).joinToString(" ").trim()
+
+    /** একটা sub_topic-এর জন্য used-id বাদ দিয়ে নতুন একটা আইটেম তুলে প্যাসেজ বানায়।
+     *  পুল খালি হয়ে গেলে (সব টাইপ হয়ে গেছে) studyExhausted = true হয়ে UI-তে
+     *  "✅ সব প্যাসেজ টাইপ করা হয়ে গেছে" বার্তা + রিসেট বাটন দেখায় */
+    fun loadStudyPool(subject: String, subTopic: String) {
+        studyLoading = true
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            val progressDao = AppDatabase.getInstance(ctx).studyTypingProgressDao()
+            val user = session.getCurrentUser()
+            val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+
+            val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+            val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
+                .filter { buildStudyPassageText(it).isNotBlank() }
+            val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
+            val available = visible.filter { it.fbKey !in usedIds }
+
+            studyPoolTotal = visible.size
+            studyPoolUsed  = visible.count { it.fbKey in usedIds }
+            studyExhausted = visible.isNotEmpty() && available.isEmpty()
+
+            val pick = available.randomOrNull()
+            if (pick != null) {
+                studyCurrentId = pick.fbKey
+                passage = normalizeBn(buildStudyPassageText(pick))
+            } else {
+                studyCurrentId = null
+                passage = ""
+            }
+            userInput = ""; frozenWordResults = emptyList()
+            isStarted = false; isFinished = false; elapsedSec = 0; result = null
+            correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+            leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+            studyLoading = false
+        }
+    }
+
+    /** সাবজেক্ট বেছে নেওয়ার সাথে সাথে সেই সাবজেক্টের sub_topic লিস্ট লোড করে */
+    fun loadStudySubTopics(subject: String) {
+        studySubject = subject
+        studySubTopic = null
+        studySubTopicList = emptyList()
+        studyCurrentId = null
+        passage = ""
+        studyExhausted = false
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            studySubTopicList = dao.getSubTopics("STUDY", subject)
+        }
+    }
+
+    /** "📚 Study Typing" ট্যাবে ট্যাপ করলে কল হয় — প্রথমে সাবজেক্ট লিস্ট লোড হয়,
+     *  ইউজার সাবজেক্ট → সাব-টপিক বেছে নিলে তবেই প্যাসেজ পুল তৈরি হয় */
+    fun startStudyMode() {
+        sessionMode = "study"
+        studySubject = null
+        studySubTopic = null
+        studyCurrentId = null
+        studySubTopicList = emptyList()
+        studyExhausted = false
+        passage = ""
+        userInput = ""; frozenWordResults = emptyList()
+        isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+        scope.launch {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            studySubjectList = dao.getSubjects("STUDY")
+        }
+    }
+
+    /** টাইপিং শেষ হলে (finishStudyItem হুকের ভেতর থেকে) আইটেমটাকে "used" হিসেবে সেভ করে,
+     *  যাতে এই sub_topic-এ আবার এলে এই আইটেমটা দ্বিতীয়বার না আসে */
+    fun markCurrentStudyItemUsed() {
+        val subject = studySubject ?: return
+        val subTopic = studySubTopic ?: return
+        val id = studyCurrentId ?: return
+        scope.launch {
+            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            AppDatabase.getInstance(ctx).studyTypingProgressDao().markUsed(
+                com.hanif.smartstudy.data.local.StudyTypingProgressEntity(
+                    userId = userId, subject = subject, subTopic = subTopic,
+                    contentId = id, typedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /** "🔄 এই টপিক রিসেট করো" বাটনে ট্যাপ করলে কল হয় — শুধু এই sub_topic-এর used
+     *  id গুলোই মোছে (পুরো ট্র্যাকিং টেবিল না), তারপর পুল আবার লোড হয় */
+    fun resetCurrentStudySubTopic() {
+        val subject = studySubject ?: return
+        val subTopic = studySubTopic ?: return
+        scope.launch {
+            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            AppDatabase.getInstance(ctx).studyTypingProgressDao().resetSubTopic(userId, subject, subTopic)
+            loadStudyPool(subject, subTopic)
+        }
+    }
+
 
     // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
     // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
@@ -818,116 +930,6 @@ fun TypingPracticeScreen(
         showPhaseTransition = false
         // isStarted/elapsedSec/correctKeystrokes ইত্যাদি ইচ্ছাকৃতভাবে অপরিবর্তিত —
         // পুরো adaptive session-এর একটাই সমন্বিত ফাইনাল রেজাল্ট হবে
-    }
-
-    /** Study sheet-এর একটা আইটেম (question/explanation/technique) জোড়া দিয়ে একটাই
-     *  টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়" গোছের
-     *  পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে */
-    fun buildStudyPassageText(item: com.hanif.smartstudy.data.local.QuestionEntity): String =
-        listOfNotNull(
-            item.question.takeIf { it.isNotBlank() },
-            item.explanation.takeIf { it.isNotBlank() },
-            item.technique.takeIf { it.isNotBlank() }
-        ).joinToString(" ").trim()
-
-    /** একটা sub_topic-এর জন্য used-id বাদ দিয়ে নতুন একটা আইটেম তুলে প্যাসেজ বানায়।
-     *  পুল খালি হয়ে গেলে (সব টাইপ হয়ে গেছে) studyExhausted = true হয়ে UI-তে
-     *  "✅ সব প্যাসেজ টাইপ করা হয়ে গেছে" বার্তা + রিসেট বাটন দেখায় */
-    fun loadStudyPool(subject: String, subTopic: String) {
-        studyLoading = true
-        scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            val progressDao = AppDatabase.getInstance(ctx).studyTypingProgressDao()
-            val user = session.getCurrentUser()
-            val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
-
-            val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
-            val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
-                .filter { buildStudyPassageText(it).isNotBlank() }
-            val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
-            val available = visible.filter { it.fbKey !in usedIds }
-
-            studyPoolTotal = visible.size
-            studyPoolUsed  = visible.count { it.fbKey in usedIds }
-            studyExhausted = visible.isNotEmpty() && available.isEmpty()
-
-            val pick = available.randomOrNull()
-            if (pick != null) {
-                studyCurrentId = pick.fbKey
-                passage = normalizeBn(buildStudyPassageText(pick))
-            } else {
-                studyCurrentId = null
-                passage = ""
-            }
-            userInput = ""; frozenWordResults = emptyList()
-            isStarted = false; isFinished = false; elapsedSec = 0; result = null
-            correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
-            leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
-            studyLoading = false
-        }
-    }
-
-    /** সাবজেক্ট বেছে নেওয়ার সাথে সাথে সেই সাবজেক্টের sub_topic লিস্ট লোড করে */
-    fun loadStudySubTopics(subject: String) {
-        studySubject = subject
-        studySubTopic = null
-        studySubTopicList = emptyList()
-        studyCurrentId = null
-        passage = ""
-        studyExhausted = false
-        scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            studySubTopicList = dao.getSubTopics("STUDY", subject)
-        }
-    }
-
-    /** "📚 Study Typing" ট্যাবে ট্যাপ করলে কল হয় — প্রথমে সাবজেক্ট লিস্ট লোড হয়,
-     *  ইউজার সাবজেক্ট → সাব-টপিক বেছে নিলে তবেই প্যাসেজ পুল তৈরি হয় */
-    fun startStudyMode() {
-        sessionMode = "study"
-        studySubject = null
-        studySubTopic = null
-        studyCurrentId = null
-        studySubTopicList = emptyList()
-        studyExhausted = false
-        passage = ""
-        userInput = ""; frozenWordResults = emptyList()
-        isStarted = false; isFinished = false; elapsedSec = 0; result = null
-        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
-        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
-        scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            studySubjectList = dao.getSubjects("STUDY")
-        }
-    }
-
-    /** টাইপিং শেষ হলে (finishStudyItem হুকের ভেতর থেকে) আইটেমটাকে "used" হিসেবে সেভ করে,
-     *  যাতে এই sub_topic-এ আবার এলে এই আইটেমটা দ্বিতীয়বার না আসে */
-    fun markCurrentStudyItemUsed() {
-        val subject = studySubject ?: return
-        val subTopic = studySubTopic ?: return
-        val id = studyCurrentId ?: return
-        scope.launch {
-            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
-            AppDatabase.getInstance(ctx).studyTypingProgressDao().markUsed(
-                com.hanif.smartstudy.data.local.StudyTypingProgressEntity(
-                    userId = userId, subject = subject, subTopic = subTopic,
-                    contentId = id, typedAt = System.currentTimeMillis()
-                )
-            )
-        }
-    }
-
-    /** "🔄 এই টপিক রিসেট করো" বাটনে ট্যাপ করলে কল হয় — শুধু এই sub_topic-এর used
-     *  id গুলোই মোছে (পুরো ট্র্যাকিং টেবিল না), তারপর পুল আবার লোড হয় */
-    fun resetCurrentStudySubTopic() {
-        val subject = studySubject ?: return
-        val subTopic = studySubTopic ?: return
-        scope.launch {
-            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
-            AppDatabase.getInstance(ctx).studyTypingProgressDao().resetSubTopic(userId, subject, subTopic)
-            loadStudyPool(subject, subTopic)
-        }
     }
 
     Scaffold(
