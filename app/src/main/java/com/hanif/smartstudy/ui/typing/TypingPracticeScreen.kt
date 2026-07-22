@@ -517,6 +517,37 @@ fun TypingPracticeScreen(
     val passageWords = remember(passage) { passage.split(' ') }
     val passageLang  = remember(passage) { TypingErrorAnalyzer.detectLanguage(passage) }
 
+    // ── প্যাসেজ বক্স এখন ফিক্সড-হাইট + অটো-স্ক্রল — লম্বা প্যাসেজ (Study Typing-এ
+    // প্রায়ই ৫০০+ ক্যারেক্টার) থাকলে আগে পুরো Card unbounded বেড়ে যেত, ফলে টাইপিং
+    // ইনপুট বক্স স্ক্রিনের অনেক নিচে চলে যেত। এখন প্যাসেজের নিজস্ব ছোট viewport-এর
+    // ভেতরেই টাইপ করতে করতে বর্তমান লাইন লক্ষ্য করে স্মুথলি অটো-স্ক্রল হয় (আগের
+    // লাইন উপরে সরে যায়, নতুন লাইন নিচ থেকে উঠে আসে) — টার্গেট প্যাসেজ ও ইনপুট বক্স
+    // সবসময় একসাথে ফিক্সড স্ক্রিনে দেখা যায় ──
+    var passageTextLayout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val passageScrollState = rememberScrollState()
+    val currentWordCharOffset = remember(frozenWordResults.size, passageWords) {
+        var off = 0
+        for (i in 0 until minOf(frozenWordResults.size, passageWords.size)) {
+            off += passageWords[i].length + 1  // শব্দ + তার পরের স্পেস
+        }
+        off
+    }
+    // নতুন প্যাসেজ লোড হলে (আগের প্যাসেজ থেকে সম্পূর্ণ ভিন্ন টেক্সট) স্ক্রল সাথে সাথেই
+    // টপে রিসেট হয় — অ্যানিমেট করে না, কারণ এটা নতুন কনটেন্ট, "চলমান" স্ক্রল না
+    LaunchedEffect(passage) { passageScrollState.scrollTo(0) }
+    // টাইপ করতে করতে বর্তমান শব্দ যে লাইনে আছে, সেই লাইন (এক লাইন আগে থেকে, যাতে
+    // প্রসঙ্গ বোঝা যায়) viewport-এর টপে আনার জন্য স্মুথ অ্যানিমেটেড স্ক্রল
+    LaunchedEffect(currentWordCharOffset, passageTextLayout) {
+        val layout = passageTextLayout ?: return@LaunchedEffect
+        val textLen = layout.layoutInput.text.text.length
+        if (textLen == 0) return@LaunchedEffect
+        val safeOffset = currentWordCharOffset.coerceIn(0, textLen - 1)
+        val line = layout.getLineForOffset(safeOffset)
+        val topLine = (line - 1).coerceAtLeast(0)
+        val targetY = layout.getLineTop(topLine).toInt().coerceAtLeast(0)
+        passageScrollState.animateScrollTo(targetY)
+    }
+
     // ── ধাপ ৪: Daily Discipline Mode — non-coercive, শুধু progress track/দেখানো হয় ──
     var disciplineOn      by remember { mutableStateOf(false) }
     var dailyGoalMin      by remember { mutableStateOf(60) }
@@ -538,6 +569,13 @@ fun TypingPracticeScreen(
     // ── টপ বার রিডিজাইন — "অনুশীলনের ধরন" রো কোলাপসিবল (ডিফল্ট খোলা), History এখন
     // popup/dialog, Focus mode-এর নিজস্ব আইকন এন্ট্রি পয়েন্ট ──
     var modeTypeExpanded by remember { mutableStateOf(true) }
+    // ── টাইপ করার জন্য একটা বৈধ টার্গেট প্যাসেজ রেডি হয়ে গেলে "অনুশীলনের ধরন" প্যানেল
+    // (মোড বাটন + সাবজেক্ট/সাব-টপিক চিপ ইত্যাদি) অটোমেটিক কোলাপ্স হয়ে যায় — যাতে
+    // প্যাসেজ ও ইনপুট বক্সের জন্য বেশি জায়গা ফাঁকা থাকে (ইউজার চাইলে টগল বাটনে চেপে
+    // আবার খুলতে পারবে) ──
+    LaunchedEffect(passage) {
+        if (passage.isNotBlank()) modeTypeExpanded = false
+    }
     var showHistoryDialog by remember { mutableStateOf(false) }
     var showLangMenu by remember { mutableStateOf(false) }   // 🌐 বাংলা/English সিলেক্টর
 
@@ -1482,6 +1520,16 @@ fun TypingPracticeScreen(
                     // কোনো শব্দ প্রভাবিত হয় না। বর্তমান (এখনো টাইপ করা হচ্ছে) শব্দে
                     // লাইভ ক্যারেক্টার-বাই-ক্যারেক্টার ফিডব্যাক দেখানো হয়। ──
                     val split = remember(userInput) { splitTypedWords(userInput) }
+                    // ── ফিক্সড-হাইট viewport (~৪ লাইন) — লম্বা প্যাসেজেও Card unbounded
+                    // বাড়ে না, ফলে নিচের ইনপুট বক্স সবসময় একই স্ক্রিনে দেখা যায়। টাইপ
+                    // করতে করতে onTextLayout দিয়ে বর্তমান লাইন বের করে স্মুথলি অটো-স্ক্রল
+                    // হয় (আগের লাইন উপরে সরে, নতুন লাইন নিচ থেকে উঠে আসে) ──
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 128.dp)
+                            .verticalScroll(passageScrollState)
+                    ) {
                     Text(
                         buildAnnotatedString {
                             passageWords.forEachIndexed { wIdx, word ->
@@ -1529,11 +1577,14 @@ fun TypingPracticeScreen(
                             }
                         },
                         fontSize = 17.sp, fontWeight = FontWeight.Medium,
-                        lineHeight = 29.sp, letterSpacing = 0.3.sp
+                        lineHeight = 29.sp, letterSpacing = 0.3.sp,
+                        onTextLayout = { passageTextLayout = it }
                     )
+                    }
                 }
             }
             }
+
 
             // Input field
             OutlinedTextField(
