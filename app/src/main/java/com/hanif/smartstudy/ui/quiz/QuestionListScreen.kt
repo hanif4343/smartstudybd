@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -120,6 +121,21 @@ fun QuestionListScreen(
         }
     }
 
+    // ── Study: ⌨️ রিকল-টাইপিং মোড — টগল করলে টাইপ-করে-উত্তর-মেলানো ফ্লো চালু/বন্ধ হয় ──
+    var studyRecallMode by remember { mutableStateOf(SessionManager(ctxForPrefs).isStudyRecallMode()) }
+    val onToggleStudyRecallMode: () -> Unit = {
+        val newValue = !studyRecallMode
+        studyRecallMode = newValue
+        prefsScope.launch {
+            SessionManager(ctxForPrefs).setStudyRecallMode(newValue)
+        }
+    }
+    // প্রতিটা প্রশ্নের রিকল-টাইপিং টেক্সট-বক্সের FocusRequester — id অনুযায়ী ক্যাশ করা,
+    // যাতে একটা প্রশ্ন গ্রেড করার পর পরেরটার বক্সে সরাসরি কার্সর ফোকাস করা যায়
+    val recallFocusRequesters = remember { mutableMapOf<String, androidx.compose.ui.focus.FocusRequester>() }
+    fun recallFocusRequesterFor(id: String) =
+        recallFocusRequesters.getOrPut(id) { androidx.compose.ui.focus.FocusRequester() }
+
     // ── Sound + Vibration feedback ──
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val feedbackEvent by viewModel.feedbackEvent.collectAsState()
@@ -181,7 +197,9 @@ fun QuestionListScreen(
                     onBack   = onBack,
                     onSubmit = if (mode != StudyMode.STUDY) {{ showSubmitDialog = true }} else null,
                     studyRevealMode = studyRevealMode,
-                    onToggleStudyRevealMode = onToggleStudyRevealMode
+                    onToggleStudyRevealMode = onToggleStudyRevealMode,
+                    studyRecallMode = studyRecallMode,
+                    onToggleStudyRecallMode = onToggleStudyRecallMode
                 )
             }
         ) { padding ->
@@ -225,6 +243,24 @@ fun QuestionListScreen(
                             scrollScope.launch {
                                 val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
                                 listState.animateScrollToItem(nextLocalIdx)
+                            }
+                        }
+                        // ── ⌨️ রিকল-টাইপিং মোড: ঠিক/ভুল বেছে Enter/ট্যাপ করলে এই প্রশ্নটা
+                        //    "পড়া হয়েছে" মার্ক হবে, তারপর পরের প্রশ্নে স্ক্রল করে সেই
+                        //    প্রশ্নের টাইপ-বক্সে সরাসরি কার্সর ফোকাস করে দেওয়া হয় — পুরোটা
+                        //    কীবোর্ড দিয়েই এক প্রশ্ন থেকে পরের প্রশ্নে চলে যাওয়া যায় ──
+                        val onRecallGradedAdvance: (Boolean) -> Unit = {
+                            viewModel.toggleStudyDone(q.id)
+                            scrollScope.launch {
+                                val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                                listState.animateScrollToItem(nextLocalIdx)
+                                if (nextLocalIdx != localIdx) {
+                                    val nextQ = pagedQuestions.getOrNull(nextLocalIdx)
+                                    if (nextQ != null) {
+                                        kotlinx.coroutines.delay(120)
+                                        runCatching { recallFocusRequesterFor(nextQ.id).requestFocus() }
+                                    }
+                                }
                             }
                         }
                         // ── Study mode-এ "পড়া হয়েছে" টিক দিলে আইটেম লিস্টের নিচে চলে যায় —
@@ -279,7 +315,10 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
-                                    studyRevealMode = studyRevealMode
+                                    studyRevealMode = studyRevealMode,
+                                    studyRecallMode = studyRecallMode,
+                                    answerFocusRequester = recallFocusRequesterFor(q.id),
+                                    onRecallGraded = onRecallGradedAdvance
                                 )
                             }
                         } else {
@@ -300,7 +339,10 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
-                            studyRevealMode = studyRevealMode
+                            studyRevealMode = studyRevealMode,
+                            studyRecallMode = studyRecallMode,
+                            answerFocusRequester = recallFocusRequesterFor(q.id),
+                            onRecallGraded = onRecallGradedAdvance
                         )
                         }
                         }
@@ -504,7 +546,9 @@ private fun QuestionTopBar(
     onBack   : () -> Unit,
     onSubmit : (() -> Unit)?,
     studyRevealMode         : Boolean = false,
-    onToggleStudyRevealMode : (() -> Unit)? = null
+    onToggleStudyRevealMode : (() -> Unit)? = null,
+    studyRecallMode         : Boolean = false,
+    onToggleStudyRecallMode : (() -> Unit)? = null
 ) {
     TopAppBar(
         title = {
@@ -541,6 +585,18 @@ private fun QuestionTopBar(
                         if (studyRevealMode) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = if (studyRevealMode) "শুধু প্রশ্ন মোড: চালু" else "শুধু প্রশ্ন মোড: বন্ধ",
                         tint = if (studyRevealMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            // ── ⌨️ রিকল-টাইপিং মোড টগল — চালু করলে উত্তর দেখার আগে টাইপ-বক্সে
+            //    নিজে লিখে Enter চাপতে হয়, তারপর ঠিক/ভুল বেছে Enter চাপলেই
+            //    পরের প্রশ্নে চলে যায়। বন্ধ থাকলে সবকিছু আগের মতোই। ──
+            if (mode == StudyMode.STUDY && onToggleStudyRecallMode != null) {
+                IconButton(onClick = onToggleStudyRecallMode) {
+                    Icon(
+                        Icons.Default.Keyboard,
+                        contentDescription = if (studyRecallMode) "টাইপ করে উত্তর মেলানো মোড: চালু" else "টাইপ করে উত্তর মেলানো মোড: বন্ধ",
+                        tint = if (studyRecallMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
