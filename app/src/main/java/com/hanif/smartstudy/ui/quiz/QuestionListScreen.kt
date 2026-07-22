@@ -263,6 +263,19 @@ fun QuestionListScreen(
                                 }
                             }
                         }
+                        // ── QBank: Written প্রশ্নে ঠিক/ভুল গ্রেড হয়ে গেলে (AI দিয়ে অটো-চেক
+                        // বা ম্যানুয়াল বাটনে) স্বয়ংক্রিয়ভাবে পরের প্রশ্নে স্ক্রল হয়ে যায় —
+                        // Study-র রিকল-টাইপিং মোডের মতোই একই আচরণ। অন্য মোডে (Quiz/Model
+                        // Test) আগের মতোই শুধু ফলাফল সেভ হয়, স্ক্রল হয় না। ──
+                        val onWrittenSelfGradeAdvance: (Boolean) -> Unit = { correct ->
+                            viewModel.answerWrittenSelfGrade(globalIdx, correct)
+                            if (mode == StudyMode.QBANK) {
+                                scrollScope.launch {
+                                    val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                                    listState.animateScrollToItem(nextLocalIdx)
+                                }
+                            }
+                        }
                         // ── Study mode-এ "পড়া হয়েছে" টিক দিলে আইটেম লিস্টের নিচে চলে যায় —
                         //    animateItemPlacement() দিয়ে এই পজিশন-চেঞ্জটা হালকা স্মূথ এনিমেশনে
                         //    হয়, পুরো স্ক্রিন/স্ক্রল জাম্প করে না, বাকি আইটেমগুলো নিজ জায়গায়
@@ -307,7 +320,7 @@ fun QuestionListScreen(
                                     onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                                     onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                                     isModelTest = isModelTest,
-                                    onWrittenSelfGrade = { correct -> viewModel.answerWrittenSelfGrade(globalIdx, correct) },
+                                    onWrittenSelfGrade = onWrittenSelfGradeAdvance,
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
                                     onStudyDone = onStudyDoneWithScroll,
                                     onReport    = { reportIdx = globalIdx },
@@ -334,7 +347,7 @@ fun QuestionListScreen(
                             onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
                             onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                             isModelTest = isModelTest,
-                            onWrittenSelfGrade = { correct -> viewModel.answerWrittenSelfGrade(globalIdx, correct) },
+                            onWrittenSelfGrade = onWrittenSelfGradeAdvance,
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
                             onStudyDone = onStudyDoneWithScroll,
                             onReport    = { reportIdx = globalIdx },
