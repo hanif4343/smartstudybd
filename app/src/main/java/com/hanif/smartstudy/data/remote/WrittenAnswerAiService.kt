@@ -97,6 +97,125 @@ object WrittenAnswerAiService {
         null
     }
 
+    /**
+     * ── "বিস্তারিত" (details) বাটনে ব্যবহারের জন্য — ভুল হলে ঠিক কোথায় ভুল
+     * হয়েছে তার এক-দুই লাইনের সংক্ষিপ্ত বাংলা ব্যাখ্যা এনে দেয়। gradeWrittenAnswer-এর
+     * মতোই Groq → Mistral → Cerebras → Gemini ক্রমে চেষ্টা করে, সব ব্যর্থ হলে null। ──
+     */
+    suspend fun explainMistake(
+        question     : String,
+        correctAnswer: String,
+        userAnswer   : String,
+        keys         : AiApiKeys
+    ): String? = withContext(Dispatchers.IO) {
+        if (!keys.hasAnyKey()) return@withContext null
+        val prompt = buildExplainPrompt(question, correctAnswer, userAnswer)
+
+        if (keys.groq.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Groq explain failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        }
+        if (keys.mistral.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.mistral.ai/v1/chat/completions",
+                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Mistral explain failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        }
+        if (keys.cerebras.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.cerebras.ai/v1/chat/completions",
+                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Cerebras explain failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        }
+        if (keys.gemini.isNotBlank()) {
+            runCatching { callGeminiText(keys.gemini, prompt) }
+                .onFailure { Log.w(TAG, "Gemini explain failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        }
+        null
+    }
+
+    private fun buildExplainPrompt(question: String, correctAnswer: String, userAnswer: String): String = """
+তুমি একজন বাংলা পরীক্ষক। নিচের শিক্ষার্থীর উত্তরে কী কী ভুল বা ফাঁক আছে সেটা সংক্ষেপে (সর্বোচ্চ ২টি ছোট বাক্যে) বাংলায় বলো।
+
+প্রশ্ন: $question
+সঠিক উত্তর: $correctAnswer
+শিক্ষার্থীর উত্তর: ${userAnswer.ifBlank { "(কিছু লেখেনি)" }}
+
+শুধু ভুলটা কোথায় সেটা বলো, কোনো ভূমিকা বা উপসংহার লিখবে না।
+""".trimIndent()
+
+    private fun callOpenAiCompatibleText(url: String, apiKey: String, model: String, prompt: String): String? {
+        val messages = JSONArray().apply {
+            put(JSONObject().apply { put("role", "user"); put("content", prompt) })
+        }
+        val payload = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.2)
+            put("max_tokens", 120)
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.trim()
+        }
+    }
+
+    private fun callGeminiText(apiKey: String, prompt: String): String? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
+        val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
+        val payload = JSONObject().apply {
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.2)
+                put("maxOutputTokens", 120)
+            })
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("candidates")
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+                ?.optJSONObject(0)
+                ?.optString("text")
+                ?.trim()
+        }
+    }
+
     private fun buildPrompt(question: String, correctAnswer: String, userAnswer: String): String = """
 তুমি একজন কঠোর কিন্তু ন্যায্য বাংলা পরীক্ষক। নিচের তথ্য দেখে বলো শিক্ষার্থীর উত্তরটি সঠিক নাকি ভুল।
 
