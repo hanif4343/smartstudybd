@@ -318,7 +318,10 @@ fun QuestionListScreen(
                                     studyRevealMode = studyRevealMode,
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
-                                    onRecallGraded = onRecallGradedAdvance
+                                    onRecallGraded = onRecallGradedAdvance,
+                                    onAiGradeWritten = { question, correctAnswer, userAnswer ->
+                                        viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
+                                    }
                                 )
                             }
                         } else {
@@ -342,7 +345,10 @@ fun QuestionListScreen(
                             studyRevealMode = studyRevealMode,
                             studyRecallMode = studyRecallMode,
                             answerFocusRequester = recallFocusRequesterFor(q.id),
-                            onRecallGraded = onRecallGradedAdvance
+                            onRecallGraded = onRecallGradedAdvance,
+                            onAiGradeWritten = { question, correctAnswer, userAnswer ->
+                                viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
+                            }
                         )
                         }
                         }
