@@ -53,6 +53,7 @@ fun MainScreen(
     var showTyping     by remember { mutableStateOf(false) }
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
+    var showAiChat     by remember { mutableStateOf(false) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -264,6 +265,12 @@ fun MainScreen(
         )
         return
     }
+    if (showAiChat) {
+        com.hanif.smartstudy.ui.aichat.AiChatScreen(
+            onBack = { showAiChat = false }
+        )
+        return
+    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -317,7 +324,8 @@ fun MainScreen(
                             quizViewModel.openMockZone(StudyMode.QUIZ)
                         }
                     },
-                    onOpenFocusMode = { showFocusModeInfo = true }
+                    onOpenFocusMode = { showFocusModeInfo = true },
+                    onOpenAiChat    = { showAiChat = true }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
