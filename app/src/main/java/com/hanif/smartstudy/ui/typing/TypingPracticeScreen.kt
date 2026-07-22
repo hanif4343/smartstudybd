@@ -30,6 +30,7 @@ import androidx.compose.ui.window.Dialog
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.CustomPassageEntity
 import com.hanif.smartstudy.data.local.MistakeErrorType
+import com.hanif.smartstudy.data.local.toEntity
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.Hand
 import com.hanif.smartstudy.util.HandKeyMap
