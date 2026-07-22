@@ -974,6 +974,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(questions = updated) }
     }
 
+    /**
+     * ── toggleStudyDone-এর মতোই, কিন্তু টগল না করে সরাসরি true/false সেট করে।
+     * Study রিকল-টাইপিং বাল্ক-সাবমিটে ব্যবহৃত — AI দিয়ে গ্রেড হওয়া প্রতিটা
+     * প্রশ্নকে "পড়া হয়েছে" মার্ক করার জন্য, আগে থেকে done থাকলে যাতে ভুলবশত
+     * আনডান না হয়ে যায়। ──
+     */
+    fun markStudyDone(qId: String, done: Boolean) {
+        if (qId.isBlank()) return
+        val current = prefs.getStringSet("study_done_ids", mutableSetOf())!!.toMutableSet()
+        val changed = if (done) current.add(qId) else current.remove(qId)
+        if (!changed) return
+        prefs.edit().putStringSet("study_done_ids", current).apply()
+
+        val updated = _state.value.questions
+            .map { q -> if (q.id == qId) q.copy(isStudyDone = current.contains(qId)) else q }
+        _state.update { it.copy(questions = updated) }
+    }
+
     fun updateReadingIndex(index: Int) {
         _state.update { it.copy(readingIndex = index) }
     }
