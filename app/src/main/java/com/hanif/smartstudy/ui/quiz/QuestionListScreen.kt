@@ -52,11 +52,12 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
 
-// ── Study রিকল-টাইপিং মোডে নিচের ফ্লোটিং "সাবমিট" বাটন চাপলে বর্তমান
-// (স্ক্রিনে দেখা যাচ্ছে এমন) প্রশ্নের জন্য এই ফলাফল স্টেটে জমা হয় ──
-private data class StudySubmitResult(
+// ── Study রিকল-টাইপিং মোডে নিচের ফ্লোটিং "সাবমিট" বাটন চাপলে — বর্তমান
+// পৃষ্ঠায় যে যে প্রশ্নে টাইপ-বক্সে খসড়া উত্তর লেখা আছে (Enter চাপা হোক
+// বা না হোক) সবগুলো একসাথে AI দিয়ে চেক হয়, প্রতিটার ফলাফল এখানে জমা হয় ──
+private data class StudyBulkItem(
     val questionId    : String,
-    val question      : String,
+    val questionText  : String,
     val correctAnswer : String,
     val userAnswer    : String,
     val verdict       : Boolean?   // true=ঠিক, false=ভুল, null=AI যাচাই করতে পারেনি
@@ -151,12 +152,12 @@ fun QuestionListScreen(
     // বাটন Enter চাপার অপেক্ষা না করেই এই খসড়া নিয়ে AI দিয়ে ম্যাচ করাতে পারে। ──
     val recallLiveDrafts = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
 
-    // ── নিচের ফ্লোটিং সাবমিট বাটনের ফলাফল — চেক চলছে কিনা, আর ফলাফল এলে
-    // সেটার বিস্তারিত (ভুলগুলো) দেখানোর স্টেট ──
+    // ── নিচের ফ্লোটিং সাবমিট বাটনের ফলাফল — চেক চলছে কিনা (কতটার মধ্যে
+    // কতটা হয়ে গেছে), আর সবগুলোর ফলাফল একসাথে (কয়টা সঠিক/কয়টা ভুল) ──
     var studySubmitChecking by remember { mutableStateOf(false) }
-    var studySubmitResult by remember { mutableStateOf<StudySubmitResult?>(null) }
-    var studySubmitDetail by remember { mutableStateOf<String?>(null) }
-    var studySubmitDetailLoading by remember { mutableStateOf(false) }
+    var studySubmitProgress by remember { mutableStateOf(0 to 0) } // (checked, total)
+    var studySubmitResults by remember { mutableStateOf<List<StudyBulkItem>?>(null) }
+    var studySubmitShowDetails by remember { mutableStateOf(false) }
 
     // ── Sound + Vibration feedback ──
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -508,31 +509,36 @@ fun QuestionListScreen(
                     }
 
                     // ── Study: ⌨️ রিকল-টাইপিং মোড চালু থাকলে এখানে একটা "সাবমিট"
-                    // বাটন — Enter না চেপে একটা একটা করে টাইপ করা অবস্থাতেও
-                    // বর্তমান প্রশ্নের খসড়া উত্তর নিয়ে সরাসরি AI দিয়ে ম্যাচ
-                    // করানো যায়। ফলাফলের ডায়ালগে "বিস্তারিত" বাটনে ভুলগুলো
-                    // দেখা যাবে। ──
+                    // বাটন — Enter না চেপে একটা একটা করে অনেকগুলো প্রশ্নে টাইপ
+                    // করে গেলেও, এই পাতায় যেসব প্রশ্নে খসড়া উত্তর লেখা আছে সেই
+                    // সবগুলো একসাথে ব্যাকগ্রাউন্ডে AI দিয়ে চেক হয়ে "কয়টা সঠিক /
+                    // কয়টা ভুল" এর মোট হিসাব দেখায় (শুধু সর্বশেষ প্রশ্নটার না) —
+                    // "বিস্তারিত" চাপলে কোন কোনগুলো ভুল হয়েছে তার তালিকা দেখা যায়। ──
                     if (mode == StudyMode.STUDY && studyRecallMode) {
                         Button(
                             onClick = {
-                                val currentLocalIdx = listState.firstVisibleItemIndex
-                                    .coerceIn(0, pagedQuestions.lastIndex.coerceAtLeast(0))
-                                val currentQ = pagedQuestions.getOrNull(currentLocalIdx)
-                                if (currentQ != null) {
-                                    val draft = recallLiveDrafts[currentQ.id].orEmpty()
-                                    val qText = currentQ.question.ifBlank { currentQ.explanation.ifBlank { currentQ.answer } }
-                                    studySubmitDetail = null
-                                    studySubmitDetailLoading = false
-                                    if (draft.isBlank()) {
-                                        studySubmitResult = StudySubmitResult(currentQ.id, qText, currentQ.answer, "", null)
-                                    } else {
-                                        studySubmitResult = null
-                                        studySubmitChecking = true
-                                        scrollScope.launch {
-                                            val verdict = viewModel.gradeWrittenWithAi(qText, currentQ.answer, draft)
-                                            studySubmitChecking = false
-                                            studySubmitResult = StudySubmitResult(currentQ.id, qText, currentQ.answer, draft, verdict)
+                                val candidates = pagedQuestions.filter { q ->
+                                    q.isWritten() && q.answer.isNotBlank() &&
+                                        recallLiveDrafts[q.id]?.isNotBlank() == true
+                                }
+                                studySubmitShowDetails = false
+                                if (candidates.isEmpty()) {
+                                    studySubmitResults = emptyList()
+                                } else {
+                                    studySubmitResults = null
+                                    studySubmitChecking = true
+                                    studySubmitProgress = 0 to candidates.size
+                                    scrollScope.launch {
+                                        val collected = mutableListOf<StudyBulkItem>()
+                                        candidates.forEachIndexed { i, q ->
+                                            val draft = recallLiveDrafts[q.id].orEmpty()
+                                            val qText = q.question.ifBlank { q.explanation.ifBlank { q.answer } }
+                                            val verdict = viewModel.gradeWrittenWithAi(qText, q.answer, draft)
+                                            collected.add(StudyBulkItem(q.id, qText, q.answer, draft, verdict))
+                                            studySubmitProgress = (i + 1) to candidates.size
                                         }
+                                        studySubmitChecking = false
+                                        studySubmitResults = collected
                                     }
                                 }
                             },
@@ -591,15 +597,15 @@ fun QuestionListScreen(
     }
 
     // ── Study: ⌨️ রিকল-টাইপিং মোডের নিচের "সাবমিট" বাটনের ফলাফল ডায়ালগ —
-    // চেক চলাকালীন লোডিং, তারপর ঠিক/ভুল দেখায়। "বিস্তারিত" চাপলে সঠিক
-    // উত্তর, নিজের লেখা উত্তর, আর AI-এর সংক্ষিপ্ত ভুল-ব্যাখ্যা দেখা যাবে। ──
-    if (mode == StudyMode.STUDY && studyRecallMode && (studySubmitChecking || studySubmitResult != null)) {
+    // চেক চলাকালীন কতগুলার মধ্যে কতগুলো চেক হয়ে গেছে তা দেখায়, তারপর মোট
+    // "কয়টা সঠিক / কয়টা ভুল" এর হিসাব — "বিস্তারিত" চাপলে কোন কোনগুলো ভুল
+    // হয়েছে (সঠিক উত্তর সহ) তার তালিকা দেখা যাবে। ──
+    if (mode == StudyMode.STUDY && studyRecallMode && (studySubmitChecking || studySubmitResults != null)) {
         AlertDialog(
             onDismissRequest = {
                 if (!studySubmitChecking) {
-                    studySubmitResult = null
-                    studySubmitDetail = null
-                    studySubmitDetailLoading = false
+                    studySubmitResults = null
+                    studySubmitShowDetails = false
                 }
             },
             title = {
@@ -607,71 +613,79 @@ fun QuestionListScreen(
                     fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
             },
             text = {
-                val result = studySubmitResult
+                val results = studySubmitResults
                 when {
                     studySubmitChecking -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
-                            Spacer(Modifier.width(10.dp))
-                            Text("🤖 AI দিয়ে যাচাই করা হচ্ছে…", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
+                                Spacer(Modifier.width(10.dp))
+                                Text("🤖 AI দিয়ে যাচাই করা হচ্ছে…", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                            }
+                            Text(
+                                "${studySubmitProgress.first}/${studySubmitProgress.second} প্রশ্ন চেক হয়েছে",
+                                fontFamily = NotoSansBengali, fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
-                    result != null && result.userAnswer.isBlank() -> {
-                        Text("❗ আগে টাইপ-বক্সে উত্তর লিখুন, তারপর সাবমিট করুন।",
+                    results != null && results.isEmpty() -> {
+                        Text("কোনো উত্তর টাইপ করা হয়নি — আগে টাইপ-বক্সে উত্তর লিখুন, তারপর সাবমিট করুন।",
                             fontFamily = NotoSansBengali, fontSize = 13.sp)
                     }
-                    result != null && result.verdict == null -> {
-                        Text("AI দিয়ে যাচাই করা যায়নি — Settings-এ কোনো API key সেভ করা নেই অথবা সবগুলো ব্যর্থ হয়েছে।",
-                            fontFamily = NotoSansBengali, fontSize = 13.sp)
-                    }
-                    result != null -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val isCorrect = result.verdict == true
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background((if (isCorrect) Color(0xFF10B981) else Color(0xFFEF4444)).copy(alpha = 0.12f))
-                                    .padding(10.dp)
+                    results != null -> {
+                        val checkedResults = results.filter { it.verdict != null }
+                        val unknownCount   = results.size - checkedResults.size
+                        val correctCount   = checkedResults.count { it.verdict == true }
+                        val wrongCount     = checkedResults.count { it.verdict == false }
+                        val wrongItems     = results.filter { it.verdict == false }
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                SubmitStatChip("মোট", "${results.size}", Color(0xFF4F46E5), Modifier.weight(1f))
+                                SubmitStatChip("✅ সঠিক", "$correctCount", Color(0xFF10B981), Modifier.weight(1f))
+                                SubmitStatChip("❌ ভুল", "$wrongCount", Color(0xFFEF4444), Modifier.weight(1f))
+                            }
+                            if (unknownCount > 0) {
                                 Text(
-                                    if (isCorrect) "✅ ঠিক হয়েছে (AI)" else "❌ ভুল হয়েছে (AI)",
-                                    fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp,
-                                    color = if (isCorrect) Color(0xFF10B981) else Color(0xFFEF4444)
+                                    "⚠️ $unknownCount টা AI দিয়ে যাচাই করা যায়নি (Settings-এ API key নেই/সব ব্যর্থ হয়েছে)।",
+                                    fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            when {
-                                studySubmitDetailLoading -> {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("বিস্তারিত আনা হচ্ছে…", fontFamily = NotoSansBengali, fontSize = 12.sp)
-                                    }
+                            if (wrongItems.isNotEmpty()) {
+                                TextButton(onClick = { studySubmitShowDetails = !studySubmitShowDetails }) {
+                                    Text(
+                                        if (studySubmitShowDetails) "বিস্তারিত লুকান" else "🔍 বিস্তারিত (ভুলগুলো দেখুন)",
+                                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5)
+                                    )
                                 }
-                                studySubmitDetail != null -> {
-                                    Text("সঠিক উত্তর: ${result.correctAnswer}", fontFamily = NotoSansBengali,
-                                        fontSize = 12.sp, color = Color(0xFF10B981))
-                                    Text("তোমার উত্তর: ${result.userAnswer}", fontFamily = NotoSansBengali,
-                                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    if (!isCorrect) {
-                                        Text(studySubmitDetail ?: "", fontFamily = NotoSansBengali,
-                                            fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                else -> {
-                                    TextButton(onClick = {
-                                        scrollScope.launch {
-                                            studySubmitDetailLoading = true
-                                            val explanation = if (isCorrect) null
-                                                else viewModel.explainWrittenMistake(result.question, result.correctAnswer, result.userAnswer)
-                                            studySubmitDetailLoading = false
-                                            studySubmitDetail = explanation
-                                                ?: if (isCorrect) "তোমার উত্তর মূল ভাবের সাথে মিলে গেছে।"
-                                                   else "সঠিক উত্তরের সাথে তুলনা করে দেখো কোথায় পার্থক্য আছে।"
+                                if (studySubmitShowDetails) {
+                                    Column(
+                                        Modifier
+                                            .heightIn(max = 280.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        wrongItems.forEach { item ->
+                                            Column(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFEF4444).copy(alpha = 0.08f))
+                                                    .padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Text(item.questionText, fontFamily = NotoSansBengali,
+                                                    fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 2)
+                                                Text("সঠিক উত্তর: ${item.correctAnswer}", fontFamily = NotoSansBengali,
+                                                    fontSize = 11.sp, color = Color(0xFF10B981))
+                                                Text("তোমার উত্তর: ${item.userAnswer}", fontFamily = NotoSansBengali,
+                                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
-                                    }) {
-                                        Text("🔍 বিস্তারিত", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
                                     }
                                 }
                             }
@@ -684,9 +698,8 @@ fun QuestionListScreen(
                 TextButton(
                     enabled = !studySubmitChecking,
                     onClick = {
-                        studySubmitResult = null
-                        studySubmitDetail = null
-                        studySubmitDetailLoading = false
+                        studySubmitResults = null
+                        studySubmitShowDetails = false
                     }
                 ) {
                     Text("বন্ধ করুন", fontFamily = NotoSansBengali, color = Color(0xFF4F46E5))
@@ -705,6 +718,20 @@ fun QuestionListScreen(
             onReport     = { viewModel.reportQuestion(reportIdx, it); reportIdx = -1 },
             onDismiss    = { reportIdx = -1 }
         )
+    }
+}
+
+@Composable
+private fun SubmitStatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.1f))
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, fontFamily = NotoSansBengali, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        Text(label, fontFamily = NotoSansBengali, fontSize = 10.sp, color = color)
     }
 }
 
