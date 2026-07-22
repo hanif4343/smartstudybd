@@ -38,6 +38,8 @@ class SessionManager(private val context: Context) {
         // টগল বাটনটা Study screen-এর নিজের টপবারেই থাকে (Settings/Menu-তে নয়),
         // কিন্তু পছন্দটা এখানে persist করা থাকে যাতে পরের বার Study খুললেও মনে থাকে।
         val KEY_STUDY_REVEAL_MODE = booleanPreferencesKey("study_reveal_mode")
+        // Study: টাইপ করে উত্তর মেলানোর রিকল-প্র্যাকটিস মোড (কীবোর্ড আইকন টগল)
+        val KEY_STUDY_RECALL_MODE = booleanPreferencesKey("study_recall_mode")
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
@@ -182,6 +184,16 @@ class SessionManager(private val context: Context) {
 
     suspend fun setStudyRevealMode(on: Boolean) {
         context.dataStore.edit { it[KEY_STUDY_REVEAL_MODE] = on }
+    }
+
+    // ── Study: টাইপ করে উত্তর রিকল-প্র্যাকটিস মোড (⌨️ আইকন) ────
+
+    fun isStudyRecallMode(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_STUDY_RECALL_MODE] ?: false
+    }
+
+    suspend fun setStudyRecallMode(on: Boolean) {
+        context.dataStore.edit { it[KEY_STUDY_RECALL_MODE] = on }
     }
 
     // ── Offline mode (ম্যানুয়াল বাটন — Firebase সম্পূর্ণ বন্ধ) ───
