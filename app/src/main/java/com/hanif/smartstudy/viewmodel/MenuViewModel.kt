@@ -151,6 +151,13 @@ data class MenuUiState(
     val syncEditsMsg      : String?          = null,
     // edit হলে increment হয় — MainScreen এ observe করে quiz/study/qbank refresh হয়
     val contentEditVersion: Int              = 0,
+
+    // ── Written উত্তর AI-অটো-চেক (স্টাডি ⌨️ রিকল-টাইপিং মোড) — ৪টা প্রোভাইডারের API key ──
+    val groqApiKey        : String           = "",
+    val mistralApiKey     : String           = "",
+    val cerebrasApiKey    : String           = "",
+    val geminiApiKey      : String           = "",
+    val aiKeysSavedMsg    : String?          = null,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -253,6 +260,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val adminTag  = if (localUser?.isAdmin() == true) session.getAdminAudienceTag() else ""
 
+            val aiKeys = session.getAiApiKeys()
+
             val weakTopics = prefs.all.entries
                 .filter { it.key.startsWith("weak_") && (it.value as? Int ?: 0) >= 2 }
                 .map { com.hanif.smartstudy.data.model.WeakTopic(
@@ -303,7 +312,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     fcmToken       = fcm,
                     bookmarkedIds  = bookmarks,
                     weakTopics     = weakTopics,
-                    adminViewingTag = adminTag
+                    adminViewingTag = adminTag,
+                    groqApiKey     = aiKeys.groq,
+                    mistralApiKey  = aiKeys.mistral,
+                    cerebrasApiKey = aiKeys.cerebras,
+                    geminiApiKey   = aiKeys.gemini
                 )
             }
 
@@ -430,6 +443,34 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication())
             }
         }
+    }
+
+    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ ──
+    // একবার সেভ করলে DataStore-এ থেকে যায়, পরের বার আবার বসাতে হয় না।
+    // চেষ্টার ক্রম Study/QBank উভয় জায়গাতেই: Groq → Mistral → Cerebras → Gemini।
+    fun saveAiApiKeys(groq: String, mistral: String, cerebras: String, gemini: String) {
+        viewModelScope.launch {
+            val keys = com.hanif.smartstudy.data.model.AiApiKeys(
+                groq     = groq.trim(),
+                mistral  = mistral.trim(),
+                cerebras = cerebras.trim(),
+                gemini   = gemini.trim()
+            )
+            session.setAiApiKeys(keys)
+            _state.update {
+                it.copy(
+                    groqApiKey     = keys.groq,
+                    mistralApiKey  = keys.mistral,
+                    cerebrasApiKey = keys.cerebras,
+                    geminiApiKey   = keys.gemini,
+                    aiKeysSavedMsg = "✅ API key সংরক্ষণ করা হয়েছে"
+                )
+            }
+        }
+    }
+
+    fun clearAiKeysSavedMsg() {
+        _state.update { it.copy(aiKeysSavedMsg = null) }
     }
 
     // ── Reminder ─────────────────────────────────────────────
