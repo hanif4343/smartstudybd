@@ -24,6 +24,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
@@ -63,6 +64,7 @@ private const val FREE_MODE_MIN_SECONDS = 300
 private val Indigo600 = Color(0xFF4F46E5)
 private val GreenOk   = Color(0xFF10B981)
 private val RedWrong  = Color(0xFFEF4444)
+private val AmberWarn = Color(0xFFB45309)  // স্পেস-মিস হওয়া শব্দ/অক্ষরের জন্য — লাল থেকে আলাদা রঙ, যাতে বানান-ভুল আর স্পেস-ভুল গুলিয়ে না যায়
 private val AmberMid  = Color(0xFFF59E0B)
 // SlateText -> MaterialTheme.colorScheme.onSurface
 // MutedText -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -259,6 +261,11 @@ fun TypingPracticeScreen(
     // এড়ানো যায়। ডাবল-স্পেসও এমনিতেই সমাধান হয়ে যায়, কারণ একাধিক স্পেসকে একটাই
     // শব্দ-বিভাজক ধরা হয় (দেখো splitTypedWords())। ──
     var frozenWordResults by remember { mutableStateOf(listOf<Boolean>()) }
+    // ── frozenWordResults-এর সমান্তরাল লিস্ট — কোন কোন লক-হওয়া শব্দে "স্পেস মিস" অটো-ফিক্স
+    // হয়েছিল (অক্ষর হয়তো ঠিক ছিল, কিন্তু মাঝের স্পেসটা ইউজার চাপেনি — অ্যাপ নিজে থেকে বসিয়ে
+    // দিয়েছে যাতে বাকি প্যাসেজ sync না হারায়)। এই শব্দগুলো ঠিক-এর মতো দেখতে (green) না, বরং
+    // আলাদা রঙে (amber) রেন্ডার হবে, এবং সবসময় "ভুল" হিসেবেই গোনা হবে — ভুলটা মাফ হয় না ──
+    var autoFixedWordFlags by remember { mutableStateOf(listOf<Boolean>()) }
     var isStarted    by remember { mutableStateOf(false) }
     var isFinished   by remember { mutableStateOf(false) }
     var elapsedSec   by remember { mutableStateOf(0) }
@@ -411,7 +418,7 @@ fun TypingPracticeScreen(
                     studyCurrentId = null
                     passage = ""
                 }
-                userInput = ""; frozenWordResults = emptyList()
+                userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                 isStarted = false; isFinished = false; elapsedSec = 0; result = null
                 correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
                 leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -462,7 +469,7 @@ fun TypingPracticeScreen(
         studySubTopicList = emptyList()
         studyExhausted = false
         passage = ""
-        userInput = ""; frozenWordResults = emptyList()
+        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
         isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -628,7 +635,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                frozenWordResults = emptyList()
+                frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                 return@LaunchedEffect
             }
 
@@ -641,7 +648,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                frozenWordResults = emptyList()
+                frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                 return@LaunchedEffect
             }
 
@@ -676,7 +683,7 @@ fun TypingPracticeScreen(
                             passage = normalizeBn(res.passage)
                             passageIndex = 0
                             userInput = ""
-                            frozenWordResults = emptyList()
+                            frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                             customAiFetching = false
                         }
                         return@LaunchedEffect
@@ -684,7 +691,7 @@ fun TypingPracticeScreen(
                     passageIndex = nextIdx
                     passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                     userInput    = ""
-                    frozenWordResults = emptyList()
+                    frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                     return@LaunchedEffect
                 }
 
@@ -699,7 +706,7 @@ fun TypingPracticeScreen(
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
-                frozenWordResults = emptyList()
+                frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                 return@LaunchedEffect
             }
 
@@ -857,7 +864,35 @@ fun TypingPracticeScreen(
     fun onInputChange(new: String) {
         if (isFinished) return
         if (!isStarted && new.isNotEmpty()) isStarted = true
-        val normalized = normalizeBn(new)
+        var normalized = normalizeBn(new)
+
+        // ── স্মার্ট অটো-রিসিঙ্ক (স্পেস মিস হ্যান্ডলিং) ──
+        // ইউজার দুটো শব্দের মাঝে স্পেস দিতে ভুলে গেলে (যেমন "স্কুলেযাই"), বর্তমান শব্দের
+        // "বাড়তি" অংশটা যদি ঠিক পরের টার্গেট-শব্দের শুরুর সাথে মিলে যায়, তাহলে এটা নিশ্চিতভাবেই
+        // স্পেস-মিস, বানান-ভুল না। ইউজারকে থামতে/ব্যাকস্পেস দিতে বলার বদলে অ্যাপ নিজেই ঠিক
+        // জায়গায় একটা স্পেস বসিয়ে দেয়, যাতে টাইপিং ফ্লো/গতি একদম অক্ষুণ্ণ থাকে আর বাকি
+        // প্যাসেজের sync নষ্ট না হয়। কিন্তু এই ভুলটা মাফ করে দেওয়া হয় না — নিচের finalize
+        // লুপে এই শব্দটা পরিষ্কারভাবে "ভুল" হিসেবেই গোনা হবে, accuracy-তে প্রভাব ফেলবে,
+        // মিসটেক DB-তে লগ হবে, আর সেশন-শেষের রেজাল্টে (🔄 sync-loss কাউন্ট) দেখানো হবে —
+        // practice-এর সততা অক্ষুণ্ণ থাকে, শুধু হাতে ব্যাকস্পেস দিতে হয় না। ন্যূনতম ২ অক্ষর
+        // মিল লাগবে যাতে কাকতালীয়ভাবে ১ অক্ষর মিলে গিয়ে ভুল-পজিটিভ না হয়। ──
+        var autoFixedIndex = -1
+        var autoFixedRawTyped = ""
+        run {
+            val liveSplit = splitTypedWords(normalized)
+            val wIdx = liveSplit.completed.size
+            val target = passageWords.getOrNull(wIdx)
+            val cur = liveSplit.current
+            if (target != null && cur.length > target.length) {
+                val overflow = cur.substring(target.length)
+                val nextWord = passageWords.getOrNull(wIdx + 1)
+                if (overflow.length >= 2 && nextWord != null && nextWord.startsWith(overflow)) {
+                    autoFixedRawTyped = cur   // যা আসলে টাইপ হয়েছিল (স্পেস ছাড়া) — মিসটেক লগে এটাই যাবে
+                    normalized = normalized.dropLast(cur.length) + cur.substring(0, target.length) + " " + overflow
+                    autoFixedIndex = wIdx
+                }
+            }
+        }
 
         val oldSplit = splitTypedWords(userInput)
         val newSplit = splitTypedWords(normalized)
@@ -866,12 +901,17 @@ fun TypingPracticeScreen(
         // একবার করে গণনা/লগ হবে, ইতিমধ্যে লক হওয়া শব্দ আর ছোঁয়া হবে না।
         if (newSplit.completed.size > frozenWordResults.size) {
             var results = frozenWordResults
+            var fixedFlags = autoFixedWordFlags
             for (i in frozenWordResults.size until newSplit.completed.size) {
                 val target    = passageWords.getOrNull(i) ?: break
                 val typedWord = newSplit.completed[i]
-                val isCorrect = typedWord == target
+                val wasAutoFixed = (i == autoFixedIndex)
+                // ── স্পেস অটো-ফিক্স হলে এই শব্দটাকে সবসময় "ভুল" গোনা হয় — অক্ষর ঠিক থাকলেও
+                // ইউজার স্পেসটা আসলে চাপেনি, তাই এই ভুলটা লুকানো/মাফ করা হয় না ──
+                val isCorrect = !wasAutoFixed && typedWord == target
 
-                // ── ক্যারেক্টার-ভিত্তিক গণনা (WPM/accuracy আন্তর্জাতিক সূত্র + হাত-ব্যালান্স) ──
+                // ── ক্যারেক্টার-ভিত্তিক গণনা (WPM/accuracy আন্তর্জাতিক সূত্র + হাত-ব্যালান্স) —
+                // যা আসলে টাইপ হয়েছে (typedWord) তার ভিত্তিতেই, যাতে সংখ্যা কৃত্রিমভাবে না বাড়ে ──
                 val len = maxOf(target.length, typedWord.length)
                 for (j in 0 until len) {
                     totalKeystrokes++
@@ -896,14 +936,20 @@ fun TypingPracticeScreen(
                     }
                 }
                 if (i < passageWords.size - 1) {
-                    // শব্দের পরের স্পেসটাও ১টা কী-প্রেস হিসেবে গোনা (সঠিক শব্দ মানেই স্পেসও ঠিক)
+                    // শব্দের পরের স্পেসটাও ১টা কী-প্রেস হিসেবে গোনা (সঠিক শব্দ মানেই স্পেসও ঠিক;
+                    // অটো-ফিক্স হলে isCorrect এমনিতেই false, তাই স্পেসটাও ভুল হিসেবেই যোগ হবে)
                     totalKeystrokes++
                     if (isCorrect) correctKeystrokes++ else incorrectKeystrokes++
                 }
 
                 // ── mistake/correct লগিং — AI adaptive practice ও sync-loss ইনসাইটের ভিত্তি ──
                 if (!isCorrect) {
-                    val errType = TypingErrorAnalyzer.classify(target, typedWord)
+                    // অটো-ফিক্স হওয়া শব্দের জন্য প্রকৃত (স্পেসবিহীন) টাইপড টেক্সট পাঠানো হয়,
+                    // যাতে classify() ঠিকভাবে SYNC_LOSS (স্পেস-মিস) হিসেবে ধরে, আর মিসটেক DB-তেও
+                    // সঠিক প্রমাণ (তুমি আসলে কী টাইপ করেছিলে) সেভ থাকে
+                    val typedForAnalysis = if (wasAutoFixed) autoFixedRawTyped else typedWord
+                    val errType = if (wasAutoFixed) MistakeErrorType.SYNC_LOSS
+                                  else TypingErrorAnalyzer.classify(target, typedWord)
                     val collectMistakes = (sessionMode == "adaptive" && adaptivePhase == 1) ||
                         (sessionMode == "free" && selectedDifficulty == "custom")
                     if (collectMistakes && errType != MistakeErrorType.SYNC_LOSS) {
@@ -919,17 +965,20 @@ fun TypingPracticeScreen(
                             }
                         }
                     }
-                    scope.launch { TypingMistakeLogger.logMistake(ctx, target, typedWord, passageLang) }
+                    scope.launch { TypingMistakeLogger.logMistake(ctx, target, typedForAnalysis, passageLang) }
                 } else {
                     scope.launch { TypingMistakeLogger.logCorrect(ctx, target, passageLang) }
                 }
 
                 results = results + isCorrect
+                fixedFlags = fixedFlags + wasAutoFixed
             }
             frozenWordResults = results
+            autoFixedWordFlags = fixedFlags
         } else if (newSplit.completed.size < oldSplit.completed.size) {
             // ── ব্যাকস্পেস দিয়ে আগের শব্দে ফিরে গেলে — সেই শব্দ(গুলো)-র লক তুলে নেওয়া ──
             frozenWordResults = frozenWordResults.take(newSplit.completed.size)
+            autoFixedWordFlags = autoFixedWordFlags.take(newSplit.completed.size)
         }
 
         userInput = normalized
@@ -940,7 +989,7 @@ fun TypingPracticeScreen(
         passageIndex = idx
         passage      = normalizeBn(pool.getOrNull(idx)?.text ?: PASSAGES[0].text)
         userInput    = ""
-        frozenWordResults = emptyList()
+        frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
         isStarted    = false
         isFinished   = false
         elapsedSec   = 0
@@ -978,7 +1027,7 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage(language)
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
@@ -993,7 +1042,7 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage("en")
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
+        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
@@ -1004,7 +1053,7 @@ fun TypingPracticeScreen(
     fun startFreeTyping() {
         sessionMode = "freetyping"
         userInput = ""
-        frozenWordResults = emptyList()
+        frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
         isStarted = false
         isFinished = false
         elapsedSec = 0
@@ -1057,7 +1106,7 @@ fun TypingPracticeScreen(
         val pool = poolForLanguage("bn")
         passageIndex = 0
         passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
-        userInput = ""; frozenWordResults = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
+        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
     }
@@ -1068,7 +1117,7 @@ fun TypingPracticeScreen(
     fun startPhase2() {
         adaptivePhase = 2
         passage = normalizeBn(phase2Passage ?: fallbackPassageFor(sessionLanguage))
-        userInput = ""; frozenWordResults = emptyList()
+        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
         isFinished = false
         showPhaseTransition = false
         // isStarted/elapsedSec/correctKeystrokes ইত্যাদি ইচ্ছাকৃতভাবে অপরিবর্তিত —
@@ -1537,8 +1586,12 @@ fun TypingPracticeScreen(
                                 when {
                                     wIdx < frozenWordResults.size -> {
                                         val ok = frozenWordResults[wIdx]
-                                        val style = if (ok) SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
-                                                    else SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                        val wasAutoFixed = autoFixedWordFlags.getOrNull(wIdx) == true
+                                        val style = when {
+                                            wasAutoFixed -> SpanStyle(color = AmberWarn, background = Color(0xFFFFF3CD))
+                                            ok            -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                            else          -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                        }
                                         withStyle(style) { append(word) }
                                     }
                                     wIdx == frozenWordResults.size -> {
@@ -1555,10 +1608,18 @@ fun TypingPracticeScreen(
                                             }
                                             withStyle(style) { append(word[ci]) }
                                         }
-                                        // ইউজার যদি শব্দের চেয়ে বেশি অক্ষর টাইপ করে ফেলে (ভুল করে
-                                        // এক্সট্রা অক্ষর), সেগুলোও দেখানো হয় — যাতে ও বুঝতে পারে
+                                        // ইউজার যদি শব্দের চেয়ে বেশি অক্ষর টাইপ করে ফেলে (স্পেস চাপতে
+                                        // ভুলে পরের শব্দ জুড়ে যাচ্ছে), সেই "অতিরিক্ত" অংশটা আলাদা
+                                        // রঙ + strikethrough দিয়ে দেখানো হয় — পরের (এখনো টাইপ না-হওয়া)
+                                        // শব্দের সাথে যাতে গুলিয়ে না যায় ──
                                         if (split.current.length > word.length) {
-                                            withStyle(SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))) {
+                                            withStyle(
+                                                SpanStyle(
+                                                    color = AmberWarn,
+                                                    background = Color(0xFFFFF3CD),
+                                                    textDecoration = TextDecoration.LineThrough
+                                                )
+                                            ) {
                                                 append(split.current.substring(word.length))
                                             }
                                         }
@@ -1736,7 +1797,7 @@ fun TypingPracticeScreen(
                                 sessionMode == "study" -> {
                                     // ── আবার — একই আইটেম, শুধু টাইপিং স্টেট রিসেট (used হিসেবে
                                     // ইতিমধ্যে সেভ হয়ে গেছে, দ্বিতীয়বার সেভ করলেও ক্ষতি নেই — id একই থাকায় REPLACE হবে) ──
-                                    userInput = ""; frozenWordResults = emptyList()
+                                    userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
                                     isStarted = false; isFinished = false; elapsedSec = 0; result = null
                                     correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
                                     leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -2245,4 +2306,3 @@ private fun ResultStat(label: String, value: String, color: Color, dark: Boolean
         Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
     }
 }
-
