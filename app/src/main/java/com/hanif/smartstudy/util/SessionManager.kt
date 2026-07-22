@@ -40,6 +40,14 @@ class SessionManager(private val context: Context) {
         val KEY_STUDY_REVEAL_MODE = booleanPreferencesKey("study_reveal_mode")
         // Study: টাইপ করে উত্তর মেলানোর রিকল-প্র্যাকটিস মোড (কীবোর্ড আইকন টগল)
         val KEY_STUDY_RECALL_MODE = booleanPreferencesKey("study_recall_mode")
+        // ── Study রিকল-টাইপিং (⌨️) মোডে Written উত্তর AI দিয়ে অটো-চেক করার জন্য
+        // ইউজারের নিজের API key — Settings থেকে একবার সেভ করলে DataStore-এ থেকে যায়,
+        // পরের বার আবার বসাতে হয় না। fallback order: Groq → Mistral → Cerebras → Gemini
+        // (Gemini সবার শেষে, কারণ এটা প্রায়ই ফেইল করে)।
+        val KEY_AI_GROQ_KEY      = stringPreferencesKey("ai_groq_api_key")
+        val KEY_AI_MISTRAL_KEY   = stringPreferencesKey("ai_mistral_api_key")
+        val KEY_AI_CEREBRAS_KEY  = stringPreferencesKey("ai_cerebras_api_key")
+        val KEY_AI_GEMINI_KEY    = stringPreferencesKey("ai_gemini_api_key")
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
@@ -194,6 +202,27 @@ class SessionManager(private val context: Context) {
 
     suspend fun setStudyRecallMode(on: Boolean) {
         context.dataStore.edit { it[KEY_STUDY_RECALL_MODE] = on }
+    }
+
+    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ/লোড ────
+
+    fun getAiApiKeys(): com.hanif.smartstudy.data.model.AiApiKeys = runBlocking {
+        val prefs = context.dataStore.data.first()
+        com.hanif.smartstudy.data.model.AiApiKeys(
+            groq     = prefs[KEY_AI_GROQ_KEY] ?: "",
+            mistral  = prefs[KEY_AI_MISTRAL_KEY] ?: "",
+            cerebras = prefs[KEY_AI_CEREBRAS_KEY] ?: "",
+            gemini   = prefs[KEY_AI_GEMINI_KEY] ?: ""
+        )
+    }
+
+    suspend fun setAiApiKeys(keys: com.hanif.smartstudy.data.model.AiApiKeys) {
+        context.dataStore.edit {
+            it[KEY_AI_GROQ_KEY]     = keys.groq.trim()
+            it[KEY_AI_MISTRAL_KEY]  = keys.mistral.trim()
+            it[KEY_AI_CEREBRAS_KEY] = keys.cerebras.trim()
+            it[KEY_AI_GEMINI_KEY]   = keys.gemini.trim()
+        }
     }
 
     // ── Offline mode (ম্যানুয়াল বাটন — Firebase সম্পূর্ণ বন্ধ) ───
