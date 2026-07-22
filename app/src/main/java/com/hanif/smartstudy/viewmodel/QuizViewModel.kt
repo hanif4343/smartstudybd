@@ -769,6 +769,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(writtenDrafts = it.writtenDrafts + (key to text)) }
     }
 
+    /**
+     * ── Study রিকল-টাইপিং (⌨️) মোডে Written উত্তর AI দিয়ে অটো-চেক ──
+     * Settings-এ সেভ করা key দিয়ে Groq → Mistral → Cerebras → Gemini ক্রমে চেষ্টা হয়।
+     * কোনো key সেভ করা না থাকলে বা সবগুলো ব্যর্থ হলে null রিটার্ন করে — তখন
+     * SharedComponents-এর QuestionCard সাথে সাথেই ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক করে।
+     */
+    suspend fun gradeWrittenWithAi(question: String, correctAnswer: String, userAnswer: String): Boolean? {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey()) return null
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.gradeWrittenAnswer(
+            question      = question,
+            correctAnswer = correctAnswer,
+            userAnswer    = userAnswer,
+            keys          = keys
+        )
+    }
+
+
     fun submitQuiz() {
         timerJob?.cancel()
 
