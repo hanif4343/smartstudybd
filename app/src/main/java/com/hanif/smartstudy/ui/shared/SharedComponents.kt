@@ -472,7 +472,11 @@ fun QuestionCard(
                     keyboardActions = KeyboardActions(onDone = { isRevealed = true }),
                     colors          = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = Indigo600,
-                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                        // ── টাইপ করা আছে কিন্তু এখনো Enter/সাবমিট দিয়ে চেক করা
+                        // হয়নি — এমন বক্সে হালকা হলুদ বর্ডার দেখায়, যাতে স্ক্রল
+                        // করার সময়ই বোঝা যায় কোনগুলো "উত্তর দেওয়া কিন্তু
+                        // যাচাই-বাকি" আর কোনগুলো এখনো একদম খালি ──
+                        unfocusedBorderColor = if (recallTypedAnswer.isNotBlank()) Color(0xFFF59E0B) else Color(0xFFE2E8F0)
                     )
                 )
             } else if (studyHideAnswer && !isRevealed) {
