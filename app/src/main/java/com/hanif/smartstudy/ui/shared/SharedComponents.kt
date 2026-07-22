@@ -223,6 +223,11 @@ fun QuestionCard(
     answerFocusRequester : FocusRequester? = null,
     onRecallGraded       : (Boolean) -> Unit = {},
     studyRecallMode      : Boolean = false,
+    // ── ⌨️ রিকল-টাইপিং মোডে Enter না চেপে একটা একটা করে টাইপ করার সময়ও
+    //    প্রতিটা কি-স্ট্রোকে প্যারেন্ট স্ক্রিনকে জানানো হয় — এতে প্যারেন্টে
+    //    বসানো "সাবমিট" বাটন (নিচের ফ্লোটিং বার) যেকোনো সময় বর্তমান খসড়া
+    //    উত্তর নিয়ে AI দিয়ে ম্যাচ করাতে পারে, Enter চাপার অপেক্ষা করতে হয় না। ──
+    onRecallDraftChange  : (String) -> Unit = {},
     // ── ⌨️ রিকল-টাইপিং মোডে Written উত্তর AI দিয়ে অটো-চেক করার জন্য —
     //    Settings-এ সেভ করা key দিয়ে Groq→Mistral→Cerebras→Gemini ক্রমে চেষ্টা হয়।
     //    null রিটার্ন করলে (কোনো key নেই / সব ব্যর্থ) সাথে সাথেই ম্যানুয়াল
@@ -448,7 +453,7 @@ fun QuestionCard(
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value         = recallTypedAnswer,
-                    onValueChange = { recallTypedAnswer = it },
+                    onValueChange = { recallTypedAnswer = it; onRecallDraftChange(it) },
                     modifier      = Modifier
                         .fillMaxWidth()
                         .then(
@@ -499,11 +504,13 @@ fun QuestionCard(
                         }.getOrNull()
                         aiChecking = false
                         if (verdict != null) {
-                            // ── ফলাফল (ঠিক/ভুল) আগে স্ক্রিনে দেখাও, ৫ সেকেন্ড
-                            // অপেক্ষা করো, তারপরই পরের প্রশ্নে অটো-এগিয়ে যাও —
-                            // যাতে ইউজার ফলাফল দেখার আগেই পরের প্রশ্নে চলে না যায় ──
+                            // ── ফলাফল (ঠিক/ভুল) আগে স্ক্রিনে দেখাও, তারপরই পরের
+                            // প্রশ্নে অটো-এগিয়ে যাও — সঠিক হলে ৩ সেকেন্ড যথেষ্ট,
+                            // কিন্তু ভুল হলে উত্তরটা পড়ে শেখার সুযোগ দিতে ৭ সেকেন্ড
+                            // অপেক্ষা করা হয় যাতে ইউজার তাড়াহুড়ো করে পরের প্রশ্নে
+                            // চলে না যায় ──
                             aiVerdict = verdict
-                            kotlinx.coroutines.delay(5000)
+                            kotlinx.coroutines.delay(if (verdict) 3000 else 7000)
                             recallGraded = true
                             onRecallGraded(verdict)
                         } else {
