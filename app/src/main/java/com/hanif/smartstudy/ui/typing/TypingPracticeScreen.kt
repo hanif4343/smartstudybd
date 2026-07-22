@@ -323,15 +323,39 @@ fun TypingPracticeScreen(
     var rightWrongChars   by remember { mutableStateOf(0) }
     var syncLossCount     by remember { mutableStateOf(0) }
 
-    /** Study sheet-এর একটা আইটেম (question/explanation/technique) জোড়া দিয়ে একটাই
-     *  টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়" গোছের
-     *  পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে */
-    fun buildStudyPassageText(item: com.hanif.smartstudy.data.local.QuestionEntity): String =
-        listOfNotNull(
-            item.question.takeIf { it.isNotBlank() },
-            item.explanation.takeIf { it.isNotBlank() },
-            item.technique.takeIf { it.isNotBlank() }
+    /** কোনো টেক্সট আসলে টাইপ করার মতো অর্থবহ কনটেন্ট কিনা — শুধু একটা raw
+     *  ছবি/লিংক (যেমন https://i.ibb.co/...) হলে সেটা বাদ দেওয়া হয়, কারণ সেটা
+     *  টাইপ করার মতো কোনো বাক্য/ব্যাখ্যা না, স্রেফ একটা URL */
+    fun isTypableText(text: String?): Boolean {
+        val t = text?.trim().orEmpty()
+        if (t.isBlank()) return false
+        val urlOnly = Regex("""^(https?://\S+|www\.\S+)[.\s]*$""", RegexOption.IGNORE_CASE)
+        return !urlOnly.matches(t)
+    }
+
+    /** Study sheet-এর একটা আইটেম (question/explanation/technique/answer) জোড়া দিয়ে
+     *  একটাই টাইপিং প্যাসেজ বানায় — "কারক কি? কত প্রকার? কোনটা কি উপায়ে চেনা যায়"
+     *  গোছের পুরো ব্যাখ্যাটাই একসাথে টাইপ করা যাবে।
+     *  — explanationIsPublic = false (এডমিন-শুধু/প্রাইভেট ব্যাখ্যা) হলে সাধারণ
+     *    ইউজারের জন্য সেটা বাদ দেওয়া হয় — Study রিডিং স্ক্রিনে যেটা লুকানো থাকে,
+     *    Study Typing-এও সেটা "অন্য জায়গায়" ফাঁস হয়ে যাওয়া ঠিক না।
+     *  — explanation/technique যদি স্রেফ একটা raw ছবির লিংক হয়, সেটাও বাদ।
+     *  — ব্যাখ্যা ফাঁকা/অদেখাযোগ্য/শুধু-লিংক হলে (কিন্তু উত্তরে টাইপ করার মতো আসল
+     *    টেক্সট থাকলে) — ব্যাখ্যার বদলে সেই উত্তরটাই প্যাসেজে যোগ হয়, যাতে আইটেমটা
+     *    পুরো বাদ না পড়ে যায় ──
+     */
+    fun buildStudyPassageText(item: com.hanif.smartstudy.data.local.QuestionEntity): String {
+        val isAdmin = session.getCurrentUser()?.isAdmin() == true
+        val canSeeExplanation = item.explanationIsPublic || isAdmin
+        val explanationUsable = canSeeExplanation && isTypableText(item.explanation)
+        val explanationOrAnswer = if (explanationUsable) item.explanation
+                                   else item.answer.takeIf { isTypableText(it) }
+        return listOfNotNull(
+            item.question.takeIf { isTypableText(it) },
+            explanationOrAnswer,
+            item.technique.takeIf { isTypableText(it) }
         ).joinToString(" ").trim()
+    }
 
     /** Room-এর "STUDY" শীটে ডেটা না থাকলে (বা এই সাবজেক্ট/সাব-টপিকের ডেটা এখনো Room-এ
      *  লেখা হয়নি) — ContentRepository-র in-memory cache (যেটা 📚 Study সেকশন খুললেই
