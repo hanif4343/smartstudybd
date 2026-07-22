@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -202,6 +204,11 @@ fun SettingsScreen(
                         onCheckedChange = { vm.setSoundOff(!it) }
                     )
                 }
+            }
+
+            // ── Written উত্তর AI-অটো-চেক (Study ⌨️ রিকল-টাইপিং মোড) ──
+            SettingsCard("🤖 AI দিয়ে Written উত্তর চেক") {
+                AiApiKeysSection(state = state, vm = vm)
             }
 
             // ── Reminder ──
@@ -489,6 +496,79 @@ fun SettingsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
             Column(content = content)
         }
     }
+}
+
+// ── Written উত্তর AI-অটো-চেক: Groq/Mistral/Cerebras/Gemini — ৪টা API key ──
+// একবার সেভ করলে DataStore-এ থেকে যায়, বারবার বসাতে হয় না। শুধু Study-তে
+// ⌨️ (রিকল-টাইপিং) মোড চালু থাকলেই ব্যবহার হয়। চেষ্টার ক্রম:
+// Groq → Mistral → Cerebras → Gemini (Gemini সবার শেষে — এটা প্রায়ই ফেইল করে)।
+// কোনো key না দিলে বা AI ব্যর্থ হলে আগের মতোই ম্যানুয়াল ঠিক/ভুল বাটনে চলে।
+@Composable
+private fun AiApiKeysSection(state: MenuUiState, vm: MenuViewModel) {
+    var groqKey     by remember(state.groqApiKey)     { mutableStateOf(state.groqApiKey) }
+    var mistralKey  by remember(state.mistralApiKey)  { mutableStateOf(state.mistralApiKey) }
+    var cerebrasKey by remember(state.cerebrasApiKey) { mutableStateOf(state.cerebrasApiKey) }
+    var geminiKey   by remember(state.geminiApiKey)   { mutableStateOf(state.geminiApiKey) }
+
+    val context = LocalContext.current
+    LaunchedEffect(state.aiKeysSavedMsg) {
+        state.aiKeysSavedMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            vm.clearAiKeysSavedMsg()
+        }
+    }
+
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "স্টাডিতে ⌨️ (টাইপ করে উত্তর মেলানো) মোড চালু থাকলে, নিজের লেখা Written " +
+            "উত্তর জমা দেওয়ার সাথে সাথে এই key গুলো দিয়ে AI সঠিক/ভুল ধরে দেবে। " +
+            "চেষ্টার ক্রম: Groq → Mistral → Cerebras → Gemini। একটা ফেইল করলে পরেরটা " +
+            "চেষ্টা হয়, সব ব্যর্থ হলে বা key না দিলে আগের মতোই নিজে ঠিক/ভুল বেছে নেওয়া যাবে।",
+            fontFamily = NotoSansBengali, fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
+        )
+
+        AiApiKeyField(label = "Groq API Key", value = groqKey, onChange = { groqKey = it })
+        AiApiKeyField(label = "Mistral API Key", value = mistralKey, onChange = { mistralKey = it })
+        AiApiKeyField(label = "Cerebras API Key", value = cerebrasKey, onChange = { cerebrasKey = it })
+        AiApiKeyField(label = "Gemini API Key", value = geminiKey, onChange = { geminiKey = it })
+
+        Button(
+            onClick  = { vm.saveAiApiKeys(groqKey, mistralKey, cerebrasKey, geminiKey) },
+            modifier = Modifier.fillMaxWidth(),
+            shape    = RoundedCornerShape(12.dp),
+            colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+        ) {
+            Text("সংরক্ষণ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun AiApiKeyField(label: String, value: String, onChange: (String) -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value         = value,
+        onValueChange = onChange,
+        label         = { Text(label, fontSize = 12.sp) },
+        singleLine    = true,
+        modifier      = Modifier.fillMaxWidth(),
+        shape         = RoundedCornerShape(12.dp),
+        visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
+                               else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        trailingIcon  = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                    contentDescription = if (visible) "লুকাও" else "দেখাও"
+                )
+            }
+        },
+        colors        = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor   = Indigo600,
+            unfocusedBorderColor = Color(0xFFE2E8F0)
+        )
+    )
 }
 
 // ── Theme color chip ──────────────────────────────────────────
