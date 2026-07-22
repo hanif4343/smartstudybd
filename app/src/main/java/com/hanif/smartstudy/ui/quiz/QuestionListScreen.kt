@@ -517,8 +517,14 @@ fun QuestionListScreen(
                     if (mode == StudyMode.STUDY && studyRecallMode) {
                         Button(
                             onClick = {
+                                // ── ⚠️ এখানে item.isWritten() দিয়ে ফিল্টার করা যাবে না —
+                                // Study-র ⌨️ রিকল-টাইপিং বক্স MCQ/Study যেকোনো টাইপের
+                                // প্রশ্নেই দেখা যায় (SharedComponents.kt-এর studyRecallActive
+                                // এর শর্তের সাথে মিলিয়ে রাখা হলো), শুধু "Written" টাইপে না —
+                                // আগে ভুলবশত isWritten() চেক থাকায় অন্য টাইপের প্রশ্নে টাইপ
+                                // করা উত্তরগুলো সাবমিটে ধরা পড়ছিল না ──
                                 val candidates = pagedQuestions.filter { q ->
-                                    q.isWritten() && q.answer.isNotBlank() &&
+                                    q.answer.isNotBlank() &&
                                         recallLiveDrafts[q.id]?.isNotBlank() == true
                                 }
                                 studySubmitShowDetails = false
