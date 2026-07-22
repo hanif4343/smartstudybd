@@ -69,7 +69,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.TextRange
@@ -211,6 +216,13 @@ fun QuestionCard(
     onBookmark     : () -> Unit,
     onStudyDone    : () -> Unit = {},
     onReport       : () -> Unit,
+    // ── Study রিকল-টাইপিং মোড: ⌨️ আইকন টগল চালু থাকলে টাইপ-বক্সে উত্তর
+    //    লিখে Enter চাপলে আসল উত্তর দেখা যায়, তারপর ঠিক/ভুল বেছে Enter
+    //    চাপলেই পরের প্রশ্নের টাইপ-বক্সে কার্সর চলে যায়। টগল বন্ধ থাকলে
+    //    সবকিছু আগের মতোই (normal) কাজ করবে। ──
+    answerFocusRequester : FocusRequester? = null,
+    onRecallGraded       : (Boolean) -> Unit = {},
+    studyRecallMode      : Boolean = false,
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
@@ -392,15 +404,50 @@ fun QuestionCard(
                 else -> {}
             }
 
-            // ── Study: "শুধু প্রশ্ন দেখ" মোড — চালু থাকলে ও এই প্রশ্নের আসলেই
-            //    উত্তর/টেক্সট কনটেন্ট থাকলে, উত্তর/ব্যাখ্যা/টেকনিক সব লুকিয়ে শুধু
-            //    "উত্তর দেখুন" বাটন দেখানো হয়। ট্যাপ করলেই এই কার্ডের জন্য প্রকাশ
-            //    হয়ে যায় (isRevealed প্রতিটা প্রশ্নের id অনুযায়ী আলাদা)। ──
-            val hasAnswerContent = !studyNoQ && item.answer.isNotBlank()
-            val studyHideAnswer  = mode == StudyMode.STUDY && studyRevealMode && hasAnswerContent
+            // ── Study: "শুধু প্রশ্ন দেখ" (👁️) মোড — উত্তর/ব্যাখ্যা/টেকনিক লুকিয়ে
+            //    শুধু "উত্তর দেখুন" বাটন দেখায়, ট্যাপ করলেই প্রকাশ হয়ে যায়।
+            // ── Study: রিকল-টাইপিং (⌨️) মোড — এটা আলাদা, স্বতন্ত্র টগল। চালু
+            //    থাকলে উত্তর দেখার আগে একটা টাইপ-বক্সে নিজের উত্তর লিখতে হবে,
+            //    Enter চাপলে আসল উত্তর দেখা যায়, তারপর ঠিক/ভুল বেছে Enter
+            //    চাপলেই পরের প্রশ্নের টাইপ-বক্সে কার্সর চলে যায়। বন্ধ থাকলে
+            //    সবকিছু আগের মতোই (normal) আচরণ করবে। ──
+            val hasAnswerContent  = !studyNoQ && item.answer.isNotBlank()
+            val studyHideAnswer   = mode == StudyMode.STUDY && studyRevealMode && hasAnswerContent
+            val studyRecallActive = mode == StudyMode.STUDY && studyRecallMode && hasAnswerContent
             var isRevealed by remember(item.id) { mutableStateOf(false) }
+            // ── রিকল-টাইপিং স্টেট: টাইপ করা উত্তর ও গ্রেড হয়েছে কিনা ──
+            var recallTypedAnswer by remember(item.id) { mutableStateOf("") }
+            var recallGraded by remember(item.id) { mutableStateOf(false) }
 
-            if (studyHideAnswer && !isRevealed) {
+            if (studyRecallActive && !isRevealed) {
+                // ── ⌨️ রিকল-টাইপিং মোড: টাইপ-বক্স, Enter চাপলে উত্তর দেখাবে ──
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value         = recallTypedAnswer,
+                    onValueChange = { recallTypedAnswer = it },
+                    modifier      = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (answerFocusRequester != null) Modifier.focusRequester(answerFocusRequester)
+                            else Modifier
+                        ),
+                    singleLine    = true,
+                    placeholder   = {
+                        Text(
+                            "এখানে তোমার উত্তর লিখো, এন্টার চাপলে আসল উত্তর দেখাবে…",
+                            fontFamily = NotoSansBengali, color = Color(0xFFCBD5E1), fontSize = 13.sp
+                        )
+                    },
+                    shape           = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { isRevealed = true }),
+                    colors          = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Indigo600,
+                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                    )
+                )
+            } else if (studyHideAnswer && !isRevealed) {
+                // ── 👁️ শুধু-প্রশ্ন-দেখ মোড (রিকল-টাইপিং বন্ধ থাকলে): আগের মতোই সাধারণ বাটন ──
                 Spacer(Modifier.height(10.dp))
                 Button(
                     onClick  = { isRevealed = true },
@@ -424,6 +471,16 @@ fun QuestionCard(
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
                 val answerTtsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
+                if (studyRecallActive && recallTypedAnswer.isNotBlank()) {
+                    Text(
+                        "তোমার উত্তর: $recallTypedAnswer",
+                        fontSize   = 11.sp,
+                        fontFamily = NotoSansBengali,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 15.sp,
+                        modifier   = Modifier.padding(bottom = 6.dp)
+                    )
+                }
                 AnswerBox(
                     text        = item.answer,
                     ttsKey      = answerTtsKey,
@@ -438,6 +495,47 @@ fun QuestionCard(
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     StudyDoneCheckIcon(done = item.isStudyDone, onClick = onStudyDone)
+                }
+            }
+
+            // ── ⌨️ রিকল-টাইপিং: উত্তর দেখানোর পর "ঠিক হয়েছে"/"ভুল হয়েছে" বাছাই —
+            //    ডিফল্ট ফোকাস "ঠিক হয়েছে"-তে থাকে, হার্ডওয়্যার কীবোর্ডে Tab দিয়ে
+            //    দুই বাটনের মধ্যে টগল করা যায়, আর Enter চাপলেই সেই গ্রেড কনফার্ম
+            //    হয়ে পরের প্রশ্নের টাইপ-বক্সে ফোকাস চলে যায় — পুরোটা কীবোর্ড
+            //    দিয়েই দ্রুত করা যায়, টাচ লাগে না। ──
+            if (studyRecallActive && !recallGraded) {
+                val correctFocusRequester = remember(item.id) { FocusRequester() }
+                var correctFocused by remember(item.id) { mutableStateOf(false) }
+                var wrongFocused by remember(item.id) { mutableStateOf(false) }
+                LaunchedEffect(item.id) {
+                    kotlinx.coroutines.delay(80)
+                    runCatching { correctFocusRequester.requestFocus() }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick  = { recallGraded = true; onRecallGraded(true) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(correctFocusRequester)
+                            .onFocusChanged { correctFocused = it.isFocused },
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = GreenOk),
+                        border   = if (correctFocused) BorderStroke(2.dp, Color.White) else null
+                    ) {
+                        Text("✅ ঠিক হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
+                    Button(
+                        onClick  = { recallGraded = true; onRecallGraded(false) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { wrongFocused = it.isFocused },
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = RedWrong),
+                        border   = if (wrongFocused) BorderStroke(2.dp, Color.White) else null
+                    ) {
+                        Text("❌ ভুল হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
                 }
             }
 
