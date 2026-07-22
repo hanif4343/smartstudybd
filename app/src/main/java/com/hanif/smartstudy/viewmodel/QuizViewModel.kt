@@ -786,6 +786,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /**
+     * ── Study রিকল-টাইপিং মোডের নিচের ফ্লোটিং "সাবমিট" বাটনে ফলাফলের
+     * "বিস্তারিত" চাপলে — ভুলটা ঠিক কোথায় হয়েছে তার সংক্ষিপ্ত ব্যাখ্যা আনে। ──
+     */
+    suspend fun explainWrittenMistake(question: String, correctAnswer: String, userAnswer: String): String? {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey()) return null
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.explainMistake(
+            question      = question,
+            correctAnswer = correctAnswer,
+            userAnswer    = userAnswer,
+            keys          = keys
+        )
+    }
+
 
     fun submitQuiz() {
         timerJob?.cancel()
