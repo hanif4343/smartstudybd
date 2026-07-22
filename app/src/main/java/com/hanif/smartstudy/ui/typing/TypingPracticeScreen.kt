@@ -300,6 +300,13 @@ fun TypingPracticeScreen(
     var studyPoolUsed     by remember { mutableStateOf(0) }
     var studyExhausted    by remember { mutableStateOf(false) }
     var studyLoading      by remember { mutableStateOf(false) }
+    // ── আগে শুধু "list খালি কিনা" দেখে "লোড হচ্ছে" টেক্সট দেখানো হতো — তাই যদি
+    // ক্যাশে সত্যিই কোনো ডেটা না থাকে (এখনো সিঙ্ক হয়নি/ইন্টারনেট নেই), লোডিং শেষ
+    // হয়ে যাওয়ার পরও লিস্ট খালিই থেকে যেত, ফলে UI চিরকাল "⏳ লোড হচ্ছে..." দেখাতো
+    // যদিও আসলে লোডিং অনেক আগেই শেষ। এখন আলাদা loading-flag রাখা হলো, যাতে
+    // "এখনো লোড হচ্ছে" আর "লোড শেষ কিন্তু কোনো ডেটা নেই" — এই দুটো আলাদা করা যায় ──
+    var studySubjectsLoading  by remember { mutableStateOf(false) }
+    var studySubTopicsLoading by remember { mutableStateOf(false) }
 
     // ── কীস্ট্রোক-ভিত্তিক accuracy ট্র্যাকিং — WPM/accuracy আন্তর্জাতিক ক্যারেক্টার-ভিত্তিক
     // সূত্র মেনেই হিসেব হয় (৫ ক্যারেক্টার = ১ শব্দ), শুধু গণনাটা এখন প্রতিটা শব্দ "লক" হওয়ার
@@ -331,34 +338,43 @@ fun TypingPracticeScreen(
     fun loadStudyPool(subject: String, subTopic: String) {
         studyLoading = true
         scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            val progressDao = AppDatabase.getInstance(ctx).studyTypingProgressDao()
-            val user = session.getCurrentUser()
-            val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            try {
+                val dao = AppDatabase.getInstance(ctx).questionDao()
+                val progressDao = AppDatabase.getInstance(ctx).studyTypingProgressDao()
+                val user = session.getCurrentUser()
+                val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
 
-            val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
-            val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
-                .filter { buildStudyPassageText(it).isNotBlank() }
-            val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
-            val available = visible.filter { it.fbKey !in usedIds }
+                val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+                val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
+                    .filter { buildStudyPassageText(it).isNotBlank() }
+                val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
+                val available = visible.filter { it.fbKey !in usedIds }
 
-            studyPoolTotal = visible.size
-            studyPoolUsed  = visible.count { it.fbKey in usedIds }
-            studyExhausted = visible.isNotEmpty() && available.isEmpty()
+                studyPoolTotal = visible.size
+                studyPoolUsed  = visible.count { it.fbKey in usedIds }
+                studyExhausted = visible.isNotEmpty() && available.isEmpty()
 
-            val pick = available.randomOrNull()
-            if (pick != null) {
-                studyCurrentId = pick.fbKey
-                passage = normalizeBn(buildStudyPassageText(pick))
-            } else {
-                studyCurrentId = null
+                val pick = available.randomOrNull()
+                if (pick != null) {
+                    studyCurrentId = pick.fbKey
+                    passage = normalizeBn(buildStudyPassageText(pick))
+                } else {
+                    studyCurrentId = null
+                    passage = ""
+                }
+                userInput = ""; frozenWordResults = emptyList()
+                isStarted = false; isFinished = false; elapsedSec = 0; result = null
+                correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+                leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+            } catch (e: Exception) {
+                // ── আগে এখানে exception হলে studyLoading আর কখনো false হতো না —
+                // UI চিরকাল "⏳ প্যাসেজ লোড হচ্ছে..." দেখিয়ে যেত। এখন try/finally
+                // দিয়ে নিশ্চিত করা হলো এটা যেকোনো অবস্থাতেই শেষ হবে ──
                 passage = ""
+                studyCurrentId = null
+            } finally {
+                studyLoading = false
             }
-            userInput = ""; frozenWordResults = emptyList()
-            isStarted = false; isFinished = false; elapsedSec = 0; result = null
-            correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
-            leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
-            studyLoading = false
         }
     }
 
@@ -370,9 +386,16 @@ fun TypingPracticeScreen(
         studyCurrentId = null
         passage = ""
         studyExhausted = false
+        studySubTopicsLoading = true
         scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            studySubTopicList = dao.getSubTopics("STUDY", subject)
+            try {
+                val dao = AppDatabase.getInstance(ctx).questionDao()
+                studySubTopicList = dao.getSubTopics("STUDY", subject)
+            } catch (e: Exception) {
+                studySubTopicList = emptyList()
+            } finally {
+                studySubTopicsLoading = false
+            }
         }
     }
 
@@ -390,9 +413,16 @@ fun TypingPracticeScreen(
         isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+        studySubjectsLoading = true
         scope.launch {
-            val dao = AppDatabase.getInstance(ctx).questionDao()
-            studySubjectList = dao.getSubjects("STUDY")
+            try {
+                val dao = AppDatabase.getInstance(ctx).questionDao()
+                studySubjectList = dao.getSubjects("STUDY")
+            } catch (e: Exception) {
+                studySubjectList = emptyList()
+            } finally {
+                studySubjectsLoading = false
+            }
         }
     }
 
@@ -1176,7 +1206,10 @@ fun TypingPracticeScreen(
 
                 if (sessionMode == "study") {
                     // ── সাবজেক্ট চিপ ──
-                    if (studySubjectList.isNotEmpty()) {
+                    if (studySubjectsLoading) {
+                        Text("⏳ বিষয় লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (studySubjectList.isNotEmpty()) {
                         Text("বিষয় বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(
@@ -1196,12 +1229,26 @@ fun TypingPracticeScreen(
                             }
                         }
                     } else {
-                        Text("⏳ বিষয় লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // ── আগে এই অবস্থায়ও "⏳ বিষয় লোড হচ্ছে..." দেখাতো — লোডিং আসলে
+                        // শেষ হয়ে গেলেও, কারণ "খালি লিস্ট" আর "এখনো লোড হচ্ছে" আলাদা করা
+                        // যেত না। এখন লোড শেষেও ক্যাশে কিছু না পেলে স্পষ্ট বার্তা + রিট্রাই ──
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "📭 ক্যাশে কোনো Study কনটেন্ট পাওয়া যায়নি — ইন্টারনেট কানেকশন চেক করে আবার চেষ্টা করো, অথবা আগে একবার 📚 Study সেকশন খুলে কনটেন্ট সিঙ্ক করে নাও।",
+                                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp
+                            )
+                            OutlinedButton(onClick = { startStudyMode() }, shape = RoundedCornerShape(10.dp)) {
+                                Text("🔄 আবার চেষ্টা করো", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                            }
+                        }
                     }
 
                     // ── সাব-টপিক চিপ ──
-                    if (studySubject != null && studySubTopicList.isNotEmpty()) {
+                    if (studySubject != null && studySubTopicsLoading) {
+                        Text("⏳ সাব-টপিক লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (studySubject != null && studySubTopicList.isNotEmpty()) {
                         Text("সাব-টপিক বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(
@@ -1220,6 +1267,9 @@ fun TypingPracticeScreen(
                                 }
                             }
                         }
+                    } else if (studySubject != null) {
+                        Text("এই বিষয়ে কোনো সাব-টপিক পাওয়া যায়নি।", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
                     // ── প্রগ্রেস লেবেল, যেমন "কারক: ৮/১০ শেষ" ──
@@ -1253,6 +1303,15 @@ fun TypingPracticeScreen(
                     } else if (studyLoading) {
                         Text("⏳ প্যাসেজ লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (studySubTopic != null && !studyExhausted && studyPoolTotal == 0) {
+                        // ── লোড শেষ, কিন্তু এই সাব-টপিকে টাইপযোগ্য কোনো কনটেন্টই নেই
+                        // (audience filter-এ বাদ পড়েছে বা প্রশ্ন/ব্যাখ্যা/টেকনিক সব খালি) —
+                        // আগে এখানে কিছুই দেখাতো না, খালি স্ক্রিন দেখে "আটকে আছে" মনে হতো ──
+                        Text(
+                            "😕 এই সাব-টপিকে টাইপ করার মতো কোনো কনটেন্ট পাওয়া যায়নি — অন্য একটা সাব-টপিক বেছে নাও।",
+                            fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 } // Column
@@ -1351,18 +1410,8 @@ fun TypingPracticeScreen(
                                     modifier = Modifier.size(18.dp))
                             }
                         }
-                        if (sessionMode != "study") {
-                        val diff = currentPool().getOrNull(passageIndex)?.difficulty
-                            ?: PASSAGES.getOrNull(passageIndex)?.difficulty ?: "medium"
-                        Box(
-                            Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(difficultyColor(diff).copy(alpha = 0.12f))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Text(difficultyLabel(diff), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                                color = difficultyColor(diff), fontFamily = NotoSansBengali)
-                        }
-                        }
+                        // ── কঠিনতার স্তর বাজ (সহজ/মাঝারি/কঠিন) এখন আর দেখানো হয় না —
+                        // পুরোপুরি রিমুভ করা হলো, ব্যবহারকারীর ইনপুট/সিলেকশনের দরকার নেই ──
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1410,6 +1459,13 @@ fun TypingPracticeScreen(
                                         withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(word) }
                                     }
                                 }
+                            }
+                            // ── এই প্যাসেজ শেষ হলেও সেশন থামে না — পরেরটা অটো লোড হয়। সেটা
+                            // বোঝানোর জন্য শেষে " ....." দেখানো হচ্ছে (এই ব্লক শুধু
+                            // sessionMode != "freetyping" হলেই রেন্ডার হয়, যেখানে টার্গেট
+                            // প্যাসেজ থাকে) ──
+                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))) {
+                                append(" . . . . .")
                             }
                         },
                         fontSize = 17.sp, fontWeight = FontWeight.Medium,
@@ -1483,11 +1539,12 @@ fun TypingPracticeScreen(
                         horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("📊 প্রথম ধাপ শেষ!", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
                             fontFamily = NotoSansBengali, color = Indigo600)
+                        // ── ভুল হওয়া শব্দের আসল লিস্ট আর সরাসরি দেখানো হয় না — শুধু একটা
+                        // সাধারণ বার্তা, শব্দগুলো AI-এর কাছেই (weakNow) থেকে যায় ──
                         if (weakNow.isNotEmpty()) {
-                            Text("এই শব্দগুলোয় ভুল হয়েছে:", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(weakNow.joinToString("  •  "), fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface,
+                            Text("কিছু শব্দে ভুল হয়েছে — পরের রাউন্ডে সেগুলো নিয়েই বিশেষভাবে অনুশীলন হবে।",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         } else {
                             Text("এই ধাপে তেমন ভুল হয়নি — চমৎকার! এবার একটু কঠিন কন্টেন্টে যাই।",
@@ -1661,21 +1718,10 @@ fun TypingPracticeScreen(
                     }
                 }
 
-                // ── দুর্বল-শব্দ ড্যাশবোর্ড — আগের সেশনগুলো থেকে জমা হওয়া সবচেয়ে বেশি ভুল হওয়া শব্দ ──
-                if (weakWordDashboard.isNotEmpty()) {
-                    Card(
-                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7ED)),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberMid.copy(alpha = 0.3f))
-                    ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("📌 তোমার দুর্বল শব্দ", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                fontFamily = NotoSansBengali, color = Color(0xFFB45309))
-                            Text(weakWordDashboard.take(10).joinToString("  •  "), fontSize = 12.sp,
-                                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
+                // ── দুর্বল-শব্দ ড্যাশবোর্ড — এখন আর সরাসরি UI-তে দেখানো হয় না (ইউজারকে
+                // নিজের ভুল-শব্দ লিস্ট আকারে দেখানোর দরকার নেই), তবে weakWordDashboard
+                // ডেটা/লোডিং লজিক অপরিবর্তিত রইলো — AI Adaptive প্যাসেজ বানাতে এটাই
+                // ব্যবহার হয় (দেখো startAdaptiveSession/currentPool এর আশেপাশে) ──
 
                 // ── লাইফটাইম হাত-ভিত্তিক দুর্বলতা — যথেষ্ট ডেটা জমলেই দেখা যাবে ──
                 lifetimeHandSummary?.let { (leftErr, rightErr) ->
@@ -1696,72 +1742,22 @@ fun TypingPracticeScreen(
                     }
                 }
 
-                if (sessionMode == "free") {
-                    Spacer(Modifier.height(2.dp))
-                    Text("🎚️ কঠিনতার স্তর:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("all", "easy", "medium", "hard").forEach { d ->
-                            val selected = selectedDifficulty == d
-                            Surface(
-                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                                color    = if (selected) difficultyColor(d) else MaterialTheme.colorScheme.surfaceVariant,
-                                onClick  = {
-                                    selectedDifficulty = d
-                                    reset(0, poolFor(d))
-                                }
-                            ) {
-                                Text(
-                                    difficultyLabel(d), fontSize = 11.sp, fontFamily = NotoSansBengali,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                                )
-                            }
-                        }
-                    }
+                // ── "কঠিনতার স্তর" ও "Passage বেছে নিন" UI সম্পূর্ণ রিমুভ করা হলো —
+                // difficulty/passage নির্বাচন এখন আর ইউজারকে ম্যানুয়ালি করতে হয় না, তবে
+                // selectedDifficulty/currentPool()/reset() লজিক অপরিবর্তিত রইলো (ডিফল্ট "all"
+                // দিয়েই প্যাসেজ লুপ চলে, "আমার প্যাসেজ" ফিচার এখনো 📖 Passage কার্ডের +
+                // আইকন দিয়ে কাজ করে) ──
 
-                    // ── "আমার প্যাসেজ" ফিচার এখন উপরের 📖 Passage কার্ডের + আইকনের ভিতরে
-                    // (দেখো নিচে PassageCard-এর + বাটন ও showCustomPassageManager) ──
-
-                    Spacer(Modifier.height(4.dp))
-                    Text("📝 Passage বেছে নিন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    val pool = currentPool()
-                    if (selectedDifficulty == "custom" && pool.isEmpty()) {
-                        Text(
-                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — 📖 Passage কার্ডের + আইকনে চাপুন।",
-                            fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    pool.forEachIndexed { i, p ->
-                        OutlinedButton(
-                            onClick = { reset(i, pool) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = if (passageIndex == i) Color(0xFFEEF2FF) else Color.Transparent
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp, if (passageIndex == i) Indigo600 else Color(0xFFE2E8F0)
-                            )
-                        ) {
-                            Text(
-                                "${i + 1}. ${p.text.take(40)}...",
-                                fontSize = 11.sp, fontFamily = NotoSansBengali,
-                                color = if (passageIndex == i) Indigo600 else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-
-                // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই ──
-                TextButton(onClick = onOpenRace, modifier = Modifier.fillMaxWidth()) {
+                // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই।
+                // মোটা/prominent বাটন হিসেবে রাখা হলো (আগে ছিল হালকা TextButton) ──
+                Button(
+                    onClick = onOpenRace,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                ) {
                     Text("🏁 বন্ধুর সাথে টাইপিং রেস দাও →", fontFamily = NotoSansBengali,
-                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
+                        fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                 }
             }
         }
@@ -1934,24 +1930,26 @@ private fun StatsRow(
         (correctKeystrokes / 5.0 / (elapsedSec / 60.0)).toInt()
     } else 0
 
+    // ── আগে গাঢ় নেভি (0xFF1E1B4B) ব্যাকগ্রাউন্ড ছিল — চোখে লাগতো। এখন হালকা,
+    // নিরপেক্ষ ব্যাকগ্রাউন্ড (কোনো ভারী কালার ছাড়া) ব্যবহার করা হচ্ছে ──
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(Color(0xFF1E1B4B))) {
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                StatBox("⏱️", "%02d:%02d".format(mins, secs), "সময়", Color(0xFF60A5FA))
-                StatBox("⌨️", "$liveWpm", "WPM", Color(0xFF4ADE80))
+                StatBox("⏱️", "%02d:%02d".format(mins, secs), "সময়", Color(0xFF2563EB))
+                StatBox("⌨️", "$liveWpm", "WPM", Color(0xFF059669))
                 if (freeTypingMode) {
-                    StatBox("🔴", if (isStarted) "চলছে" else "—", "স্ট্যাটাস", Color(0xFFA78BFA))
+                    StatBox("🔴", if (isStarted) "চলছে" else "—", "স্ট্যাটাস", Color(0xFF7C3AED))
                 } else {
-                    StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFFA78BFA))
+                    StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFF7C3AED))
                 }
-                StatBox("📝", if (freeTypingMode) "$resolvedCount" else "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFFBBF24))
+                StatBox("📝", if (freeTypingMode) "$resolvedCount" else "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFB45309))
             }
             if (!freeTypingMode) {
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = Indigo600, trackColor = Color.White.copy(0.2f)
+                    color = Indigo600, trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
             }
         }
@@ -1964,7 +1962,7 @@ private fun StatBox(icon: String, value: String, label: String, color: Color) {
         Text(icon, fontSize = 14.sp)
         Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
             color = color, fontFamily = NotoSansBengali)
-        Text(label, fontSize = 9.sp, color = Color.White.copy(0.5f), fontFamily = NotoSansBengali)
+        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
     }
 }
 
@@ -2044,21 +2042,9 @@ private fun ResultCard(
                     fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
             }
 
-            // ── এই সেশনে ভুল হওয়া শব্দের তালিকা — আগে ডেটা জমলেও কোথাও দেখানো হতো না,
-            // এটাই সেই মিসিং পিস (দেখো রোডম্যাপ সেকশন ১০) ──
-            if (sessionMistakeWords.isNotEmpty()) {
-                Card(
-                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7ED))
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("📌 এই সেশনে ভুল হওয়া শব্দ", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            fontFamily = NotoSansBengali, color = Color(0xFFB45309))
-                        Text(sessionMistakeWords.take(10).joinToString("  •  "), fontSize = 12.sp,
-                            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-            }
+            // ── এই সেশনে ভুল হওয়া শব্দের তালিকা এখন আর সরাসরি দেখানো হয় না — sessionMistakeWords
+            // ডেটা এখনো AI Adaptive প্যাসেজ বানানোর জন্য ব্যবহার হয় (দেখো startPhase2/
+            // TypingAdaptiveContentProvider.getBlendedPassage), শুধু UI-তে হাইড করা হলো ──
 
             val shareCtx = androidx.compose.ui.platform.LocalContext.current
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
