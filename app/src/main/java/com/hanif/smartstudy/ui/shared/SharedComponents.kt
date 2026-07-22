@@ -223,6 +223,11 @@ fun QuestionCard(
     answerFocusRequester : FocusRequester? = null,
     onRecallGraded       : (Boolean) -> Unit = {},
     studyRecallMode      : Boolean = false,
+    // ── ⌨️ রিকল-টাইপিং মোডে Written উত্তর AI দিয়ে অটো-চেক করার জন্য —
+    //    Settings-এ সেভ করা key দিয়ে Groq→Mistral→Cerebras→Gemini ক্রমে চেষ্টা হয়।
+    //    null রিটার্ন করলে (কোনো key নেই / সব ব্যর্থ) সাথে সাথেই ম্যানুয়াল
+    //    ঠিক/ভুল বাটনে ফলব্যাক করে — parameter না দিলে আচরণ আগের মতোই থাকবে।
+    onAiGradeWritten     : (suspend (question: String, correctAnswer: String, userAnswer: String) -> Boolean?)? = null,
     currentUser    : User?     = null,
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
@@ -418,6 +423,10 @@ fun QuestionCard(
             // ── রিকল-টাইপিং স্টেট: টাইপ করা উত্তর ও গ্রেড হয়েছে কিনা ──
             var recallTypedAnswer by remember(item.id) { mutableStateOf("") }
             var recallGraded by remember(item.id) { mutableStateOf(false) }
+            // ── AI অটো-চেক স্টেট: চেক চলছে কিনা, আর চেষ্টা করে ব্যর্থ হয়েছে কিনা
+            // (ব্যর্থ হলে সাথে সাথেই নিচের ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক হয়) ──
+            var aiChecking by remember(item.id) { mutableStateOf(false) }
+            var aiFailed by remember(item.id) { mutableStateOf(false) }
 
             if (studyRecallActive && !isRevealed) {
                 // ── ⌨️ রিকল-টাইপিং মোড: টাইপ-বক্স, Enter চাপলে উত্তর দেখাবে ──
@@ -461,6 +470,29 @@ fun QuestionCard(
                 }
             } else {
 
+            // ── ⌨️ রিকল-টাইপিং মোডে উত্তর প্রকাশ হওয়ার সাথে সাথেই (Settings-এ key
+            // সেভ করা থাকলে) AI দিয়ে অটো-চেক শুরু হয়। AI নির্দিষ্ট সঠিক/ভুল বলতে
+            // পারলে recallGraded=true হয়ে সরাসরি পরের প্রশ্নে চলে যায় — ম্যানুয়াল
+            // বাটনে চাপ দিতে হয় না। AI না থাকলে বা ব্যর্থ হলে (aiFailed=true) নিচের
+            // "ঠিক হয়েছে/ভুল হয়েছে" বাটন সাথে সাথেই স্বাভাবিকভাবে দেখা যাবে ──
+            if (studyRecallActive && onAiGradeWritten != null) {
+                LaunchedEffect(item.id, isRevealed) {
+                    if (isRevealed && !recallGraded && !aiFailed && !aiChecking) {
+                        aiChecking = true
+                        val verdict = runCatching {
+                            onAiGradeWritten(displayQuestion, item.answer, recallTypedAnswer)
+                        }.getOrNull()
+                        aiChecking = false
+                        if (verdict != null) {
+                            recallGraded = true
+                            onRecallGraded(verdict)
+                        } else {
+                            aiFailed = true
+                        }
+                    }
+                }
+            }
+
             val showAnswerBox = when (mode) {
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
@@ -498,12 +530,36 @@ fun QuestionCard(
                 }
             }
 
+            // ── AI অটো-চেক চলাকালীন লোডিং ইন্ডিকেটর — এই সময় নিচের ম্যানুয়াল
+            // বাটন দেখানো হয় না, AI ব্যর্থ হলেই (aiFailed) সাথে সাথে দেখা যাবে ──
+            if (studyRecallActive && !recallGraded && aiChecking) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Indigo600)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "🤖 AI দিয়ে যাচাই করা হচ্ছে…",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // ── ⌨️ রিকল-টাইপিং: উত্তর দেখানোর পর "ঠিক হয়েছে"/"ভুল হয়েছে" বাছাই —
             //    ডিফল্ট ফোকাস "ঠিক হয়েছে"-তে থাকে, হার্ডওয়্যার কীবোর্ডে Tab দিয়ে
             //    দুই বাটনের মধ্যে টগল করা যায়, আর Enter চাপলেই সেই গ্রেড কনফার্ম
             //    হয়ে পরের প্রশ্নের টাইপ-বক্সে ফোকাস চলে যায় — পুরোটা কীবোর্ড
-            //    দিয়েই দ্রুত করা যায়, টাচ লাগে না। ──
-            if (studyRecallActive && !recallGraded) {
+            //    দিয়েই দ্রুত করা যায়, টাচ লাগে না।
+            //    ── AI চালু থাকলে (onAiGradeWritten != null) এই ম্যানুয়াল বাটন তখনই
+            //    দেখা যাবে যখন AI চেক শেষে ব্যর্থ হয়েছে (aiFailed) — অন্যথায় AI নিজেই
+            //    অটো-গ্রেড করে দেবে, ইউজারকে বাটনে চাপ দিতে হবে না। ──
+            val showManualGradeButtons = studyRecallActive && !recallGraded && !aiChecking &&
+                (onAiGradeWritten == null || aiFailed)
+            if (showManualGradeButtons) {
                 val correctFocusRequester = remember(item.id) { FocusRequester() }
                 var correctFocused by remember(item.id) { mutableStateOf(false) }
                 var wrongFocused by remember(item.id) { mutableStateOf(false) }
