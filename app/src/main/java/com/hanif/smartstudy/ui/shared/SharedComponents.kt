@@ -506,11 +506,11 @@ fun QuestionCard(
                         if (verdict != null) {
                             // ── ফলাফল (ঠিক/ভুল) আগে স্ক্রিনে দেখাও, তারপরই পরের
                             // প্রশ্নে অটো-এগিয়ে যাও — সঠিক হলে ৩ সেকেন্ড যথেষ্ট,
-                            // কিন্তু ভুল হলে উত্তরটা পড়ে শেখার সুযোগ দিতে ৭ সেকেন্ড
+                            // কিন্তু ভুল হলে উত্তরটা পড়ে শেখার সুযোগ দিতে ১০ সেকেন্ড
                             // অপেক্ষা করা হয় যাতে ইউজার তাড়াহুড়ো করে পরের প্রশ্নে
                             // চলে না যায় ──
                             aiVerdict = verdict
-                            kotlinx.coroutines.delay(if (verdict) 3000 else 7000)
+                            kotlinx.coroutines.delay(if (verdict) 3000 else 10000)
                             recallGraded = true
                             onRecallGraded(verdict)
                         } else {
