@@ -400,10 +400,21 @@ fun QuestionCard(
                 item.isMcq() && mode != StudyMode.STUDY -> {
                     McqOptions(item = item, onAnswer = onMcqAnswer)
                 }
+                item.isWritten() && mode == StudyMode.QBANK && !isModelTest -> {
+                    // ── QBank-এর Written প্রশ্নে সরাসরি টাইপ-বক্স দেখা যাবে (Study-র মতো
+                    // আলাদা কীবোর্ড আইকন টগলের দরকার নেই) — উত্তর লেখার পর AI দিয়ে অটো-চেক
+                    // হয় (Study রিকল-টাইপিং মোডের একই নিয়মে), AI ব্যর্থ হলে সাথে সাথেই
+                    // ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক করে। ──
+                    WrittenAiRecallCheck(
+                        item             = item,
+                        onGrade          = onWrittenSelfGrade,
+                        onAiGradeWritten = onAiGradeWritten
+                    )
+                }
                 item.isWritten() && mode != StudyMode.STUDY -> {
-                    // ── সব Written প্রশ্নেই (Model Test সহ Quiz/QBank-এর সাধারণ Written) এখন
-                    // টাইপ-করে-মেলানোর বদলে "উত্তর দেখুন" + ঠিক/ভুল সেলফ-গ্রেড UI ব্যবহার হয় —
-                    // এতে ফলাফল গণনা MCQ-এর মতোই নির্ভুল ও সামঞ্জস্যপূর্ণ হয়। ──
+                    // ── Model Test ও Quiz-এর Written প্রশ্নে এখনো টাইপ-করে-মেলানোর বদলে
+                    // "উত্তর দেখুন" + ঠিক/ভুল সেলফ-গ্রেড UI ব্যবহার হয় — এতে ফলাফল গণনা
+                    // MCQ-এর মতোই নির্ভুল ও সামঞ্জস্যপূর্ণ হয়। ──
                     WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
                 }
                 else -> {}
@@ -427,6 +438,10 @@ fun QuestionCard(
             // (ব্যর্থ হলে সাথে সাথেই নিচের ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক হয়) ──
             var aiChecking by remember(item.id) { mutableStateOf(false) }
             var aiFailed by remember(item.id) { mutableStateOf(false) }
+            // ── AI ফলাফল (ঠিক/ভুল) সাথে সাথেই পরের প্রশ্নে না গিয়ে কিছুক্ষণ
+            // দেখানোর জন্য — যতক্ষণ না ৫ সেকেন্ডের বিরতি শেষ হয়ে recallGraded
+            // হয়, ততক্ষণ এই ভ্যারিয়েবলে ফলাফল ধরে রাখা হয় ──
+            var aiVerdict by remember(item.id) { mutableStateOf<Boolean?>(null) }
 
             if (studyRecallActive && !isRevealed) {
                 // ── ⌨️ রিকল-টাইপিং মোড: টাইপ-বক্স, Enter চাপলে উত্তর দেখাবে ──
@@ -477,13 +492,18 @@ fun QuestionCard(
             // "ঠিক হয়েছে/ভুল হয়েছে" বাটন সাথে সাথেই স্বাভাবিকভাবে দেখা যাবে ──
             if (studyRecallActive && onAiGradeWritten != null) {
                 LaunchedEffect(item.id, isRevealed) {
-                    if (isRevealed && !recallGraded && !aiFailed && !aiChecking) {
+                    if (isRevealed && !recallGraded && !aiFailed && !aiChecking && aiVerdict == null) {
                         aiChecking = true
                         val verdict = runCatching {
                             onAiGradeWritten(displayQuestion, item.answer, recallTypedAnswer)
                         }.getOrNull()
                         aiChecking = false
                         if (verdict != null) {
+                            // ── ফলাফল (ঠিক/ভুল) আগে স্ক্রিনে দেখাও, ৫ সেকেন্ড
+                            // অপেক্ষা করো, তারপরই পরের প্রশ্নে অটো-এগিয়ে যাও —
+                            // যাতে ইউজার ফলাফল দেখার আগেই পরের প্রশ্নে চলে না যায় ──
+                            aiVerdict = verdict
+                            kotlinx.coroutines.delay(5000)
                             recallGraded = true
                             onRecallGraded(verdict)
                         } else {
@@ -527,6 +547,31 @@ fun QuestionCard(
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     StudyDoneCheckIcon(done = item.isStudyDone, onClick = onStudyDone)
+                }
+            }
+
+            // ── AI ফলাফল (ঠিক/ভুল) নির্ধারণ হয়ে গেলে সাথে সাথেই পরের প্রশ্নে
+            // না গিয়ে ৫ সেকেন্ড এই ব্যানারে ফলাফল দেখানো হয় (উপরের LaunchedEffect-এ
+            // delay(5000) চলাকালীন) — তারপর অটো পরের প্রশ্নে চলে যায়। ──
+            if (studyRecallActive && !recallGraded && aiVerdict != null) {
+                Spacer(Modifier.height(10.dp))
+                val verdictIsCorrect = aiVerdict == true
+                Card(
+                    shape  = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = (if (verdictIsCorrect) GreenOk else RedWrong).copy(alpha = 0.12f)
+                    ),
+                    border = BorderStroke(1.dp, if (verdictIsCorrect) GreenOk else RedWrong)
+                ) {
+                    Text(
+                        if (verdictIsCorrect) "✅ ঠিক হয়েছে (AI)" else "❌ ভুল হয়েছে (AI)",
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color      = if (verdictIsCorrect) GreenOk else RedWrong,
+                        fontFamily = NotoSansBengali,
+                        textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier   = Modifier.padding(12.dp).fillMaxWidth()
+                    )
                 }
             }
 
@@ -1124,6 +1169,223 @@ fun WrittenRevealSelfGrade(item: QuestionItem, onGrade: (Boolean) -> Unit) {
                         colors   = ButtonDefaults.buttonColors(containerColor = RedWrong)
                     ) {
                         Text("❌ ভুল হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// QBank — Written প্রশ্ন: Study-র রিকল-টাইপিং মোডের মতোই সরাসরি টাইপ-বক্স
+// দেখা যায় (আলাদা কীবোর্ড আইকন টগল ছাড়াই), টাইপ করে Enter/বাটনে জমা দিলে
+// আসল উত্তর দেখা যায় এবং সাথে সাথে AI দিয়ে অটো-চেক শুরু হয় (Settings-এ সেভ
+// করা key থাকলে)। AI ঠিক/ভুল ধরতে পারলে সেই ফলাফল ৫ সেকেন্ড দেখানো হয়,
+// তারপর অটো এগিয়ে যায় (পরের প্রশ্নে স্ক্রল — QuestionListScreen-এ)। AI key
+// না থাকলে বা চেষ্টা ব্যর্থ হলে সাথে সাথেই ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক
+// করে। সবশেষে ফলাফল আগের মতোই QBank-এর রেজাল্ট স্ক্রিনে গণনা হয়ে যায়
+// (AnswerState.WrittenSubmitted-ই ব্যবহার হয়, তাই submitQuiz() এ MCQ-র
+// মতোই সঠিক/ভুল হিসাব হয়)।
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun WrittenAiRecallCheck(
+    item             : QuestionItem,
+    onGrade          : (Boolean) -> Unit,
+    onAiGradeWritten : (suspend (question: String, correctAnswer: String, userAnswer: String) -> Boolean?)? = null
+) {
+    val submitted = item.answerState as? AnswerState.WrittenSubmitted
+    val isDark = LocalDarkMode.current.value
+
+    var typedAnswer by remember(item.id) { mutableStateOf("") }
+    var isRevealed   by remember(item.id) { mutableStateOf(false) }
+    var aiChecking   by remember(item.id) { mutableStateOf(false) }
+    var aiFailed     by remember(item.id) { mutableStateOf(false) }
+    var aiVerdict    by remember(item.id) { mutableStateOf<Boolean?>(null) }
+    var graded       by remember(item.id) { mutableStateOf(false) }
+
+    // ── উত্তর প্রকাশ হওয়ার সাথে সাথেই AI দিয়ে অটো-চেক শুরু হয়। key না থাকলে
+    // সরাসরি ম্যানুয়াল বাটনে ফলব্যাক করে। AI ঠিক/ভুল বলতে পারলে সেই ফলাফল
+    // ৫ সেকেন্ড দেখিয়ে তারপর onGrade() কল করে চূড়ান্ত করা হয় ──
+    if (submitted == null && isRevealed) {
+        LaunchedEffect(item.id, isRevealed) {
+            if (!graded && !aiFailed && aiVerdict == null) {
+                if (onAiGradeWritten == null) {
+                    aiFailed = true
+                } else {
+                    aiChecking = true
+                    val verdict = runCatching {
+                        onAiGradeWritten(item.question, item.answer, typedAnswer)
+                    }.getOrNull()
+                    aiChecking = false
+                    if (verdict != null) {
+                        aiVerdict = verdict
+                        kotlinx.coroutines.delay(5000)
+                        graded = true
+                        onGrade(verdict)
+                    } else {
+                        aiFailed = true
+                    }
+                }
+            }
+        }
+    }
+
+    when {
+        submitted != null -> {
+            // ── আগেই গ্রেড হয়ে গেছে — ফলাফল দেখাও ──
+            val isCorrect = submitted.isCorrect
+            Card(
+                shape  = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        isCorrect && isDark  -> Color(0xFF052E16)
+                        isCorrect            -> Color(0xFFF0FDF4)
+                        !isCorrect && isDark -> Color(0xFF3D1010)
+                        else                 -> Color(0xFFFFF1F2)
+                    }
+                ),
+                border = BorderStroke(1.dp, if (isCorrect) GreenOk else RedWrong)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        if (isCorrect) "✅ ঠিক হয়েছে" else "❌ ভুল হয়েছে",
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color      = if (isCorrect) Color(0xFF166534) else Color(0xFF9F1239),
+                        fontFamily = NotoSansBengali
+                    )
+                    if (submitted.userText.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "তোমার উত্তর: ${submitted.userText}", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = NotoSansBengali, lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+        }
+        !isRevealed -> {
+            // ── সরাসরি টাইপ-বক্স — কীবোর্ড আইকন টগলের দরকার নেই ──
+            OutlinedTextField(
+                value         = typedAnswer,
+                onValueChange = { typedAnswer = it },
+                modifier      = Modifier.fillMaxWidth(),
+                minLines      = 2,
+                maxLines      = 5,
+                placeholder   = {
+                    Text(
+                        "এখানে তোমার উত্তর লিখো...", fontFamily = NotoSansBengali,
+                        color = Color(0xFFCBD5E1)
+                    )
+                },
+                shape           = RoundedCornerShape(12.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { isRevealed = true }),
+                colors          = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = Indigo600,
+                    unfocusedBorderColor = Color(0xFFE2E8F0)
+                )
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick  = { isRevealed = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+            ) {
+                Text("🔍 উত্তর মিলিয়ে দেখো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+            }
+        }
+        else -> {
+            Column {
+                if (item.answer.isNotBlank()) {
+                    Card(
+                        shape  = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                        )
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                item.answer, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp
+                            )
+                            if (typedAnswer.isNotBlank()) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "তোমার উত্তর: $typedAnswer", fontSize = 12.sp,
+                                    fontFamily = NotoSansBengali,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // ── AI অটো-চেক চলাকালীন লোডিং ইন্ডিকেটর ──
+                if (aiChecking) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Indigo600)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "🤖 AI দিয়ে যাচাই করা হচ্ছে…",
+                            fontFamily = NotoSansBengali, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // ── AI ফলাফল (ঠিক/ভুল) — ৫ সেকেন্ড দেখানো হয়, তারপর onGrade()
+                // কল হয়ে অটো পরের প্রশ্নে চলে যায় (QuestionListScreen-এ স্ক্রল) ──
+                if (aiVerdict != null && !graded) {
+                    val verdictIsCorrect = aiVerdict == true
+                    Card(
+                        shape  = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = (if (verdictIsCorrect) GreenOk else RedWrong).copy(alpha = 0.12f)
+                        ),
+                        border = BorderStroke(1.dp, if (verdictIsCorrect) GreenOk else RedWrong)
+                    ) {
+                        Text(
+                            if (verdictIsCorrect) "✅ ঠিক হয়েছে (AI)" else "❌ ভুল হয়েছে (AI)",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color      = if (verdictIsCorrect) GreenOk else RedWrong,
+                            fontFamily = NotoSansBengali,
+                            textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier   = Modifier.padding(12.dp).fillMaxWidth()
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // ── AI ব্যর্থ হলে (key নেই / চেষ্টা ব্যর্থ) সাথে সাথেই ম্যানুয়াল
+                // ঠিক/ভুল বাটন — ইউজার নিজেই বেছে নেবে ──
+                if (aiFailed && !graded) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick  = { graded = true; onGrade(true) },
+                            modifier = Modifier.weight(1f),
+                            shape    = RoundedCornerShape(12.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = GreenOk)
+                        ) {
+                            Text("✅ ঠিক হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                        Button(
+                            onClick  = { graded = true; onGrade(false) },
+                            modifier = Modifier.weight(1f),
+                            shape    = RoundedCornerShape(12.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = RedWrong)
+                        ) {
+                            Text("❌ ভুল হয়েছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
                     }
                 }
             }
