@@ -332,6 +332,27 @@ fun TypingPracticeScreen(
             item.technique.takeIf { it.isNotBlank() }
         ).joinToString(" ").trim()
 
+    /** Room-এর "STUDY" শীটে ডেটা না থাকলে (বা এই সাবজেক্ট/সাব-টপিকের ডেটা এখনো Room-এ
+     *  লেখা হয়নি) — ContentRepository-র in-memory cache (যেটা 📚 Study সেকশন খুললেই
+     *  ভরে যায়) থেকে সরাসরি নিয়ে Room-এ upsert করে দেয়, যাতে সাথে সাথেই আবার Room
+     *  query চালালে ডেটা পাওয়া যায়। এটাই মূল সমাধান: আগে Room-sync শুধু ব্যাকগ্রাউন্ডে
+     *  (fire-and-forget GlobalScope) হতো — Study Typing খোলার সময় সেটা শেষ না হলে
+     *  "কোনো কনটেন্ট পাওয়া যায়নি" দেখাত, যদিও memCache/ডিস্ক-ক্যাশে ডেটা আসলে ছিল। */
+    suspend fun syncStudyFromRepoIfNeeded(): Boolean {
+        return try {
+            val dao = AppDatabase.getInstance(ctx).questionDao()
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(ctx)
+            val content = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()
+                ?: (repo.getContent() as? com.hanif.smartstudy.data.repository.DataState.Success)?.data
+            if (content != null && content.study.isNotEmpty()) {
+                dao.upsertAll(content.study.map { it.toEntity() })
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /** একটা sub_topic-এর জন্য used-id বাদ দিয়ে নতুন একটা আইটেম তুলে প্যাসেজ বানায়।
      *  পুল খালি হয়ে গেলে (সব টাইপ হয়ে গেছে) studyExhausted = true হয়ে UI-তে
      *  "✅ সব প্যাসেজ টাইপ করা হয়ে গেছে" বার্তা + রিসেট বাটন দেখায় */
@@ -344,7 +365,10 @@ fun TypingPracticeScreen(
                 val user = session.getCurrentUser()
                 val userId = user?.phone?.takeIf { it.isNotBlank() } ?: "guest"
 
-                val all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+                var all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+                if (all.isEmpty() && syncStudyFromRepoIfNeeded()) {
+                    all = dao.getAllForSubTopic("STUDY", subject, subTopic)
+                }
                 val visible = all.filter { com.hanif.smartstudy.util.AudienceFilter.userCanSee(it.audienceTags, user) }
                     .filter { buildStudyPassageText(it).isNotBlank() }
                 val usedIds = progressDao.getUsedIds(userId, subject, subTopic).toSet()
@@ -390,7 +414,11 @@ fun TypingPracticeScreen(
         scope.launch {
             try {
                 val dao = AppDatabase.getInstance(ctx).questionDao()
-                studySubTopicList = dao.getSubTopics("STUDY", subject)
+                var subTopics = dao.getSubTopics("STUDY", subject)
+                if (subTopics.isEmpty() && syncStudyFromRepoIfNeeded()) {
+                    subTopics = dao.getSubTopics("STUDY", subject)
+                }
+                studySubTopicList = subTopics
             } catch (e: Exception) {
                 studySubTopicList = emptyList()
             } finally {
@@ -417,7 +445,11 @@ fun TypingPracticeScreen(
         scope.launch {
             try {
                 val dao = AppDatabase.getInstance(ctx).questionDao()
-                studySubjectList = dao.getSubjects("STUDY")
+                var subjects = dao.getSubjects("STUDY")
+                if (subjects.isEmpty() && syncStudyFromRepoIfNeeded()) {
+                    subjects = dao.getSubjects("STUDY")
+                }
+                studySubjectList = subjects
             } catch (e: Exception) {
                 studySubjectList = emptyList()
             } finally {
@@ -1318,11 +1350,14 @@ fun TypingPracticeScreen(
                 } // AnimatedVisibility(modeTypeExpanded)
             }
 
-            // ── ধাপ ৪: Daily Discipline Mode ব্যানার — শুধু মোড অন থাকলেই দেখা যায়,
-            // কিছু আটকায় না, শুধু আজকের progress দেখায় (non-coercive) ──
-            if (disciplineOn) {
-                DailyGoalBanner(todaySeconds = todaySecondsBefore, goalMinutes = dailyGoalMin)
-            }
+            // ── ধাপ ৪: Daily Discipline Mode ব্যানার — ইউজারের অনুরোধে স্ক্রিনে
+            // দেখানো বন্ধ করা হলো (হাইড)। todaySecondsBefore/dailyGoalMin ট্র্যাকিং
+            // লজিক অপরিবর্তিত রইলো (অন্য জায়গায় ব্যবহার হয়), শুধু এই ব্যানারটাই আর
+            // রেন্ডার হয় না — ফলে এর জায়গায় নিচের অংশ (AI-fetching/Stats/প্যাসেজ/
+            // রেস বাটন ইত্যাদি) স্বয়ংক্রিয়ভাবে উপরে উঠে আসে ──
+            // if (disciplineOn) {
+            //     DailyGoalBanner(todaySeconds = todaySecondsBefore, goalMinutes = dailyGoalMin)
+            // }
 
             // ── নিজের প্যাসেজ একবার শেষ, এখন এই সেশনের ভুল থেকে AI দিয়ে পরের
             // প্যাসেজ তৈরি হচ্ছে — সংক্ষিপ্ত সময়ের জন্য দেখানো হয় ──
