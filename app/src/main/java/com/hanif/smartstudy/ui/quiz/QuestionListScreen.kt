@@ -51,17 +51,89 @@ import com.hanif.smartstudy.util.AdManager
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.util.concurrent.atomic.AtomicInteger
 
 // ── Study রিকল-টাইপিং মোডে নিচের ফ্লোটিং "সাবমিট" বাটন চাপলে — বর্তমান
 // পৃষ্ঠায় যে যে প্রশ্নে টাইপ-বক্সে খসড়া উত্তর লেখা আছে (Enter চাপা হোক
 // বা না হোক) সবগুলো একসাথে AI দিয়ে চেক হয়, প্রতিটার ফলাফল এখানে জমা হয় ──
 private data class StudyBulkItem(
     val questionId    : String,
+    val questionNumber: Int,       // "#নম্বর" — বিস্তারিত লিস্টে দেখানো ও খুঁজে বের করার জন্য
+    val localIndex    : Int,       // এই পাতায় (pagedQuestions) প্রশ্নটার পজিশন — ট্যাপ করলে সেখানে স্ক্রল করতে ব্যবহৃত
     val questionText  : String,
     val correctAnswer : String,
     val userAnswer    : String,
     val verdict       : Boolean?   // true=ঠিক, false=ভুল, null=AI যাচাই করতে পারেনি
 )
+
+/**
+ * ── বাল্ক-সাবমিটের মূল চেকিং লজিক — একে একে (sequential) না চেক করে ৪টা করে
+ * ব্যাচে প্যারালাল AI কল পাঠানো হয় (ফ্রি-টায়ার API rate-limit এর কথা মাথায়
+ * রেখে concurrency=৪ এ সীমাবদ্ধ) — এতে ৪০টা প্রশ্ন চেক করতে অনেক কম সময় লাগে। ──
+ */
+private suspend fun gradeCandidatesInParallel(
+    candidates       : List<Pair<Int, QuestionItem>>,   // (localIndex, question)
+    pageOffset       : Int,
+    recallLiveDrafts : Map<String, String>,
+    onProgress       : (Int, Int) -> Unit,
+    grade            : suspend (question: String, correctAnswer: String, userAnswer: String) -> Boolean?,
+    markDone         : (String) -> Unit
+): List<StudyBulkItem> = coroutineScope {
+    val total = candidates.size
+    val completed = AtomicInteger(0)
+    val resultsArr = arrayOfNulls<StudyBulkItem>(total)
+    candidates.withIndex().chunked(4).forEach { chunk ->
+        chunk.map { (arrIdx, pair) ->
+            async {
+                val (localIdx, q) = pair
+                val draft = recallLiveDrafts[q.id].orEmpty()
+                val qText = q.question.ifBlank { q.explanation.ifBlank { q.answer } }
+                val verdict = grade(qText, q.answer, draft)
+                resultsArr[arrIdx] = StudyBulkItem(
+                    questionId    = q.id,
+                    questionNumber = pageOffset + localIdx + 1,
+                    localIndex    = localIdx,
+                    questionText  = qText,
+                    correctAnswer = q.answer,
+                    userAnswer    = draft,
+                    verdict       = verdict
+                )
+                if (verdict != null) markDone(q.id)
+                onProgress(completed.incrementAndGet(), total)
+            }
+        }.awaitAll()
+    }
+    resultsArr.filterNotNull()
+}
+
+/**
+ * ── "🔁 আবার চেষ্টা করুন" বাটনে ব্যবহৃত — যেসব প্রশ্নে AI যাচাই ব্যর্থ হয়েছিল
+ * (verdict == null) শুধু সেগুলোই আবার (একই ৪-প্যারালাল ব্যাচে) চেক করে। ──
+ */
+private suspend fun regradeItemsInParallel(
+    items      : List<StudyBulkItem>,
+    onProgress : (Int, Int) -> Unit,
+    grade      : suspend (question: String, correctAnswer: String, userAnswer: String) -> Boolean?,
+    markDone   : (String) -> Unit
+): List<StudyBulkItem> = coroutineScope {
+    val total = items.size
+    val completed = AtomicInteger(0)
+    val resultsArr = arrayOfNulls<StudyBulkItem>(total)
+    items.withIndex().chunked(4).forEach { chunk ->
+        chunk.map { (idx, item) ->
+            async {
+                val verdict = grade(item.questionText, item.correctAnswer, item.userAnswer)
+                resultsArr[idx] = item.copy(verdict = verdict)
+                if (verdict != null) markDone(item.questionId)
+                onProgress(completed.incrementAndGet(), total)
+            }
+        }.awaitAll()
+    }
+    resultsArr.filterNotNull()
+}
 
 // ── Vibration helper (API 26+ VibrationEffect, পুরনো device এ fallback) ──
 private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
@@ -158,6 +230,20 @@ fun QuestionListScreen(
     var studySubmitProgress by remember { mutableStateOf(0 to 0) } // (checked, total)
     var studySubmitResults by remember { mutableStateOf<List<StudyBulkItem>?>(null) }
     var studySubmitShowDetails by remember { mutableStateOf(false) }
+
+    // ── বিস্তারিত লিস্টে কোনো ভুল প্রশ্নে ট্যাপ করলে ডায়ালগ বন্ধ করে সরাসরি
+    // সেই প্রশ্নের কার্ডে স্ক্রল করে ২.৫ সেকেন্ড হাইলাইট করে দেখায় (রিপোর্ট
+    // রেজল্ভড হাইলাইটের মতোই একই প্রক্রিয়া) ──
+    fun scrollToAndHighlight(localIdx: Int, qId: String) {
+        studySubmitResults = null
+        studySubmitShowDetails = false
+        scrollScope.launch {
+            listState.animateScrollToItem(localIdx.coerceIn(0, pagedQuestions.lastIndex.coerceAtLeast(0)))
+            activeHighlightId = qId
+            kotlinx.coroutines.delay(2500)
+            if (activeHighlightId == qId) activeHighlightId = null
+        }
+    }
 
     // ── Sound + Vibration feedback ──
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -511,11 +597,13 @@ fun QuestionListScreen(
                     // ── Study: ⌨️ রিকল-টাইপিং মোড চালু থাকলে এখানে একটা "সাবমিট"
                     // বাটন — Enter না চেপে একটা একটা করে অনেকগুলো প্রশ্নে টাইপ
                     // করে গেলেও, এই পাতায় যেসব প্রশ্নে খসড়া উত্তর লেখা আছে সেই
-                    // সবগুলো একসাথে ব্যাকগ্রাউন্ডে AI দিয়ে চেক হয়ে "কয়টা সঠিক /
-                    // কয়টা ভুল" এর মোট হিসাব দেখায় (শুধু সর্বশেষ প্রশ্নটার না) —
-                    // "বিস্তারিত" চাপলে কোন কোনগুলো ভুল হয়েছে তার তালিকা দেখা যায়। ──
+                    // সবগুলো একসাথে (৪টা করে প্যারালাল ব্যাচে, দ্রুত) ব্যাকগ্রাউন্ডে
+                    // AI দিয়ে চেক হয়ে "কয়টা সঠিক / কয়টা ভুল" এর মোট হিসাব দেখায় —
+                    // "বিস্তারিত" চাপলে কোন কোনগুলো ভুল হয়েছে তার তালিকা দেখা যায়,
+                    // আর প্রতিটা গ্রেড হওয়া প্রশ্ন "পড়া হয়েছে" হিসেবেও মার্ক হয়ে যায়। ──
                     if (mode == StudyMode.STUDY && studyRecallMode) {
                         Button(
+                            enabled = !studySubmitChecking,
                             onClick = {
                                 // ── ⚠️ এখানে item.isWritten() দিয়ে ফিল্টার করা যাবে না —
                                 // Study-র ⌨️ রিকল-টাইপিং বক্স MCQ/Study যেকোনো টাইপের
@@ -523,9 +611,9 @@ fun QuestionListScreen(
                                 // এর শর্তের সাথে মিলিয়ে রাখা হলো), শুধু "Written" টাইপে না —
                                 // আগে ভুলবশত isWritten() চেক থাকায় অন্য টাইপের প্রশ্নে টাইপ
                                 // করা উত্তরগুলো সাবমিটে ধরা পড়ছিল না ──
-                                val candidates = pagedQuestions.filter { q ->
-                                    q.answer.isNotBlank() &&
-                                        recallLiveDrafts[q.id]?.isNotBlank() == true
+                                val candidates = pagedQuestions.mapIndexedNotNull { localIdx, q ->
+                                    if (q.answer.isNotBlank() && recallLiveDrafts[q.id]?.isNotBlank() == true)
+                                        localIdx to q else null
                                 }
                                 studySubmitShowDetails = false
                                 if (candidates.isEmpty()) {
@@ -535,30 +623,46 @@ fun QuestionListScreen(
                                     studySubmitChecking = true
                                     studySubmitProgress = 0 to candidates.size
                                     scrollScope.launch {
-                                        val collected = mutableListOf<StudyBulkItem>()
-                                        candidates.forEachIndexed { i, q ->
-                                            val draft = recallLiveDrafts[q.id].orEmpty()
-                                            val qText = q.question.ifBlank { q.explanation.ifBlank { q.answer } }
-                                            val verdict = viewModel.gradeWrittenWithAi(qText, q.answer, draft)
-                                            collected.add(StudyBulkItem(q.id, qText, q.answer, draft, verdict))
-                                            studySubmitProgress = (i + 1) to candidates.size
-                                        }
+                                        studySubmitResults = gradeCandidatesInParallel(
+                                            candidates = candidates,
+                                            pageOffset = pageOffset,
+                                            recallLiveDrafts = recallLiveDrafts,
+                                            onProgress = { done, total -> studySubmitProgress = done to total },
+                                            grade = { question, correct, user -> viewModel.gradeWrittenWithAi(question, correct, user) },
+                                            markDone = { qId -> viewModel.markStudyDone(qId, true) }
+                                        )
                                         studySubmitChecking = false
-                                        studySubmitResults = collected
                                     }
                                 }
                             },
                             shape   = RoundedCornerShape(20.dp),
-                            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            colors  = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF10B981),
+                                disabledContainerColor = Color(0xFF10B981).copy(alpha = 0.5f)
+                            ),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                         ) {
-                            Text(
-                                "✅ সাবমিট",
-                                fontSize   = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color      = Color.White,
-                                fontFamily = NotoSansBengali
-                            )
+                            if (studySubmitChecking) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "চেক হচ্ছে (${studySubmitProgress.first}/${studySubmitProgress.second})",
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                        color = Color.White, fontFamily = NotoSansBengali
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    "✅ সাবমিট",
+                                    fontSize   = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color      = Color.White,
+                                    fontFamily = NotoSansBengali
+                                )
+                            }
                         }
                     }
                 }
@@ -655,11 +759,36 @@ fun QuestionListScreen(
                                 SubmitStatChip("❌ ভুল", "$wrongCount", Color(0xFFEF4444), Modifier.weight(1f))
                             }
                             if (unknownCount > 0) {
-                                Text(
-                                    "⚠️ $unknownCount টা AI দিয়ে যাচাই করা যায়নি (Settings-এ API key নেই/সব ব্যর্থ হয়েছে)।",
-                                    fontFamily = NotoSansBengali, fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        "⚠️ $unknownCount টা AI দিয়ে যাচাই করা যায়নি (Settings-এ API key নেই/সব ব্যর্থ হয়েছে)।",
+                                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    TextButton(
+                                        enabled = !studySubmitChecking,
+                                        onClick = {
+                                            val retryList = results.filter { it.verdict == null }
+                                            studySubmitChecking = true
+                                            studySubmitProgress = 0 to retryList.size
+                                            scrollScope.launch {
+                                                val updatedSubset = regradeItemsInParallel(
+                                                    items = retryList,
+                                                    onProgress = { done, total -> studySubmitProgress = done to total },
+                                                    grade = { question, correct, user -> viewModel.gradeWrittenWithAi(question, correct, user) },
+                                                    markDone = { qId -> viewModel.markStudyDone(qId, true) }
+                                                )
+                                                studySubmitResults = results.map { old ->
+                                                    updatedSubset.find { it.questionId == old.questionId } ?: old
+                                                }
+                                                studySubmitChecking = false
+                                            }
+                                        }
+                                    ) {
+                                        Text("🔁 আবার চেষ্টা করুন ($unknownCount)", fontFamily = NotoSansBengali,
+                                            fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                                    }
+                                }
                             }
                             if (wrongItems.isNotEmpty()) {
                                 TextButton(onClick = { studySubmitShowDetails = !studySubmitShowDetails }) {
@@ -681,15 +810,18 @@ fun QuestionListScreen(
                                                     .fillMaxWidth()
                                                     .clip(RoundedCornerShape(10.dp))
                                                     .background(Color(0xFFEF4444).copy(alpha = 0.08f))
+                                                    .clickable { scrollToAndHighlight(item.localIndex, item.questionId) }
                                                     .padding(10.dp),
                                                 verticalArrangement = Arrangement.spacedBy(3.dp)
                                             ) {
-                                                Text(item.questionText, fontFamily = NotoSansBengali,
+                                                Text("#${item.questionNumber}  ${item.questionText}", fontFamily = NotoSansBengali,
                                                     fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 2)
                                                 Text("সঠিক উত্তর: ${item.correctAnswer}", fontFamily = NotoSansBengali,
                                                     fontSize = 11.sp, color = Color(0xFF10B981))
                                                 Text("তোমার উত্তর: ${item.userAnswer}", fontFamily = NotoSansBengali,
                                                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text("👆 ট্যাপ করে এই প্রশ্নে যাও", fontFamily = NotoSansBengali,
+                                                    fontSize = 10.sp, color = Color(0xFF4F46E5))
                                             }
                                         }
                                     }
