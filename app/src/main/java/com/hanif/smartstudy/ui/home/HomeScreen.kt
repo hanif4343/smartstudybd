@@ -142,7 +142,8 @@ fun HomeScreen(
     onOpenStudyTab : () -> Unit = {},
     onOpenTyping   : () -> Unit = {},
     onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
-    onOpenFocusMode: () -> Unit = {}
+    onOpenFocusMode: () -> Unit = {},
+    onOpenAiChat   : () -> Unit = {}            // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
 ) {
     val state by viewModel.uiState.collectAsState()
 
@@ -187,7 +188,8 @@ fun HomeScreen(
                 onOpenMenu     = onOpenMenu,
                 onOpenMenuPage = onOpenMenuPage,
                 onOpenMockTest = onOpenMockTest,
-                onOpenFocusMode = onOpenFocusMode
+                onOpenFocusMode = onOpenFocusMode,
+                onOpenAiChat = onOpenAiChat
             )
 
             if (state.isLoading) {
@@ -324,7 +326,8 @@ private fun HomeQuickAccessGrid(
     onOpenMenu     : () -> Unit,
     onOpenMenuPage : (String) -> Unit,
     onOpenMockTest : (Boolean) -> Unit = {},
-    onOpenFocusMode: () -> Unit = {}
+    onOpenFocusMode: () -> Unit = {},
+    onOpenAiChat   : () -> Unit = {}
 ) {
     var showMockTestPicker by remember { mutableStateOf(false) }
 
@@ -354,7 +357,11 @@ private fun HomeQuickAccessGrid(
             title = "Progress", titleColor = Color(0xFF2563EB), onExplore = { onOpenMenuPage("stats") },
             tiles = listOf(
                 GridTileData(vecIcon(Icons.Default.EmojiEvents), "Leaderboard",   Color(0xFFF59E0B), { onOpenMenuPage("leaderboard") }),
-                GridTileData(vecIcon(Icons.Default.BarChart),    "Statistics",    Color(0xFF2563EB), { onOpenMenuPage("stats") }),
+                // ── আগে এখানে "Statistics" ছিল (onOpenMenuPage("stats")) — এখন সেই
+                // জায়গায় নতুন "AI Chat" (ডাউট সলভার) ফিচার। Statistics এখনো Menu থেকে
+                // এবং "Explore →" (উপরের onExplore) থেকে খোলা যায়, শুধু এই কুইক-টাইলটা
+                // সরিয়ে AI Chat বসানো হয়েছে। ──
+                GridTileData(vecIcon(Icons.Default.SmartToy),    "AI Chat",       Color(0xFF4F46E5), onOpenAiChat),
                 GridTileData(vecIcon(Icons.Default.Bookmark),    "Saved Question", Color(0xFF64748B), { onOpenMenuPage("bookmarks") })
             )
         )
