@@ -3,6 +3,7 @@ package com.hanif.smartstudy.ui.typing
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -238,6 +239,8 @@ fun TypingPracticeScreen(
     // মোডের phase-২ AI-ইঞ্জিনই পুনরায় ব্যবহার করা হয়েছে, দেখো নিচে) ──
     var customPassages    by remember { mutableStateOf(listOf<CustomPassageEntity>()) }
     var showAddPassageDialog by remember { mutableStateOf(false) }
+    // ── "📖 Passage" কার্ডের + আইকনে চাপলে খোলে — নিজের প্যাসেজ বাছাই/যোগ করার ডায়ালগ ──
+    var showCustomPassageManager by remember { mutableStateOf(false) }
     var customPassageInput   by remember { mutableStateOf("") }
     var customCyclesDone     by remember { mutableStateOf(0) }   // নিজের পুরো তালিকা কতবার শেষ হয়েছে
     var customAiFetching     by remember { mutableStateOf(false) }
@@ -449,8 +452,23 @@ fun TypingPracticeScreen(
     // popup/dialog, Focus mode-এর নিজস্ব আইকন এন্ট্রি পয়েন্ট ──
     var modeTypeExpanded by remember { mutableStateOf(true) }
     var showHistoryDialog by remember { mutableStateOf(false) }
-    var showFocusCard by remember { mutableStateOf(false) }
     var showLangMenu by remember { mutableStateOf(false) }   // 🌐 বাংলা/English সিলেক্টর
+
+    // ── 🎯 Focus mode — টাইপিং স্ক্রিন থেকে ট্যাপ করলেই সরাসরি অন/অফ হয়ে যায়, কোনো
+    // সাবজেক্ট/পরীক্ষার-তারিখ বাছাইয়ের প্রয়োজন নেই — টাইপিং-এ থাকা মানেই ফোকাস
+    // টাইপিং-এই থাকবে, এটাই স্বাভাবিক (দেখো TopAppBar-এর 🎯 আইকন) ──
+    val focusStore = remember { com.hanif.smartstudy.focus.FocusModeStore(ctx) }
+    val focusState by focusStore.stateFlow.collectAsState(initial = com.hanif.smartstudy.focus.FocusModeState())
+    val focusActive = focusState.isEffectivelyActive()
+    fun toggleFocusMode() {
+        scope.launch {
+            if (focusActive) focusStore.deactivate()
+            else focusStore.activate(
+                com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT,
+                com.hanif.smartstudy.focus.FocusModeStore.todayStartMillis()
+            )
+        }
+    }
 
     // Timer
     LaunchedEffect(isStarted, isFinished) {
@@ -939,31 +957,16 @@ fun TypingPracticeScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                 actions = {
-                    // ── 🎯 Focus mode — নিজস্ব আইকন এন্ট্রি পয়েন্ট, existing ফাংশনালিটি
-                    // (FocusTodayCard) অপরিবর্তিত, শুধু এখান থেকে দেখা/লুকানো যায় ──
+                    // ── 🎯 Focus mode — টাইপিং স্ক্রিনে থাকা মানেই ফোকাস টাইপিং-এই থাকবে,
+                    // তাই আলাদা সাবজেক্ট/তারিখ বাছাইয়ের দরকার নেই — ট্যাপ করলেই সরাসরি
+                    // অন/অফ টগল হয়ে যায় (কোনো কার্ড/শিট দেখানো হয় না) ──
                     if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
-                        IconButton(onClick = { showFocusCard = !showFocusCard }) {
+                        IconButton(onClick = { toggleFocusMode() }) {
                             Icon(
                                 Icons.Default.GpsFixed, contentDescription = "Focus mode",
-                                tint = if (showFocusCard) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = if (focusActive) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                    // ── আজকের মোট টাইপিং সময় ব্যাজ ──
-                    if (todaySecondsBefore > 0) {
-                        Box(
-                            Modifier.padding(end = 6.dp)
-                                .background(Color(0xFFEFF6FF), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text("⏱️ আজ ${todaySecondsBefore / 60}min", fontSize = 11.sp, color = Indigo600,
-                                fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                        }
-                    }
-                    // ── 📜 History — এখন popup/dialog আকারে খোলে ──
-                    IconButton(onClick = { showHistoryDialog = true }) {
-                        Icon(Icons.Default.History, contentDescription = "History",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     // Best WPM badge — এখন আসলেই persist হয়ে সঠিক মান দেখায়
                     if (bestWpm > 0) {
@@ -1049,12 +1052,211 @@ fun TypingPracticeScreen(
                 }
             }
 
-            // ── ফোকাস মোড: SubjectListScreen.kt-এর "🎯 আজ ফোকাস" কার্ডের সেম —
-            // ফাংশনালিটি অপরিবর্তিত, শুধু এখন টপ বারের 🎯 আইকনে ট্যাপ করলে দেখা/লুকানো যায় ──
-            if (com.hanif.smartstudy.focus.FocusModeConfig.ENABLED && showFocusCard) {
-                com.hanif.smartstudy.focus.FocusTodayCard(
-                    subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + focusStudySubjects
-                )
+            // ── মোড-সিলেক্টর হেডার — টপ বারের ঠিক নিচে (কোলাপসিবল, ডিফল্ট খোলা)।
+            // "History" এখন আইকন না, সরাসরি লেখা হিসেবে ভাষা সিলেক্টরের পাশে ──
+            if (!isStarted) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🎯 অনুশীলনের ধরন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        // ── 🌐 ভাষা সিলেক্টর — "প্র্যাকটিস" মোডে passage পুল এই ভাষা
+                        // অনুযায়ী ফিল্টার হয় (দেখো currentPool()) ──
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { showLangMenu = true }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        if (sessionLanguage == "en") "🌐 English" else "🌐 বাংলা",
+                                        fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                            DropdownMenu(expanded = showLangMenu, onDismissRequest = { showLangMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("🌐 বাংলা", fontFamily = NotoSansBengali) },
+                                    onClick = {
+                                        sessionLanguage = "bn"; showLangMenu = false
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("🌐 English", fontFamily = NotoSansBengali) },
+                                    onClick = {
+                                        sessionLanguage = "en"; showLangMenu = false
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                    }
+                                )
+                            }
+                        }
+                        // ── 📜 History — এখন আইকন না, সরাসরি লেখা, ভাষা সিলেক্টরের পাশে,
+                        // চাপলে আগের মতোই popup/dialog খোলে ──
+                        Text(
+                            "History", fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { showHistoryDialog = true }
+                        )
+                    }
+                    IconButton(
+                        onClick = { modeTypeExpanded = !modeTypeExpanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            if (modeTypeExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = "টগল", tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                AnimatedVisibility(visible = modeTypeExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = {
+                            sessionMode = "free"; adaptivePhase = 1
+                            // ── Study Typing মোড থেকে এলে passage খালি থাকতে পারে —
+                            // তখন একটা ভ্যালিড প্যাসেজ লোড করে দেওয়া নিশ্চিত করা হলো ──
+                            if (passage.isBlank()) reset(0, currentPool())
+                        }
+                    ) {
+                        Text("✍️ প্র্যাকটিস", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "free") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "freetyping") Color(0xFF0D9488) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startFreeTyping() }
+                    ) {
+                        Text("⌨️ ফ্রি টাইপিং", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "freetyping") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "adaptive") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startAdaptiveSession(sessionLanguage) }
+                    ) {
+                        Text("🎯 AI Adaptive", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "adaptive") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "study") Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startStudyMode() }
+                    ) {
+                        Text("📚 Study Typing", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "study") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+                    }
+                }
+
+                if (sessionMode == "study") {
+                    // ── সাবজেক্ট চিপ ──
+                    if (studySubjectList.isNotEmpty()) {
+                        Text("বিষয় বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            studySubjectList.forEach { subj ->
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (studySubject == subj) Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { loadStudySubTopics(subj) }
+                                ) {
+                                    Text(subj, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        color = if (studySubject == subj) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    } else {
+                        Text("⏳ বিষয় লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    // ── সাব-টপিক চিপ ──
+                    if (studySubject != null && studySubTopicList.isNotEmpty()) {
+                        Text("সাব-টপিক বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            studySubTopicList.forEach { st ->
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (studySubTopic == st) Color(0xFF0E7490) else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { studySubTopic = st; loadStudyPool(studySubject!!, st) }
+                                ) {
+                                    Text(st, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        color = if (studySubTopic == st) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // ── প্রগ্রেস লেবেল, যেমন "কারক: ৮/১০ শেষ" ──
+                    if (studySubTopic != null && studyPoolTotal > 0) {
+                        Text("$studySubTopic: $studyPoolUsed/$studyPoolTotal শেষ",
+                            fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0891B2))
+                    }
+
+                    // ── পুরো টপিক শেষ হয়ে গেলে — রিসেট বাটন ──
+                    if (studyExhausted && studySubTopic != null) {
+                        Card(
+                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4))
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "✅ \"$studySubTopic\"-এর সব প্যাসেজ টাইপ করা হয়ে গেছে — অন্য টপিক বেছে নাও, অথবা এই টপিক রিসেট করো।",
+                                    fontSize = 12.sp, fontFamily = NotoSansBengali, color = GreenOk, fontWeight = FontWeight.Bold
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp), color = GreenOk,
+                                    onClick = { resetCurrentStudySubTopic() }
+                                ) {
+                                    Text("🔄 এই টপিক রিসেট করো", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                        fontWeight = FontWeight.Bold, color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    } else if (studyLoading) {
+                        Text("⏳ প্যাসেজ লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                } // Column
+                } // AnimatedVisibility(modeTypeExpanded)
             }
 
             // ── ধাপ ৪: Daily Discipline Mode ব্যানার — শুধু মোড অন থাকলেই দেখা যায়,
@@ -1137,6 +1339,18 @@ fun TypingPracticeScreen(
                                 Text(srcLabel, fontSize = 9.sp, fontFamily = NotoSansBengali,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                        // ── "আমার প্যাসেজ" ফিচার — নিজের যোগ করা প্যাসেজ এখান থেকেই
+                        // ম্যানেজ/বাছাই করা যায় (+ আইকনে চাপুন) ──
+                        if (sessionMode == "free") {
+                            IconButton(
+                                onClick = { showCustomPassageManager = true },
+                                modifier = Modifier.size(22.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "আমার প্যাসেজ",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp))
+                            }
+                        }
                         if (sessionMode != "study") {
                         val diff = currentPool().getOrNull(passageIndex)?.difficulty
                             ?: PASSAGES.getOrNull(passageIndex)?.difficulty ?: "medium"
@@ -1379,204 +1593,10 @@ fun TypingPracticeScreen(
                 }
             }
 
-            // Difficulty filter + Passage selector
+            // ── মোড/ভাষা সিলেক্টর হেডার এখন টপ বারের ঠিক নিচে (উপরে সরানো হয়েছে) —
+            // এখানে শুধু মোড-নির্দিষ্ট তথ্য কার্ড, দুর্বল-শব্দ ড্যাশবোর্ড, কঠিনতার স্তর ও
+            // সবশেষে "টাইপিং রেস" — এর পর আর কিছু নেই ──
             if (!isStarted) {
-                // ── মোড-সিলেক্টর হেডার — এখন কোলাপসিবল (ডিফল্ট খোলা), ▼ চাপলে বন্ধ/খোলা টগল হয় ──
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🎯 অনুশীলনের ধরন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        // ── 🌐 ভাষা সিলেক্টর — "প্র্যাকটিস" মোডে passage পুল এই ভাষা
-                        // অনুযায়ী ফিল্টার হয় (দেখো currentPool()) ──
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                onClick = { showLangMenu = true }
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                ) {
-                                    Text(
-                                        if (sessionLanguage == "en") "🌐 English" else "🌐 বাংলা",
-                                        fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                            DropdownMenu(expanded = showLangMenu, onDismissRequest = { showLangMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("🌐 বাংলা", fontFamily = NotoSansBengali) },
-                                    onClick = {
-                                        sessionLanguage = "bn"; showLangMenu = false
-                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("🌐 English", fontFamily = NotoSansBengali) },
-                                    onClick = {
-                                        sessionLanguage = "en"; showLangMenu = false
-                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    IconButton(
-                        onClick = { modeTypeExpanded = !modeTypeExpanded },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            if (modeTypeExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = "টগল", tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                AnimatedVisibility(visible = modeTypeExpanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                        color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = {
-                            sessionMode = "free"; adaptivePhase = 1
-                            // ── Study Typing মোড থেকে এলে passage খালি থাকতে পারে —
-                            // তখন একটা ভ্যালিড প্যাসেজ লোড করে দেওয়া নিশ্চিত করা হলো ──
-                            if (passage.isBlank()) reset(0, currentPool())
-                        }
-                    ) {
-                        Text("✍️ প্র্যাকটিস", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold,
-                            color = if (sessionMode == "free") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
-                    }
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                        color    = if (sessionMode == "freetyping") Color(0xFF0D9488) else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = { startFreeTyping() }
-                    ) {
-                        Text("⌨️ ফ্রি টাইপিং", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold,
-                            color = if (sessionMode == "freetyping") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                        color    = if (sessionMode == "adaptive") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = { startAdaptiveSession(sessionLanguage) }
-                    ) {
-                        Text("🎯 AI Adaptive", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold,
-                            color = if (sessionMode == "adaptive") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
-                    }
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                        color    = if (sessionMode == "study") Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick  = { startStudyMode() }
-                    ) {
-                        Text("📚 Study Typing", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold,
-                            color = if (sessionMode == "study") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
-                    }
-                }
-
-                if (sessionMode == "study") {
-                    // ── সাবজেক্ট চিপ ──
-                    if (studySubjectList.isNotEmpty()) {
-                        Text("বিষয় বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(
-                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            studySubjectList.forEach { subj ->
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (studySubject == subj) Color(0xFF0891B2) else MaterialTheme.colorScheme.surfaceVariant,
-                                    onClick = { loadStudySubTopics(subj) }
-                                ) {
-                                    Text(subj, fontSize = 12.sp, fontFamily = NotoSansBengali,
-                                        color = if (studySubject == subj) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-                                }
-                            }
-                        }
-                    } else {
-                        Text("⏳ বিষয় লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-
-                    // ── সাব-টপিক চিপ ──
-                    if (studySubject != null && studySubTopicList.isNotEmpty()) {
-                        Text("সাব-টপিক বেছে নাও:", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(
-                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            studySubTopicList.forEach { st ->
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (studySubTopic == st) Color(0xFF0E7490) else MaterialTheme.colorScheme.surfaceVariant,
-                                    onClick = { studySubTopic = st; loadStudyPool(studySubject!!, st) }
-                                ) {
-                                    Text(st, fontSize = 12.sp, fontFamily = NotoSansBengali,
-                                        color = if (studySubTopic == st) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-                                }
-                            }
-                        }
-                    }
-
-                    // ── প্রগ্রেস লেবেল, যেমন "কারক: ৮/১০ শেষ" ──
-                    if (studySubTopic != null && studyPoolTotal > 0) {
-                        Text("$studySubTopic: $studyPoolUsed/$studyPoolTotal শেষ",
-                            fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0891B2))
-                    }
-
-                    // ── পুরো টপিক শেষ হয়ে গেলে — রিসেট বাটন ──
-                    if (studyExhausted && studySubTopic != null) {
-                        Card(
-                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4))
-                        ) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    "✅ \"$studySubTopic\"-এর সব প্যাসেজ টাইপ করা হয়ে গেছে — অন্য টপিক বেছে নাও, অথবা এই টপিক রিসেট করো।",
-                                    fontSize = 12.sp, fontFamily = NotoSansBengali, color = GreenOk, fontWeight = FontWeight.Bold
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp), color = GreenOk,
-                                    onClick = { resetCurrentStudySubTopic() }
-                                ) {
-                                    Text("🔄 এই টপিক রিসেট করো", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                                        fontWeight = FontWeight.Bold, color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-                                }
-                            }
-                        }
-                    } else if (studyLoading) {
-                        Text("⏳ প্যাসেজ লোড হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                } // Column
-                } // AnimatedVisibility(modeTypeExpanded)
 
                 if (sessionMode == "exam") {
                     Card(
@@ -1676,11 +1696,6 @@ fun TypingPracticeScreen(
                     }
                 }
 
-                TextButton(onClick = onOpenRace, modifier = Modifier.fillMaxWidth()) {
-                    Text("🏁 বন্ধুর সাথে টাইপিং রেস দাও →", fontFamily = NotoSansBengali,
-                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
-                }
-
                 if (sessionMode == "free") {
                     Spacer(Modifier.height(2.dp))
                     Text("🎚️ কঠিনতার স্তর:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1707,42 +1722,8 @@ fun TypingPracticeScreen(
                         }
                     }
 
-                    // ── "আমার প্যাসেজ" — লোকালি সেভ করা নিজের প্যাসেজ, + বাটনে নতুন যোগ করা যায় ──
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val selected = selectedDifficulty == "custom"
-                        Surface(
-                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                            color    = if (selected) difficultyColor("custom") else MaterialTheme.colorScheme.surfaceVariant,
-                            onClick  = {
-                                if (customPassages.isNotEmpty()) {
-                                    selectedDifficulty = "custom"
-                                    customCyclesDone = 0
-                                    reset(0, customPassages.map { PassageInfo(it.text, "custom") })
-                                } else {
-                                    showAddPassageDialog = true
-                                }
-                            }
-                        ) {
-                            Text(
-                                "✍️ আমার প্যাসেজ (${customPassages.size})", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = { showAddPassageDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Text("+ যোগ করুন", fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    // ── "আমার প্যাসেজ" ফিচার এখন উপরের 📖 Passage কার্ডের + আইকনের ভিতরে
+                    // (দেখো নিচে PassageCard-এর + বাটন ও showCustomPassageManager) ──
 
                     Spacer(Modifier.height(4.dp))
                     Text("📝 Passage বেছে নিন:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1750,7 +1731,7 @@ fun TypingPracticeScreen(
                     val pool = currentPool()
                     if (selectedDifficulty == "custom" && pool.isEmpty()) {
                         Text(
-                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — উপরের \"+ যোগ করুন\" বাটনে চাপুন।",
+                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — 📖 Passage কার্ডের + আইকনে চাপুন।",
                             fontSize = 12.sp, fontFamily = NotoSansBengali,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1775,6 +1756,12 @@ fun TypingPracticeScreen(
                             )
                         }
                     }
+                }
+
+                // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই ──
+                TextButton(onClick = onOpenRace, modifier = Modifier.fillMaxWidth()) {
+                    Text("🏁 বন্ধুর সাথে টাইপিং রেস দাও →", fontFamily = NotoSansBengali,
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF7C3AED))
                 }
             }
         }
@@ -1827,6 +1814,72 @@ fun TypingPracticeScreen(
             dismissButton = {
                 TextButton(onClick = { showAddPassageDialog = false; customPassageInput = "" }) {
                     Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
+    }
+
+    // ── "📖 Passage" কার্ডের + আইকনে চাপলে খোলে — "আমার প্যাসেজ" ফিচার এখন এখানেই,
+    // আগে যেটা "কঠিনতার স্তর"-এর নিচে আলাদা একটা রো হিসেবে থাকতো ──
+    if (showCustomPassageManager) {
+        AlertDialog(
+            onDismissRequest = { showCustomPassageManager = false },
+            title = { Text("✍️ আমার প্যাসেজ", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (customPassages.isEmpty()) {
+                        Text(
+                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — নিচের \"+ নতুন যোগ করুন\" বাটনে চাপুন।",
+                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(
+                            Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            customPassages.forEach { cp ->
+                                Row(
+                                    Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            selectedDifficulty = "custom"
+                                            customCyclesDone = 0
+                                            reset(customPassages.indexOf(cp), customPassages.map { PassageInfo(it.text, "custom") })
+                                            showCustomPassageManager = false
+                                        },
+                                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(
+                                            cp.text.take(40) + if (cp.text.length > 40) "..." else "",
+                                            fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    IconButton(onClick = {
+                                        scope.launch {
+                                            AppDatabase.getInstance(ctx).customPassageDao().delete(cp)
+                                            customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = RedWrong)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCustomPassageManager = false; showAddPassageDialog = true }) {
+                    Text("+ নতুন যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomPassageManager = false }) {
+                    Text("বন্ধ করুন", fontFamily = NotoSansBengali)
                 }
             }
         )
