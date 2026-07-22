@@ -52,6 +52,16 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
 
+// ── Study রিকল-টাইপিং মোডে নিচের ফ্লোটিং "সাবমিট" বাটন চাপলে বর্তমান
+// (স্ক্রিনে দেখা যাচ্ছে এমন) প্রশ্নের জন্য এই ফলাফল স্টেটে জমা হয় ──
+private data class StudySubmitResult(
+    val questionId    : String,
+    val question      : String,
+    val correctAnswer : String,
+    val userAnswer    : String,
+    val verdict       : Boolean?   // true=ঠিক, false=ভুল, null=AI যাচাই করতে পারেনি
+)
+
 // ── Vibration helper (API 26+ VibrationEffect, পুরনো device এ fallback) ──
 private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
     try {
@@ -135,6 +145,18 @@ fun QuestionListScreen(
     val recallFocusRequesters = remember { mutableMapOf<String, androidx.compose.ui.focus.FocusRequester>() }
     fun recallFocusRequesterFor(id: String) =
         recallFocusRequesters.getOrPut(id) { androidx.compose.ui.focus.FocusRequester() }
+
+    // ── ⌨️ রিকল-টাইপিং মোডে Enter না চেপে টাইপ করার সময়ও প্রতি কি-স্ট্রোকে
+    // এখানে (প্রশ্ন id অনুযায়ী) খসড়া উত্তর জমা থাকে — নিচের ফ্লোটিং "সাবমিট"
+    // বাটন Enter চাপার অপেক্ষা না করেই এই খসড়া নিয়ে AI দিয়ে ম্যাচ করাতে পারে। ──
+    val recallLiveDrafts = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+
+    // ── নিচের ফ্লোটিং সাবমিট বাটনের ফলাফল — চেক চলছে কিনা, আর ফলাফল এলে
+    // সেটার বিস্তারিত (ভুলগুলো) দেখানোর স্টেট ──
+    var studySubmitChecking by remember { mutableStateOf(false) }
+    var studySubmitResult by remember { mutableStateOf<StudySubmitResult?>(null) }
+    var studySubmitDetail by remember { mutableStateOf<String?>(null) }
+    var studySubmitDetailLoading by remember { mutableStateOf(false) }
 
     // ── Sound + Vibration feedback ──
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -332,6 +354,7 @@ fun QuestionListScreen(
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
                                     onRecallGraded = onRecallGradedAdvance,
+                                    onRecallDraftChange = { text -> recallLiveDrafts[q.id] = text },
                                     onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     }
@@ -359,6 +382,7 @@ fun QuestionListScreen(
                             studyRecallMode = studyRecallMode,
                             answerFocusRequester = recallFocusRequesterFor(q.id),
                             onRecallGraded = onRecallGradedAdvance,
+                            onRecallDraftChange = { text -> recallLiveDrafts[q.id] = text },
                             onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             }
@@ -482,6 +506,49 @@ fun QuestionListScreen(
                             }
                         }
                     }
+
+                    // ── Study: ⌨️ রিকল-টাইপিং মোড চালু থাকলে এখানে একটা "সাবমিট"
+                    // বাটন — Enter না চেপে একটা একটা করে টাইপ করা অবস্থাতেও
+                    // বর্তমান প্রশ্নের খসড়া উত্তর নিয়ে সরাসরি AI দিয়ে ম্যাচ
+                    // করানো যায়। ফলাফলের ডায়ালগে "বিস্তারিত" বাটনে ভুলগুলো
+                    // দেখা যাবে। ──
+                    if (mode == StudyMode.STUDY && studyRecallMode) {
+                        Button(
+                            onClick = {
+                                val currentLocalIdx = listState.firstVisibleItemIndex
+                                    .coerceIn(0, pagedQuestions.lastIndex.coerceAtLeast(0))
+                                val currentQ = pagedQuestions.getOrNull(currentLocalIdx)
+                                if (currentQ != null) {
+                                    val draft = recallLiveDrafts[currentQ.id].orEmpty()
+                                    val qText = currentQ.question.ifBlank { currentQ.explanation.ifBlank { currentQ.answer } }
+                                    studySubmitDetail = null
+                                    studySubmitDetailLoading = false
+                                    if (draft.isBlank()) {
+                                        studySubmitResult = StudySubmitResult(currentQ.id, qText, currentQ.answer, "", null)
+                                    } else {
+                                        studySubmitResult = null
+                                        studySubmitChecking = true
+                                        scrollScope.launch {
+                                            val verdict = viewModel.gradeWrittenWithAi(qText, currentQ.answer, draft)
+                                            studySubmitChecking = false
+                                            studySubmitResult = StudySubmitResult(currentQ.id, qText, currentQ.answer, draft, verdict)
+                                        }
+                                    }
+                                }
+                            },
+                            shape   = RoundedCornerShape(20.dp),
+                            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                "✅ সাবমিট",
+                                fontSize   = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color      = Color.White,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -517,6 +584,112 @@ fun QuestionListScreen(
             dismissButton = {
                 TextButton(onClick = { showSubmitDialog = false }) {
                     Text("আরো দেখি", fontFamily = NotoSansBengali, color = Color(0xFF4F46E5))
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // ── Study: ⌨️ রিকল-টাইপিং মোডের নিচের "সাবমিট" বাটনের ফলাফল ডায়ালগ —
+    // চেক চলাকালীন লোডিং, তারপর ঠিক/ভুল দেখায়। "বিস্তারিত" চাপলে সঠিক
+    // উত্তর, নিজের লেখা উত্তর, আর AI-এর সংক্ষিপ্ত ভুল-ব্যাখ্যা দেখা যাবে। ──
+    if (mode == StudyMode.STUDY && studyRecallMode && (studySubmitChecking || studySubmitResult != null)) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!studySubmitChecking) {
+                    studySubmitResult = null
+                    studySubmitDetail = null
+                    studySubmitDetailLoading = false
+                }
+            },
+            title = {
+                Text("সাবমিট ফলাফল", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+            },
+            text = {
+                val result = studySubmitResult
+                when {
+                    studySubmitChecking -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
+                            Spacer(Modifier.width(10.dp))
+                            Text("🤖 AI দিয়ে যাচাই করা হচ্ছে…", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        }
+                    }
+                    result != null && result.userAnswer.isBlank() -> {
+                        Text("❗ আগে টাইপ-বক্সে উত্তর লিখুন, তারপর সাবমিট করুন।",
+                            fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                    result != null && result.verdict == null -> {
+                        Text("AI দিয়ে যাচাই করা যায়নি — Settings-এ কোনো API key সেভ করা নেই অথবা সবগুলো ব্যর্থ হয়েছে।",
+                            fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                    result != null -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val isCorrect = result.verdict == true
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background((if (isCorrect) Color(0xFF10B981) else Color(0xFFEF4444)).copy(alpha = 0.12f))
+                                    .padding(10.dp)
+                            ) {
+                                Text(
+                                    if (isCorrect) "✅ ঠিক হয়েছে (AI)" else "❌ ভুল হয়েছে (AI)",
+                                    fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    color = if (isCorrect) Color(0xFF10B981) else Color(0xFFEF4444)
+                                )
+                            }
+                            when {
+                                studySubmitDetailLoading -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("বিস্তারিত আনা হচ্ছে…", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                                    }
+                                }
+                                studySubmitDetail != null -> {
+                                    Text("সঠিক উত্তর: ${result.correctAnswer}", fontFamily = NotoSansBengali,
+                                        fontSize = 12.sp, color = Color(0xFF10B981))
+                                    Text("তোমার উত্তর: ${result.userAnswer}", fontFamily = NotoSansBengali,
+                                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (!isCorrect) {
+                                        Text(studySubmitDetail ?: "", fontFamily = NotoSansBengali,
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                else -> {
+                                    TextButton(onClick = {
+                                        scrollScope.launch {
+                                            studySubmitDetailLoading = true
+                                            val explanation = if (isCorrect) null
+                                                else viewModel.explainWrittenMistake(result.question, result.correctAnswer, result.userAnswer)
+                                            studySubmitDetailLoading = false
+                                            studySubmitDetail = explanation
+                                                ?: if (isCorrect) "তোমার উত্তর মূল ভাবের সাথে মিলে গেছে।"
+                                                   else "সঠিক উত্তরের সাথে তুলনা করে দেখো কোথায় পার্থক্য আছে।"
+                                        }
+                                    }) {
+                                        Text("🔍 বিস্তারিত", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !studySubmitChecking,
+                    onClick = {
+                        studySubmitResult = null
+                        studySubmitDetail = null
+                        studySubmitDetailLoading = false
+                    }
+                ) {
+                    Text("বন্ধ করুন", fontFamily = NotoSansBengali, color = Color(0xFF4F46E5))
                 }
             },
             shape = RoundedCornerShape(20.dp)
