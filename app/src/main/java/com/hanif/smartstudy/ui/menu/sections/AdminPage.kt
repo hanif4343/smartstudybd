@@ -1964,11 +1964,13 @@ private fun ProductionChecklistTab() {
             "→ Worker-এ Firebase Auth token refresh করে ব্যবহার করো।",
             "app/.../worker/SyncWorker.kt"
         ),
-        CheckItem(false, false,
-            "RemoteLogger production-এ disable করো",
-            "RemoteLogger.kt Firebase-এ debug log লিখছে — DB Secret দিয়ে।\n" +
-            "→ Production-এ এটা বন্ধ রাখো বা REALTIME_DATA check দিয়ে guard করো।",
-            "app/.../util/RemoteLogger.kt"
+        CheckItem(true, false,
+            "RemoteLogger সম্পূর্ণ সরানো হয়েছে ✅",
+            "RemoteLogger.kt (Firebase এ DB Secret দিয়ে debug log পাঠানো) পুরোপুরি " +
+            "বাদ দেওয়া হয়েছে — ফাইল ডিলিট, আর init/flush/setUserPhone/d/e/i সব কল " +
+            "সরিয়ে ফেলা হয়েছে (যেখানে দরকার ছিল সেখানে সাধারণ android.util.Log " +
+            "রাখা হয়েছে, যা শুধু ডিভাইসের logcat-এই থাকে, বাইরে পাঠায় না)।",
+            "app/.../util/RemoteLogger.kt — ডিলিট করা হয়েছে"
         ),
         CheckItem(false, false,
             "versionName এবং versionCode ঠিক করো",
