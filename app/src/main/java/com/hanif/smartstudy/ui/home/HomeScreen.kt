@@ -143,9 +143,11 @@ fun HomeScreen(
     onOpenTyping   : () -> Unit = {},
     onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
     onOpenFocusMode: () -> Unit = {},
-    onOpenAiChat   : () -> Unit = {}            // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
+    onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
+    onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
+    var showNotifSheet by remember { mutableStateOf(false) }
 
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -165,7 +167,12 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 72.dp)
     ) {
-        HomeHeaderBar(state = state, onOpenMenu = onOpenMenu, onSearchClick = onSearchClick)
+        HomeHeaderBar(
+            state         = state,
+            onOpenMenu    = onOpenMenu,
+            onSearchClick = onSearchClick,
+            onBellClick   = { showNotifSheet = true; viewModel.loadNotifications() }
+        )
 
         if (state.isOffline) OfflineBanner()
 
@@ -202,6 +209,20 @@ fun HomeScreen(
             Spacer(Modifier.height(4.dp))
         }
     }
+
+    if (showNotifSheet) {
+        NotificationsSheet(
+            notifications = state.notifications,
+            isLoading     = state.isLoadingNotifs,
+            onDismiss     = { showNotifSheet = false },
+            onItemClick   = { notif ->
+                viewModel.markNotificationRead(notif.key)
+                showNotifSheet = false
+                onNotificationClick(notif)
+            },
+            onMarkAllRead = { viewModel.markAllNotificationsRead() }
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -226,7 +247,7 @@ fun AdNativePlaceholder() {
 // নতুন Home header — ছবি ২ রেফারেন্স অনুযায়ী: ☰ + avatar + "Welcome back, নাম" + 🔔 + 🔍
 // ═══════════════════════════════════════════════════════════
 @Composable
-private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchClick: () -> Unit) {
+private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchClick: () -> Unit, onBellClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -255,9 +276,28 @@ private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchCl
             )
             Text("পড়তে থাকো, এগিয়ে যেতে থাকো!", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
         }
-        // 🔔 — এখনো কোনো ফাংশন যুক্ত নেই, শুধু UI placeholder (পরে notification inbox যোগ হলে wiring হবে)
-        IconButton(onClick = {}, modifier = Modifier.size(34.dp)) {
-            Icon(Icons.Default.NotificationsNone, contentDescription = "নোটিফিকেশন", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        // 🔔 — নোটিফিকেশন ইনবক্স খোলে (Firebase "Notifications/{phone}" থেকে);
+        // অপঠিত থাকলে লাল ব্যাজে সংখ্যা দেখায়
+        BadgedBox(
+            badge = {
+                if (state.unreadNotifCount > 0) {
+                    Badge(containerColor = Color(0xFFEF4444)) {
+                        Text(
+                            if (state.unreadNotifCount > 9) "9+" else "${state.unreadNotifCount}",
+                            fontSize = 9.sp, color = Color.White
+                        )
+                    }
+                }
+            }
+        ) {
+            IconButton(onClick = onBellClick, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    if (state.unreadNotifCount > 0) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                    contentDescription = "নোটিফিকেশন",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
         IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
             Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
