@@ -145,7 +145,6 @@ class SessionManager(private val context: Context) {
             p[KEY_USER_NAME] = user.name ?: ""
             user.picture?.let { p[KEY_USER_PIC] = it }
         }
-        user.phone?.let { com.hanif.smartstudy.util.RemoteLogger.setUserPhone(it) }
     }
 
     suspend fun clearUser() {
