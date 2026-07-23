@@ -721,9 +721,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Admin: Edit Question (offline-aware) ──────────────────
     fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>, questionPreview: String = "") {
-        com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "adminEditQuestion called: sheet=$sheet rowKey='$rowKey' fields=$fields isAdmin=${_state.value.isAdmin}")
+        android.util.Log.d("AdminEdit", "adminEditQuestion called: sheet=$sheet rowKey='$rowKey' fields=$fields isAdmin=${_state.value.isAdmin}")
         if (!_state.value.isAdmin) {
-            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "BLOCKED: user is not admin!")
+            android.util.Log.e("AdminEdit", "BLOCKED: user is not admin!")
             return
         }
         viewModelScope.launch {
@@ -738,7 +738,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         as android.net.ConnectivityManager
                 val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
                     ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-                com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "connectivity check: isOnline=$isOnline")
+                android.util.Log.d("AdminEdit", "connectivity check: isOnline=$isOnline")
 
                 if (isOnline) {
                     // Online — সরাসরি Firebase এ save
@@ -753,7 +753,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             // এবং অন্য সব ইউজারের কাছেও আপডেট পৌঁছাবে।
                             com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                                 .patchContentAndPersist(sheet, rowKey, fields)
-                            com.hanif.smartstudy.util.RemoteLogger.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
+                            android.util.Log.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
                             _state.update { it.copy(isEditingQuestion = false,
                                 editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
                                 contentEditVersion = _state.value.contentEditVersion + 1) }
@@ -762,7 +762,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             // Online কিন্তু fail — queue এ রাখো + লোকাল cache-এও সাথে সাথে
                             // patch করে দাও, যাতে sync না হওয়া পর্যন্ত এই edit-টাই অ্যাপে
                             // দেখা যায় (Firebase-এ সিঙ্ক না হলেও UI নিজের local state দেখাবে)।
-                            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "Online but FAILED: ${r.message} — queueing")
+                            android.util.Log.e("AdminEdit", "Online but FAILED: ${r.message} — queueing")
                             com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                                 .patchContentAndPersist(sheet, rowKey, fields)
                             val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
@@ -776,13 +776,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     // Offline — লোকাল cache-এ সাথে সাথে patch করো (তাই edit-টা সাথে সাথেই
                     // অ্যাপে দেখা যাবে), আর queue এ রাখো — net আসলে auto sync হবে
-                    com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "OFFLINE branch — enqueueing")
+                    android.util.Log.d("AdminEdit", "OFFLINE branch — enqueueing")
                     com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                         .patchContentAndPersist(sheet, rowKey, fields)
                     val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                     q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
                     val countAfter = q.getPendingAdminEdits().size
-                    com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "enqueued OK — pending count now = $countAfter")
+                    android.util.Log.d("AdminEdit", "enqueued OK — pending count now = $countAfter")
                     loadPendingEdits()
                     _state.update { it.copy(isEditingQuestion = false,
                         editSuccessMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে",
@@ -792,7 +792,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 // ── connectivity check / network কল / patchContentAndPersist —
                 //    যেখানেই exception হোক না কেন, শেষ চেষ্টা হিসেবে queue এ ফেলার
                 //    চেষ্টা করি, যাতে edit-টা একদম হারিয়ে না যায় ──
-                com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "EXCEPTION in adminEditQuestion: ${e.message}", e)
+                android.util.Log.e("AdminEdit", "EXCEPTION in adminEditQuestion: ${e.message}", e)
                 try {
                     com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                         .patchContentAndPersist(sheet, rowKey, fields)
@@ -803,7 +803,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         editSuccessMsg = "📴 সংরক্ষিত — net আসলে auto sync হবে",
                         contentEditVersion = _state.value.contentEditVersion + 1) }
                 } catch (e2: Exception) {
-                    com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "QUEUE ALSO FAILED: ${e2.message}", e2)
+                    android.util.Log.e("AdminEdit", "QUEUE ALSO FAILED: ${e2.message}", e2)
                     _state.update { it.copy(isEditingQuestion = false,
                         error = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e2.message ?: "unknown error"}") }
                 }
