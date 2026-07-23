@@ -24,6 +24,7 @@ import com.hanif.smartstudy.ui.search.GlobalSearchScreen
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.ui.typing.TypingPracticeScreen
 import com.hanif.smartstudy.util.DeepLinkAction
+import com.hanif.smartstudy.util.toDeepLinkAction
 import com.hanif.smartstudy.viewmodel.ChallengeViewModel
 import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
@@ -148,25 +149,29 @@ fun MainScreen(
         }
     }
 
-    LaunchedEffect(deepLink.type) {
-        when (deepLink.type) {
+    // deepLink থেকে menuPage বের করো (এখন mutable — Home এর grid card থেকেও, বা
+    // 🔔 notification tap থেকেও applyDeepLink() এর মাধ্যমে set করা যায়)
+    var menuInitialPage by remember { mutableStateOf<String?>(null) }
+
+    fun applyDeepLink(action: DeepLinkAction) {
+        when (action.type) {
             DeepLinkAction.Type.QUIZ       -> {
                 currentTab = BottomTab.QUIZ
-                deepLink.questionId?.let { quizViewModel.navigateToQuestion(it) }
+                action.questionId?.let { quizViewModel.navigateToQuestion(it) }
             }
             DeepLinkAction.Type.QBANK      -> {
                 currentTab = BottomTab.QBANK
-                deepLink.questionId?.let { qbankViewModel.navigateToQuestion(it) }
+                action.questionId?.let { qbankViewModel.navigateToQuestion(it) }
             }
             DeepLinkAction.Type.STUDY      -> {
                 currentTab = BottomTab.STUDY
-                deepLink.questionId?.let { studyViewModel.navigateToQuestion(it) }
+                action.questionId?.let { studyViewModel.navigateToQuestion(it) }
             }
             DeepLinkAction.Type.SEARCH     -> { showSearch = true }
             DeepLinkAction.Type.REPORTS    -> {
-                val qid = deepLink.questionId
+                val qid = action.questionId
                 if (!qid.isNullOrBlank()) {
-                    when (deepLink.tab?.lowercase()) {
+                    when (action.tab?.lowercase()) {
                         "qbank" -> { currentTab = BottomTab.QBANK; qbankViewModel.navigateToQuestion(qid) }
                         "study" -> { currentTab = BottomTab.STUDY; studyViewModel.navigateToQuestion(qid) }
                         else    -> { currentTab = BottomTab.QUIZ;  quizViewModel.navigateToQuestion(qid) }
@@ -180,25 +185,27 @@ fun MainScreen(
             DeepLinkAction.Type.CHALLENGE  -> { currentTab = BottomTab.CHALLENGE }
             DeepLinkAction.Type.ROUTINE    -> {
                 currentTab = BottomTab.MENU
-                pendingRoutineItemId = deepLink.routineItemId
+                pendingRoutineItemId = action.routineItemId
             }
             DeepLinkAction.Type.FOCUS      -> {
                 currentTab = BottomTab.STUDY
-                deepLink.subject?.let { studyViewModel.navigateToSubject(it) }
+                action.subject?.let { studyViewModel.navigateToSubject(it) }
             }
             DeepLinkAction.Type.NONE       -> {}
         }
+        // ── Menu ট্যাবের কোন সাব-পেজে যেতে হবে সেটাও এখানেই সেট করা হলো —
+        // আগে এটা আলাদা LaunchedEffect(deepLink) এ ছিল যেটা শুধু top-level
+        // deepLink prop বদলালেই চলত, in-app notification tap থেকে চললে চলত না ──
+        menuInitialPage = when (action.type) {
+            DeepLinkAction.Type.REPORTS    -> if (action.questionId.isNullOrBlank()) "admin" else null
+            DeepLinkAction.Type.TECHNIQUES -> "admin"
+            DeepLinkAction.Type.MENU       -> action.menuPage
+            else                            -> null
+        }
     }
 
-    // deepLink থেকে menuPage বের করো (এখন mutable — Home এর grid card থেকেও set করা যায়)
-    var menuInitialPage by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(deepLink) {
-        menuInitialPage = when (deepLink.type) {
-            DeepLinkAction.Type.REPORTS    -> if (deepLink.questionId.isNullOrBlank()) "admin" else null
-            DeepLinkAction.Type.TECHNIQUES -> "admin"
-            DeepLinkAction.Type.MENU       -> deepLink.menuPage
-            else                           -> null
-        }
+    LaunchedEffect(deepLink.type) {
+        applyDeepLink(deepLink)
     }
 
     // ── ফোকাস মোড: অ্যাপ খোলার সাথে সাথে (একবারই, cold-open এ) ফোকাস মোড চালু
@@ -325,7 +332,8 @@ fun MainScreen(
                         }
                     },
                     onOpenFocusMode = { showFocusModeInfo = true },
-                    onOpenAiChat    = { showAiChat = true }
+                    onOpenAiChat    = { showAiChat = true },
+                    onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
                     mode      = StudyMode.QUIZ,
