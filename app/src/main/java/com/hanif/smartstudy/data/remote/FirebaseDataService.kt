@@ -750,6 +750,79 @@ object FirebaseDataService {
             ApiResult.Success(totalUpdated)
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
     }
+
+    // ── 🔔 Notification inbox ─────────────────────────────────────────
+    // "Notifications/{phone}/{key}" node — এই একই node NotificationPollWorker.kt
+    // পোল করে system-tray notification দেখায়। এখানে ঠিক সেই একই ডেটা inbox-এর
+    // জন্য fetch করা হয় (read + unread দুটোই, সময় অনুযায়ী নতুন-আগে সাজানো)।
+    suspend fun getNotifications(phone: String): List<com.hanif.smartstudy.data.model.AppNotification> =
+        withContext(Dispatchers.IO) {
+            try {
+                val safePhone = com.hanif.smartstudy.util.PhoneValidator.sanitize(phone) ?: return@withContext emptyList()
+                val auth = authQuery()
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/Notifications/$safePhone.json$auth"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val bodyStr = resp.body?.string()
+                resp.close()
+                if (bodyStr.isNullOrBlank() || bodyStr == "null") return@withContext emptyList()
+
+                val root = com.google.gson.JsonParser.parseString(bodyStr)
+                val obj = root.takeIf { it.isJsonObject }?.asJsonObject ?: return@withContext emptyList()
+
+                obj.entrySet().mapNotNull { (key, value) ->
+                    if (!value.isJsonObject) return@mapNotNull null
+                    val n = value.asJsonObject
+                    val keyTime = key.removePrefix("notif_").toLongOrNull() ?: 0L
+                    val time = keyTime.takeIf { it > 0 } ?: run {
+                        n.get("time")?.asString?.let {
+                            try {
+                                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                                    .parse(it)?.time
+                            } catch (e: Exception) { null }
+                        } ?: 0L
+                    }
+                    com.hanif.smartstudy.data.model.AppNotification(
+                        key         = key,
+                        title       = n.get("title")?.asString ?: "Smart Study",
+                        body        = n.get("body")?.asString ?: "",
+                        time        = time,
+                        read        = n.get("read")?.asBoolean ?: false,
+                        type        = n.get("type")?.asString ?: "",
+                        url         = n.get("url")?.asString ?: "",
+                        questionId  = n.get("questionId")?.asString ?: "",
+                        tab         = n.get("tab")?.asString ?: "",
+                        challengeId = n.get("challengeId")?.asString ?: ""
+                    )
+                }.sortedByDescending { it.time }
+            } catch (e: Exception) {
+                android.util.Log.e("FirebaseDataService", "getNotifications failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+    /** একটা নির্দিষ্ট notification "পড়া হয়েছে" মার্ক করো */
+    suspend fun markNotificationRead(phone: String, key: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val safePhone = com.hanif.smartstudy.util.PhoneValidator.sanitize(phone) ?: return@withContext false
+            val auth = authQuery()
+            val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/Notifications/$safePhone/$key/read.json$auth"
+            val body = "true".toRequestBody("application/json".toMediaType())
+            val resp = client.newCall(Request.Builder().url(url).put(body).build()).execute()
+            val ok = resp.isSuccessful
+            resp.close()
+            ok
+        } catch (e: Exception) {
+            android.util.Log.e("FirebaseDataService", "markNotificationRead failed: ${e.message}")
+            false
+        }
+    }
+
+    /** ইনবক্সের সব কটাকেই একসাথে "পড়া হয়েছে" মার্ক করো (🔔 শীটে "সব পড়া হয়েছে" বাটনের জন্য) */
+    suspend fun markAllNotificationsRead(phone: String, keys: List<String>): Int = withContext(Dispatchers.IO) {
+        var okCount = 0
+        keys.forEach { key -> if (markNotificationRead(phone, key)) okCount++ }
+        okCount
+    }
 }
 
 // ── Data model ───────────────────────────────────────────────
