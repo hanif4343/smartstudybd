@@ -435,7 +435,6 @@ object FirebaseDataService {
             val auth = authQuery()
             val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet/$rowKey.json$auth"
             android.util.Log.d("AdminEdit", "PATCH → $url | fields=$fields")
-            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "PATCH → $sheet/$rowKey | fields=$fields | url_preview=${url.take(80)}")
             // "updatedAt" নাম্বার হিসেবে স্ট্যাম্প করি (string না — Firebase orderBy query
             // numeric type এর সাথে numeric startAt মেলায়, string হলে query কাজ করবে না)।
             // অন্য ডিভাইসের incremental/delta sync এই row টা "changed since X" query তে
@@ -449,18 +448,15 @@ object FirebaseDataService {
             val respBody = resp.body?.string() ?: ""
             val code = resp.code
             android.util.Log.d("AdminEdit", "Response: $code | $respBody")
-            com.hanif.smartstudy.util.RemoteLogger.d("AdminEdit", "Response: $code | body=${respBody.take(200)}")
             resp.close()
             if (resp.isSuccessful) {
                 touchMetaUpdatedAt()
                 ApiResult.Success(Unit)
             } else {
-                com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "FAILED: $code — $respBody")
                 ApiResult.Error("Firebase error: $code — $respBody")
             }
         } catch (e: Exception) {
             android.util.Log.e("AdminEdit", "Exception: ${e.message}", e)
-            com.hanif.smartstudy.util.RemoteLogger.e("AdminEdit", "Exception: ${e.message ?: "unknown"}")
             ApiResult.Error(e.message ?: "Network error")
         }
     }
