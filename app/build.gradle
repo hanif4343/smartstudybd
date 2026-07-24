@@ -38,7 +38,16 @@ android {
         buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
-        buildConfigField "String", "FIREBASE_DB_SECRET", "\"%%FIREBASE_DB_SECRET%%\""
+        // ── FIREBASE_DB_SECRET সরানো হয়েছে (আগে এখানে ছিল) — এই master secret
+        // APK-তে BuildConfig হিসেবে কম্পাইল হয়ে যেত, decompile করলে যে কেউ
+        // পুরো Firebase Database এ read/write access পেয়ে যেত। এখন
+        // FirebaseTokenProvider.kt শুধু real/anonymous Firebase Auth ID token
+        // ব্যবহার করে, কোনো master secret লাগে না।
+        // ⚠️ পুরনো secret আগেই প্রতিটা পুরনো APK build-এ এমবেড হয়ে গেছে, তাই এটা
+        // সরানোর পাশাপাশি Firebase Console এ গিয়ে Database Secret টা rotate/
+        // regenerate করতে হবে (Project settings → Service accounts → Database
+        // secrets), আর GitHub repo থেকে FIREBASE_DB_SECRET secret-টাও ডিলিট
+        // করে দেওয়া উচিত।
         // ── টাইপিং AI Adaptive Session — admin-app-এর Cloudflare Worker endpoint
         // (cloudflare-worker/typing-sentence-worker.js) — এখানে আসল AI provider
         // key কিছুই নেই, শুধু endpoint URL আর একটা shared secret token ──
