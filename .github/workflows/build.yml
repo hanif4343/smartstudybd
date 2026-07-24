@@ -107,7 +107,10 @@ jobs:
           sed -i 's|%%FIREBASE_URL%%|${{ secrets.FIREBASE_URL }}|g'     app/build.gradle
           sed -i 's|%%GEMINI_API_KEY%%|${{ secrets.GEMINI_API_KEY }}|g' app/build.gradle
           sed -i 's|%%IMGBB_API_KEY%%|${{ secrets.IMGBB_API_KEY }}|g'   app/build.gradle
-          sed -i 's|%%FIREBASE_DB_SECRET%%|${{ secrets.FIREBASE_DB_SECRET }}|g' app/build.gradle
+          # FIREBASE_DB_SECRET আর ইনজেক্ট করা হয় না — app/build.gradle থেকে
+          # buildConfigField-টাই সরানো হয়েছে (নিরাপত্তার কারণে, দেখো
+          # FirebaseTokenProvider.kt-এর কমেন্ট)। এখন থেকে FIREBASE_DB_SECRET
+          # GitHub repo secrets থেকেও ডিলিট করে দেওয়া যায়।
           sed -i 's|%%TYPING_AI_ENDPOINT%%|${{ secrets.TYPING_AI_ENDPOINT }}|g' app/build.gradle
           sed -i 's|%%TYPING_AI_SECRET%%|${{ secrets.TYPING_AI_SECRET }}|g'     app/build.gradle
 
