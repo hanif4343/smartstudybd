@@ -3,7 +3,7 @@ package com.hanif.smartstudy.data.remote
 import android.util.Log
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
-import com.hanif.smartstudy.BuildConfig
+import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -17,36 +17,47 @@ suspend fun <T> Task<T>.awaitTask(): T = suspendCancellableCoroutine { cont ->
 }
 
 /**
- * Real Firebase Auth (Phone OTP) দিয়ে sign in করা থাকলে তার ID token রিটার্ন
- * করে — এটাই এখন থেকে প্রতিটা REST call এ ব্যবহৃত হয়, কোনো master secret না।
+ * Real Firebase Auth (Google/Phone OTP sign-in, অথবা সেসবের আগে Anonymous)
+ * দিয়ে যা-ই সাইন-ইন করা থাকুক, তার ID token রিটার্ন করে — প্রতিটা REST call
+ * এ ব্যবহৃত হয়, কোনো master DB secret আর ব্যবহার হয় না।
  *
- * ⚠️ TRANSITIONAL: Google Sign-In এখনো real Firebase Auth এর মধ্য দিয়ে যায়
- * না (সেটা পরের ধাপে migrate হবে), তাই সেই একটা ছোট windows-এ (Google
- * sign-in/signup চলাকালীন, phone OTP দিয়ে sign-in করার আগে) কোনো currentUser
- * থাকে না — তখন সাময়িকভাবে legacy secret এ fallback করে যাতে সেই flow ভেঙে
- * না যায়। Phone OTP দিয়ে sign-in করা থাকলে এই fallback কখনো ব্যবহৃত হয় না।
+ * ✅ আগে এখানে "কোনো signed-in user না থাকলে" পুরো database access দেওয়া
+ * BuildConfig.FIREBASE_DB_SECRET এ fallback করতো — যেটা APK decompile করে
+ * বের করে ফেলা সম্ভব ছিল (minifyEnabled=false থাকায় আরও সহজ), মানে যে কেউ
+ * পুরো ডেটাবেসে read/write করতে পারতো। এখন সেই fallback সম্পূর্ণ সরিয়ে,
+ * বদলে Firebase Anonymous Auth ব্যবহার করা হয় — app চালু হওয়ার সাথে সাথেই
+ * (SmartStudyApp.onCreate) signInAnonymously() কল হয়ে যায়, তাই বাস্তবে
+ * "currentUser == null" অবস্থা প্রায় কখনোই ঘটে না। Google/Phone sign-in
+ * হয়ে গেলে সেই real user-ই currentUser হয়ে যায়, ততক্ষণ anonymous user-ই
+ * auth != null শর্ত পূরণ করে (কিন্তু কোনো master-secret-level অ্যাক্সেস দেয় না)।
  */
 object FirebaseTokenProvider {
 
     private const val TAG = "FBToken"
 
     suspend fun getToken(): String {
-        val user = FirebaseAuth.getInstance().currentUser
-        if (user != null) {
-            return try {
-                val result = user.getIdToken(false).awaitTask()
-                result.token ?: legacyFallback("ID token null")
-            } catch (e: Exception) {
-                Log.e(TAG, "getIdToken failed: ${e.message}")
-                legacyFallback("getIdToken exception")
-            }
+        val user = FirebaseAuth.getInstance().currentUser ?: signInAnonymously()
+        if (user == null) {
+            Log.e(TAG, "No token available — anonymous sign-in also failed. এই কলটা auth ছাড়াই যাবে, Firebase Rules এ প্রত্যাখ্যাত হবে।")
+            return ""
         }
-        return legacyFallback("no signed-in user yet")
+        return try {
+            user.getIdToken(false).awaitTask().token ?: ""
+        } catch (e: Exception) {
+            Log.e(TAG, "getIdToken failed: ${e.message}")
+            ""
+        }
     }
 
-    private fun legacyFallback(reason: String): String {
-        Log.w(TAG, "Falling back to legacy DB secret ($reason) — এই path টা migrate করা বাকি আছে")
-        return BuildConfig.FIREBASE_DB_SECRET
+    private suspend fun signInAnonymously(): FirebaseUser? {
+        return try {
+            val result = FirebaseAuth.getInstance().signInAnonymously().awaitTask()
+            Log.d(TAG, "Anonymous sign-in OK: ${result.user?.uid}")
+            result.user
+        } catch (e: Exception) {
+            Log.e(TAG, "Anonymous sign-in failed: ${e.message}")
+            null
+        }
     }
 
     suspend fun refreshToken(): String {
@@ -58,8 +69,15 @@ object FirebaseTokenProvider {
         }
     }
 
-    fun ensureSignedIn() {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid
-        Log.d(TAG, if (uid != null) "Signed in as $uid" else "No signed-in user (legacy fallback active)")
+    /** App চালু হওয়ার সাথে সাথেই কল হয় (SmartStudyApp.onCreate) — currentUser
+     *  না থাকলে সাথে সাথে anonymous sign-in করে ফেলে, যাতে পরের প্রতিটা
+     *  Firebase কল-এর আগে "no signed-in user" অবস্থাই না থাকে। */
+    suspend fun ensureSignedIn() {
+        val existing = FirebaseAuth.getInstance().currentUser
+        if (existing != null) {
+            Log.d(TAG, "Already signed in as ${existing.uid}")
+            return
+        }
+        signInAnonymously()
     }
 }
