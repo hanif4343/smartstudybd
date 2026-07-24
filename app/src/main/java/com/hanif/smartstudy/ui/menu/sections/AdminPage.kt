@@ -1804,8 +1804,17 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                         gson.fromJson(action.payload, Map::class.java)
                     } catch (e: Exception) { emptyMap<String, Any>() }
 
-                    val sheet    = payload["sheet"]?.toString() ?: "?"
-                    val preview  = payload["questionPreview"]?.toString() ?: ""
+                    val isReorderAction = action.type == "admin_reorder_subject" || action.type == "admin_reorder_subtopic"
+                    val sheet    = payload["sheet"]?.toString()
+                        ?: (payload["mode"]?.toString() ?: "?")
+                    @Suppress("UNCHECKED_CAST")
+                    val reorderCount = (payload["order"] as? Map<Any?, Any?>)?.size ?: 0
+                    val preview  = payload["questionPreview"]?.toString()
+                        ?: if (isReorderAction) {
+                            val subj = payload["subject"]?.toString()
+                            if (subj != null) "\"$subj\"-এর সাবটপিক ক্রম ($reorderCount টি)"
+                            else "সাবজেক্ট ক্রম ($reorderCount টি)"
+                        } else ""
                     val retry    = action.retryCount
 
                     Card(
@@ -1838,9 +1847,11 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                             color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
                                     }
                                     val (typeLabel, typeColor) = when (action.type) {
-                                        "admin_add_question"    -> "➕ নতুন" to Color(0xFF16A34A)
-                                        "admin_delete_question" -> "🗑️ ডিলিট" to Color(0xFFDC2626)
-                                        else                     -> "✏️ এডিট" to Color(0xFF4F46E5)
+                                        "admin_add_question"      -> "➕ নতুন" to Color(0xFF16A34A)
+                                        "admin_delete_question"   -> "🗑️ ডিলিট" to Color(0xFFDC2626)
+                                        "admin_reorder_subject",
+                                        "admin_reorder_subtopic"  -> "🔀 ক্রম" to Color(0xFF9333EA)
+                                        else                       -> "✏️ এডিট" to Color(0xFF4F46E5)
                                     }
                                     Surface(shape = RoundedCornerShape(6.dp),
                                         color = typeColor.copy(0.1f)) {
@@ -1907,15 +1918,15 @@ private fun ProductionChecklistTab() {
             "REWARDED_XP_BONUS, REWARDED_DAILY_LOGIN, NATIVE_HOME",
             "app/src/main/java/com/hanif/smartstudy/util/AdManager.kt (line ~42-50)"
         ),
-        CheckItem(false, true,
-            "REALTIME_DATA = false করো — build.gradle",
-            "এখন build.gradle-এ REALTIME_DATA = true আছে।\n" +
-            "এর মানে: প্রতিবার এপ খুললে সরাসরি Firebase থেকে data টানে — cache নেই।\n" +
-            "→ Production-এ false করো, নইলে:\n" +
-            "   • Firebase read বিল বাড়বে\n" +
-            "   • অনেক user হলে Firebase throttle করবে\n" +
-            "   • এপ খুলতে বেশি সময় লাগবে (offline-first না)",
-            "app/build.gradle — buildConfigField \"boolean\", \"REALTIME_DATA\", \"true\""
+        CheckItem(true, true,
+            "REALTIME_DATA = false করা হয়েছে ✅",
+            "build.gradle-এ REALTIME_DATA এখন false। subTopic ওপেন করলে Room cache-এ\n" +
+            "ডেটা থাকলে সেই এক্সট্রা background Firebase sync আর হয় না\n" +
+            "(QuizViewModel.navigateToSubTopic-এর BuildConfig.REALTIME_DATA চেক)।\n" +
+            "ContentRepository-এর আগে থেকে থাকা stale-while-revalidate cache\n" +
+            "(15 মিনিট gap দিয়ে background refresh) আগের মতোই কাজ করবে — শুধু\n" +
+            "এই এক্সট্রা কলটাই বন্ধ হলো।",
+            "app/build.gradle — buildConfigField \"boolean\", \"REALTIME_DATA\", \"false\""
         ),
         CheckItem(false, true,
             "minifyEnabled true করো — build.gradle (release)",
@@ -1999,6 +2010,25 @@ private fun ProductionChecklistTab() {
             "Play Store-এ Privacy Policy আবশ্যক।\n" +
             "PrivacyPolicyScreen.kt এ কোনো URL hardcode আছে কিনা চেক করো।",
             "app/.../ui/menu/PrivacyPolicyScreen.kt"
+        ),
+        CheckItem(true, false,
+            "Subject/SubTopic reorder — offline queue + all-user sync ✅",
+            "আগে দুইটা সমস্যা ছিল:\n" +
+            "১) Firebase কল fail হলে (নেট/quota) reorder আর কোথাও সংরক্ষিত হতো না —\n" +
+            "   admin অ্যাপ বন্ধ করে খুললেই আগের ক্রম ফিরে আসত।\n" +
+            "২) সফল হলেও adminSetSubjectOrderBulk/adminSetSubTopicOrderBulk কখনো\n" +
+            "   /meta/updatedAt touch করত না — তাই অন্য ইউজারের ডিভাইস মেটা-চেকে\n" +
+            "   নতুন কিছু আছে বলে ধরতেই পারত না, ফলে periodic full-resync না হওয়া\n" +
+            "   পর্যন্ত admin ছাড়া বাকি সবাই পুরনো ক্রমই দেখত।\n" +
+            "→ Fix: এখন reorder সবসময় আগে লোকাল cache-এ patch হয় (admin সাথে সাথেই\n" +
+            "   ঠিক ক্রম দেখে, রিস্টার্টের পরও), তারপর অনলাইনে সরাসরি Firebase-এ,\n" +
+            "   ব্যর্থ/অফলাইন হলে PendingQueue-তে (admin_edit_question-এর মতোই\n" +
+            "   প্যাটার্নে) গিয়ে SyncWorker ব্যাকগ্রাউন্ডে auto-retry করে। সফল হলেই\n" +
+            "   এখন touchMetaUpdatedAt() কল হয়, তাই বাকি সব ইউজারও পরের sync-এ\n" +
+            "   একই ক্রম দেখতে পাবে।",
+            "QuizViewModel.persistSubjectOrder/persistSubTopicOrder, " +
+            "FirebaseDataService.adminSetSubjectOrderBulk/adminSetSubTopicOrderBulk, " +
+            "PendingQueue.kt, SyncWorker.kt"
         ),
     )
 
