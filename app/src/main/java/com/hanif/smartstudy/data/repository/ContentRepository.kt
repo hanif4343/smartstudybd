@@ -66,7 +66,7 @@ class ContentRepository(private val context: Context) {
             return if (cached != null) DataState.Success(cached, fromCache = true, isOffline = true)
             else DataState.Error("ইন্টারনেট সংযোগ নেই")
         }
-        return when (val result = ContentFetchService.fetchSubjectsOnly()) {
+        return when (val result = ContentFetchService.fetchSubjectsOnly(context)) {
             is ContentResult.Success -> {
                 // শুধু subjectOrder/subTopicOrder মেমরিতে রাখি
                 // questions না আসা পর্যন্ত memCache এ questions empty থাকবে
@@ -154,7 +154,7 @@ class ContentRepository(private val context: Context) {
 
         if (needsFullResync) {
             Log.d("Repo", "Periodic full resync due (deletion/edge-case reconcile)")
-            when (val fresh = ContentFetchService.fetchAllContent()) {
+            when (val fresh = ContentFetchService.fetchAllContent(context)) {
                 is ContentResult.Success -> {
                     val toSave = fresh.data.copy(remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now)
                     _memCache = toSave
@@ -172,7 +172,7 @@ class ContentRepository(private val context: Context) {
         val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
         val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
 
-        when (val delta = ContentFetchService.fetchIncrementalContent(sinceQuiz, sinceQBank, sinceStudy)) {
+        when (val delta = ContentFetchService.fetchIncrementalContent(context, sinceQuiz, sinceQBank, sinceStudy)) {
             is ContentResult.Success -> {
                 val d = delta.data
                 val hasQuestionChanges = d.quiz.isNotEmpty() || d.qbank.isNotEmpty() || d.study.isNotEmpty()
@@ -242,7 +242,7 @@ class ContentRepository(private val context: Context) {
                 _lastBgRefreshAt = now
                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     try {
-                        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt()
+                        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt(context)
                         val serverHasNewer = remoteUpdatedAt == 0L || remoteUpdatedAt > cached.remoteUpdatedAt
                         if (!serverHasNewer) {
                             Log.d("Repo", "Background: meta unchanged, skipping refetch")
@@ -271,7 +271,7 @@ class ContentRepository(private val context: Context) {
             }
 
             Log.d("Repo", "First load: Firebase থেকে fetch করছি...")
-            when (val result = ContentFetchService.fetchAllContent()) {
+            when (val result = ContentFetchService.fetchAllContent(context)) {
                 is ContentResult.Success -> {
                     Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
                     _memCache = result.data
