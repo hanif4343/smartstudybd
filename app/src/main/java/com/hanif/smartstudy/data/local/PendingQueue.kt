@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.first
  * Internet না থাকলে actions queue-এ রাখে।
  * Internet আসলে WorkManager দিয়ে sync হয়।
  *
- * Supported actions: quiz_answer, study_progress, xp_update, admin_edit_question
+ * Supported actions: quiz_answer, study_progress, xp_update, admin_edit_question,
+ * admin_add_question, admin_delete_question, admin_reorder_subject, admin_reorder_subtopic
  */
 data class PendingAction(
     val id         : String = java.util.UUID.randomUUID().toString(),
@@ -126,6 +127,51 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin: offline/fail অবস্থায় Subject reorder — mode+tag এর জন্য পুরো
+    //    order map টাই queue-তে রাখা হয় (PUT — সম্পূর্ণ node replace), তাই একই
+    //    mode+tag-এ বারবার reorder করলে পুরনো pending entry গুলো আর দরকার নেই,
+    //    সেগুলো নিচে removePendingReorder() দিয়ে সরিয়ে সবশেষটাই queue-তে রাখা হয়। ──
+    suspend fun enqueueAdminReorderSubject(mode: String, tag: String, order: Map<String, Int>) {
+        removePendingReorder("admin_reorder_subject", mode, tag)
+        enqueue(PendingAction(
+            type    = "admin_reorder_subject",
+            payload = gson.toJson(mapOf(
+                "mode"  to mode,
+                "tag"   to tag,
+                "order" to order
+            ))
+        ))
+    }
+
+    // ── Admin: offline/fail অবস্থায় SubTopic reorder — mode+tag+subject ভিত্তিক ──
+    suspend fun enqueueAdminReorderSubTopic(mode: String, tag: String, subject: String, order: Map<String, Int>) {
+        removePendingReorder("admin_reorder_subtopic", mode, tag, subject)
+        enqueue(PendingAction(
+            type    = "admin_reorder_subtopic",
+            payload = gson.toJson(mapOf(
+                "mode"    to mode,
+                "tag"     to tag,
+                "subject" to subject,
+                "order"   to order
+            ))
+        ))
+    }
+
+    // ── একই mode(+tag[+subject]) এর জন্য আগে থেকে queue-তে থাকা reorder action
+    //    থাকলে বাদ দাও — শুধু সবশেষ ক্রমটাই sync হওয়া উচিত, মাঝেরগুলো না ──
+    private suspend fun removePendingReorder(type: String, mode: String, tag: String, subject: String? = null) {
+        val queue = getAll().toMutableList()
+        queue.removeAll { action ->
+            if (action.type != type) return@removeAll false
+            try {
+                val map = gson.fromJson<Map<String, Any>>(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                val sameModeTag = map["mode"]?.toString() == mode && map["tag"]?.toString() == tag
+                if (subject == null) sameModeTag else sameModeTag && map["subject"]?.toString() == subject
+            } catch (e: Exception) { false }
+        }
+        save(queue)
+    }
+
     // ── কোনো প্রশ্ন (rowKey/localId) ডিলিট হয়ে গেলে সেই প্রশ্নের জন্য আগে থেকে
     //    queue-তে থাকা pending edit/add action গুলো আর দরকার নেই — সরিয়ে ফেলো।
     //    বিশেষত: এখনো sync না হওয়া লোকাল-add প্রশ্ন ডিলিট করলে তো Firebase-এ
@@ -142,9 +188,13 @@ class PendingQueue(private val context: Context) {
         save(queue)
     }
 
-    // ── Pending admin edit + add + delete — সবগুলোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
+    // ── Pending admin edit + add + delete + reorder — সবগুলোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
     suspend fun getPendingAdminActions(): List<PendingAction> =
-        getAll().filter { it.type == "admin_edit_question" || it.type == "admin_add_question" || it.type == "admin_delete_question" }
+        getAll().filter {
+            it.type == "admin_edit_question" || it.type == "admin_add_question" ||
+            it.type == "admin_delete_question" || it.type == "admin_reorder_subject" ||
+            it.type == "admin_reorder_subtopic"
+        }
 
     // ── Pending admin edits আলাদা করে দেখাও ──
     suspend fun getPendingAdminEdits(): List<PendingAction> =
