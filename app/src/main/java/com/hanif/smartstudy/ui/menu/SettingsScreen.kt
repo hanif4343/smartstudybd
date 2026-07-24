@@ -543,6 +543,57 @@ fun DataSourceModeDropdown(state: MenuUiState, vm: MenuViewModel) {
             fontFamily = NotoSansBengali, fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
         )
+
+        // ── Google Sheet সিলেক্ট করার সাথে সাথেই test fetch চলে — এখানে real-time
+        // progress (elapsed সেকেন্ড, ticking) এবং শেষে সফল/ব্যর্থ ফলাফল দেখানো হয়।
+        // "সিলেক্ট করলাম কিন্তু কিছু দেখছি না" — এই অন্ধকার অবস্থা এড়াতেই এটা। ──
+        if (state.isTestingDataSource) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF4F46E5).copy(alpha = 0.08f))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF4F46E5))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(
+                        "Google Sheet থেকে ডেটা আসছে… ${state.dataSourceTestElapsedSec} সেকেন্ড",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "সাধারণত ৫–৩০ সেকেন্ড লাগে (sheet-এর আকারের ওপর নির্ভর করে) — বন্ধ করো না",
+                        fontFamily = NotoSansBengali, fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.55f)
+                    )
+                }
+            }
+        }
+
+        state.dataSourceTestResultMsg?.let { msg ->
+            val isSuccess = msg.startsWith("✅")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background((if (isSuccess) Color(0xFF16A34A) else Color(0xFFDC2626)).copy(alpha = 0.10f))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    msg, fontFamily = NotoSansBengali, fontSize = 12.sp,
+                    color = if (isSuccess) Color(0xFF166534) else Color(0xFF9F1239),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "✕", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(0.5f),
+                    modifier = Modifier.clickable { vm.clearDataSourceTestResult() }
+                )
+            }
+        }
     }
 }
 
