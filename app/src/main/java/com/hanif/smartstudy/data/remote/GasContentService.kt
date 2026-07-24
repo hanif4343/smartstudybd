@@ -314,6 +314,19 @@ object GasContentService {
     }
 
     /**
+     * Google Sheet মোডে "Typing" ট্যাব — ঠিক Quiz/QBank/Study-এর মতোই getSheetRows
+     * action দিয়ে Firebase বাইপাস করে সরাসরি sheet থেকে পড়ে (headers: id, language,
+     * content, updatedAt)। ব্যর্থ হলে খালি লিস্ট রিটার্ন করে — caller (TypingPassageProvider)
+     * তখন Room-এর পুরনো cache ব্যবহার করে। দেখো util/TypingPassageProvider.kt।
+     */
+    suspend fun fetchTypingPassages(): List<com.hanif.smartstudy.data.model.TypingSheetPassage> {
+        if (!isConfigured()) return emptyList()
+        val result = fetchSheetRows<com.hanif.smartstudy.data.model.TypingSheetPassage>("Typing")
+        if (result.error != null) Log.w(TAG, "fetchTypingPassages: ${result.error}")
+        return result.items
+    }
+
+    /**
      * adminAddQuestion() এর জন্য — নতুন প্রশ্ন POST দিয়ে GAS-এর জেনেরিক row-upsert
      * endpoint-এ পাঠানো হয় (editId ছাড়া → নতুন row হিসেবে appendRow হয়)। GAS নিজেই
      * নতুন sequential id বানিয়ে response-এ ফেরত দেয় — সেটাই rowKey হিসেবে ব্যবহার হবে।
