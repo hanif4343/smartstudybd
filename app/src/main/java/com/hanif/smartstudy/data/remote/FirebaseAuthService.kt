@@ -57,6 +57,31 @@ object FirebaseAuthService {
     }
 
     /**
+     * ── 🔐 UidToPhone/{uid} → phone ম্যাপিং লেখে ──
+     * এই ম্যাপিং না থাকলে Firebase Rules কখনোই বুঝতে পারতো না কোন Firebase Auth
+     * UID কোন Users/{phone} প্রোফাইলের মালিক — কারণ Phone+Password flow এর জন্য
+     * synthetic email (toSyntheticEmail) থেকে phone বের করা গেলেও, Google
+     * sign-in এ auth.token.email আসল Gmail ঠিকানা, phone-এর সাথে কোনো সরাসরি
+     * সম্পর্ক নেই। তাই sign-in/sign-up সফল হওয়ার সাথে সাথেই (auth.uid জানা
+     * থাকা অবস্থায়) এই ম্যাপিং লিখে রাখা হয়, আর firebase-database-rules.json
+     * এটা পড়েই ঠিক করে কোন request কার প্রোফাইলে অ্যাক্সেস চাইছে।
+     * ব্যর্থ হলেও silently ignore করে — sign-in flow টা ব্লক করা উচিত না।
+     */
+    suspend fun linkUidToPhone(uid: String, phone: String, firebaseUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            if (uid.isBlank() || phone.isBlank()) return@withContext
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url  = "$baseUrl/UidToPhone/$uid.json$auth"
+            val body = "\"$phone\"".toRequestBody(JSON_MEDIA_TYPE)
+            val req  = Request.Builder().url(url).put(body).build()
+            client.newCall(req).execute().close()
+        } catch (e: Exception) {
+            Log.e("UidToPhone", "link failed: ${e.message}")
+        }
+    }
+
+    /**
      * Users node থেকে phone দিয়ে user খোঁজে (DB-key ফরম্যাট: "01XXXXXXXXX")।
      */
     suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
