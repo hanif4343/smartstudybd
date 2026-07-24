@@ -1946,7 +1946,7 @@ private fun ProductionChecklistTab() {
             "চেক প্রোডাকশনে কখনোই সত্যি হতো না (Reports/ModelTests/Routine\n" +
             "সব জায়গায়) — সম্ভবত DB-secret fallback এটা আড়াল করে রাখতো।\n" +
             "→ Fix: নতুন UidToPhone/{uid}→phone ম্যাপিং (sign-in এর সময় লেখা হয়),\n" +
-            "   Users/$userId এখন শুধু owner + admin পড়তে/লিখতে পারবে,\n" +
+            "   Users/\$userId এখন শুধু owner + admin পড়তে/লিখতে পারবে,\n" +
             "   users (lowercase, FCM token) node ও একইভাবে fix হয়েছে।\n" +
             "⚠️ Firebase Console/CLI দিয়ে নতুন rules ডিপ্লয় করতে হবে, আর Google\n" +
             "   sign-in + admin login ভালোভাবে টেস্ট করে দেখো।",
