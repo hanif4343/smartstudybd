@@ -614,6 +614,67 @@ fun TypingPracticeScreen(
         }
     }
 
+    /** এখন পর্যন্ত যা টাইপ হয়েছে তা দিয়েই সেশন চূড়ান্তভাবে শেষ করে, WPM/accuracy হিসাব
+     *  করে, history/best-WPM/হাত-ভিত্তিক স্ট্যাটে সেভ করে, আর ResultCard দেখায় — পুরো
+     *  প্যাসেজ শেষ হলে (বা adaptive/exam-এ সময়-বাজেট শেষ হলে) স্বয়ংক্রিয়ভাবে যা হতো,
+     *  ঠিক সেই একই লজিক। "📤 Submit Now" বাটনে ট্যাপ করলেও এটাই কল হয় — তাই যেকোনো
+     *  সময় চাপলে স্বাভাবিক ফলাফলই (as usual) দেখা যায়, আলাদা কোনো পথ নেই। */
+    fun finishSession() {
+        isFinished = true
+        val timeSec = elapsedSec.coerceAtLeast(1)
+        val minutes = timeSec / 60.0
+        // ── ইন্ডাস্ট্রি স্ট্যান্ডার্ড: ৫টা ক্যারেক্টার = ১টা "word" ──
+        val rawWpm = if (minutes > 0) (totalKeystrokes / 5.0 / minutes).toInt() else 0
+        val netWpm = if (minutes > 0) (correctKeystrokes / 5.0 / minutes).toInt().coerceAtLeast(0) else 0
+        val acc = if (totalKeystrokes > 0) (correctKeystrokes * 100 / totalKeystrokes) else 100
+        val r = TypingResult(
+            wpm = netWpm, rawWpm = rawWpm, accuracy = acc, timeSec = timeSec,
+            correctChars = correctKeystrokes, totalChars = totalKeystrokes,
+            leftCorrect = leftCorrectChars, leftWrong = leftWrongChars,
+            rightCorrect = rightCorrectChars, rightWrong = rightWrongChars,
+            syncLossCount = syncLossCount
+        )
+        result = r
+        onResult(r)
+        if (sessionMode == "study") markCurrentStudyItemUsed()
+        scope.launch {
+            session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
+            bestWpm = maxOf(bestWpm, r.wpm)
+            history = session.getTypingHistory()
+
+            // ── ধাপ ৪: এই সেশনের হাত-ভিত্তিক ডেটা Room-এ cumulative করে যোগ ──
+            val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+            AppDatabase.getInstance(ctx).typingHandStatsDao().addSessionDelta(
+                userId       = userId,
+                leftCorrect  = leftCorrectChars.toLong(),
+                leftWrong    = leftWrongChars.toLong(),
+                rightCorrect = rightCorrectChars.toLong(),
+                rightWrong   = rightWrongChars.toLong()
+            )
+
+            // ── ধাপ ৪: Daily Discipline — আজকের মোট টাইপিং-সময়ে যোগ (মোড অফ থাকলেও
+            // ট্র্যাক করা হয়, যাতে পরে অন করলে আজকের ডেটা মিস না হয়; শুধু ব্যানারটা
+            // অফ থাকলে দেখানো হয় না — কিছুই জোর করে আটকানো হয় না) ──
+            session.addTypingSecondsToday(timeSec)
+            todaySecondsBefore = session.getTypingTodaySeconds()
+
+            // ── ধাপ ৪: sync-loss (ধরন B) ধরা পড়লে সেশন-শেষে ছোট ভয়েস-টিপ (মাঝপথে না,
+            // কারণ মাঝপথে ভয়েস মনোযোগ আরও ভাঙতে পারে — রোডম্যাপ সেকশন ৫.১) ──
+            if (syncLossCount > 0) {
+                TtsManager.speak(
+                    "তুমি এই সেশনে $syncLossCount বার টেক্সট ট্র্যাক হারিয়েছ। ধীরে টাইপ করো, একবারে কয়েকটা শব্দ পড়ে তারপর টাইপ করো।",
+                    key = "typing_sync_tip"
+                )
+            }
+
+            // ── দুর্বল-শব্দ ড্যাশবোর্ড রিফ্রেশ (পরের সেশনের আগে আপডেটেড দেখাতে) ──
+            weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
+                .getTopWeakWords(userId, "bn", limit = 10).map { it.targetWord } +
+                AppDatabase.getInstance(ctx).typingMistakeDao()
+                .getTopWeakWords(userId, "en", limit = 5).map { it.targetWord }
+        }
+    }
+
     // Check completion
     LaunchedEffect(userInput) {
         // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage নেই (হার্ড কপি বই দেখে
@@ -712,59 +773,7 @@ fun TypingPracticeScreen(
                 return@LaunchedEffect
             }
 
-            isFinished = true
-            val timeSec = elapsedSec.coerceAtLeast(1)
-            val minutes = timeSec / 60.0
-            // ── ইন্ডাস্ট্রি স্ট্যান্ডার্ড: ৫টা ক্যারেক্টার = ১টা "word" ──
-            val rawWpm = if (minutes > 0) (totalKeystrokes / 5.0 / minutes).toInt() else 0
-            val netWpm = if (minutes > 0) (correctKeystrokes / 5.0 / minutes).toInt().coerceAtLeast(0) else 0
-            val acc = if (totalKeystrokes > 0) (correctKeystrokes * 100 / totalKeystrokes) else 100
-            val r = TypingResult(
-                wpm = netWpm, rawWpm = rawWpm, accuracy = acc, timeSec = timeSec,
-                correctChars = correctKeystrokes, totalChars = totalKeystrokes,
-                leftCorrect = leftCorrectChars, leftWrong = leftWrongChars,
-                rightCorrect = rightCorrectChars, rightWrong = rightWrongChars,
-                syncLossCount = syncLossCount
-            )
-            result = r
-            onResult(r)
-            if (sessionMode == "study") markCurrentStudyItemUsed()
-            scope.launch {
-                session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
-                bestWpm = maxOf(bestWpm, r.wpm)
-                history = session.getTypingHistory()
-
-                // ── ধাপ ৪: এই সেশনের হাত-ভিত্তিক ডেটা Room-এ cumulative করে যোগ ──
-                val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
-                AppDatabase.getInstance(ctx).typingHandStatsDao().addSessionDelta(
-                    userId       = userId,
-                    leftCorrect  = leftCorrectChars.toLong(),
-                    leftWrong    = leftWrongChars.toLong(),
-                    rightCorrect = rightCorrectChars.toLong(),
-                    rightWrong   = rightWrongChars.toLong()
-                )
-
-                // ── ধাপ ৪: Daily Discipline — আজকের মোট টাইপিং-সময়ে যোগ (মোড অফ থাকলেও
-                // ট্র্যাক করা হয়, যাতে পরে অন করলে আজকের ডেটা মিস না হয়; শুধু ব্যানারটা
-                // অফ থাকলে দেখানো হয় না — কিছুই জোর করে আটকানো হয় না) ──
-                session.addTypingSecondsToday(timeSec)
-                todaySecondsBefore = session.getTypingTodaySeconds()
-
-                // ── ধাপ ৪: sync-loss (ধরন B) ধরা পড়লে সেশন-শেষে ছোট ভয়েস-টিপ (মাঝপথে না,
-                // কারণ মাঝপথে ভয়েস মনোযোগ আরও ভাঙতে পারে — রোডম্যাপ সেকশন ৫.১) ──
-                if (syncLossCount > 0) {
-                    TtsManager.speak(
-                        "তুমি এই সেশনে $syncLossCount বার টেক্সট ট্র্যাক হারিয়েছ। ধীরে টাইপ করো, একবারে কয়েকটা শব্দ পড়ে তারপর টাইপ করো।",
-                        key = "typing_sync_tip"
-                    )
-                }
-
-                // ── দুর্বল-শব্দ ড্যাশবোর্ড রিফ্রেশ (পরের সেশনের আগে আপডেটেড দেখাতে) ──
-                weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
-                    .getTopWeakWords(userId, "bn", limit = 10).map { it.targetWord } +
-                    AppDatabase.getInstance(ctx).typingMistakeDao()
-                    .getTopWeakWords(userId, "en", limit = 5).map { it.targetWord }
-            }
+            finishSession()
         }
     }
 
@@ -814,13 +823,11 @@ fun TypingPracticeScreen(
         }
     }
 
-    // ── Exam Simulation — সময়-বাজেট নিয়ন্ত্রণ: EXAM_PHASE_SECONDS (১০ মিনিট) শেষ হলে
-    // মাঝ-প্যাসেজেও জোর করে থামিয়ে দেয় — ঠিক বাস্তব পরীক্ষার মতো (দেখো রোডম্যাপ সেকশন ৪ —
-    // "১০ মিনিট শেষ হওয়ার পর সফটওয়্যার স্বয়ংক্রিয়ভাবে বন্ধ হয়ে যায়") ──
-    LaunchedEffect(elapsedSec, sessionMode, examPhase, isStarted, isFinished) {
-        if (sessionMode != "exam" || !isStarted || isFinished) return@LaunchedEffect
-        if (elapsedSec < EXAM_PHASE_SECONDS) return@LaunchedEffect
-
+    /** Exam মোডের বর্তমান ফেজ (English/Bangla) এখনই শেষ করে — সময়-বাজেট (EXAM_PHASE_SECONDS)
+     *  শেষ হলে যেটা স্বয়ংক্রিয়ভাবে হতো, ঠিক সেই একই লজিক। ইংরেজি ফেজে থাকলে বাংলা ফেজে
+     *  transition কার্ড দেখায় (আগের মতোই), বাংলা ফেজে থাকলে দুই ফেজ মিলিয়ে চূড়ান্ত
+     *  ExamResultCard দেখায়। "📤 Submit Now"-এ ট্যাপ করলে এটাই কল হয়। */
+    fun finishExamPhase() {
         isFinished = true
         val timeSec = elapsedSec.coerceAtLeast(1)
         val minutes = timeSec / 60.0
@@ -856,6 +863,16 @@ fun TypingPracticeScreen(
                 todaySecondsBefore = session.getTypingTodaySeconds()
             }
         }
+    }
+
+    // ── Exam Simulation — সময়-বাজেট নিয়ন্ত্রণ: EXAM_PHASE_SECONDS (১০ মিনিট) শেষ হলে
+    // মাঝ-প্যাসেজেও জোর করে থামিয়ে দেয় — ঠিক বাস্তব পরীক্ষার মতো (দেখো রোডম্যাপ সেকশন ৪ —
+    // "১০ মিনিট শেষ হওয়ার পর সফটওয়্যার স্বয়ংক্রিয়ভাবে বন্ধ হয়ে যায়") ──
+    LaunchedEffect(elapsedSec, sessionMode, examPhase, isStarted, isFinished) {
+        if (sessionMode != "exam" || !isStarted || isFinished) return@LaunchedEffect
+        if (elapsedSec < EXAM_PHASE_SECONDS) return@LaunchedEffect
+
+        finishExamPhase()
     }
 
     // ── Word-by-word matching — একটা শব্দ পুরো টাইপ করে স্পেস চাপলেই (বা প্যাসেজের
@@ -1709,6 +1726,24 @@ fun TypingPracticeScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488))
                 ) {
                     Text("✅ শেষ করুন", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali)
+                }
+            }
+
+            // ── অন্য সব মোডে (প্র্যাকটিস/adaptive/exam/study) আগে পুরো প্যাসেজ শেষ করতেই
+            // হতো, অথবা exam/adaptive-এ সময়-বাজেট শেষ হওয়ার অপেক্ষা করতে হতো — তবেই
+            // ফলাফল দেখা যেত। এখন "📤 Submit Now" চাপলেই যেকোনো সময় (মাঝপথেও) এখন
+            // পর্যন্ত যা টাইপ হয়েছে তা দিয়ে ঠিক স্বাভাবিক (as usual) ফলাফল দেখানো হয় —
+            // exam মোডে ইংরেজি ফেজে চাপলে বাংলা ফেজে transition, বাংলা ফেজে চাপলে
+            // চূড়ান্ত ExamResultCard (দেখো finishSession()/finishExamPhase()) ──
+            if (sessionMode != "freetyping" && isStarted && !isFinished) {
+                Button(
+                    onClick = { if (sessionMode == "exam") finishExamPhase() else finishSession() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                ) {
+                    Text("📤 Submit Now", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color.White, fontFamily = NotoSansBengali)
                 }
             }
