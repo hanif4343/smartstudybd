@@ -52,9 +52,14 @@ object GasContentService {
     private const val TAG = "GasContent"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)   // Sheet read Firebase-এর চেয়ে ধীর হতে পারে
-        .writeTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        // ── ~১৪,০০০ রো-র মতো বড় sheet একবারে (getDataRange().getValues()) পড়তে GAS-এর
+        // নিজেরই কিছু সময় লাগে — আগে ৪৫ সেকেন্ড টাইমআউট ছিল, যেটার কারণে বড় ট্যাব
+        // (যেমন QBank) মাঝপথে কেটে গিয়ে খালি/আংশিক রেজাল্ট আসছিল, অথচ কোনো error
+        // দেখাচ্ছিল না (নিচের fetchSheetRows-এর error attribution এখন সেটাও ধরে)।
+        // এখন first-load একবারই, ধীরে হলেও, পুরোটা লোড করার জন্য যথেষ্ট সময় দেওয়া হলো।
+        .readTimeout(280, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val gson      = CaseInsensitiveGson.instance
@@ -128,13 +133,15 @@ object GasContentService {
                 val qbankR = qbankD.await()
                 val studyR = studyD.await()
                 Log.d(TAG, "fetchAllContent: quiz=${quizR.items.size} qbank=${qbankR.items.size} study=${studyR.items.size}")
-                if (quizR.items.isEmpty() && qbankR.items.isEmpty() && studyR.items.isEmpty()) {
-                    // তিনটাই খালি — আসল কারণ (Unauthorized / Sheet not found / network) জানাই,
-                    // যাতে GAS_SECRET ভুল নাকি sheet ট্যাবের নাম ভুল নাকি deployment access
-                    // সমস্যা — এটা বোঝা যায় সাথে সাথে
-                    val reasons = listOfNotNull(quizR.error, qbankR.error, studyR.error).distinct()
-                    val reasonText = if (reasons.isNotEmpty()) reasons.joinToString(" | ") else "সব sheet খালি"
-                    ContentResult.Error("Google Sheet থেকে data আসেনি — $reasonText")
+
+                // ── কোনো ট্যাবে real fetch error (timeout/HTTP fail/parse fail) হলে —
+                // অন্য ট্যাব সফল হলেও পুরো ফলাফলকে "সফল" ধরে আংশিক ডেটা cache করা
+                // হবে না। ইউজার স্পষ্ট error দেখবে, চুপচাপ কম প্রশ্ন cache হয়ে যাবে না। ──
+                val errors = listOfNotNull(quizR.error, qbankR.error, studyR.error)
+                if (errors.isNotEmpty()) {
+                    ContentResult.Error("আংশিক ব্যর্থ (retry করো) — ${errors.joinToString(" | ")}")
+                } else if (quizR.items.isEmpty() && qbankR.items.isEmpty() && studyR.items.isEmpty()) {
+                    ContentResult.Error("Google Sheet থেকে data আসেনি (সব empty)")
                 } else {
                     ContentResult.Success(
                         AppContent(quiz = quizR.items, qbank = qbankR.items, study = studyR.items, fetchedAt = System.currentTimeMillis())
