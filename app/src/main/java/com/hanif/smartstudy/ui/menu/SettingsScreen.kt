@@ -134,6 +134,14 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Data Source (Firebase / Google Sheet) ──
+            // Quiz/QBank/Study কনটেন্টের read + admin এডিট/আপডেট + সাবজেক্ট তালিকা এই
+            // মোড অনুযায়ী রুট হয় — Firebase হলে আগের মতোই দ্রুত sync, Google Sheet হলে
+            // GAS Web App প্রক্সি দিয়ে সরাসরি Sheet-এর সাথে (ধীর হতে পারে প্রথমবার, পরে cache থেকে instant)।
+            SettingsCard("📊 Data Source") {
+                DataSourceModeDropdown(state = state, vm = vm)
+            }
+
             // ── Dark mode ──
             SettingsCard("🌙 ডার্ক মোড") {
                 Row(
@@ -477,6 +485,66 @@ private fun ReminderRow(
 }
 
 // ── Settings card wrapper ─────────────────────────────────────
+
+// ── Data Source ড্রপডাউন — Firebase | Google Sheet ──
+// GAS_URL/GAS_SECRET বিল্ডে সেট না থাকলে "Google Sheet" অপশন disabled দেখায় (ট্যাপ
+// করলে ব্যাখ্যা সহ toast) — ভুল করে সিলেক্ট করে খালি ডেটা দেখতে না হয়।
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DataSourceModeDropdown(state: MenuUiState, vm: MenuViewModel) {
+    var expanded by remember { mutableStateOf(false) }
+    val gasReady = com.hanif.smartstudy.data.remote.GasContentService.isConfigured()
+
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "প্রশ্ন/কনটেন্ট কোথা থেকে আসবে",
+            fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Medium
+        )
+
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+            OutlinedTextField(
+                value         = state.dataSourceMode.label,
+                onValueChange = {},
+                readOnly      = true,
+                modifier      = Modifier.fillMaxWidth().menuAnchor(),
+                trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                textStyle     = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 14.sp)
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                com.hanif.smartstudy.data.model.DataSourceMode.entries.forEach { mode ->
+                    val disabled = mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET && !gasReady
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(mode.label, fontFamily = NotoSansBengali)
+                                if (disabled) {
+                                    Text(
+                                        "GAS_URL/GAS_SECRET সেট নেই — বিল্ডে যোগ করতে হবে",
+                                        fontFamily = NotoSansBengali, fontSize = 10.sp, color = Color(0xFFDC2626)
+                                    )
+                                }
+                            }
+                        },
+                        enabled = !disabled,
+                        onClick = {
+                            expanded = false
+                            vm.setDataSourceMode(mode)
+                        }
+                    )
+                }
+            }
+        }
+
+        Text(
+            if (state.dataSourceMode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET)
+                "📊 এখন সব প্রশ্ন পড়া, admin এডিট/আপডেট এবং সাবজেক্ট তালিকা সরাসরি Google Sheet থেকে হচ্ছে (GAS প্রক্সির মাধ্যমে)। প্রথমবার একটু ধীর হতে পারে, তারপর cache থেকে দ্রুত।"
+            else
+                "🔥 এখন সব প্রশ্ন Firebase থেকে দ্রুত sync হচ্ছে (আগের মতোই)।",
+            fontFamily = NotoSansBengali, fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
+        )
+    }
+}
 
 @Composable
 fun SettingsCard(title: String, content: @Composable ColumnScope.() -> Unit) {
