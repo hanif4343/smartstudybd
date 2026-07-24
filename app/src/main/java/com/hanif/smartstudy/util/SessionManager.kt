@@ -51,6 +51,8 @@ class SessionManager(private val context: Context) {
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
+        // Settings → "Data Source" ড্রপডাউন — "firebase" | "google_sheet" (দেখুন DataSourceMode.kt)
+        val KEY_DATA_SOURCE_MODE = stringPreferencesKey("data_source_mode")
         val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
         val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
@@ -234,6 +236,23 @@ class SessionManager(private val context: Context) {
 
     suspend fun setOfflineMode(on: Boolean) {
         context.dataStore.edit { it[KEY_OFFLINE_MODE] = on }
+    }
+
+    // ── Data Source (Firebase / Google Sheet) ─────────────────
+    // Settings-এ একবার সিলেক্ট করলে এখানে সেভ থাকে — Quiz/QBank/Study কনটেন্টের
+    // read + admin edit/update + subject তালিকা এই মোড অনুযায়ী রুট হয়
+    // (দেখুন ContentFetchService.kt ও MenuViewModel-এর admin ফাংশনগুলো)।
+
+    fun getDataSourceMode(): com.hanif.smartstudy.data.model.DataSourceMode = runBlocking {
+        val raw = context.dataStore.data.first()[KEY_DATA_SOURCE_MODE]
+        com.hanif.smartstudy.data.model.DataSourceMode.fromStorageOrDefault(raw)
+    }
+
+    fun dataSourceModeFlow(): Flow<com.hanif.smartstudy.data.model.DataSourceMode> =
+        context.dataStore.data.map { com.hanif.smartstudy.data.model.DataSourceMode.fromStorageOrDefault(it[KEY_DATA_SOURCE_MODE]) }
+
+    suspend fun setDataSourceMode(mode: com.hanif.smartstudy.data.model.DataSourceMode) {
+        context.dataStore.edit { it[KEY_DATA_SOURCE_MODE] = mode.storageKey }
     }
 
     // ── Onboarding ────────────────────────────────────────────
