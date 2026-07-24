@@ -392,8 +392,14 @@ object FirebaseDataService {
                 val respBody = resp.body?.string() ?: ""
                 val code    = resp.code
                 resp.close()
-                if (resp.isSuccessful) ApiResult.Success(Unit)
-                else ApiResult.Error("Firebase error: $code — $respBody")
+                if (resp.isSuccessful) {
+                    // ⚠️ আগে এখানে meta touch হতো না — তাই অন্য ডিভাইসের background
+                    // sync/SyncWorker মেটা-চেকে নতুন কিছু আছে বলে বুঝতে পারত না, ফলে
+                    // periodic full-resync না হওয়া পর্যন্ত admin ছাড়া বাকি সবাই পুরনো
+                    // ক্রমই দেখত। এখন touch করা হয় যাতে সবার sync-এ নতুন ক্রম ধরা পড়ে।
+                    touchMetaUpdatedAt()
+                    ApiResult.Success(Unit)
+                } else ApiResult.Error("Firebase error: $code — $respBody")
             } catch (e: Exception) {
                 ApiResult.Error(e.message ?: "Network error")
             }
@@ -418,8 +424,10 @@ object FirebaseDataService {
                 val respBody   = resp.body?.string() ?: ""
                 val code       = resp.code
                 resp.close()
-                if (resp.isSuccessful) ApiResult.Success(Unit)
-                else ApiResult.Error("Firebase error: $code — $respBody")
+                if (resp.isSuccessful) {
+                    touchMetaUpdatedAt()
+                    ApiResult.Success(Unit)
+                } else ApiResult.Error("Firebase error: $code — $respBody")
             } catch (e: Exception) {
                 ApiResult.Error(e.message ?: "Network error")
             }
