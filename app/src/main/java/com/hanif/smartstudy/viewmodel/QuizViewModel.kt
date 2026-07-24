@@ -1131,7 +1131,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private var orderSaveJob: Job? = null
 
-    /** বর্তমান subjects ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag এর জন্য Firebase এ সেভ করো */
+    /**
+     * বর্তমান subjects ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag এর জন্য Firebase এ সেভ করো।
+     *
+     * ⚠️ আগে এখানে শুধু Firebase কল success হলেই লোকাল cache patch হতো — মানে নেট/quota
+     * সমস্যায় কল fail করলে reorder-টা কোথাও সংরক্ষিতই হতো না (admin অ্যাপ বন্ধ করে খুললেই
+     * আগের ক্রম ফিরে আসত), আর সফল হলেও meta touch না হওয়ায় বাকি ইউজাররা নতুন ক্রম দেখতে
+     * পেত না periodic full-resync-এর আগ পর্যন্ত।
+     *
+     * এখন: (adminEditQuestion-এর মতোই প্যাটার্নে)
+     * ১) লোকাল cache-এ সবসময় সাথে সাথে patch হয় — Firebase সফল হোক বা না হোক, admin
+     *    এই মুহূর্তেই আর অ্যাপ রিস্টার্টের পরও ঠিক ক্রম দেখবে।
+     * ২) অফলাইন হলে সরাসরি Firebase কল না করে PendingQueue-তে রাখা হয়।
+     * ৩) অনলাইনে কল fail করলে (quota/network) — PendingQueue-তে রাখা হয় + SyncWorker
+     *    ব্যাকগ্রাউন্ডে auto-retry করবে নেট/quota ঠিক হলে।
+     * ৪) সফল হলে FirebaseDataService.adminSetSubjectOrderBulk এখন নিজেই touchMetaUpdatedAt()
+     *    কল করে, তাই বাকি সব ইউজারও পরের sync-এ নতুন ক্রম পেয়ে যাবে।
+     */
     private fun persistSubjectOrder(orderedNames: List<String>) {
         val mode = _state.value.mode
         val user = session.getCurrentUser()
@@ -1142,20 +1158,41 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
             val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
+            val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+
+            // ── Step 1: লোকাল cache-এ সাথে সাথেই patch — ফলাফল যাই হোক ──
+            repo.patchSubjectOrderAndPersist(mode.name, encodedTag, order)
+
+            val pendingQueue = com.hanif.smartstudy.data.local.PendingQueue(getApplication<Application>())
+
+            if (!repo.isOnline()) {
+                pendingQueue.enqueueAdminReorderSubject(mode.name, effectiveTag, order)
+                _state.update { it.copy(isSavingOrder = false,
+                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
+                return@launch
+            }
+
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode.name, effectiveTag, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
-                    repo.patchSubjectOrderAndPersist(mode.name, encodedTag, order)
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে — সব ইউজার দেখতে পাবে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "❌ সংরক্ষণ ব্যর্থ: ${r.message}") }
+                    // Online কিন্তু fail (যেমন Firebase quota শেষ) — queue এ রাখো, লোকাল
+                    // cache তো আগেই patch হয়ে গেছে, তাই admin ঠিক ক্রমই দেখবে।
+                    pendingQueue.enqueueAdminReorderSubject(mode.name, effectiveTag, order)
+                    com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
+                    _state.update { it.copy(isSavingOrder = false,
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
                 }
             }
         }
     }
 
-    /** বর্তমান subTopics ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag+subject এর জন্য Firebase এ সেভ করো */
+    /**
+     * বর্তমান subTopics ক্রম অনুযায়ী ১,২,৩... সিরিয়াল বানিয়ে এই mode+tag+subject এর জন্য Firebase এ সেভ করো।
+     * persistSubjectOrder-এর মতোই প্যাটার্ন — লোকাল cache সবসময় সাথে সাথে patch হয়, আর
+     * offline/fail হলে PendingQueue-তে রাখা হয় (SyncWorker ব্যাকগ্রাউন্ডে auto-retry করবে)।
+     */
     private fun persistSubTopicOrder(subject: String, orderedNames: List<String>) {
         val mode = _state.value.mode
         val user = session.getCurrentUser()
@@ -1166,14 +1203,29 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
             val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
+            val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
+
+            // ── Step 1: লোকাল cache-এ সাথে সাথেই patch — ফলাফল যাই হোক ──
+            repo.patchSubTopicOrderAndPersist(mode.name, encodedTag, subject, order)
+
+            val pendingQueue = com.hanif.smartstudy.data.local.PendingQueue(getApplication<Application>())
+
+            if (!repo.isOnline()) {
+                pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
+                _state.update { it.copy(isSavingOrder = false,
+                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
+                return@launch
+            }
+
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, effectiveTag, subject, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
-                    repo.patchSubTopicOrderAndPersist(mode.name, encodedTag, subject, order)
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে") }
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে — সব ইউজার দেখতে পাবে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "❌ সংরক্ষণ ব্যর্থ: ${r.message}") }
+                    pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
+                    com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
+                    _state.update { it.copy(isSavingOrder = false,
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
                 }
             }
         }
