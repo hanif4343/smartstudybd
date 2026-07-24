@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -15,8 +15,10 @@ import androidx.room.RoomDatabase
     // v5 → v6: StudyTypingProgressEntity যোগ হলো — "স্টাডি টাইপিং" ফিচারে কোন STUDY
     // আইটেম ইতিমধ্যে টাইপ করা হয়ে গেছে তার ট্র্যাকিং (একবার হলে আর না আসার জন্য)
     // v6 → v7: CustomPassageEntity যোগ হলো — ইউজারের নিজের যোগ করা টাইপিং প্যাসেজ (লোকাল-অনলি)
+    // v7 → v8: TypingSheetPassageEntity যোগ হলো — Google Sheet "Typing" ট্যাব থেকে আসা
+    // ডিফল্ট প্যাসেজ পুলের অফলাইন cache (হার্ডকোডেড PASSAGES তালিকা রিমুভ করার পর)
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version  = 7,
+    version  = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -27,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun generatedPassageCacheDao(): GeneratedPassageCacheDao
     abstract fun studyTypingProgressDao(): StudyTypingProgressDao
     abstract fun customPassageDao(): CustomPassageDao
+    abstract fun typingSheetPassageDao(): TypingSheetPassageDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
