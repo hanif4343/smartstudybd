@@ -500,6 +500,9 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             session.setDataSourceMode(mode)
             cache.clearCache()
             com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+            // ── Typing প্র্যাকটিসের প্যাসেজ পুলও এই সোর্স বদলের আওতায় — নাহলে RAM cache
+            // পুরনো সোর্সের ডেটা ধরে রাখবে, পরের getPassages() নতুন মোডে fetch করবে না ──
+            com.hanif.smartstudy.util.TypingPassageProvider.forceRefreshNextTime()
             _state.update { it.copy(
                 dataSourceMode = mode,
                 dataSourceTestResultMsg = null,
