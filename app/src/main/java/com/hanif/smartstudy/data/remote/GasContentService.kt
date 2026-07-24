@@ -73,21 +73,32 @@ object GasContentService {
     // READ
     // ══════════════════════════════════════════════════════════
 
-    private suspend inline fun <reified T> fetchSheetRows(tab: String): List<T> =
+    /** getSheetRows কল করে items + (ব্যর্থ হলে) আসল কারণ — silent empty-list এর বদলে
+     * প্রকৃত error message (Unauthorized/Sheet not found/network ইত্যাদি) UI পর্যন্ত পৌঁছায় */
+    private data class SheetFetchResult<T>(val items: List<T>, val error: String?)
+
+    private suspend inline fun <reified T> fetchSheetRows(tab: String): SheetFetchResult<T> =
         withContext(Dispatchers.IO) {
             try {
                 val url = "$BASE_URL?action=getSheetRows&tab=$tab&secret=${enc(SECRET)}"
                 val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val code = resp.code
                 val body = resp.body?.string() ?: ""
                 resp.close()
-                if (body.isBlank()) return@withContext emptyList()
+                if (!resp.isSuccessful) {
+                    return@withContext SheetFetchResult(emptyList(), "$tab: HTTP $code")
+                }
+                if (body.isBlank()) {
+                    return@withContext SheetFetchResult(emptyList(), "$tab: খালি response")
+                }
                 val obj = JsonParser.parseString(body).asJsonObject
                 if (obj.get("status")?.asString != "success") {
-                    Log.w(TAG, "$tab getSheetRows non-success: ${body.take(200)}")
-                    return@withContext emptyList()
+                    val msg = obj.get("message")?.asString ?: body.take(150)
+                    Log.w(TAG, "$tab getSheetRows non-success: $msg")
+                    return@withContext SheetFetchResult(emptyList(), "$tab: $msg")
                 }
-                val rows = obj.getAsJsonArray("rows") ?: return@withContext emptyList()
-                rows.mapNotNull { el ->
+                val rows = obj.getAsJsonArray("rows") ?: return@withContext SheetFetchResult(emptyList(), null)
+                val items = rows.mapNotNull { el ->
                     try {
                         if (!el.isJsonObject) return@mapNotNull null
                         val o = el.asJsonObject.deepCopy()
@@ -98,9 +109,10 @@ object GasContentService {
                         gson.fromJson(o, T::class.java)
                     } catch (e: Exception) { null }
                 }
+                SheetFetchResult(items, null)
             } catch (e: Exception) {
                 Log.e(TAG, "fetchSheetRows<$tab> error: ${e.message}")
-                emptyList()
+                SheetFetchResult(emptyList(), "$tab: ${e.message ?: "network error"}")
             }
         }
 
@@ -112,15 +124,20 @@ object GasContentService {
                 val quizD  = async { fetchSheetRows<QuizItem>("Quiz") }
                 val qbankD = async { fetchSheetRows<QBankItem>("QBank") }
                 val studyD = async { fetchSheetRows<StudyItem>("Study") }
-                val quiz  = quizD.await()
-                val qbank = qbankD.await()
-                val study = studyD.await()
-                Log.d(TAG, "fetchAllContent: quiz=${quiz.size} qbank=${qbank.size} study=${study.size}")
-                if (quiz.isEmpty() && qbank.isEmpty() && study.isEmpty()) {
-                    ContentResult.Error("Google Sheet থেকে data আসেনি (সব empty)")
+                val quizR  = quizD.await()
+                val qbankR = qbankD.await()
+                val studyR = studyD.await()
+                Log.d(TAG, "fetchAllContent: quiz=${quizR.items.size} qbank=${qbankR.items.size} study=${studyR.items.size}")
+                if (quizR.items.isEmpty() && qbankR.items.isEmpty() && studyR.items.isEmpty()) {
+                    // তিনটাই খালি — আসল কারণ (Unauthorized / Sheet not found / network) জানাই,
+                    // যাতে GAS_SECRET ভুল নাকি sheet ট্যাবের নাম ভুল নাকি deployment access
+                    // সমস্যা — এটা বোঝা যায় সাথে সাথে
+                    val reasons = listOfNotNull(quizR.error, qbankR.error, studyR.error).distinct()
+                    val reasonText = if (reasons.isNotEmpty()) reasons.joinToString(" | ") else "সব sheet খালি"
+                    ContentResult.Error("Google Sheet থেকে data আসেনি — $reasonText")
                 } else {
                     ContentResult.Success(
-                        AppContent(quiz = quiz, qbank = qbank, study = study, fetchedAt = System.currentTimeMillis())
+                        AppContent(quiz = quizR.items, qbank = qbankR.items, study = studyR.items, fetchedAt = System.currentTimeMillis())
                     )
                 }
             }
