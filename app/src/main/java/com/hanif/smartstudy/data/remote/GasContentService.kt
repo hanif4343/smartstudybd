@@ -103,6 +103,8 @@ object GasContentService {
                     return@withContext SheetFetchResult(emptyList(), "$tab: $msg")
                 }
                 val rows = obj.getAsJsonArray("rows") ?: return@withContext SheetFetchResult(emptyList(), null)
+                var parseFails = 0
+                var lastParseError: String? = null
                 val items = rows.mapNotNull { el ->
                     try {
                         if (!el.isJsonObject) return@mapNotNull null
@@ -112,9 +114,23 @@ object GasContentService {
                             o.get("_fbKey")?.takeIf { !it.isJsonNull }?.let { o.addProperty("id", it.asString) }
                         }
                         gson.fromJson(o, T::class.java)
-                    } catch (e: Exception) { null }
+                    } catch (e: Exception) {
+                        parseFails++
+                        lastParseError = e.message
+                        null
+                    }
                 }
-                SheetFetchResult(items, null)
+                if (parseFails > 0) {
+                    Log.w(TAG, "$tab: $parseFails/${rows.size()} row parse failed, e.g. $lastParseError")
+                }
+                // ── প্রায় সব row (>৫০%) parse-ব্যর্থ হলে এটা GAS/network সমস্যা না, বরং
+                // মডেল-মিসম্যাচ (যেমন আগে "updatedAt":"" থাকায় সব row বাদ পড়ছিল) — এটাকে
+                // "সফল, ০টা" হিসেবে চুপচাপ দেখানোর বদলে স্পষ্ট error হিসেবে জানানো হয় ──
+                if (rows.size() > 0 && parseFails * 2 > rows.size()) {
+                    SheetFetchResult(items, "$tab: ${parseFails}/${rows.size()} row parse ব্যর্থ (${lastParseError ?: "unknown"})")
+                } else {
+                    SheetFetchResult(items, null)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "fetchSheetRows<$tab> error: ${e.message}")
                 SheetFetchResult(emptyList(), "$tab: ${e.message ?: "network error"}")
@@ -143,8 +159,18 @@ object GasContentService {
                 } else if (quizR.items.isEmpty() && qbankR.items.isEmpty() && studyR.items.isEmpty()) {
                     ContentResult.Error("Google Sheet থেকে data আসেনি (সব empty)")
                 } else {
+                    val now = System.currentTimeMillis()
                     ContentResult.Success(
-                        AppContent(quiz = quizR.items, qbank = qbankR.items, study = studyR.items, fetchedAt = System.currentTimeMillis())
+                        AppContent(
+                            quiz = quizR.items, qbank = qbankR.items, study = studyR.items,
+                            fetchedAt = now,
+                            // ── এই fetch-এর সময়টাই "remoteUpdatedAt" হিসেবে সেভ থাকে —
+                            // ContentFetchService.fetchMetaUpdatedAt() এটা পড়ে বোঝে শেষ
+                            // কবে পুরো (~১৪,০০০ row) Sheet সফলভাবে টানা হয়েছিল, যাতে
+                            // প্রতি ১৫ মিনিটে না টেনে অনেক কম ঘন ঘন (SHEET_META_SAFE_GAP_MS)
+                            // চেক করে — GAS/Sheets quota বাঁচাতে। ──
+                            remoteUpdatedAt = now
+                        )
                     )
                 }
             }
