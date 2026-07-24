@@ -206,7 +206,7 @@ private fun EmptyChatHint() {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "যেমন: \"সালোকসংশ্লেষণ কী?\" বা \"এই অংকটা বুঝিয়ে দাও\"",
+            "যেমন: \"কারক কত প্রকার অথবা Perticiple কাকো বলে?\"",
             fontSize = 12.sp, fontFamily = NotoSansBengali,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
