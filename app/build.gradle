@@ -57,8 +57,12 @@ android {
         // ── Real-time data mode ──
         // true  → online হলে সবসময় Firebase থেকে fresh data (testing/development)
         // false → cache ব্যবহার করে (production — Firebase read কম হবে)
-        // Production ready হলে এটা false করো।
-        buildConfigField "boolean", "REALTIME_DATA", "true"
+        // ✅ Production checklist অনুযায়ী false করা হলো — এখন subTopic ওপেন করলে
+        // Room cache-এ ডেটা থাকলে (roomCount > 0) আর অতিরিক্ত ব্যাকগ্রাউন্ড Firebase
+        // sync হবে না (QuizViewModel.navigateToSubTopic দেখো)। সাধারণ stale-while-
+        // revalidate cache (ContentRepository.getContent) আগের মতোই কাজ করবে,
+        // শুধু এই এক্সট্রা call বন্ধ হলো — quota বাঁচবে।
+        buildConfigField "boolean", "REALTIME_DATA", "false"
 
         // ── FCM HTTP v1 service account — সরাসরি app থেকে push পাঠানোর জন্য (GAS নেই) ──
         buildConfigField "String", "FCM_PROJECT_ID",   secretField("FCM_PROJECT_ID")
