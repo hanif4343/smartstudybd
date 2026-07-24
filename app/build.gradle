@@ -64,6 +64,12 @@ android {
         buildConfigField "String", "FCM_PROJECT_ID",   secretField("FCM_PROJECT_ID")
         buildConfigField "String", "FCM_CLIENT_EMAIL", secretField("FCM_CLIENT_EMAIL")
         buildConfigField "String", "FCM_PRIVATE_KEY",  secretField("FCM_PRIVATE_KEY")
+
+        // ── Google Sheet ডেটা সোর্স (Settings → Data Source) — GAS (Google Apps Script)
+        // Web App প্রক্সির URL ও secret। GitHub secrets-এ GAS_URL/GAS_SECRET যোগ করলেই
+        // এই দুটো এখানে env var থেকে সরাসরি বসে যাবে (দেখো .github/workflows/build.yml)।
+        buildConfigField "String", "GAS_URL",    secretField("GAS_URL")
+        buildConfigField "String", "GAS_SECRET", secretField("GAS_SECRET")
     }
 
     signingConfigs {
