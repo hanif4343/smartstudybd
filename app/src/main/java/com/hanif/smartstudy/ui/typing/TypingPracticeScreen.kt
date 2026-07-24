@@ -70,29 +70,27 @@ private val AmberMid  = Color(0xFFF59E0B)
 // MutedText -> MaterialTheme.colorScheme.onSurfaceVariant
 // CardBg -> MaterialTheme.colorScheme.surface
 
-// ── Passage + difficulty ট্যাগ — "easy" | "medium" | "hard" ──
+// ── Passage + difficulty ট্যাগ — "easy" | "medium" | "hard" | "custom" | "all" ──
 data class PassageInfo(val text: String, val difficulty: String)
 
-private val PASSAGES = listOf(
-    // সহজ
-    PassageInfo("আমি বই পড়ি। বই পড়তে আমার ভালো লাগে। প্রতিদিন সকালে আমি পড়াশোনা করি।", "easy"),
-    PassageInfo("সূর্য পূর্ব দিকে ওঠে। পাখিরা সকালে গান গায়। বাতাস ঠান্ডা ও সতেজ।", "easy"),
-    PassageInfo("আমার নাম রাহাত। আমি স্কুলে যাই। আমার প্রিয় বিষয় বিজ্ঞান।", "easy"),
-    PassageInfo("Cats and dogs are common pets. They live with people. Many families love them.", "easy"),
-    PassageInfo("Water is essential for life. We drink water every day. It keeps us healthy.", "easy"),
-    // মাঝারি
-    PassageInfo("বাংলাদেশ একটি সুন্দর দেশ। এখানে অনেক নদী আছে। পদ্মা, মেঘনা, যমুনা প্রধান নদী।", "medium"),
-    PassageInfo("বিজ্ঞান মানুষের জীবনকে সহজ করেছে। প্রযুক্তির উন্নয়নে পৃথিবী পরিবর্তন হচ্ছে দিন দিন।", "medium"),
-    PassageInfo("শিক্ষা জাতির মেরুদণ্ড। একটি শিক্ষিত জাতি সকল প্রতিকূলতা অতিক্রম করতে পারে।", "medium"),
-    PassageInfo("The quick brown fox jumps over the lazy dog. Practice typing every day to improve your speed.", "medium"),
-    PassageInfo("Reading books regularly improves vocabulary, concentration, and overall mental development.", "medium"),
-    // কঠিন
-    PassageInfo("Science and technology have transformed human civilization in remarkable ways over centuries.", "hard"),
-    PassageInfo("স্বাধীনতা মানুষের জন্মগত অধিকার, যা কোনো জাতি বা রাষ্ট্র কেড়ে নিতে পারে না; এটি রক্ত দিয়ে অর্জিত এক মহান চেতনা।", "hard"),
-    PassageInfo("পরিবেশ দূষণ, জলবায়ু পরিবর্তন এবং প্রাকৃতিক সম্পদের অপব্যবহার—এই তিনটি সমস্যা আজ সারা পৃথিবীর জন্য এক বিরাট চ্যালেঞ্জ হয়ে দাঁড়িয়েছে।", "hard"),
-    PassageInfo("Artificial intelligence, machine learning, and data science are rapidly reshaping industries, economies, and the very nature of human employment worldwide.", "hard"),
-    PassageInfo("কোয়ান্টাম পদার্থবিজ্ঞান এমন একটি ক্ষেত্র যেখানে ক্ষুদ্রাতিক্ষুদ্র কণার আচরণ সাধারণ বুদ্ধি দিয়ে ব্যাখ্যা করা প্রায়ই অসম্ভব হয়ে পড়ে।", "hard"),
-)
+// ── আগে এখানে হার্ডকোডেড প্যাসেজের একটা fixed তালিকা ছিল। এখন সেটা বাদ —
+// Google Sheet-এর "Typing" ট্যাব (headers: id, language, content, updatedAt, Firebase
+// হয়ে সিঙ্ক হয়) থেকে রানটাইমে লোড হয় (দেখো util/TypingPassageProvider.kt), Admin App
+// থেকে যোগ করা কনটেন্টও এখান দিয়েই আসবে। বাংলা সিলেক্ট থাকলে বাংলা প্যাসেজ, English
+// সিলেক্ট থাকলে English প্যাসেজ — sessionLanguage অনুযায়ী filter হয় (poolForLanguage/
+// currentPool()-এ), sheet-এর "language" কলাম অনুযায়ী না মিললেও detectLanguage() দিয়ে
+// টেক্সট থেকে ভাষা যাচাই হয়, তাই sheet-এ language ফাঁকা থাকলেও কাজ করবে।
+// লোড শেষ না হওয়া পর্যন্ত/লোড ব্যর্থ হলে এই তালিকা খালি থাকে — সব pool-getter ও
+// fallback ফাংশন খালি তালিকা নিরাপদে হ্যান্ডেল করে (ক্র্যাশ করে না, খালি স্ট্রিং রিটার্ন করে)।
+private var PASSAGES: List<PassageInfo> = emptyList()
+
+/** TypingPracticeScreen ও TypingRaceScreen — দুটোই স্ক্রিন খোলার সাথে সাথে এটা কল করে,
+ *  Sheet থেকে প্যাসেজ পুল একবার লোড করে নেয় (RAM cache থাকলে আবার নেটওয়ার্ক কল হয় না)। */
+suspend fun ensureTypingPassagesLoaded(context: android.content.Context) {
+    if (PASSAGES.isEmpty()) {
+        PASSAGES = com.hanif.smartstudy.util.TypingPassageProvider.getPassages(context)
+    }
+}
 
 private fun difficultyLabel(d: String) = when (d) {
     "easy"   -> "সহজ"
@@ -176,7 +174,9 @@ fun fallbackPassageFor(language: String): String {
         val isBn = it.text.any { c -> c.code in 0x0980..0x09FF }
         if (language == "bn") isBn else !isBn
     }.ifEmpty { PASSAGES }
-    return pool.random().text
+    // PASSAGES এখনো লোড না হলে/লোড ব্যর্থ হলে (নেট নেই) pool খালি থাকতে পারে —
+    // আগে এখানে .random() ক্র্যাশ করত (NoSuchElementException)
+    return pool.randomOrNull()?.text ?: ""
 }
 
 data class TypingResult(
@@ -251,7 +251,9 @@ fun TypingPracticeScreen(
         customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
     }
     var passageIndex by remember { mutableStateOf(0) }
-    var passage      by remember { mutableStateOf(normalizeBn(PASSAGES[0].text)) }
+    // ── PASSAGES এখন Sheet থেকে asynchronously লোড হয় (দেখো ensureTypingPassagesLoaded()),
+    // তাই শুরুতে খালি — নিচের LaunchedEffect(Unit) লোড শেষে reset() দিয়ে বৈধ প্যাসেজ বসায় ──
+    var passage      by remember { mutableStateOf("") }
     var userInput    by remember { mutableStateOf("") }
     // ── Word-by-word matching (selftyping.com/10fastfingers-এর স্ট্যান্ডার্ড পদ্ধতি) —
     // প্যাসেজকে স্পেস দিয়ে শব্দে ভাগ করা হয়। একটা শব্দ পুরোপুরি টাইপ করে স্পেস চাপলেই
@@ -987,7 +989,7 @@ fun TypingPracticeScreen(
     fun reset(newIndex: Int = passageIndex, pool: List<PassageInfo> = currentPool()) {
         val idx = if (pool.isNotEmpty()) newIndex.mod(pool.size) else 0
         passageIndex = idx
-        passage      = normalizeBn(pool.getOrNull(idx)?.text ?: PASSAGES[0].text)
+        passage      = normalizeBn(pool.getOrNull(idx)?.text ?: PASSAGES.firstOrNull()?.text ?: "")
         userInput    = ""
         frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
         isStarted    = false
@@ -1013,6 +1015,17 @@ fun TypingPracticeScreen(
         // গেলে sessionMode="free" আলাদাভাবে সেট করে দিলেই যথেষ্ট (নিচের startAdaptiveSession দেখো)
     }
 
+    // ── আগে হার্ডকোডেড PASSAGES তালিকা এখান থেকেই সরাসরি পড়া হতো। এখন Google Sheet-এর
+    // "Typing" ট্যাব (Firebase হয়ে) থেকে asynchronously লোড হয় — এই effect স্ক্রিন খোলার
+    // সাথে সাথে একবার লোড করে (RAM cache থাকলে আবার নেটওয়ার্ক কল হয় না), লোড শেষে
+    // "প্র্যাকটিস" মোডে থেকে passage এখনো খালি থাকলে reset() দিয়ে বৈধ প্যাসেজ বসিয়ে দেয় ──
+    LaunchedEffect(Unit) {
+        ensureTypingPassagesLoaded(ctx)
+        if (passage.isBlank() && sessionMode == "free" && selectedDifficulty != "custom") {
+            reset(0, currentPool())
+        }
+    }
+
     /** "🎯 AI Adaptive Session" বাটনে ট্যাপ করলে কল হয় — ভাষা অনুযায়ী পুল থেকে
      *  একটা random প্যাসেজ দিয়ে phase-১ শুরু করে সব adaptive-state রিসেট করে */
     fun startAdaptiveSession(language: String) {
@@ -1026,7 +1039,7 @@ fun TypingPracticeScreen(
         showPhaseTransition = false
         val pool = poolForLanguage(language)
         passageIndex = 0
-        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES.firstOrNull()?.text ?: "")
         userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -1041,7 +1054,7 @@ fun TypingPracticeScreen(
         showExamPhaseTransition = false
         val pool = poolForLanguage("en")
         passageIndex = 0
-        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES.firstOrNull()?.text ?: "")
         userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0; result = null
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -1105,7 +1118,7 @@ fun TypingPracticeScreen(
         showExamPhaseTransition = false
         val pool = poolForLanguage("bn")
         passageIndex = 0
-        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES[0].text)
+        passage      = normalizeBn(pool.firstOrNull()?.text ?: PASSAGES.firstOrNull()?.text ?: "")
         userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList(); isStarted = false; isFinished = false; elapsedSec = 0
         correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
         leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
@@ -1513,6 +1526,17 @@ fun TypingPracticeScreen(
                 correctKeystrokes = correctKeystrokes,
                 freeTypingMode    = sessionMode == "freetyping"
             )
+
+            // ── Sheet থেকে প্যাসেজ পুল এখনো লোড না হলে (নেট নেই/প্রথমবার) — ব্যবহারকারীকে
+            // জানানো, নাহলে খালি স্ক্রিন দেখে "আটকে আছে" মনে হতে পারে ──
+            if (passage.isBlank() && sessionMode !in listOf("freetyping", "study")) {
+                Text(
+                    "⏳ প্যাসেজ লোড হচ্ছে... (না এলে ইন্টারনেট সংযোগ চেক করুন)",
+                    fontSize = 12.sp, fontFamily = NotoSansBengali,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
 
             // ── Passage display — "ফ্রি টাইপিং" মোডে কোনো passage/target টেক্সট দেখানো হয় না,
             // ইউজার হার্ড কপি বই দেখে নিজের ইচ্ছামতো নিচের ফাঁকা বক্সে টাইপ করে ──
