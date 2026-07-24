@@ -1927,23 +1927,29 @@ private fun ProductionChecklistTab() {
             "⚠️ true করার পর proguard-rules.pro চেক করো — crash হলে rules যোগ করতে হবে।",
             "app/build.gradle — buildTypes > release > minifyEnabled false"
         ),
-        CheckItem(false, true,
-            "Firebase DB Secret → User-auth-only migration",
-            "FirebaseTokenProvider.kt-এ এখন legacy fallback আছে:\n" +
-            "কোনো signed-in user না থাকলে FIREBASE_DB_SECRET সরাসরি REST call-এ ব্যবহার হয়।\n" +
-            "DB Secret মানে সম্পূর্ণ database access — এটা app-এ থাকা বিপজ্জনক।\n" +
-            "→ Google Sign-In কে Firebase Auth-এর সাথে properly link করো\n" +
-            "   যাতে সবসময় Firebase ID token ব্যবহার হয়, DB secret নয়।",
-            "app/.../data/remote/FirebaseTokenProvider.kt — legacyFallback()"
+        CheckItem(true, true,
+            "Firebase DB Secret → User-auth-only migration ✅",
+            "FIREBASE_DB_SECRET সম্পূর্ণ সরানো হয়েছে (build.gradle, CI workflow,\n" +
+            "FirebaseTokenProvider.kt সবখান থেকে)। এখন app চালু হওয়ার সাথে সাথেই\n" +
+            "Firebase Anonymous Auth দিয়ে sign-in হয় (SmartStudyApp.onCreate), তাই\n" +
+            "currentUser কখনো null থাকে না — কোনো master secret আর দরকার নেই।\n" +
+            "⚠️ পুরনো secret আগের সব APK build-এ এমবেড হয়ে গেছে — Firebase Console এ\n" +
+            "গিয়ে Database Secret rotate করো, আর GitHub repo থেকে\n" +
+            "FIREBASE_DB_SECRET secret-টাও ডিলিট করে দাও (আমি এটা করতে পারবো না)।",
+            "app/.../data/remote/FirebaseTokenProvider.kt"
         ),
-        CheckItem(false, true,
-            "Firebase Rules — Users node সবাই পড়তে পারছে",
-            "firebase-database-rules.json-এ:\n" +
-            "\"Users\": { \".read\": \"auth != null\" }\n" +
-            "→ যেকোনো authenticated user সব user-এর data পড়তে পারছে!\n" +
-            "   Phone number, name, XP সব expose।\n" +
-            "→ Fix: প্রতিটা user শুধু নিজেরটা পড়তে পারবে:\n" +
-            "   \"\$userId\": { \".read\": \"auth.uid === \$userId\" }",
+        CheckItem(true, true,
+            "Firebase Rules — Users node সবাই পড়তে পারছে ✅",
+            "গভীরে গিয়ে দেখা গেল সমস্যাটা আরও বড় ছিল — isAdmin চেক\n" +
+            "root.child('Users').child(auth.uid) দিয়ে হতো, কিন্তু Users node\n" +
+            "phone দিয়ে key করা, Firebase Auth UID দিয়ে না! মানে এই isAdmin\n" +
+            "চেক প্রোডাকশনে কখনোই সত্যি হতো না (Reports/ModelTests/Routine\n" +
+            "সব জায়গায়) — সম্ভবত DB-secret fallback এটা আড়াল করে রাখতো।\n" +
+            "→ Fix: নতুন UidToPhone/{uid}→phone ম্যাপিং (sign-in এর সময় লেখা হয়),\n" +
+            "   Users/$userId এখন শুধু owner + admin পড়তে/লিখতে পারবে,\n" +
+            "   users (lowercase, FCM token) node ও একইভাবে fix হয়েছে।\n" +
+            "⚠️ Firebase Console/CLI দিয়ে নতুন rules ডিপ্লয় করতে হবে, আর Google\n" +
+            "   sign-in + admin login ভালোভাবে টেস্ট করে দেখো।",
             "firebase-database-rules.json"
         ),
 
