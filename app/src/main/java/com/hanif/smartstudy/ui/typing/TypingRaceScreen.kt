@@ -53,6 +53,12 @@ fun TypingRaceScreen(onBack: () -> Unit) {
     var lastProgressPush by remember { mutableStateOf(0L) }
     var hasFinished       by remember { mutableStateOf(false) }
 
+    // ── আগে fallbackPassageFor() হার্ডকোডেড PASSAGES থেকে সরাসরি পড়ত। এখন সেটা
+    // Google Sheet "Typing" ট্যাব থেকে আসে (দেখো TypingPracticeScreen.kt-এর
+    // ensureTypingPassagesLoaded()/util/TypingPassageProvider.kt) — এই effect স্ক্রিন
+    // খোলার সাথে সাথে একবার লোড নিশ্চিত করে (RAM cache থাকলে আবার নেটওয়ার্ক কল হয় না) ──
+    LaunchedEffect(Unit) { ensureTypingPassagesLoaded(ctx) }
+
     // ── আমার পেন্ডিং ইনভাইট শোনা ──
     LaunchedEffect(myPhone) {
         if (myPhone.isBlank()) return@LaunchedEffect
@@ -195,6 +201,7 @@ fun TypingRaceScreen(onBack: () -> Unit) {
                                     creating = false
                                     return@launch
                                 }
+                                ensureTypingPassagesLoaded(ctx)
                                 val passage = fallbackPassageFor(raceLanguage)
                                 val id = repo.createRace(
                                     creatorPhone = myPhone, creatorName = myName,
