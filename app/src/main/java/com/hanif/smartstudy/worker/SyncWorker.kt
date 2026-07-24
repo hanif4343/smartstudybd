@@ -73,7 +73,7 @@ class SyncWorker(
         // remoteUpdatedAt এর চেয়ে নতুন হলে তবেই পুরো ডেটা টানা হয়। meta node না থাকলে
         // (পুরনো/আনসাপোর্টেড ডেটাবেস) TTL fallback ব্যবহার হয়, যাতে ডেটা কখনো একদম আটকে না থাকে।
         val cached = cache.loadContent()
-        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt()
+        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt(applicationContext)
         val needsRefresh = when {
             cached == null -> true
             remoteUpdatedAt > 0L -> remoteUpdatedAt > cached.remoteUpdatedAt
@@ -84,7 +84,7 @@ class SyncWorker(
             if (cached == null) {
                 // কখনো fetch হয়নি — এই একবারই পুরো ডাউনলোড লাগবে
                 Log.d(TAG, "No cache yet — full fetch")
-                when (val result = ContentFetchService.fetchAllContent()) {
+                when (val result = ContentFetchService.fetchAllContent(applicationContext)) {
                     is ContentResult.Success -> {
                         val toSave = result.data.copy(
                             remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
@@ -108,7 +108,7 @@ class SyncWorker(
 
                 if (needsFullResync) {
                     Log.d(TAG, "Periodic full resync due (deletion/edge-case reconcile)")
-                    when (val result = ContentFetchService.fetchAllContent()) {
+                    when (val result = ContentFetchService.fetchAllContent(applicationContext)) {
                         is ContentResult.Success -> {
                             val toSave = result.data.copy(
                                 remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
@@ -127,7 +127,7 @@ class SyncWorker(
                     val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
                     val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
 
-                    when (val delta = ContentFetchService.fetchIncrementalContent(sinceQuiz, sinceQBank, sinceStudy)) {
+                    when (val delta = ContentFetchService.fetchIncrementalContent(applicationContext, sinceQuiz, sinceQBank, sinceStudy)) {
                         is ContentResult.Success -> {
                             val d = delta.data
                             Log.d(TAG, "Delta sync: quiz+${d.quiz.size} qbank+${d.qbank.size} study+${d.study.size}")
