@@ -58,6 +58,9 @@ data class MenuUiState(
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
     val isOfflineMode   : Boolean            = false,
+    // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
+    val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
+        com.hanif.smartstudy.data.model.DataSourceMode.FIREBASE,
     val isReminderOn    : Boolean            = false,
     val reminderHour    : Int                = 20,
     val reminderMinute  : Int                = 0,
@@ -166,6 +169,33 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val cache   = ContentCache(app)
     private val ctx     = app.applicationContext
 
+    // ── Settings-এ "Data Source" ড্রপডাউন থেকে "Google Sheet" সিলেক্ট করা থাকলে
+    // admin এর প্রশ্ন এডিট/যোগ/ডিলিট/রিনেম — সবকিছু Firebase বাইপাস করে GasContentService
+    // (GAS Web App প্রক্সি) দিয়ে যায়। দুই ব্যাকএন্ডেরই ApiResult<T> রিটার্ন টাইপ এক,
+    // তাই কল-সাইটের বাকি লজিক (cache patch, pending-queue fallback ইত্যাদি) অপরিবর্তিত থাকে। ──
+    private fun useGoogleSheetBackend(): Boolean =
+        session.getDataSourceMode() == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET
+
+    private suspend fun adminUpdateField(
+        sheet: String, rowKey: String, fields: Map<String, String>
+    ): com.hanif.smartstudy.data.remote.ApiResult<Unit> =
+        if (useGoogleSheetBackend())
+            com.hanif.smartstudy.data.remote.GasContentService.updateFields(sheet, rowKey, fields)
+        else
+            com.hanif.smartstudy.data.remote.FirebaseDataService.adminUpdateQuestionField(sheet, rowKey, fields)
+
+    private suspend fun adminDeleteRow(sheet: String, rowKey: String): com.hanif.smartstudy.data.remote.ApiResult<Unit> =
+        if (useGoogleSheetBackend())
+            com.hanif.smartstudy.data.remote.GasContentService.deleteQuestion(sheet, rowKey)
+        else
+            com.hanif.smartstudy.data.remote.FirebaseDataService.adminDeleteQuestion(sheet, rowKey)
+
+    private suspend fun adminAddRow(sheet: String, fields: Map<String, String>): com.hanif.smartstudy.data.remote.ApiResult<String> =
+        if (useGoogleSheetBackend())
+            com.hanif.smartstudy.data.remote.GasContentService.addQuestion(sheet, fields)
+        else
+            com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)
+
     // ── Firebase REST helpers ─────────────────────────────────
     private val http    = OkHttpClient()
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
@@ -228,6 +258,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
             val offlineOn  = session.isOfflineMode()
+            val dataSrcMode = session.getDataSourceMode()
             val remOn      = session.isReminderOn()
             val remH       = session.getReminderHour()
             val remM       = session.getReminderMinute()
@@ -280,6 +311,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     appTheme       = theme,
                     isSoundOff     = soundOff,
                     isOfflineMode  = offlineOn,
+                    dataSourceMode = dataSrcMode,
                     isReminderOn   = remOn,
                     reminderHour   = remH,
                     reminderMinute = remM,
@@ -442,6 +474,34 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 // অফলাইন মোড বন্ধ হওয়া মাত্র pending queue sync চালু করে দাও
                 com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication())
             }
+        }
+    }
+
+    // ── Data Source (Firebase / Google Sheet) — Settings-এ ড্রপডাউন থেকে বদলায় ──
+    // বদলানোর সাথে সাথে content cache (Room + DataStore + in-memory) clear করে দেওয়া
+    // হয় — যাতে পুরনো ব্যাকএন্ডের ডেটা নতুন মোডের সাথে গুলিয়ে না যায় (getContent() পরের
+    // বার কল হলে নতুন মোড অনুযায়ী fresh fetch শুরু হবে, দেখো ContentFetchService.kt)।
+    fun setDataSourceMode(mode: com.hanif.smartstudy.data.model.DataSourceMode) {
+        viewModelScope.launch {
+            if (mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET &&
+                !com.hanif.smartstudy.data.remote.GasContentService.isConfigured()
+            ) {
+                _state.update { it.copy(
+                    toast = "❌ GAS_URL/GAS_SECRET বিল্ডে সেট করা নেই — Google Sheet মোড চালু করা যাবে না"
+                )}
+                return@launch
+            }
+            session.setDataSourceMode(mode)
+            cache.clearCache()
+            com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+            _state.update { it.copy(
+                dataSourceMode = mode,
+                toast = if (mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET)
+                    "📊 Data Source: Google Sheet — এখন থেকে সব প্রশ্ন/সাবজেক্ট Sheet থেকে আসবে (প্রথমবার একটু সময় লাগতে পারে)"
+                else
+                    "🔥 Data Source: Firebase — আগের মতোই দ্রুত sync",
+                contentEditVersion = it.contentEditVersion + 1
+            )}
         }
     }
 
@@ -741,9 +801,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.d("AdminEdit", "connectivity check: isOnline=$isOnline")
 
                 if (isOnline) {
-                    // Online — সরাসরি Firebase এ save
-                    when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                            .adminUpdateQuestionField(sheet, rowKey, fields)) {
+                    // Online — সরাসরি Firebase/Google Sheet এ save (Settings-এ যেটা সিলেক্ট করা আছে)
+                    when (val r = adminUpdateField(sheet, rowKey, fields)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                             // পুরো cache clear করে নতুন fetch করানোর বদলে — শুধু এই
                             // row টাই in-memory + disk cache এ সরাসরি patch করো।
@@ -846,8 +905,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
 
                 if (isOnline) {
-                    when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                            .adminDeleteQuestion(sheet, rowKey)) {
+                    when (val r = adminDeleteRow(sheet, rowKey)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                             _state.update { it.copy(isDeletingQuestion = false,
                                 deleteSuccessMsg = "✅ প্রশ্ন কার্ডটি ডিলিট হয়েছে!", toast = "🗑️ প্রশ্ন ডিলিট হয়েছে",
@@ -921,8 +979,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
-                            when (com.hanif.smartstudy.data.remote.FirebaseDataService
-                                    .adminUpdateQuestionField(sheet, questionId, fields)) {
+                            when (adminUpdateField(sheet, questionId, fields)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     repo.patchContentAndPersist(sheet, questionId, fields)
                                     q.remove(action.id); successCount++
@@ -936,8 +993,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val localId = payload["localId"]?.toString() ?: continue
-                            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                                    .adminAddQuestion(sheet, fields)) {
+                            when (val r = adminAddRow(sheet, fields)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // temp local id → আসল Firebase push key দিয়ে replace
                                     repo.replaceLocalIdAndPersist(sheet, localId, r.data)
@@ -950,8 +1006,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         "admin_delete_question" -> {
                             val questionId = payload["questionId"]?.toString() ?: continue
-                            when (com.hanif.smartstudy.data.remote.FirebaseDataService
-                                    .adminDeleteQuestion(sheet, questionId)) {
+                            when (adminDeleteRow(sheet, questionId)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // লোকাল cache থেকে তো ডিলিটের সময়ই সরানো হয়ে গেছে,
                                     // এখানে শুধু Firebase-এ পাঠানো সফল হলো এটাই নিশ্চিত করা
@@ -1050,7 +1105,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
 
                 if (isOnline) {
-                    when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)) {
+                    when (val r = adminAddRow(sheet, fields)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                             // পুরো cache clear করার বদলে সরাসরি নতুন row cache-এ যোগ করো —
                             // তাতে স্ক্রিন reload ছাড়াই সাথে সাথে নতুন প্রশ্নটা দেখা যাবে।
@@ -1144,7 +1199,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             fields to null
                         } else {
                             val r = try {
-                                com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)
+                                adminAddRow(sheet, fields)
                             } catch (e: Exception) {
                                 com.hanif.smartstudy.data.remote.ApiResult.Error(e.message ?: "unknown")
                             }
@@ -1284,8 +1339,12 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (sheets.isEmpty() || oldSubject.isBlank() || newName.isBlank()) return
         viewModelScope.launch {
             _state.update { it.copy(isRenaming = true, renameMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                    .adminRenameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
+            when (val r = if (useGoogleSheetBackend())
+                    com.hanif.smartstudy.data.remote.GasContentService
+                        .renameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)
+                else
+                    com.hanif.smartstudy.data.remote.FirebaseDataService
+                        .adminRenameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     cache.clearCache()
                     com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
