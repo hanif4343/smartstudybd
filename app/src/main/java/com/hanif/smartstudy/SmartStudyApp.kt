@@ -37,8 +37,12 @@ class SmartStudyApp : Application() {
             Log.w("SmartStudyApp", "Persistence already enabled or failed: ${e.message}")
         }
 
-        // Firebase Anonymous Auth — app start এ sign in নিশ্চিত করো
-        FirebaseTokenProvider.ensureSignedIn()
+        // Firebase Anonymous/Real Auth — app start এ sign in নিশ্চিত করো (আগে এটা
+        // শুধু log করতো, কোনো sign-in-ই করতো না — DB secret fallback-এর আসল কারণ
+        // ছিল এটাই, এখন আসলেই anonymous sign-in করে)
+        CoroutineScope(Dispatchers.IO).launch {
+            FirebaseTokenProvider.ensureSignedIn()
+        }
 
         // Phase 3: Periodic content sync + offline queue flush
         SyncWorker.schedulePeriodic(this)
