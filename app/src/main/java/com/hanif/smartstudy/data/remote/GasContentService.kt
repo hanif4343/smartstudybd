@@ -327,6 +327,49 @@ object GasContentService {
     }
 
     /**
+     * fetchUser() (RemoteServices.kt) Firebase quota/permission-এ ব্যর্থ হলে fallback —
+     * GAS "getSheetRows" (tab=Users) দিয়ে সরাসরি Google Sheet থেকে ওই phone-এর row খুঁজে
+     * User বানায় (role/status/xp সহ)। এতে Firebase read-quota শেষ হয়ে গেলেও admin
+     * নিজের role/admin-menu হারায় না — Sheet-ই ব্যাকআপ সোর্স হিসেবে কাজ করে।
+     * GAS_URL/GAS_SECRET সেট না থাকলে (isConfigured()==false) চুপচাপ null রিটার্ন করে।
+     */
+    suspend fun fetchUserFromSheet(phone: String): com.hanif.smartstudy.data.model.User? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            try {
+                val url = "$BASE_URL?action=getSheetRows&tab=Users&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (!resp.isSuccessful || body.isBlank()) return@withContext null
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("status")?.asString != "success") {
+                    Log.w(TAG, "fetchUserFromSheet non-success: ${body.take(150)}")
+                    return@withContext null
+                }
+                val rows = obj.getAsJsonArray("rows") ?: return@withContext null
+                val cleanPhone = phone.trim()
+                for (el in rows) {
+                    if (!el.isJsonObject) continue
+                    val o = el.asJsonObject
+                    val p = (o.get("Phone")?.takeIf { !it.isJsonNull }?.asString
+                        ?: o.get("phone")?.takeIf { !it.isJsonNull }?.asString)?.trim()
+                    if (p == cleanPhone) {
+                        @Suppress("UNCHECKED_CAST")
+                        val map = plainGson.fromJson(o, Map::class.java) as? Map<String, Any> ?: continue
+                        Log.d(TAG, "fetchUserFromSheet: found $cleanPhone via Sheet fallback")
+                        return@withContext com.hanif.smartstudy.data.model.User.fromFirebaseMap(map)
+                    }
+                }
+                Log.w(TAG, "fetchUserFromSheet: $cleanPhone not found in Sheet either")
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchUserFromSheet error: ${e.message}")
+                null
+            }
+        }
+
+    /**
      * adminAddQuestion() এর জন্য — নতুন প্রশ্ন POST দিয়ে GAS-এর জেনেরিক row-upsert
      * endpoint-এ পাঠানো হয় (editId ছাড়া → নতুন row হিসেবে appendRow হয়)। GAS নিজেই
      * নতুন sequential id বানিয়ে response-এ ফেরত দেয় — সেটাই rowKey হিসেবে ব্যবহার হবে।
