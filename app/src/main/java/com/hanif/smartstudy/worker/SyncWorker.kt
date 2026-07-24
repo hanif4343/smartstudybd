@@ -181,6 +181,8 @@ class SyncWorker(
             "admin_edit_question" -> syncAdminEdit(payload)
             "admin_add_question"  -> syncAdminAdd(payload)
             "admin_delete_question" -> syncAdminDelete(payload)
+            "admin_reorder_subject" -> syncAdminReorderSubject(payload)
+            "admin_reorder_subtopic" -> syncAdminReorderSubTopic(payload)
             else -> false
         }
     }
@@ -394,6 +396,76 @@ class SyncWorker(
             ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminDelete error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/quota-fail এ করা Subject reorder — net আসলে ব্যাকগ্রাউন্ডে
+    //    FirebaseDataService.adminSetSubjectOrderBulk দিয়েই পাঠায় (URL/encoding
+    //    লজিক এখানে আলাদা করে লেখা হয়নি, একই ফাংশন আবার ব্যবহার হয়েছে যাতে দুই
+    //    জায়গায় path/encoding আলাদা হয়ে অসামঞ্জস্য না হয়) — সফল হলে সেই
+    //    ফাংশনের ভেতরেই touchMetaUpdatedAt() কল হয়ে যায়, তাই বাকি সব ডিভাইসও
+    //    পরের sync-এ নতুন ক্রম পেয়ে যাবে। শেষে লোকাল cache-ও patch করে রাখি। ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminReorderSubject(payload: Map<*, *>): Boolean {
+        return try {
+            val mode     = payload["mode"]?.toString() ?: return false
+            val tag      = payload["tag"]?.toString() ?: ""
+            val orderRaw = payload["order"] as? Map<*, *> ?: return false
+            val order = orderRaw.entries.associate { (k, v) ->
+                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+            }
+            if (order.isEmpty()) return true
+
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                .adminSetSubjectOrderBulk(mode, tag, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(tag)
+                    com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                        .patchSubjectOrderAndPersist(mode, encodedTag, order)
+                    Log.d(TAG, "syncAdminReorderSubject $mode/$tag → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminReorderSubject failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminReorderSubject error: ${e.message}")
+            false
+        }
+    }
+
+    // ── একই প্যাটার্নে SubTopic reorder — mode+tag+subject ভিত্তিক ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminReorderSubTopic(payload: Map<*, *>): Boolean {
+        return try {
+            val mode     = payload["mode"]?.toString() ?: return false
+            val tag      = payload["tag"]?.toString() ?: ""
+            val subject  = payload["subject"]?.toString() ?: return false
+            val orderRaw = payload["order"] as? Map<*, *> ?: return false
+            val order = orderRaw.entries.associate { (k, v) ->
+                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+            }
+            if (order.isEmpty()) return true
+
+            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
+                .adminSetSubTopicOrderBulk(mode, tag, subject, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(tag)
+                    com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                        .patchSubTopicOrderAndPersist(mode, encodedTag, subject, order)
+                    Log.d(TAG, "syncAdminReorderSubTopic $mode/$tag/$subject → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminReorderSubTopic failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminReorderSubTopic error: ${e.message}")
             false
         }
     }
