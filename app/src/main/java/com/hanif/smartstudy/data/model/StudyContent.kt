@@ -115,6 +115,20 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                             else                                              -> normalized.add(nk, v)
                         }
                     }
+                    // FIX (আরও general/robust): Google Sheet-এর অনেক কলামই (updatedAt, important,
+                    // বা ভবিষ্যতে যোগ হতে পারা যেকোনো numeric/boolean ফিল্ড) পুরনো/অস্পর্শিত row-এ
+                    // খালি স্ট্রিং ("") হয়ে থাকে। Kotlin মডেলে সেগুলো Long?/Boolean?/Int? — Gson-এর
+                    // default adapter খালি স্ট্রিংকে সংখ্যা/বুলিয়ানে কনভার্ট করতে না পেরে
+                    // NumberFormatException ছোড়ে, আর সেই exception-এ পুরো row-টাই বাদ পড়ে যায়
+                    // (silently) — QBank/Quiz-এর হাজার হাজার row এভাবে হারিয়ে যাচ্ছিল।
+                    // শুধু "updatedAt"/"important" নাম ধরে ধরে ঠিক করার বদলে — এখানে *যেকোনো*
+                    // কলামের ভ্যালু blank string হলেই সেটা বাদ দেওয়া হয় (String টাইপ ফিল্ডে
+                    // "" আর null প্রায় সবসময় একই অর্থ বহন করে এই কোডবেসে, তাই নিরাপদ), যাতে
+                    // অজানা কোনো নতুন numeric/boolean কলামও ভবিষ্যতে চুপচাপ পুরো row নষ্ট করতে না পারে।
+                    val blankKeys = normalized.entrySet()
+                        .filter { (_, v) -> isBlankJsonValue(v) && !v.isJsonNull }
+                        .map { it.key }
+                    blankKeys.forEach { normalized.remove(it) }
                     delegate.fromJsonTree(normalized)
                 } else {
                     delegate.fromJsonTree(jsonElement)
