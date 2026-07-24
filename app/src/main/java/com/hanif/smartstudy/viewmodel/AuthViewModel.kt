@@ -61,7 +61,10 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             _authState.value = AuthState.Loading
             try {
                 val email = PhoneValidator.toSyntheticEmail(cleanPhone)
-                FirebaseAuth.getInstance().signInWithEmailAndPassword(email, pw).awaitTask()
+                val authResult = FirebaseAuth.getInstance().signInWithEmailAndPassword(email, pw).awaitTask()
+                authResult.user?.uid?.let { uid ->
+                    FirebaseAuthService.linkUidToPhone(uid, cleanPhone, firebaseUrl)
+                }
 
                 val profile = FirebaseAuthService.findUserByPhone(cleanPhone, firebaseUrl)
                 if (profile == null) {
@@ -128,7 +131,10 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             _authState.value = AuthState.Loading
             try {
                 val email = PhoneValidator.toSyntheticEmail(safePhone)
-                FirebaseAuth.getInstance().createUserWithEmailAndPassword(email, pw).awaitTask()
+                val authResult = FirebaseAuth.getInstance().createUserWithEmailAndPassword(email, pw).awaitTask()
+                authResult.user?.uid?.let { uid ->
+                    FirebaseAuthService.linkUidToPhone(uid, safePhone, firebaseUrl)
+                }
 
                 when (val r = FirebaseAuthService.createProfile(n, safePhone, userType, classLevel, firebaseUrl)) {
                     is AuthResult.Success -> {
@@ -181,7 +187,12 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                         u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
                     }
                     session.saveUser(user)
-                    user.phone?.let { FcmHelper.collectAndSaveForPhone(getApplication(), it) }
+                    user.phone?.let { ph ->
+                        FcmHelper.collectAndSaveForPhone(getApplication(), ph)
+                        FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
+                            FirebaseAuthService.linkUidToPhone(uid, ph, firebaseUrl)
+                        }
+                    }
                     _authState.value = AuthState.Success(user)
                 }
                 is GoogleAuthResult.NewUser -> {
@@ -229,6 +240,15 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             Log.d("GoogleSignup", "Final photo URL: $finalPhotoUrl")
+
+            // ── ⚠️ ক্রম গুরুত্বপূর্ণ: createProfile() Users/$ph নোডে প্রথমবার লিখবে,
+            // আর নতুন Firebase Rules সেই write allow করার আগে UidToPhone/{uid} এ
+            // এই phone-টা match করে কিনা চেক করে — তাই mapping-টা createProfile
+            // এর ঠিক আগেই লিখে ফেলতে হবে, নাহলে ব্র্যান্ড-নিউ Google signup
+            // permission-denied এ ব্যর্থ হবে। ──
+            FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
+                FirebaseAuthService.linkUidToPhone(uid, ph, firebaseUrl)
+            }
 
             when (val r = FirebaseAuthService.createProfile(
                 name = n, localPhone = ph, userType = userType, classLevel = classLevel,
