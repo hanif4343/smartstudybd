@@ -24,7 +24,7 @@
       "$mode": {
         "$tag": {
           ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+          ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
           "$subject": {
             ".validate": "newData.isNumber()"
           }
@@ -36,7 +36,7 @@
       "$mode": {
         "$tag": {
           ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+          ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
           "$subject": {
             "$subTopic": {
               ".validate": "newData.isNumber()"
@@ -48,26 +48,50 @@
 
     "ModelTests": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
     },
     "ModelTestSubmissions": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null"
     },
 
+    // ── আগে এখানে top-level ".read"/".write": "auth != null" ছিল — মানে
+    // যেকোনো সাইন-ইন করা ইউজার সব ইউজারের ফোন/নাম/XP/isAdmin flag পড়তে ও
+    // লিখতে পারতো (privacy leak + privilege escalation risk)। এখন প্রতিটা
+    // ইউজার শুধু নিজের প্রোফাইল পড়তে/লিখতে পারবে (নিচের UidToPhone ম্যাপিং
+    // দিয়ে যাচাই করে), অ্যাডমিন সবার প্রোফাইল পড়তে পারবে। ──
     "Users": {
-      ".read": "auth != null",
-      ".write": "auth != null",
       ".indexOn": ["Phone", "phone"],
       "$userId": {
-        ".write": "auth != null && (auth.uid === $userId || root.child('Users').child(auth.uid).child('isAdmin').val() === true)"
+        ".read":  "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)",
+        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)"
       }
     },
 
+    // ── Firebase Auth UID → phone ম্যাপিং (দেখো FirebaseAuthService.kt এর
+    // linkUidToPhone) — উপরের Users node এর owner-check এর ভিত্তি এটাই।
+    // Google sign-in এ auth.token.email আসল Gmail (phone-এর সাথে সম্পর্কহীন),
+    // আর Phone+Password এ synthetic email — তাই auth.uid থেকে সরাসরি phone
+    // বের করার কোনো নির্ভরযোগ্য উপায় নেই এই ম্যাপিং ছাড়া। প্রতিটা ইউজার শুধু
+    // নিজের uid এন্ট্রি লিখতে/পড়তে পারবে। ──
+    "UidToPhone": {
+      "$uid": {
+        ".read":  "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+
+    // ── FCM token/presence ডেটা (phone-keyed) — আগে যেকোনো authenticated
+    // user সবার FCM token + lastActive/lastSeen পড়তে পারতো (presence-tracking
+    // দিয়ে অন্যদের অনলাইন-অফলাইন প্যাটার্ন ট্র্যাক করা সম্ভব ছিল)। এখন প্রতিটা
+    // ইউজার শুধু নিজের এন্ট্রি লিখতে পারবে (FCM token সেভের সময়), পুরো লিস্ট
+    // শুধু অ্যাডমিন পড়তে পারবে (Admin Panel-এর "active users" ফিচারের জন্য)। ──
     "users": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      ".indexOn": ["Phone", "phone"]
+      ".indexOn": ["Phone", "phone"],
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      "$phone": {
+        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $phone || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)"
+      }
     },
 
     "AdminFCMTokens": {
@@ -119,7 +143,7 @@
     },
 
     "Reports": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null",
       "$reportId": {
         ".validate": "newData.hasChildren(['questionId','issue','timestamp','status'])",
@@ -137,17 +161,17 @@
     },
 
     "QuizAnswers": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null"
     },
     "StudyLog": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null"
     },
 
     "broadcasts": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
-      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
     },
 
     "AdminAppLogcat": {
@@ -159,17 +183,17 @@
       ".write": "auth != null"
     },
     "DebugLogs": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null"
     },
 
     "Routine": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
     },
 
     "UserContent": {
-      ".read": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true",
+      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
       ".write": "auth != null"
     },
     "Techniques": {
@@ -185,7 +209,7 @@
     "meta": {
       ".read": "auth != null",
       "updatedAt": {
-        ".write": "auth != null && root.child('Users').child(auth.uid).child('isAdmin').val() === true"
+        ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
       }
     }
   }
