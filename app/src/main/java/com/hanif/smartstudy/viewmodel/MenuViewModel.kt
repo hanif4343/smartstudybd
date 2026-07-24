@@ -1021,10 +1021,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             for (action in pending) {
                 try {
                     val payload = gson.fromJson(action.payload, Map::class.java)
-                    val sheet   = payload["sheet"]?.toString() ?: continue
 
                     when (action.type) {
                         "admin_edit_question" -> {
+                            val sheet   = payload["sheet"]?.toString() ?: continue
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
@@ -1039,6 +1039,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "admin_add_question" -> {
+                            val sheet   = payload["sheet"]?.toString() ?: continue
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val localId = payload["localId"]?.toString() ?: continue
@@ -1054,11 +1055,53 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "admin_delete_question" -> {
+                            val sheet   = payload["sheet"]?.toString() ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
                             when (adminDeleteRow(sheet, questionId)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // লোকাল cache থেকে তো ডিলিটের সময়ই সরানো হয়ে গেছে,
                                     // এখানে শুধু Firebase-এ পাঠানো সফল হলো এটাই নিশ্চিত করা
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
+                        // ── Subject/SubTopic reorder — "sheet" নেই, mode/tag(/subject)+order দিয়ে
+                        //    সরাসরি FirebaseDataService দিয়ে পাঠানো হয় (সফল হলে ভেতরেই meta touch হয়)।
+                        "admin_reorder_subject" -> {
+                            val mode = payload["mode"]?.toString() ?: continue
+                            val tag  = payload["tag"]?.toString() ?: ""
+                            @Suppress("UNCHECKED_CAST")
+                            val orderRaw = payload["order"] as? Map<*, *> ?: continue
+                            val order = orderRaw.entries.associate { (k, v) ->
+                                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+                            }
+                            when (com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode, tag, order)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(tag)
+                                    repo.patchSubjectOrderAndPersist(mode, encodedTag, order)
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
+                        "admin_reorder_subtopic" -> {
+                            val mode    = payload["mode"]?.toString() ?: continue
+                            val tag     = payload["tag"]?.toString() ?: ""
+                            val subject = payload["subject"]?.toString() ?: continue
+                            @Suppress("UNCHECKED_CAST")
+                            val orderRaw = payload["order"] as? Map<*, *> ?: continue
+                            val order = orderRaw.entries.associate { (k, v) ->
+                                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+                            }
+                            when (com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode, tag, subject, order)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(tag)
+                                    repo.patchSubTopicOrderAndPersist(mode, encodedTag, subject, order)
                                     q.remove(action.id); successCount++
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
