@@ -1,13 +1,16 @@
 package com.hanif.smartstudy.data.remote
 
+import android.content.Context
 import android.util.Log
 import com.google.gson.JsonObject
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.CaseInsensitiveGson
+import com.hanif.smartstudy.data.model.DataSourceMode
 import com.hanif.smartstudy.data.model.QBankItem
 import com.hanif.smartstudy.data.model.QuizItem
 import com.hanif.smartstudy.data.model.StudyItem
+import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -35,6 +38,12 @@ object ContentFetchService {
 
     private val BASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
 
+    // ── Settings-এ "Data Source" ড্রপডাউন থেকে "Google Sheet" সিলেক্ট করা থাকলে
+    // Firebase বাইপাস করে GasContentService (GAS Web App প্রক্সি) ব্যবহার হয়।
+    // দেখো GasContentService.kt-এর ডকুমেন্টেশন কমেন্ট — READ/WRITE উভয় পাশেই। ──
+    private fun isGoogleSheetMode(context: Context): Boolean =
+        SessionManager(context).getDataSourceMode() == DataSourceMode.GOOGLE_SHEET
+
     /** Firebase Auth ID Token দিয়ে secure auth param */
     private suspend fun authParam(): String {
         val token = FirebaseTokenProvider.getToken()
@@ -47,7 +56,11 @@ object ContentFetchService {
      * Subject list + SubTopic list দেখাতে এটুকুই যথেষ্ট।
      * Questions এর জন্য fetchAllContent() আলাদাভাবে background-এ চলবে।
      */
-    suspend fun fetchSubjectsOnly(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+    suspend fun fetchSubjectsOnly(context: Context): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+        // Google Sheet মোডে subjects-only দ্রুত fetch করার আলাদা GAS action নেই
+        // (SubjectOrder/SubTopicOrder Firebase-only node) — পুরো content-ই আনা হয়,
+        // subject list সেখান থেকেই বের করা যাবে (item.subject ফিল্ড থেকে)।
+        if (isGoogleSheetMode(context)) return@withContext GasContentService.fetchAllContent()
         Log.d(TAG, "=== FAST FETCH: SubjectOrder + SubTopicOrder only ===")
         try {
             coroutineScope {
@@ -77,7 +90,13 @@ object ContentFetchService {
      * রিফেচ হয়ে bandwidth নষ্ট হয় না।
      * Node না থাকলে বা error হলে 0L রিটার্ন করে (caller তখন পুরনো TTL-fallback ব্যবহার করবে)।
      */
-    suspend fun fetchMetaUpdatedAt(): Long = withContext(Dispatchers.IO) {
+    suspend fun fetchMetaUpdatedAt(context: Context): Long = withContext(Dispatchers.IO) {
+        // Google Sheet মোডে "/meta/updatedAt"-এর কোনো সমতুল্য (ছোট, দ্রুত) GAS action
+        // নেই — 0L রিটার্ন করলে ContentRepository এটাকে "server has newer" ধরে নেয়
+        // (দেখো ContentRepository.getContent()), ফলে BG_REFRESH_MIN_GAP_MS (১৫ মিনিট)
+        // গ্যাপ মেনেই ব্যাকগ্রাউন্ডে refresh চলতে থাকে — user-এর নির্দেশনা অনুযায়ী
+        // ("ধীর হোক, ব্যাকগ্রাউন্ডে আসবে") এটাই সবচেয়ে সহজ, নিরাপদ আচরণ।
+        if (isGoogleSheetMode(context)) return@withContext 0L
         try {
             val auth = authParam()
             val url  = "$BASE_URL/meta/updatedAt.json$auth"
@@ -173,10 +192,14 @@ object ContentFetchService {
      * ModelTests — এই তিনটা ছোট node বলে প্রতিবারই পুরোটা রিফ্রেশ করা bandwidth-এ কোনো সমস্যা করে না।
      */
     suspend fun fetchIncrementalContent(
+        context   : Context,
         sinceQuiz : Long,
         sinceQBank: Long,
         sinceStudy: Long
     ): ContentResult<IncrementalContent> = withContext(Dispatchers.IO) {
+        // Google Sheet মোডে delta filter সাপোর্ট নেই (দেখো GasContentService.fetchIncrementalContent
+        // এর কমেন্ট) — পুরো sheet-ই "changed" হিসেবে ফেরত যায়, mergeById() ঠিকভাবেই সামলে নেয়।
+        if (isGoogleSheetMode(context)) return@withContext GasContentService.fetchIncrementalContent()
         try {
             coroutineScope {
                 val quizDeferred         = async { fetchSheetChangedSince<QuizItem>("Quiz", sinceQuiz) }
@@ -203,7 +226,9 @@ object ContentFetchService {
         }
     }
 
-    suspend fun fetchAllContent(): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+    suspend fun fetchAllContent(context: Context): ContentResult<AppContent> = withContext(Dispatchers.IO) {
+        if (isGoogleSheetMode(context)) return@withContext GasContentService.fetchAllContent()
+
         Log.d(TAG, "=== FETCH START (parallel) ===")
         Log.d(TAG, "BASE_URL: ${BASE_URL.take(50)}")
 
