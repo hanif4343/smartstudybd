@@ -38,6 +38,11 @@ object ContentFetchService {
 
     private val BASE_URL get() = BuildConfig.FIREBASE_URL.trimEnd('/')
 
+    // Google Sheet মোডে পুরো ~১৪,০০০ row background-এ কতক্ষণ পরপর আবার চেক করা
+    // হবে তার সর্বনিম্ন গ্যাপ — GAS/Sheets API quota বাঁচাতে ১৫ মিনিটের বদলে ৬ ঘণ্টা।
+    // জরুরি প্রয়োজনে Settings-এ Data Source ড্রপডাউন থেকে ম্যানুয়ালি রিফ্রেশ করা যায়।
+    private const val SHEET_META_SAFE_GAP_MS = 6 * 60 * 60_000L
+
     // ── Settings-এ "Data Source" ড্রপডাউন থেকে "Google Sheet" সিলেক্ট করা থাকলে
     // Firebase বাইপাস করে GasContentService (GAS Web App প্রক্সি) ব্যবহার হয়।
     // দেখো GasContentService.kt-এর ডকুমেন্টেশন কমেন্ট — READ/WRITE উভয় পাশেই। ──
@@ -91,12 +96,24 @@ object ContentFetchService {
      * Node না থাকলে বা error হলে 0L রিটার্ন করে (caller তখন পুরনো TTL-fallback ব্যবহার করবে)।
      */
     suspend fun fetchMetaUpdatedAt(context: Context): Long = withContext(Dispatchers.IO) {
-        // Google Sheet মোডে "/meta/updatedAt"-এর কোনো সমতুল্য (ছোট, দ্রুত) GAS action
-        // নেই — 0L রিটার্ন করলে ContentRepository এটাকে "server has newer" ধরে নেয়
-        // (দেখো ContentRepository.getContent()), ফলে BG_REFRESH_MIN_GAP_MS (১৫ মিনিট)
-        // গ্যাপ মেনেই ব্যাকগ্রাউন্ডে refresh চলতে থাকে — user-এর নির্দেশনা অনুযায়ী
-        // ("ধীর হোক, ব্যাকগ্রাউন্ডে আসবে") এটাই সবচেয়ে সহজ, নিরাপদ আচরণ।
-        if (isGoogleSheetMode(context)) return@withContext 0L
+        // Google Sheet মোডে "/meta/updatedAt"-এর কোনো সমতুল্য (ছোট, দ্রুত) GAS action নেই।
+        // FIX: আগে এখানে সবসময় 0L রিটার্ন করা হতো — তার মানে ContentRepository প্রতি
+        // BG_REFRESH_MIN_GAP_MS (১৫ মিনিট) পরপরই পুরো ~১৪,০০০ row Sheet আবার টেনে
+        // ফেলত (GAS + Sheets API quota-তে চাপ)। এখন লোকাল cache-এর ছোট timestamp key
+        // পড়ে (network call ছাড়াই) বোঝা হয় শেষ সফল full-fetch কতক্ষণ আগে হয়েছিল —
+        // SHEET_META_SAFE_GAP_MS-এর মধ্যে হলে refresh স্কিপ করা হয়। এই গ্যাপ পার হলে
+        // তবেই 0L (force refresh) রিটার্ন হয়। জরুরি হলে Settings-এ Data Source
+        // ড্রপডাউন থেকে আবার "Google Sheet" ট্যাপ করলে সাথে সাথেই ম্যানুয়াল রিফ্রেশ হয়।
+        if (isGoogleSheetMode(context)) {
+            val sheetCache = com.hanif.smartstudy.data.local.ContentCache(context)
+            val lastFullSync = sheetCache.getLastFullSync()
+            val now = System.currentTimeMillis()
+            return@withContext if (lastFullSync > 0L && now - lastFullSync < SHEET_META_SAFE_GAP_MS) {
+                sheetCache.getRemoteUpdatedAt() // অপরিবর্তিত মান → serverHasNewer=false, refresh স্কিপ
+            } else {
+                0L // গ্যাপ পার হয়ে গেছে — একবার ফ্রেশ ফুল-fetch করাও
+            }
+        }
         try {
             val auth = authParam()
             val url  = "$BASE_URL/meta/updatedAt.json$auth"
