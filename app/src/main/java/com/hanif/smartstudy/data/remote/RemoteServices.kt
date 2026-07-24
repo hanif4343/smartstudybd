@@ -222,7 +222,15 @@ object UserSyncService {
                 }
             }
 
-            Log.w(TAG, "fetchUser: user not found for $cleanPhone")
+            Log.w(TAG, "fetchUser: user not found for $cleanPhone (Firebase) — GAS Sheet fallback চেষ্টা করছি")
+            // ── Firebase quota শেষ/permission denied হলে দুটো node-attempt-ই এখানে খালি হাতে
+            // পৌঁছায় — এখন GAS "getSheetRows" (tab=Users) দিয়ে সরাসরি Sheet থেকে খোঁজা হয়,
+            // যাতে role="Admin" থাকলে সেটা হারিয়ে না যায় (দেখো GasContentService.fetchUserFromSheet)। ──
+            val sheetUser = GasContentService.fetchUserFromSheet(cleanPhone)
+            if (sheetUser != null) {
+                Log.d(TAG, "fetchUser: found $cleanPhone via GAS Sheet fallback")
+                return@withContext sheetUser
+            }
             null
         }
 
