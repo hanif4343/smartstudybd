@@ -74,6 +74,10 @@ class ContentCache(private val context: Context) {
     suspend fun getQBankLastSync(): Long = context.dataStore.data.first()[KEY_QBANK_LAST_SYNC] ?: 0L
     suspend fun getStudyLastSync(): Long = context.dataStore.data.first()[KEY_STUDY_LAST_SYNC] ?: 0L
     suspend fun getLastFullSync(): Long  = context.dataStore.data.first()[KEY_LAST_FULL_SYNC]  ?: 0L
+    // ── Google Sheet মোডে ব্যাকগ্রাউন্ড refresh চেক-এর জন্য হালকা getter — পুরো
+    // cached content (হাজার হাজার row) deserialize না করেই শুধু এই একটা ছোট
+    // timestamp key পড়া যায় (দেখো ContentFetchService.fetchMetaUpdatedAt) ──
+    suspend fun getRemoteUpdatedAt(): Long = context.dataStore.data.first()[KEY_REMOTE_UPDATED_AT] ?: 0L
 
     /** delta sync সফল হওয়ার পর প্রতিটা sheet এর checkpoint আলাদাভাবে আপডেট করো */
     suspend fun setSyncCheckpoints(quizAt: Long, qbankAt: Long, studyAt: Long) {
