@@ -479,6 +479,16 @@ object ContentFetchService {
             }
         }
 
+    /**
+     * Google Sheet "Typing" ট্যাব (headers: id, language, content, updatedAt) — Firebase
+     * "Typing" node থেকে, ঠিক Quiz/QBank/Study-এর মতোই generic fetchSheet<T> দিয়ে আনা হয়
+     * (GAS syncToFirebase("Typing","Typing") ইতিমধ্যে এই node সিঙ্ক করে রাখে)। এখান থেকেই
+     * TypingPracticeScreen/TypingRaceScreen-এর আগের হার্ডকোডেড PASSAGES পুল রিপ্লেস হয়েছে —
+     * দেখো util/TypingPassageProvider.kt।
+     */
+    suspend fun fetchTypingPassages(): List<com.hanif.smartstudy.data.model.TypingSheetPassage> =
+        fetchSheet("Typing")
+
     private suspend inline fun <reified T> fetchSheet(sheet: String): List<T> =
         withContext(Dispatchers.IO) {
             try {
