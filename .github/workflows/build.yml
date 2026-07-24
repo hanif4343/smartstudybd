@@ -9,13 +9,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY are read directly by
-    # app/build.gradle via System.getenv(...) — they are never sed-substituted
-    # into a file, so the private key's embedded newlines can't break anything.
+    # FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY / GAS_URL / GAS_SECRET are
+    # read directly by app/build.gradle via System.getenv(...) — they are never
+    # sed-substituted into a file, so the private key's embedded newlines can't
+    # break anything.
     env:
       FCM_PROJECT_ID:   ${{ secrets.FCM_PROJECT_ID }}
       FCM_CLIENT_EMAIL: ${{ secrets.FCM_CLIENT_EMAIL }}
       FCM_PRIVATE_KEY:  ${{ secrets.FCM_PRIVATE_KEY }}
+      # Google Sheet ডেটা সোর্স (Settings → Data Source) — GAS Web App প্রক্সি
+      GAS_URL:          ${{ secrets.GAS_URL }}
+      GAS_SECRET:       ${{ secrets.GAS_SECRET }}
 
     steps:
       - name: Checkout
