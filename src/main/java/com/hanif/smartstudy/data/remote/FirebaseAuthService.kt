@@ -1,0 +1,285 @@
+package com.hanif.smartstudy.data.remote
+
+import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.hanif.smartstudy.util.PhoneValidator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+/**
+ * ════════════════════════════════════════════════════════════════
+ *  FirebaseAuthService
+ * ════════════════════════════════════════════════════════════════
+ * Identity verification এখন real Firebase Auth দিয়ে হয় — phone+password
+ * ব্যবহারকারীদের জন্য Email/Password provider (ফোন নম্বর থেকে বানানো একটা
+ * ভেতরের synthetic email দিয়ে, দেখো PhoneValidator.toSyntheticEmail),
+ * আর Google ব্যবহারকারীদের জন্য real Google credential bridge (দেখো
+ * AuthViewModel.googleSignIn/googleSignup) — কোনো পদ্ধতিতেই password
+ * hashing/verification এই কোডে নেই, Firebase নিজেই সেটা সামলায়।
+ *
+ * এই ফাইল শুধু Firebase Realtime Database এ profile data (Users/{phone})
+ * read/create করে — phone, name, class, role ইত্যাদি প্রোফাইল তথ্য।
+ */
+object FirebaseAuthService {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+    private val gson = Gson()
+    private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+    /** Gson সব number কে Double করে — এই function সঠিক String দেয় */
+    private fun anyToString(value: Any?): String {
+        if (value == null) return ""
+        return when (value) {
+            is Double -> {
+                if (value == Math.floor(value) && !value.isInfinite()) {
+                    value.toLong().toString()
+                } else value.toString()
+            }
+            is Long    -> value.toString()
+            is Int     -> value.toString()
+            is Boolean -> value.toString()
+            else       -> value.toString()
+        }
+    }
+
+    /** Real Firebase Auth ID token (sign-in করা থাকলে) দিয়ে auth query param বানাও */
+    private suspend fun authQuery(): String {
+        val token = FirebaseTokenProvider.getToken()
+        return if (token.isNotBlank()) "?auth=$token" else ""
+    }
+
+    /**
+     * ── 🔐 UidToPhone/{uid} → phone ম্যাপিং লেখে ──
+     * এই ম্যাপিং না থাকলে Firebase Rules কখনোই বুঝতে পারতো না কোন Firebase Auth
+     * UID কোন Users/{phone} প্রোফাইলের মালিক — কারণ Phone+Password flow এর জন্য
+     * synthetic email (toSyntheticEmail) থেকে phone বের করা গেলেও, Google
+     * sign-in এ auth.token.email আসল Gmail ঠিকানা, phone-এর সাথে কোনো সরাসরি
+     * সম্পর্ক নেই। তাই sign-in/sign-up সফল হওয়ার সাথে সাথেই (auth.uid জানা
+     * থাকা অবস্থায়) এই ম্যাপিং লিখে রাখা হয়, আর firebase-database-rules.json
+     * এটা পড়েই ঠিক করে কোন request কার প্রোফাইলে অ্যাক্সেস চাইছে।
+     * ব্যর্থ হলেও silently ignore করে — sign-in flow টা ব্লক করা উচিত না।
+     */
+    suspend fun linkUidToPhone(uid: String, phone: String, firebaseUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            if (uid.isBlank() || phone.isBlank()) return@withContext
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url  = "$baseUrl/UidToPhone/$uid.json$auth"
+            val body = "\"$phone\"".toRequestBody(JSON_MEDIA_TYPE)
+            val req  = Request.Builder().url(url).put(body).build()
+            client.newCall(req).execute().close()
+        } catch (e: Exception) {
+            Log.e("UidToPhone", "link failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Users/{phone} নোড সরাসরি fetch করে (DB-key ফরম্যাট: "01XXXXXXXXX")।
+     *
+     * ── আগে এটা পুরো /Users.json fetch করে লুপ চালিয়ে phone মেলাতো — সেটা
+     * নতুন (tightened) rules-এ পুরোপুরি deny হয়ে যায় (অন্য কারো profile তো
+     * দূরে থাক, নিজেরটাও broad read-এ পাওয়া যায় না, কারণ rules exact path
+     * ছাড়া partial filtering করে না)। এখন সরাসরি Users/{phone}.json পড়া
+     * হয় — এটাই ঠিক সেই path যেটা rules-এ per-child owner-check আছে
+     * (root.child('UidToPhone').child(auth.uid).val() === $userId), তাই
+     * নিজের প্রোফাইলের জন্য সবসময় readable, আর admin-এর জন্যও (custom
+     * claim দিয়ে) readable। ──
+     */
+    suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val normPhone = phone.trim()
+                val auth = authQuery()
+                val baseUrl = firebaseUrl.trimEnd('/')
+                val url = "$baseUrl/Users/$normPhone.json$auth"
+                Log.d("Login", "Fetching user directly: $normPhone")
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+
+                if (body.isBlank() || body == "null") {
+                    Log.d("Login", "User not found: $normPhone")
+                    return@withContext null
+                }
+
+                val type = object : TypeToken<Map<String, Any>>() {}.type
+                val userMap: Map<String, Any> = gson.fromJson(body, type)
+                Log.d("Login", "Found: ${userMap["Name"]}")
+                userMap
+            } catch (e: Exception) {
+                Log.e("Login", "findUserByPhone error: ${e.message}")
+                null
+            }
+        }
+
+    // ── Firebase Auth এ sign in/up করার পর প্রোফাইল তৈরি (password আর সংরক্ষণ করা হয় না — Firebase Auth নিজেই সেটা সামলায়) ──
+    suspend fun createProfile(
+        name: String,
+        localPhone: String,
+        userType: String,
+        classLevel: String,
+        firebaseUrl: String,
+        email: String = "",
+        picture: String = ""
+    ): AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = PhoneValidator.sanitize(localPhone)
+                ?: return@withContext AuthResult.Error("ফোন নম্বরটি সঠিক ফরম্যাটে নেই")
+
+            val existing = findUserByPhone(cleanPhone, firebaseUrl)
+            if (existing != null) {
+                return@withContext AuthResult.Error("এই ফোন নম্বর আগে থেকেই নিবন্ধিত")
+            }
+
+            val userData = mapOf(
+                "Name"       to name,
+                "Phone"      to cleanPhone,
+                "Email"      to email,
+                "Picture"    to picture,
+                "UserType"   to userType,
+                "ClassLevel" to classLevel,
+                "Status"     to "Active",
+                "Role"       to "User"
+            )
+
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url = "$baseUrl/Users/$cleanPhone.json$auth"
+            val requestBody = gson.toJson(userData).toRequestBody(JSON_MEDIA_TYPE)
+            val req  = Request.Builder().url(url).put(requestBody).build()
+            val resp = client.newCall(req).execute()
+
+            if (resp.isSuccessful) AuthResult.Success(userData)
+            else AuthResult.Error("Firebase-এ অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে (HTTP ${resp.code})")
+        } catch (e: Exception) {
+            AuthResult.Error("নেটওয়ার্ক সমস্যা: ${e.message}")
+        }
+    }
+
+    // ── GOOGLE SIGN-IN (TRANSITIONAL — পরের ধাপে real Firebase Auth এ migrate হবে) ──
+    suspend fun googleSignIn(
+        email: String,
+        name: String,
+        photoUrl: String,
+        firebaseUrl: String
+    ): GoogleAuthResult = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+            val url  = "$baseUrl/Users.json$auth"
+            Log.d("GoogleAuth", "Fetching users from Firebase")
+            val req  = Request.Builder().url(url).get().build()
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+
+            if (body.isBlank() || body == "null") {
+                return@withContext GoogleAuthResult.NewUser(email, name, photoUrl)
+            }
+
+            val normEmail    = email.trim().lowercase()
+            var matchedUser: Map<String, Any>? = null
+
+            try {
+                val type   = object : TypeToken<Map<String, Any>>() {}.type
+                val rawMap: Map<String, Any> = gson.fromJson(body, type)
+                for ((_, value) in rawMap) {
+                    if (value is Map<*, *>) {
+                        @Suppress("UNCHECKED_CAST")
+                        val userMap = value as Map<String, Any>
+                        val uEmail  = (userMap["Email"] ?: userMap["email"])
+                            ?.toString()?.trim()?.lowercase() ?: ""
+                        if (uEmail == normEmail) { matchedUser = userMap; break }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("GoogleAuth", "Parse error: ${e.message}")
+            }
+
+            if (matchedUser != null) {
+                val status = (matchedUser["Status"] ?: matchedUser["status"] ?: "Active")
+                    .toString().lowercase()
+                if (status == "inactive") {
+                    return@withContext GoogleAuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin-এর সাথে যোগাযোগ করুন।")
+                }
+                GoogleAuthResult.ExistingUser(matchedUser)
+            } else {
+                GoogleAuthResult.NewUser(email = email, name = name, photoUrl = photoUrl)
+            }
+        } catch (e: Exception) {
+            Log.e("GoogleAuth", "Error: ${e.message}")
+            GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
+        }
+    }
+
+    /**
+     * ── GOOGLE SIGN-IN (uid-based — নতুন, tightened rules-এর সাথে কাজ করে) ──
+     * পুরনো googleSignIn() পুরো /Users.json স্ক্যান করে email মিলাতে চাইতো,
+     * কিন্তু নতুন rules-এ অন্য user-দের profile আর readable না বলে সেই স্ক্যান
+     * সবসময় ব্যর্থ হয় (permission denied) — ফলে existing user-ও বারবার
+     * "NewUser" ধরা পড়ে signup screen-এ চলে যেত।
+     *
+     * এই ফাংশন বদলে নিজের UidToPhone/{uid} mapping আগে চেক করে — এই path
+     * সবসময় নিজের জন্য readable (rules: auth.uid === $uid), আর real
+     * Firebase Auth ব্যবহার হচ্ছে বলে একই Google account সবসময় একই uid
+     * দেয় (নতুন-পুরনো সাইন-ইনে uid বদলায় না)। mapping পাওয়া গেলে সরাসরি
+     * নিজের Users/{phone} নোড পড়ে ExistingUser রিটার্ন করে; mapping না
+     * থাকলে সত্যিকারের নতুন user ধরে নিয়ে NewUser রিটার্ন করে।
+     */
+    suspend fun googleSignInByUid(
+        uid: String,
+        email: String,
+        name: String,
+        photoUrl: String,
+        firebaseUrl: String
+    ): GoogleAuthResult = withContext(Dispatchers.IO) {
+        try {
+            if (uid.isBlank()) {
+                return@withContext GoogleAuthResult.Error("সাইন-ইন uid পাওয়া যায়নি, আবার চেষ্টা করুন")
+            }
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+
+            val mapUrl = "$baseUrl/UidToPhone/$uid.json$auth"
+            val mapResp = client.newCall(Request.Builder().url(mapUrl).get().build()).execute()
+            val phoneJson = mapResp.body?.string()?.trim()
+
+            if (!phoneJson.isNullOrBlank() && phoneJson != "null") {
+                val phone = phoneJson.removeSurrounding("\"")
+                val profile = findUserByPhone(phone, firebaseUrl)
+                if (profile != null) {
+                    val status = (profile["Status"] ?: profile["status"] ?: "Active")
+                        .toString().lowercase()
+                    return@withContext if (status == "inactive") {
+                        GoogleAuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin-এর সাথে যোগাযোগ করুন।")
+                    } else {
+                        GoogleAuthResult.ExistingUser(profile)
+                    }
+                }
+            }
+            // UidToPhone mapping নেই বা profile পাওয়া যায়নি — সত্যিকারের নতুন user
+            GoogleAuthResult.NewUser(email = email, name = name, photoUrl = photoUrl)
+        } catch (e: Exception) {
+            Log.e("GoogleAuth", "googleSignInByUid error: ${e.message}")
+            GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
+        }
+    }
+}
+
+sealed class AuthResult {
+    data class Success(val userData: Map<String, Any>) : AuthResult()
+    data class Error(val message: String) : AuthResult()
+}
+
+sealed class GoogleAuthResult {
+    data class ExistingUser(val userData: Map<String, Any>) : GoogleAuthResult()
+    data class NewUser(val email: String, val name: String, val photoUrl: String) : GoogleAuthResult()
+    data class Error(val message: String) : GoogleAuthResult()
+}
