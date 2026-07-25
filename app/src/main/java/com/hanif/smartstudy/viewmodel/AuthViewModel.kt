@@ -181,7 +181,8 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            when (val r = FirebaseAuthService.googleSignIn(email, name, photoUrl, firebaseUrl)) {
+            val currentUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            when (val r = FirebaseAuthService.googleSignInByUid(currentUid, email, name, photoUrl, firebaseUrl)) {
                 is GoogleAuthResult.ExistingUser -> {
                     val user = User.fromFirebaseMap(r.userData).let { u ->
                         u.copy(picture = u.picture ?: photoUrl, name = u.name ?: name)
@@ -189,9 +190,8 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                     session.saveUser(user)
                     user.phone?.let { ph ->
                         FcmHelper.collectAndSaveForPhone(getApplication(), ph)
-                        FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
-                            FirebaseAuthService.linkUidToPhone(uid, ph, firebaseUrl)
-                        }
+                        // mapping আগে থেকেই থাকার কথা, তবু নিশ্চিত করতে আবার লিখে রাখা হলো
+                        FirebaseAuthService.linkUidToPhone(currentUid, ph, firebaseUrl)
                     }
                     _authState.value = AuthState.Success(user)
                 }
