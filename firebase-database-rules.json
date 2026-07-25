@@ -5,17 +5,17 @@
 
     "Quiz": {
       ".read": "auth != null",
-      ".write": false,
+      ".write": "auth != null && auth.token.admin === true",
       ".indexOn": ["updatedAt"]
     },
     "QBank": {
       ".read": "auth != null",
-      ".write": false,
+      ".write": "auth != null && auth.token.admin === true",
       ".indexOn": ["updatedAt"]
     },
     "Study": {
       ".read": "auth != null",
-      ".write": false,
+      ".write": "auth != null && auth.token.admin === true",
       ".indexOn": ["updatedAt"]
     },
 
