@@ -392,14 +392,8 @@ object FirebaseDataService {
                 val respBody = resp.body?.string() ?: ""
                 val code    = resp.code
                 resp.close()
-                if (resp.isSuccessful) {
-                    // ⚠️ আগে এখানে meta touch হতো না — তাই অন্য ডিভাইসের background
-                    // sync/SyncWorker মেটা-চেকে নতুন কিছু আছে বলে বুঝতে পারত না, ফলে
-                    // periodic full-resync না হওয়া পর্যন্ত admin ছাড়া বাকি সবাই পুরনো
-                    // ক্রমই দেখত। এখন touch করা হয় যাতে সবার sync-এ নতুন ক্রম ধরা পড়ে।
-                    touchMetaUpdatedAt()
-                    ApiResult.Success(Unit)
-                } else ApiResult.Error("Firebase error: $code — $respBody")
+                if (resp.isSuccessful) ApiResult.Success(Unit)
+                else ApiResult.Error("Firebase error: $code — $respBody")
             } catch (e: Exception) {
                 ApiResult.Error(e.message ?: "Network error")
             }
@@ -424,10 +418,8 @@ object FirebaseDataService {
                 val respBody   = resp.body?.string() ?: ""
                 val code       = resp.code
                 resp.close()
-                if (resp.isSuccessful) {
-                    touchMetaUpdatedAt()
-                    ApiResult.Success(Unit)
-                } else ApiResult.Error("Firebase error: $code — $respBody")
+                if (resp.isSuccessful) ApiResult.Success(Unit)
+                else ApiResult.Error("Firebase error: $code — $respBody")
             } catch (e: Exception) {
                 ApiResult.Error(e.message ?: "Network error")
             }
@@ -757,6 +749,62 @@ object FirebaseDataService {
             touchMetaUpdatedAt()
             ApiResult.Success(totalUpdated)
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
+    }
+
+    /**
+     * Admin: Subject/SubTopic অনুযায়ী মিলে যাওয়া সব প্রশ্ন Firebase থেকে ডিলিট করো —
+     * adminRenameSubjectOrTopic-এর মতোই matching logic (subject+sub_topic scope), শুধু
+     * rename এর বদলে প্রতিটা matching key-তে DELETE কল যায়। deleteSubTopic=false হলে
+     * পুরো subject-এর সব প্রশ্ন (সব অধ্যায়সহ) মুছে যায়।
+     */
+    suspend fun adminDeleteBySubjectOrTopic(
+        sheets         : List<String>,
+        oldSubject     : String,
+        oldSubTopic    : String,
+        deleteSubTopic : Boolean
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+            var totalDeleted = 0
+            var anySheetHadData = false
+
+            for (sheet in sheets) {
+                val json = client.newCall(
+                    Request.Builder().url("$base/$sheet.json$auth").get().build()
+                ).execute().body?.string() ?: "null"
+                if (json == "null") continue
+
+                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
+                if (raw.isEmpty()) continue
+                anySheetHadData = true
+
+                val matching = raw.filter { (_, v) ->
+                    val s  = v["subject"]?.toString()?.trim() ?: ""
+                    val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    if (deleteSubTopic) {
+                        s.equals(oldSubject.trim(), ignoreCase = true) &&
+                        st.equals(oldSubTopic.trim(), ignoreCase = true)
+                    } else {
+                        s.equals(oldSubject.trim(), ignoreCase = true)
+                    }
+                }
+                if (matching.isEmpty()) continue
+
+                matching.forEach { (key, _) ->
+                    val resp = client.newCall(
+                        Request.Builder().url("$base/$sheet/$key.json$auth").delete().build()
+                    ).execute()
+                    if (resp.isSuccessful) totalDeleted++
+                    resp.close()
+                }
+            }
+
+            if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
+            if (totalDeleted == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
+            touchMetaUpdatedAt()
+            ApiResult.Success(totalDeleted)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Delete failed") }
     }
 
     // ── 🔔 Notification inbox ─────────────────────────────────────────
