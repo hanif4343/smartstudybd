@@ -226,6 +226,59 @@ object FirebaseAuthService {
             GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
         }
     }
+
+    /**
+     * ── GOOGLE SIGN-IN (uid-based — নতুন, tightened rules-এর সাথে কাজ করে) ──
+     * পুরনো googleSignIn() পুরো /Users.json স্ক্যান করে email মিলাতে চাইতো,
+     * কিন্তু নতুন rules-এ অন্য user-দের profile আর readable না বলে সেই স্ক্যান
+     * সবসময় ব্যর্থ হয় (permission denied) — ফলে existing user-ও বারবার
+     * "NewUser" ধরা পড়ে signup screen-এ চলে যেত।
+     *
+     * এই ফাংশন বদলে নিজের UidToPhone/{uid} mapping আগে চেক করে — এই path
+     * সবসময় নিজের জন্য readable (rules: auth.uid === $uid), আর real
+     * Firebase Auth ব্যবহার হচ্ছে বলে একই Google account সবসময় একই uid
+     * দেয় (নতুন-পুরনো সাইন-ইনে uid বদলায় না)। mapping পাওয়া গেলে সরাসরি
+     * নিজের Users/{phone} নোড পড়ে ExistingUser রিটার্ন করে; mapping না
+     * থাকলে সত্যিকারের নতুন user ধরে নিয়ে NewUser রিটার্ন করে।
+     */
+    suspend fun googleSignInByUid(
+        uid: String,
+        email: String,
+        name: String,
+        photoUrl: String,
+        firebaseUrl: String
+    ): GoogleAuthResult = withContext(Dispatchers.IO) {
+        try {
+            if (uid.isBlank()) {
+                return@withContext GoogleAuthResult.Error("সাইন-ইন uid পাওয়া যায়নি, আবার চেষ্টা করুন")
+            }
+            val auth = authQuery()
+            val baseUrl = firebaseUrl.trimEnd('/')
+
+            val mapUrl = "$baseUrl/UidToPhone/$uid.json$auth"
+            val mapResp = client.newCall(Request.Builder().url(mapUrl).get().build()).execute()
+            val phoneJson = mapResp.body?.string()?.trim()
+
+            if (!phoneJson.isNullOrBlank() && phoneJson != "null") {
+                val phone = phoneJson.removeSurrounding("\"")
+                val profile = findUserByPhone(phone, firebaseUrl)
+                if (profile != null) {
+                    val status = (profile["Status"] ?: profile["status"] ?: "Active")
+                        .toString().lowercase()
+                    return@withContext if (status == "inactive") {
+                        GoogleAuthResult.Error("অ্যাকাউন্ট নিষ্ক্রিয়। Admin-এর সাথে যোগাযোগ করুন।")
+                    } else {
+                        GoogleAuthResult.ExistingUser(profile)
+                    }
+                }
+            }
+            // UidToPhone mapping নেই বা profile পাওয়া যায়নি — সত্যিকারের নতুন user
+            GoogleAuthResult.NewUser(email = email, name = name, photoUrl = photoUrl)
+        } catch (e: Exception) {
+            Log.e("GoogleAuth", "googleSignInByUid error: ${e.message}")
+            GoogleAuthResult.Error("সংযোগ সমস্যা: ${e.message}")
+        }
+    }
 }
 
 sealed class AuthResult {
