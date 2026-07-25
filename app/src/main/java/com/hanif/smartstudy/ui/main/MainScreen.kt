@@ -345,6 +345,18 @@ fun MainScreen(
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
+                    },
+                    onAdminRenameSubject = { sheet, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), old, "", new, renameSubTopic = false)
+                    },
+                    onAdminDeleteSubject = { sheet, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), name, "", deleteSubTopic = false)
+                    },
+                    onAdminRenameSubTopic = { sheet, subject, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), subject, old, new, renameSubTopic = true)
+                    },
+                    onAdminDeleteSubTopic = { sheet, subject, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
                     }
                 )
                 BottomTab.QBANK -> CoreScreen(
@@ -357,6 +369,18 @@ fun MainScreen(
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
+                    },
+                    onAdminRenameSubject = { sheet, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), old, "", new, renameSubTopic = false)
+                    },
+                    onAdminDeleteSubject = { sheet, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), name, "", deleteSubTopic = false)
+                    },
+                    onAdminRenameSubTopic = { sheet, subject, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), subject, old, new, renameSubTopic = true)
+                    },
+                    onAdminDeleteSubTopic = { sheet, subject, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
                     }
                 )
                 BottomTab.STUDY -> CoreScreen(
@@ -369,6 +393,18 @@ fun MainScreen(
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
+                    },
+                    onAdminRenameSubject = { sheet, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), old, "", new, renameSubTopic = false)
+                    },
+                    onAdminDeleteSubject = { sheet, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), name, "", deleteSubTopic = false)
+                    },
+                    onAdminRenameSubTopic = { sheet, subject, old, new ->
+                        menuViewModel.adminRenameSubjectOrTopic(listOf(sheet), subject, old, new, renameSubTopic = true)
+                    },
+                    onAdminDeleteSubTopic = { sheet, subject, name ->
+                        menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
                     }
                 )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
