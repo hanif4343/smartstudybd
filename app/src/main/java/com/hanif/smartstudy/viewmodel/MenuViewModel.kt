@@ -147,6 +147,8 @@ data class MenuUiState(
     // Subject/SubTopic Rename
     val isRenaming        : Boolean          = false,
     val renameMsg         : String?          = null,
+    val isDeletingSubject : Boolean          = false,
+    val deleteSubjectMsg  : String?          = null,
     // Model Test bulk-generate (Admin)
     // ── Subject/SubTopic taxonomy (dropdown suggestions এর জন্য) ──
     // key: sheet ("Quiz"/"QBank"/"Study") → distinct subject list
@@ -1469,6 +1471,56 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearRenameMsg() { _state.update { it.copy(renameMsg = null) } }
+
+    // ── Delete-ও rename এর মতোই dual-write: Sheet কনফিগার থাকলে প্রাইমারি ফলাফল,
+    // Firebase শুধু best-effort মিরর ──
+    private suspend fun adminDeleteBySubjectBoth(
+        sheets: List<String>, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ): com.hanif.smartstudy.data.remote.ApiResult<Int> {
+        val fbResult = fbBestEffort {
+            com.hanif.smartstudy.data.remote.FirebaseDataService
+                .adminDeleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)
+        }
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
+        val sheetResult = com.hanif.smartstudy.data.remote.GasContentService
+            .deleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)
+        return when (sheetResult) {
+            is com.hanif.smartstudy.data.remote.ApiResult.Success -> sheetResult
+            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
+                else com.hanif.smartstudy.data.remote.ApiResult.Error(
+                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
+                )
+        }
+    }
+
+    // ── Admin: Subject/SubTopic-এর সব প্রশ্ন একসাথে ডিলিট (destructive — নিশ্চিত হয়ে কল করবে) ──
+    fun adminDeleteSubjectOrTopic(
+        sheets         : List<String>,
+        subject        : String,
+        subTopic       : String,
+        deleteSubTopic : Boolean
+    ) {
+        if (!_state.value.isAdmin) return
+        if (sheets.isEmpty() || subject.isBlank() || (deleteSubTopic && subTopic.isBlank())) return
+        viewModelScope.launch {
+            _state.update { it.copy(isDeletingSubject = true, deleteSubjectMsg = null) }
+            when (val r = adminDeleteBySubjectBoth(sheets, subject, subTopic, deleteSubTopic)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    val what = if (deleteSubTopic) "\"$subTopic\" অধ্যায়ের" else "\"$subject\" বিষয়ের"
+                    _state.update { it.copy(isDeletingSubject = false,
+                        deleteSubjectMsg = "✅ $what ${r.data}টি প্রশ্ন মুছে ফেলা হয়েছে",
+                        contentEditVersion = it.contentEditVersion + 1) }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                    _state.update { it.copy(isDeletingSubject = false, deleteSubjectMsg = "❌ ${r.message}") }
+            }
+        }
+    }
+
+    fun clearDeleteSubjectMsg() { _state.update { it.copy(deleteSubjectMsg = null) } }
 
     // ── Toast clear ───────────────────────────────────────────
 
