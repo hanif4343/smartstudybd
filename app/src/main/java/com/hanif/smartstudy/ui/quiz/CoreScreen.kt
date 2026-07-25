@@ -24,11 +24,25 @@ fun CoreScreen(
     onAchievementUnlocked : (com.hanif.smartstudy.data.model.Achievement) -> Unit = {},
     onStreakUpdated       : (Int) -> Unit = {},
     onAdminEdit           : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
-    onAdminDelete         : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
+    onAdminDelete         : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── Subject/SubTopic-লেভেল Rename/Delete — SubjectListScreen/SubTopicListScreen-এর
+    // "Admin" মেনু থেকে ট্রিগার হয়, বর্তমান sheet (নিচে sheetKey দেখো)-এর ওপরই কাজ করে ──
+    onAdminRenameSubject  : ((sheet: String, oldName: String, newName: String) -> Unit)? = null,
+    onAdminDeleteSubject  : ((sheet: String, name: String) -> Unit)? = null,
+    onAdminRenameSubTopic : ((sheet: String, subject: String, oldName: String, newName: String) -> Unit)? = null,
+    onAdminDeleteSubTopic : ((sheet: String, subject: String, name: String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val ctx   = LocalContext.current
     val currentUser = remember { SessionManager(ctx).getCurrentUser() }
+
+    // ── FirebaseDataService/GasContentService-এ ব্যবহৃত sheet key — capitalized,
+    // ঠিক QuizViewModel.reportQuestion()-এ ব্যবহৃত mapping-এর মতোই ──
+    val sheetKey = when (mode) {
+        StudyMode.QUIZ  -> "Quiz"
+        StudyMode.QBANK -> "QBank"
+        StudyMode.STUDY -> "Study"
+    }
 
     // Collect and forward achievement/streak events
     val achievement by viewModel.pendingAchievement.collectAsState()
@@ -189,7 +203,13 @@ fun CoreScreen(
                 isSavingOrder   = state.isSavingOrder,
                 orderSavedMsg   = state.orderSavedMsg,
                 onToggleReorder = { viewModel.toggleReorderMode() },
-                onMoveSubTopic  = { from, to -> viewModel.moveSubTopic(from, to) }
+                onMoveSubTopic  = { from, to -> viewModel.moveSubTopic(from, to) },
+                onRenameSubTopic = { old, new ->
+                    onAdminRenameSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", old, new)
+                },
+                onDeleteSubTopic = { name ->
+                    onAdminDeleteSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", name)
+                }
             )
         }
 
@@ -209,7 +229,9 @@ fun CoreScreen(
                 isSavingOrder   = state.isSavingOrder,
                 orderSavedMsg   = state.orderSavedMsg,
                 onToggleReorder = { viewModel.toggleReorderMode() },
-                onMoveSubject   = { from, to -> viewModel.moveSubject(from, to) }
+                onMoveSubject   = { from, to -> viewModel.moveSubject(from, to) },
+                onRenameSubject = { old, new -> onAdminRenameSubject?.invoke(sheetKey, old, new) },
+                onDeleteSubject = { name -> onAdminDeleteSubject?.invoke(sheetKey, name) }
             )
         }
     }
