@@ -175,48 +175,29 @@ object UserSyncService {
             val cleanPhone = phone.trim()
             Log.d(TAG, "fetchUser: phone=$cleanPhone")
 
-            // "users" এবং "Users" দুটো path-ই try করবো
-            for (node in listOf("users", "Users")) {
+            // ── আগে এখানে orderBy query আর পুরো node scan করা হতো — দুটোই
+            // parent path (/Users.json, /users.json)-এ hit করে, যেটা rules-এ
+            // owner-only per-child rule থাকায় সবসময় deny হয় (orderBy/equalTo
+            // ফিল্টার rules বাইপাস করে না, rule evaluate হয় requested path-এ,
+            // ফলাফলের প্রতিটা item-এ না)। এর ফলে প্রতিবার এখানে ব্যর্থ হয়ে GAS
+            // Sheet fallback-এ পড়ে যেত — Role/isAdmin সহ যেকোনো ফিল্ড হারানোর
+            // ঝুঁকি থাকতো। এখন সরাসরি Users/{phone}.json পড়া হয়, যেটা নিজের
+            // জন্য (বা admin claim থাকলে যেকারো জন্য) সবসময় readable। ──
+            for (node in listOf("Users", "users")) {
                 try {
-                    // Method 1: orderBy query
                     val fbAuth = authQuery()
-                    val url = "$FB_URL/$node.json?orderBy=%22Phone%22&equalTo=%22$cleanPhone%22&auth=${FirebaseTokenProvider.getToken()}"
-                    Log.d(TAG, "fetchUser trying: $url")
-                    val req  = Request.Builder().url(url).get().build()
-                    val body = client.newCall(req).execute().body?.string() ?: continue
-                    Log.d(TAG, "fetchUser $node response: $body")
+                    val url = "$FB_URL/$node/$cleanPhone.json$fbAuth"
+                    val body = client.newCall(Request.Builder().url(url).get().build())
+                        .execute().body?.string()
+                    Log.d(TAG, "fetchUser $node direct response length=${body?.length}")
 
-                    if (body != "null" && body.isNotBlank() && body != "{}") {
-                        val rootMap = gson.fromJson(body, Map::class.java) as? Map<String, Any>
-                        if (!rootMap.isNullOrEmpty()) {
-                            val userMap = rootMap.values.firstOrNull() as? Map<String, Any>
-                            if (userMap != null) {
-                                Log.d(TAG, "fetchUser: found in $node via query")
-                                return@withContext com.hanif.smartstudy.data.model.User.fromFirebaseMap(userMap)
-                            }
-                        }
-                    }
-
-                    // Method 2: সব user scan করো
-                    val scanAuth = authQuery()
-                    val scanUrl = "$FB_URL/$node.json$scanAuth"
-                    val scanReq  = Request.Builder().url(scanUrl).get().build()
-                    val scanBody = client.newCall(scanReq).execute().body?.string() ?: continue
-                    Log.d(TAG, "fetchUserScan $node: length=${scanBody.length}")
-
-                    if (scanBody == "null" || scanBody.isBlank()) continue
-                    val allMap = gson.fromJson(scanBody, Map::class.java) as? Map<String, Any> ?: continue
-
-                    for ((_, value) in allMap) {
-                        val userMap = value as? Map<String, Any> ?: continue
-                        val p = userMap["Phone"]?.toString()?.trim()
-                            ?: userMap["phone"]?.toString()?.trim() ?: continue
-                        if (p == cleanPhone) {
-                            Log.d(TAG, "fetchUser: found in $node via scan")
+                    if (!body.isNullOrBlank() && body != "null") {
+                        val userMap = gson.fromJson(body, Map::class.java) as? Map<String, Any>
+                        if (userMap != null) {
+                            Log.d(TAG, "fetchUser: found in $node directly")
                             return@withContext com.hanif.smartstudy.data.model.User.fromFirebaseMap(userMap)
                         }
                     }
-
                 } catch (e: Exception) {
                     Log.e(TAG, "fetchUser error for $node: ${e.message}")
                 }
