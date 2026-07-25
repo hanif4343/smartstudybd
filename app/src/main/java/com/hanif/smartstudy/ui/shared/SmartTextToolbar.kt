@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,7 +137,19 @@ fun ProvideSmartTextToolbar(content: @Composable () -> Unit) {
 private fun SmartToolbarPopup(toolbar: SmartTextToolbarImpl) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val rect = toolbar.toolbarRect
+
+    // ── আসল বাগ: সিলেকশন হ্যান্ডেল টেনে ধরে থাকার সময় toolbarRect প্রতি ফ্রেমে
+    // (drag এর প্রতিটা ছোট্ট নড়াচড়ায়) আপডেট হয় — এই raw rect সরাসরি Popup-এর
+    // offset হিসেবে ব্যবহার করলে টুলবারটা টানার সময় পুরো সময় ধরে "কাঁপতে" থাকে/
+    // জাম্প করতে থাকে। তাই rect ১২০ms স্থির থাকলে তবেই সেই পজিশনে সরানো হয় —
+    // হ্যান্ডেল টানার সময় jitter হয় না, ছেড়ে দেওয়ার সাথে সাথেই ঠিক জায়গায় বসে যায়।
+    // প্রথমবার দেখানোর সময় delay হয় না (initial state-ই বর্তমান rect)। ──
+    var stableRect by remember { mutableStateOf(toolbar.toolbarRect) }
+    LaunchedEffect(toolbar.toolbarRect) {
+        kotlinx.coroutines.delay(120)
+        stableRect = toolbar.toolbarRect
+    }
+    val rect = stableRect
 
     // টুলবারটা সিলেকশনের ঠিক উপরে বসানো হয় — screen edge এ গেলে 0 এর নিচে না যায়
     val toolbarHeightPx = with(density) { 52.dp.toPx() }
