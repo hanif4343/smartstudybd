@@ -1,0 +1,43 @@
+name: Fix Admin Role
+
+# Actions ট্যাব → "Fix Admin Role" → "Run workflow"
+# ডিফল্ট phone (01788196143) এবং role (Admin) দিয়ে চালানোই যথেষ্ট,
+# চাইলে অন্য phone/role দিয়েও চালানো যায়।
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_phone:
+        description: 'যে phone number-এর Role ঠিক করবে'
+        required: false
+        default: '01788196143'
+        type: string
+      target_role:
+        description: 'কী Role বসাবে'
+        required: false
+        default: 'Admin'
+        type: string
+
+jobs:
+  fix-role:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_ADMIN_PROJECT_ID:   ${{ secrets.FIREBASE_ADMIN_PROJECT_ID }}
+      FIREBASE_ADMIN_CLIENT_EMAIL: ${{ secrets.FIREBASE_ADMIN_CLIENT_EMAIL }}
+      FIREBASE_ADMIN_PRIVATE_KEY:  ${{ secrets.FIREBASE_ADMIN_PRIVATE_KEY }}
+      FIREBASE_DATABASE_URL:       ${{ secrets.FIREBASE_DATABASE_URL }}
+      TARGET_PHONE: ${{ github.event.inputs.target_phone }}
+      TARGET_ROLE:  ${{ github.event.inputs.target_role }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install firebase-admin
+        run: npm install firebase-admin@12
+
+      - name: Fix Role field
+        run: node scripts/fix-admin-role.js
