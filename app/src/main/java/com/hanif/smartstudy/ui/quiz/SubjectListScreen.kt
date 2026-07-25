@@ -374,8 +374,9 @@ private fun AdminRenamePickerDialog(
     )
 }
 
-// ── একই রকম, শুধু rename এর বদলে ডিলিট — ধ্বংসাত্মক কাজ, তাই নাম হুবহু টাইপ
-// করে নিশ্চিত করতে হবে (ভুলে ট্যাপ হয়ে গেলেও যাতে সাথে সাথে ডিলিট না হয়ে যায়)। ──
+// ── একই রকম, শুধু rename এর বদলে ডিলিট — ধ্বংসাত্মক কাজ, তাই ২-ধাপে কনফার্ম করা হয়
+// (লিস্ট থেকে বাছাই → শেষে হ্যাঁ/না)। আগে নাম টাইপ করে কনফার্ম করা লাগত, কিন্তু emoji-সহ
+// নাম কিবোর্ড দিয়ে হুবহু টাইপ করা কঠিন ছিল বলে সেটা বাদ দেওয়া হয়েছে — এখন শুধু ট্যাপ। ──
 @Composable
 private fun AdminDeletePickerDialog(
     title    : String,
@@ -383,49 +384,63 @@ private fun AdminDeletePickerDialog(
     onConfirm: (name: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selected     by remember { mutableStateOf(items.firstOrNull() ?: "") }
-    var typedConfirm by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
-        text = {
-            Column(
-                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("⚠️ কোনটা ডিলিট করবেন? এর সব প্রশ্ন Sheet + Firebase থেকে চিরতরে মুছে যাবে!",
-                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-                if (items.isEmpty()) {
-                    Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
-                }
-                items.forEach { name ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { selected = name; typedConfirm = "" }.padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = selected == name, onClick = { selected = name; typedConfirm = "" },
-                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFFEF4444)))
-                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+    var selected      by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var confirmStep   by remember { mutableStateOf(false) }   // false = লিস্ট থেকে বাছাই, true = শেষ নিশ্চিতকরণ
+
+    if (!confirmStep) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("⚠️ কোনটা ডিলিট করবেন? এর সব প্রশ্ন Sheet + Firebase থেকে চিরতরে মুছে যাবে!",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                    if (items.isEmpty()) {
+                        Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                    }
+                    items.forEach { name ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { selected = name }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected == name, onClick = { selected = name },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFFEF4444)))
+                            Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        }
                     }
                 }
-                if (selected.isNotBlank()) {
-                    OutlinedTextField(
-                        value = typedConfirm, onValueChange = { typedConfirm = it },
-                        label = { Text("নিশ্চিত করতে \"$selected\" টাইপ করুন", fontFamily = NotoSansBengali) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { if (selected.isNotBlank()) confirmStep = true },
+                    enabled = selected.isNotBlank()
+                ) { Text("ডিলিট করুন 🗑️", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    } else {
+        // ── শেষ নিশ্চিতকরণ — টাইপ করার ঝামেলা নেই, শুধু ২টা বাটনে চাপ। emoji-সহ
+        // নাম হুবহু টাইপ করতে গিয়ে আটকে যাওয়ার সমস্যা এড়াতে টাইপ-কনফার্ম বাদ দেওয়া হলো। ──
+        AlertDialog(
+            onDismissRequest = { confirmStep = false },
+            title = { Text("⚠️ একদম নিশ্চিত?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Text(
+                    "\"$selected\" — এর সব প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onConfirm(selected); onDismiss() }) {
+                    Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444))
                 }
-            }
-        },
-        confirmButton = {
-            val matches = selected.isNotBlank() && typedConfirm.trim().equals(selected.trim(), ignoreCase = true)
-            TextButton(
-                onClick = { if (matches) { onConfirm(selected); onDismiss() } },
-                enabled = matches
-            ) { Text("ডিলিট করুন 🗑️", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
-    )
+            },
+            dismissButton = { TextButton(onClick = { confirmStep = false }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
 }
 
 @Composable
