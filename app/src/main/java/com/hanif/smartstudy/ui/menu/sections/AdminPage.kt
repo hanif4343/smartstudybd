@@ -69,7 +69,7 @@ fun AdminPage(
                 contentColor     = Color.White,
                 edgePadding      = 0.dp
             ) {
-                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "⚡ Bulk Upload", "🌐 Bulk Tag", "✏️ Rename", "📋 Logs", "⏳ Sync", "✅ চেকলিস্ট")
+                listOf("👥 ইউজার", "📣 Notify", "🔑 FCM", "🚩 Reports", "➕ নতুন প্রশ্ন", "⚡ Bulk Upload", "🌐 Bulk Tag", "✏️ Rename", "🗑️ Delete Subject", "📋 Logs", "⏳ Sync", "✅ চেকলিস্ট")
                     .forEachIndexed { i, label ->
                         Tab(selected = tab == i, onClick = { tab = i },
                             text = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp,
@@ -82,11 +82,11 @@ fun AdminPage(
 
             // Auto-load reports when tab 3 opens
             LaunchedEffect(tab) { if (tab == 3) vm.loadPendingReports() }
-            // Auto-load debug log phone list when Logs tab (8) opens
-            LaunchedEffect(tab) { if (tab == 8) vm.loadDebugLogPhones() }
+            // Auto-load debug log phone list when Logs tab (9) opens
+            LaunchedEffect(tab) { if (tab == 9) vm.loadDebugLogPhones() }
             // Sync ট্যাব (⏳ Sync) খোলার সময় প্রতিবার fresh করে নাও — যাতে
             // এইমাত্র করা offline edit-ও সাথে সাথে দেখা যায়
-            LaunchedEffect(tab) { if (tab == 9) vm.loadPendingEdits() }
+            LaunchedEffect(tab) { if (tab == 10) vm.loadPendingEdits() }
 
             when (tab) {
                 0 -> ActiveUsersTab(state, vm, onViewAs = { showViewAsDialog = true; viewAsPhone = it })
@@ -104,9 +104,10 @@ fun AdminPage(
                 5 -> BulkUploaderTab(state, vm)
                 6 -> BulkAudienceTab(state, vm)
                 7 -> RenameTab(state, vm)
-                8 -> LogsTab(state, vm)
-                9 -> PendingSyncTab(state, vm)
-                10 -> ProductionChecklistTab()
+                8 -> DeleteSubjectTab(state, vm)
+                9 -> LogsTab(state, vm)
+                10 -> PendingSyncTab(state, vm)
+                11 -> ProductionChecklistTab()
             }
         }
     }
@@ -1688,6 +1689,172 @@ private fun RenameTab(state: MenuUiState, vm: MenuViewModel) {
     }
 }
 
+// ── Delete Subject / SubTopic Tab (সব প্রশ্ন একসাথে ডিলিট — destructive) ──
+@Composable
+private fun DeleteSubjectTab(state: MenuUiState, vm: MenuViewModel) {
+    val selectedSheets = remember { mutableStateListOf("Quiz", "QBank", "Study") }
+
+    var deleteSubTopic by remember { mutableStateOf(false) }  // false = পুরো Subject ডিলিট, true = শুধু SubTopic
+    var subject   by remember { mutableStateOf("") }
+    var subTopic  by remember { mutableStateOf("") }
+    var confirmed by remember { mutableStateOf(false) }
+    var typedConfirm by remember { mutableStateOf("") }  // অতিরিক্ত সেফটি — নাম টাইপ করে confirm
+
+    val msg     = state.deleteSubjectMsg
+    val loading = state.isDeletingSubject
+    val isOk    = msg?.startsWith("✅") == true
+
+    LaunchedEffect(isOk) {
+        if (isOk) {
+            kotlinx.coroutines.delay(3000)
+            vm.clearDeleteSubjectMsg()
+            subject = ""; subTopic = ""; confirmed = false; typedConfirm = ""
+        }
+    }
+    LaunchedEffect(Unit) { vm.loadAdminTaxonomy() }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFFFF1F2),
+            border = androidx.compose.foundation.BorderStroke(1.dp, RedWrong.copy(0.35f))
+        ) {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.Delete, null, tint = RedWrong, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("বিষয় / অধ্যায় সম্পূর্ণ ডিলিট", fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = RedWrong)
+                    Text("এই বিষয়/অধ্যায়ের সব প্রশ্ন Sheet + Firebase থেকে চিরতরে মুছে যাবে — ফেরানো যাবে না!",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF9F1239))
+                }
+            }
+        }
+
+        Text("কী ডিলিট করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !deleteSubTopic, onClick = { deleteSubTopic = false },
+                label = { Text("📚 পুরো Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = RedWrong, selectedLabelColor = Color.White))
+            FilterChip(selected = deleteSubTopic, onClick = { deleteSubTopic = true },
+                label = { Text("📖 শুধু SubTopic (অধ্যায়)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = RedWrong, selectedLabelColor = Color.White))
+        }
+
+        Text("কোন Sheet(গুলো) থেকে?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SHEETS_LIST.forEach { s ->
+                val isSel = selectedSheets.contains(s)
+                FilterChip(
+                    selected = isSel,
+                    onClick = { if (isSel) selectedSheets.remove(s) else selectedSheets.add(s) },
+                    label = { Text(s, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF0891B2), selectedLabelColor = Color.White)
+                )
+            }
+        }
+        Text(
+            if (selectedSheets.isEmpty()) "⚠️ অন্তত একটি sheet বেছে নিন"
+            else "নির্বাচিত: ${selectedSheets.joinToString(", ")}",
+            fontFamily = NotoSansBengali, fontSize = 11.sp,
+            color = if (selectedSheets.isEmpty()) RedWrong else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        val subjectOptions = remember(selectedSheets.toList(), state.adminSubjectsBySheet) {
+            selectedSheets.flatMap { state.adminSubjectsBySheet[it].orEmpty() }.distinct().sorted()
+        }
+        val subTopicOptions = remember(selectedSheets.toList(), subject, state.adminSubTopicsByKey) {
+            selectedSheets.flatMap { state.adminSubTopicsByKey["$it|$subject"].orEmpty() }.distinct().sorted()
+        }
+
+        AdminSubjectField("বিষয় (Subject) *", subject, subjectOptions, { subject = it })
+
+        if (deleteSubTopic) {
+            AdminSubjectField("অধ্যায় (SubTopic) *", subTopic, subTopicOptions, { subTopic = it })
+        } else {
+            Text(
+                "ℹ️ এই বিষয়ের সব অধ্যায়সহ (সব প্রশ্ন) মুছে যাবে",
+                fontFamily = NotoSansBengali, fontSize = 11.sp, color = RedWrong, fontWeight = FontWeight.Bold
+            )
+        }
+
+        val canSubmit = selectedSheets.isNotEmpty() && subject.isNotBlank() && (!deleteSubTopic || subTopic.isNotBlank())
+        val targetLabel = if (deleteSubTopic) subTopic else subject
+
+        if (canSubmit) {
+            Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFFF1F2),
+                border = androidx.compose.foundation.BorderStroke(1.dp, RedWrong.copy(0.3f))
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("⚠️ নিশ্চিত করুন:", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = RedWrong)
+                    Text("Sheet: ${selectedSheets.joinToString(", ")}", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    if (deleteSubTopic) Text("Subject: $subject", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    Text(
+                        (if (deleteSubTopic) "\"$subTopic\" অধ্যায়ের" else "\"$subject\" বিষয়ের (সব অধ্যায়সহ)") + " সব প্রশ্ন মুছে যাবে",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RedWrong
+                    )
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFFFF1F2), RoundedCornerShape(10.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = confirmed, onCheckedChange = { confirmed = it },
+                    colors = CheckboxDefaults.colors(checkedColor = RedWrong))
+                Spacer(Modifier.width(8.dp))
+                Text("আমি নিশ্চিত যে এই ডিলিট পূর্বাবস্থায় ফেরানো যাবে না, তবুও ডিলিট করতে চাই।",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp,
+                    color = Color(0xFF9F1239), fontWeight = FontWeight.Bold)
+            }
+
+            // অতিরিক্ত সেফটি স্তর — subject/subtopic-এর নাম হুবহু টাইপ করে confirm করতে হবে
+            AdminTabField("নিশ্চিত করতে \"$targetLabel\" টাইপ করুন *", typedConfirm, { typedConfirm = it })
+        }
+
+        msg?.let {
+            Surface(shape = RoundedCornerShape(10.dp), color = if (isOk) Color(0xFFF0FDF4) else Color(0xFFFFF1F2),
+                modifier = Modifier.fillMaxWidth()) {
+                Text(it, Modifier.padding(12.dp), fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = if (isOk) Color(0xFF166534) else Color(0xFF991B1B))
+            }
+        }
+
+        val typedMatches = canSubmit && typedConfirm.trim().equals(targetLabel.trim(), ignoreCase = true)
+
+        Button(
+            onClick = {
+                vm.adminDeleteSubjectOrTopic(
+                    sheets         = selectedSheets.toList(),
+                    subject        = subject,
+                    subTopic       = if (deleteSubTopic) subTopic else "",
+                    deleteSubTopic = deleteSubTopic
+                )
+            },
+            enabled = canSubmit && confirmed && typedMatches && !loading,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = RedWrong)
+        ) {
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("ডিলিট হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.Delete, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("সব প্রশ্ন ডিলিট করুন 🗑️", fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            }
+        }
+        Spacer(Modifier.height(40.dp))
+    }
+}
+
 // ── Pending Sync Tab ──
 @Composable
 private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
@@ -1804,17 +1971,8 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                         gson.fromJson(action.payload, Map::class.java)
                     } catch (e: Exception) { emptyMap<String, Any>() }
 
-                    val isReorderAction = action.type == "admin_reorder_subject" || action.type == "admin_reorder_subtopic"
-                    val sheet    = payload["sheet"]?.toString()
-                        ?: (payload["mode"]?.toString() ?: "?")
-                    @Suppress("UNCHECKED_CAST")
-                    val reorderCount = (payload["order"] as? Map<Any?, Any?>)?.size ?: 0
-                    val preview  = payload["questionPreview"]?.toString()
-                        ?: if (isReorderAction) {
-                            val subj = payload["subject"]?.toString()
-                            if (subj != null) "\"$subj\"-এর সাবটপিক ক্রম ($reorderCount টি)"
-                            else "সাবজেক্ট ক্রম ($reorderCount টি)"
-                        } else ""
+                    val sheet    = payload["sheet"]?.toString() ?: "?"
+                    val preview  = payload["questionPreview"]?.toString() ?: ""
                     val retry    = action.retryCount
 
                     Card(
@@ -1847,11 +2005,9 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                             color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
                                     }
                                     val (typeLabel, typeColor) = when (action.type) {
-                                        "admin_add_question"      -> "➕ নতুন" to Color(0xFF16A34A)
-                                        "admin_delete_question"   -> "🗑️ ডিলিট" to Color(0xFFDC2626)
-                                        "admin_reorder_subject",
-                                        "admin_reorder_subtopic"  -> "🔀 ক্রম" to Color(0xFF9333EA)
-                                        else                       -> "✏️ এডিট" to Color(0xFF4F46E5)
+                                        "admin_add_question"    -> "➕ নতুন" to Color(0xFF16A34A)
+                                        "admin_delete_question" -> "🗑️ ডিলিট" to Color(0xFFDC2626)
+                                        else                     -> "✏️ এডিট" to Color(0xFF4F46E5)
                                     }
                                     Surface(shape = RoundedCornerShape(6.dp),
                                         color = typeColor.copy(0.1f)) {
@@ -1918,15 +2074,15 @@ private fun ProductionChecklistTab() {
             "REWARDED_XP_BONUS, REWARDED_DAILY_LOGIN, NATIVE_HOME",
             "app/src/main/java/com/hanif/smartstudy/util/AdManager.kt (line ~42-50)"
         ),
-        CheckItem(true, true,
-            "REALTIME_DATA = false করা হয়েছে ✅",
-            "build.gradle-এ REALTIME_DATA এখন false। subTopic ওপেন করলে Room cache-এ\n" +
-            "ডেটা থাকলে সেই এক্সট্রা background Firebase sync আর হয় না\n" +
-            "(QuizViewModel.navigateToSubTopic-এর BuildConfig.REALTIME_DATA চেক)।\n" +
-            "ContentRepository-এর আগে থেকে থাকা stale-while-revalidate cache\n" +
-            "(15 মিনিট gap দিয়ে background refresh) আগের মতোই কাজ করবে — শুধু\n" +
-            "এই এক্সট্রা কলটাই বন্ধ হলো।",
-            "app/build.gradle — buildConfigField \"boolean\", \"REALTIME_DATA\", \"false\""
+        CheckItem(false, true,
+            "REALTIME_DATA = false করো — build.gradle",
+            "এখন build.gradle-এ REALTIME_DATA = true আছে।\n" +
+            "এর মানে: প্রতিবার এপ খুললে সরাসরি Firebase থেকে data টানে — cache নেই।\n" +
+            "→ Production-এ false করো, নইলে:\n" +
+            "   • Firebase read বিল বাড়বে\n" +
+            "   • অনেক user হলে Firebase throttle করবে\n" +
+            "   • এপ খুলতে বেশি সময় লাগবে (offline-first না)",
+            "app/build.gradle — buildConfigField \"boolean\", \"REALTIME_DATA\", \"true\""
         ),
         CheckItem(false, true,
             "minifyEnabled true করো — build.gradle (release)",
@@ -2010,25 +2166,6 @@ private fun ProductionChecklistTab() {
             "Play Store-এ Privacy Policy আবশ্যক।\n" +
             "PrivacyPolicyScreen.kt এ কোনো URL hardcode আছে কিনা চেক করো।",
             "app/.../ui/menu/PrivacyPolicyScreen.kt"
-        ),
-        CheckItem(true, false,
-            "Subject/SubTopic reorder — offline queue + all-user sync ✅",
-            "আগে দুইটা সমস্যা ছিল:\n" +
-            "১) Firebase কল fail হলে (নেট/quota) reorder আর কোথাও সংরক্ষিত হতো না —\n" +
-            "   admin অ্যাপ বন্ধ করে খুললেই আগের ক্রম ফিরে আসত।\n" +
-            "২) সফল হলেও adminSetSubjectOrderBulk/adminSetSubTopicOrderBulk কখনো\n" +
-            "   /meta/updatedAt touch করত না — তাই অন্য ইউজারের ডিভাইস মেটা-চেকে\n" +
-            "   নতুন কিছু আছে বলে ধরতেই পারত না, ফলে periodic full-resync না হওয়া\n" +
-            "   পর্যন্ত admin ছাড়া বাকি সবাই পুরনো ক্রমই দেখত।\n" +
-            "→ Fix: এখন reorder সবসময় আগে লোকাল cache-এ patch হয় (admin সাথে সাথেই\n" +
-            "   ঠিক ক্রম দেখে, রিস্টার্টের পরও), তারপর অনলাইনে সরাসরি Firebase-এ,\n" +
-            "   ব্যর্থ/অফলাইন হলে PendingQueue-তে (admin_edit_question-এর মতোই\n" +
-            "   প্যাটার্নে) গিয়ে SyncWorker ব্যাকগ্রাউন্ডে auto-retry করে। সফল হলেই\n" +
-            "   এখন touchMetaUpdatedAt() কল হয়, তাই বাকি সব ইউজারও পরের sync-এ\n" +
-            "   একই ক্রম দেখতে পাবে।",
-            "QuizViewModel.persistSubjectOrder/persistSubTopicOrder, " +
-            "FirebaseDataService.adminSetSubjectOrderBulk/adminSetSubTopicOrderBulk, " +
-            "PendingQueue.kt, SyncWorker.kt"
         ),
     )
 
