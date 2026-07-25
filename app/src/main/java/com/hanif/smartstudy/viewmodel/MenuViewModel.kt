@@ -299,7 +299,20 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(MenuUiState())
     val state: StateFlow<MenuUiState> = _state.asStateFlow()
 
-    init { loadAll() }
+    init {
+        loadAll()
+        // ── আগে isAdmin শুধু loadAll()-এ (app চালু হওয়ার সময় একবারই) সেট হতো।
+        // App বন্ধ না করে logout করে অন্য account দিয়ে login করলে এই
+        // MenuViewModel instance-টা recreate হতো না (Activity-scoped), ফলে
+        // পুরনো session-এর isAdmin=true state থেকেই যেত — নতুন (non-admin)
+        // account-ও ভুলভাবে Admin Menu দেখতো। এখন session-এর user বদলালেই
+        // (logout-এ null, login-এ নতুন user) সাথে সাথে isAdmin recompute হয়। ──
+        viewModelScope.launch {
+            session.currentUserFlow().collect { u ->
+                _state.update { it.copy(user = u, isAdmin = u?.isAdmin() ?: false) }
+            }
+        }
+    }
 
     fun loadAll() {
         viewModelScope.launch {
