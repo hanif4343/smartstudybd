@@ -253,7 +253,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun adminRefreshContent() {
         viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            // ── আগে fetch ব্যর্থ হলে খালি AppContent() দিয়ে বিদ্যমান লিস্ট
+            // replace হয়ে যেত (কারণ ঠিক এর আগে cache.clearCache()/clearMemCache()
+            // চলে বলে fallback করার মতো কোনো cache-ও থাকতো না) — ফলে edit/delete/
+            // rename করার পরপরই একটা transient network/Sheet ব্যর্থতায় পুরো
+            // subject/QBank/Study list "উধাও" হয়ে যেত, যদিও আসল ডেটা অক্ষত ছিল।
+            // এখন fetch ব্যর্থ হলে screen-এর বিদ্যমান state-ই অক্ষত থাকবে,
+            // পরের successful refresh না আসা পর্যন্ত কিছু bদলাবে না। ──
+            val content = (repo.getContent() as? DataState.Success)?.data
+            if (content == null) {
+                Log.w("QuizVM", "adminRefreshContent: fetch failed, বিদ্যমান content অক্ষত রাখা হলো")
+                return@launch
+            }
             val path    = _state.value.navPath
             when {
                 path.subTopic != null && path.subject != null ->
