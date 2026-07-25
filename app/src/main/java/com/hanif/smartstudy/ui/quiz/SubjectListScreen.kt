@@ -72,7 +72,9 @@ fun SubjectListScreen(
     isSavingOrder : Boolean        = false,
     orderSavedMsg : String?        = null,
     onToggleReorder: () -> Unit    = {},
-    onMoveSubject  : (Int, Int) -> Unit = { _, _ -> }
+    onMoveSubject  : (Int, Int) -> Unit = { _, _ -> },
+    onRenameSubject: (old: String, new: String) -> Unit = { _, _ -> },
+    onDeleteSubject: (name: String) -> Unit = {}
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -98,6 +100,11 @@ fun SubjectListScreen(
     val headerTextColor = if (isNordic) NordicInk else Color.White
     val headerSubTextColor = if (isNordic) NordicMuted else Color.White.copy(0.65f)
 
+    // ── Admin মেনু (ক্রম ঠিক করুন / Rename / Delete) — সবগুলোই বর্তমান sheet
+    // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier            = Modifier.fillMaxSize(),
         contentPadding      = PaddingValues(bottom = 100.dp),
@@ -117,7 +124,12 @@ fun SubjectListScreen(
                             fontFamily = NotoSansBengali)
                     }
                     if (isAdmin) {
-                        ReorderToggleButton(isReorderMode = isReorderMode, onClick = onToggleReorder)
+                        AdminMenuButton(
+                            isReorderMode   = isReorderMode,
+                            onToggleReorder = onToggleReorder,
+                            onRenameClick   = { showRenameDialog = true },
+                            onDeleteClick   = { showDeleteDialog = true }
+                        )
                     }
                 }
             }
@@ -245,28 +257,175 @@ fun SubjectListScreen(
             }
         }
     }
+
+    if (isAdmin && showRenameDialog) {
+        AdminRenamePickerDialog(
+            title   = "$modeLabel বিষয় Rename",
+            items   = subjects.map { it.name },
+            onConfirm = { old, new -> onRenameSubject(old, new) },
+            onDismiss = { showRenameDialog = false }
+        )
+    }
+    if (isAdmin && showDeleteDialog) {
+        AdminDeletePickerDialog(
+            title   = "$modeLabel বিষয় Delete",
+            items   = subjects.map { it.name },
+            onConfirm = { name -> onDeleteSubject(name) },
+            onDismiss = { showDeleteDialog = false }
+        )
+    }
 }
 
 @Composable
-private fun ReorderToggleButton(isReorderMode: Boolean, onClick: () -> Unit) {
-    Surface(
-        shape    = RoundedCornerShape(12.dp),
-        color    = if (isReorderMode) Color.White else Color.White.copy(alpha = 0.18f),
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+private fun AdminMenuButton(
+    isReorderMode  : Boolean,
+    onToggleReorder: () -> Unit,
+    onRenameClick  : () -> Unit,
+    onDeleteClick  : () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            shape    = RoundedCornerShape(12.dp),
+            color    = if (isReorderMode) Color.White else Color.White.copy(alpha = 0.18f),
+            modifier = Modifier.clickable { expanded = true }
         ) {
-            Text(if (isReorderMode) "✖️" else "🔢", fontSize = 13.sp)
-            Text(
-                if (isReorderMode) "শেষ" else "ক্রম সাজান",
-                fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
-                color = if (isReorderMode) Color(0xFF4F46E5) else Color.White
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text("🛡️", fontSize = 13.sp)
+                Text(
+                    "Admin", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                    color = if (isReorderMode) Color(0xFF4F46E5) else Color.White
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = {
+                    Text(if (isReorderMode) "✖️ ক্রম সাজানো শেষ করুন" else "🔢 ক্রম ঠিক করুন",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                },
+                onClick = { expanded = false; onToggleReorder() }
+            )
+            DropdownMenuItem(
+                text = { Text("✏️ Rename", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                onClick = { expanded = false; onRenameClick() }
+            )
+            DropdownMenuItem(
+                text = { Text("🗑️ Delete", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEF4444)) },
+                onClick = { expanded = false; onDeleteClick() }
             )
         }
     }
+}
+
+// ── বর্তমান sheet (Quiz/QBank/Study — যেটাতে ইউজার এখন আছে)-এর subject বা
+// subtopic-এর মধ্য থেকে একটা বেছে নিয়ে নতুন নাম দেওয়ার ডায়ালগ। items সবসময়
+// এই screen-এই দেখানো list থেকে আসে, তাই অন্য sheet-এর ডেটা কখনো দেখায় না। ──
+@Composable
+private fun AdminRenamePickerDialog(
+    title    : String,
+    items    : List<String>,
+    onConfirm: (old: String, new: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var newName  by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("কোনটা Rename করবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (items.isEmpty()) {
+                    Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                items.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selected = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == name, onClick = { selected = name })
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it },
+                    label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            val canConfirm = selected.isNotBlank() && newName.isNotBlank()
+            TextButton(
+                onClick = { if (canConfirm) { onConfirm(selected, newName); onDismiss() } },
+                enabled = canConfirm
+            ) { Text("Rename করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+}
+
+// ── একই রকম, শুধু rename এর বদলে ডিলিট — ধ্বংসাত্মক কাজ, তাই নাম হুবহু টাইপ
+// করে নিশ্চিত করতে হবে (ভুলে ট্যাপ হয়ে গেলেও যাতে সাথে সাথে ডিলিট না হয়ে যায়)। ──
+@Composable
+private fun AdminDeletePickerDialog(
+    title    : String,
+    items    : List<String>,
+    onConfirm: (name: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected     by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var typedConfirm by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("⚠️ কোনটা ডিলিট করবেন? এর সব প্রশ্ন Sheet + Firebase থেকে চিরতরে মুছে যাবে!",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                if (items.isEmpty()) {
+                    Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                items.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selected = name; typedConfirm = "" }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == name, onClick = { selected = name; typedConfirm = "" },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFFEF4444)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+                if (selected.isNotBlank()) {
+                    OutlinedTextField(
+                        value = typedConfirm, onValueChange = { typedConfirm = it },
+                        label = { Text("নিশ্চিত করতে \"$selected\" টাইপ করুন", fontFamily = NotoSansBengali) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            val matches = selected.isNotBlank() && typedConfirm.trim().equals(selected.trim(), ignoreCase = true)
+            TextButton(
+                onClick = { if (matches) { onConfirm(selected); onDismiss() } },
+                enabled = matches
+            ) { Text("ডিলিট করুন 🗑️", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
 }
 
 @Composable
@@ -515,9 +674,13 @@ fun SubTopicListScreen(
     isSavingOrder : Boolean        = false,
     orderSavedMsg : String?        = null,
     onToggleReorder : () -> Unit   = {},
-    onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> }
+    onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> },
+    onRenameSubTopic: (old: String, new: String) -> Unit = { _, _ -> },
+    onDeleteSubTopic: (name: String) -> Unit = {}
 ) {
     val isQBank = mode == StudyMode.QBANK
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier       = Modifier.fillMaxSize(),
@@ -541,7 +704,12 @@ fun SubTopicListScreen(
                             fontFamily = NotoSansBengali)
                     }
                     if (isAdmin) {
-                        ReorderToggleButton(isReorderMode = isReorderMode, onClick = onToggleReorder)
+                        AdminMenuButton(
+                            isReorderMode   = isReorderMode,
+                            onToggleReorder = onToggleReorder,
+                            onRenameClick   = { showRenameDialog = true },
+                            onDeleteClick   = { showDeleteDialog = true }
+                        )
                     }
                 }
             }
@@ -592,6 +760,23 @@ fun SubTopicListScreen(
                 )
             }
         }
+    }
+
+    if (isAdmin && showRenameDialog) {
+        AdminRenamePickerDialog(
+            title   = "$subject — অধ্যায় Rename",
+            items   = subTopics.filterNot { it.isModelTest }.map { it.name },
+            onConfirm = { old, new -> onRenameSubTopic(old, new) },
+            onDismiss = { showRenameDialog = false }
+        )
+    }
+    if (isAdmin && showDeleteDialog) {
+        AdminDeletePickerDialog(
+            title   = "$subject — অধ্যায় Delete",
+            items   = subTopics.filterNot { it.isModelTest }.map { it.name },
+            onConfirm = { name -> onDeleteSubTopic(name) },
+            onDismiss = { showDeleteDialog = false }
+        )
     }
 }
 
