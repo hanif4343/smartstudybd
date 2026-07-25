@@ -82,7 +82,16 @@ object FirebaseAuthService {
     }
 
     /**
-     * Users node থেকে phone দিয়ে user খোঁজে (DB-key ফরম্যাট: "01XXXXXXXXX")।
+     * Users/{phone} নোড সরাসরি fetch করে (DB-key ফরম্যাট: "01XXXXXXXXX")।
+     *
+     * ── আগে এটা পুরো /Users.json fetch করে লুপ চালিয়ে phone মেলাতো — সেটা
+     * নতুন (tightened) rules-এ পুরোপুরি deny হয়ে যায় (অন্য কারো profile তো
+     * দূরে থাক, নিজেরটাও broad read-এ পাওয়া যায় না, কারণ rules exact path
+     * ছাড়া partial filtering করে না)। এখন সরাসরি Users/{phone}.json পড়া
+     * হয় — এটাই ঠিক সেই path যেটা rules-এ per-child owner-check আছে
+     * (root.child('UidToPhone').child(auth.uid).val() === $userId), তাই
+     * নিজের প্রোফাইলের জন্য সবসময় readable, আর admin-এর জন্যও (custom
+     * claim দিয়ে) readable। ──
      */
     suspend fun findUserByPhone(phone: String, firebaseUrl: String): Map<String, Any>? =
         withContext(Dispatchers.IO) {
@@ -90,38 +99,21 @@ object FirebaseAuthService {
                 val normPhone = phone.trim()
                 val auth = authQuery()
                 val baseUrl = firebaseUrl.trimEnd('/')
-                val allUrl = "$baseUrl/Users.json$auth"
-                Log.d("Login", "Scanning users for phone: $normPhone")
-                val allReq  = Request.Builder().url(allUrl).get().build()
-                val allResp = client.newCall(allReq).execute()
-                val allBody = allResp.body?.string() ?: ""
+                val url = "$baseUrl/Users/$normPhone.json$auth"
+                Log.d("Login", "Fetching user directly: $normPhone")
+                val req  = Request.Builder().url(url).get().build()
+                val resp = client.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
 
-                if (allBody.isBlank() || allBody == "null") return@withContext null
+                if (body.isBlank() || body == "null") {
+                    Log.d("Login", "User not found: $normPhone")
+                    return@withContext null
+                }
 
                 val type = object : TypeToken<Map<String, Any>>() {}.type
-                val rawMap: Map<String, Any> = gson.fromJson(allBody, type)
-
-                for ((key, value) in rawMap) {
-                    when {
-                        key == normPhone -> {
-                            if (value is Map<*, *>) {
-                                @Suppress("UNCHECKED_CAST")
-                                return@withContext value as Map<String, Any>
-                            }
-                        }
-                        value is Map<*, *> -> {
-                            @Suppress("UNCHECKED_CAST")
-                            val userMap = value as Map<String, Any>
-                            val storedPhone = anyToString(userMap["Phone"] ?: userMap["phone"]).trim()
-                            if (storedPhone == normPhone) {
-                                Log.d("Login", "Found: ${userMap["Name"]}")
-                                return@withContext userMap
-                            }
-                        }
-                    }
-                }
-                Log.d("Login", "User not found: $normPhone")
-                null
+                val userMap: Map<String, Any> = gson.fromJson(body, type)
+                Log.d("Login", "Found: ${userMap["Name"]}")
+                userMap
             } catch (e: Exception) {
                 Log.e("Login", "findUserByPhone error: ${e.message}")
                 null
