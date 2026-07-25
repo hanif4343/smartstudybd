@@ -13,6 +13,20 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
+// ── subject/topic/sub_topic লেবেল normalize করে — GAS ব্যাকএন্ডের normalizeFieldValue_()
+// (code_updated_gs.txt) এর সাথে হুবহু মিল রেখে: শুধু invisible zero-width char
+// (\u200B\u200C\u200D\uFEFF, nbsp) বাদ দেয় আর extra whitespace collapse করে, visible
+// টেক্সট/emoji অক্ষত রাখে। "Rename/Delete কখনো হয়, কখনো হয় না" সমস্যার আসল কারণ ছিল
+// এই invisible character — পুরনো copy-paste থেকে কিছু subject/sub_topic নামের ভেতর এসব
+// লুকানো character ঢুকে ছিল, যা প্লেইন .trim().equals() দিয়ে ধরা পড়ে না (দেখতে হুবহু এক
+// মনে হলেও string আলাদা)। এখন থেকে সব matching এই একই normalize দিয়ে হবে, তাই ম্যাচ
+// consistent হবে — GAS-এর renameField ও একইভাবে normalize করে, তাই দুই দিকেই মিলবে।
+internal fun normalizeFieldValue(s: String?): String =
+    (s ?: "")
+        .replace(Regex("[\u200B\u200C\u200D\uFEFF\u00A0]"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
 object FirebaseDataService {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -659,10 +673,10 @@ object FirebaseDataService {
 
             val raw: Map<String, Map<String, Any>> = parseRowMap(json)
             val matching = raw.filter { (_, v) ->
-                val s  = v["subject"]?.toString()?.trim() ?: ""
-                val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
-                s.equals(subject.trim(), ignoreCase = true) &&
-                (subTopic.isBlank() || st.equals(subTopic.trim(), ignoreCase = true))
+                val s  = normalizeFieldValue(v["subject"]?.toString())
+                val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
+                s.equals(normalizeFieldValue(subject), ignoreCase = true) &&
+                (subTopic.isBlank() || st.equals(normalizeFieldValue(subTopic), ignoreCase = true))
             }
             if (matching.isEmpty()) return@withContext ApiResult.Error("কোনো matching প্রশ্ন নেই")
 
@@ -716,15 +730,15 @@ object FirebaseDataService {
                 anySheetHadData = true
 
                 val matching = raw.filter { (_, v) ->
-                    val s  = v["subject"]?.toString()?.trim() ?: ""
-                    val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    val s  = normalizeFieldValue(v["subject"]?.toString())
+                    val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
                     if (renameSubTopic) {
                         // SubTopic rename — subject এর মধ্যেই scope, exact sub_topic match লাগবে
-                        s.equals(oldSubject.trim(), ignoreCase = true) &&
-                        st.equals(oldSubTopic.trim(), ignoreCase = true)
+                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true) &&
+                        st.equals(normalizeFieldValue(oldSubTopic), ignoreCase = true)
                     } else {
                         // Subject rename — পুরো subject এর সব প্রশ্ন (sub_topic যাই হোক)
-                        s.equals(oldSubject.trim(), ignoreCase = true)
+                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true)
                     }
                 }
                 if (matching.isEmpty()) continue
@@ -780,13 +794,13 @@ object FirebaseDataService {
                 anySheetHadData = true
 
                 val matching = raw.filter { (_, v) ->
-                    val s  = v["subject"]?.toString()?.trim() ?: ""
-                    val st = (v["sub_topic"] ?: v["subTopic"])?.toString()?.trim() ?: ""
+                    val s  = normalizeFieldValue(v["subject"]?.toString())
+                    val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
                     if (deleteSubTopic) {
-                        s.equals(oldSubject.trim(), ignoreCase = true) &&
-                        st.equals(oldSubTopic.trim(), ignoreCase = true)
+                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true) &&
+                        st.equals(normalizeFieldValue(oldSubTopic), ignoreCase = true)
                     } else {
-                        s.equals(oldSubject.trim(), ignoreCase = true)
+                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true)
                     }
                 }
                 if (matching.isEmpty()) continue
