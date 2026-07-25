@@ -136,7 +136,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('❌ Failed:', err.message);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // admin.database() একটা persistent websocket connection খোলা রাখে —
+    // এটা explicitly বন্ধ না করলে GitHub Actions job কখনো শেষ হবে না
+    // (process খোলা থেকে যাবে, "In progress"-এ আটকে থাকবে)।
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error('❌ Failed:', err.message);
+    process.exit(1);
+  });
