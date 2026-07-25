@@ -314,6 +314,56 @@ object GasContentService {
     }
 
     /**
+     * adminDeleteSubjectOrTopic()-এর Sheet-দিকের implementation — renameSubjectOrTopic-এর
+     * মতোই কাজ করে, শুধু rename এর বদলে delete। প্রতিটা sheet-এ typed model (QuizItem/
+     * QBankItem/StudyItem, যেগুলোতে id/subject/subTopic আছে) দিয়ে matching row-গুলোর id
+     * বের করা হয়, তারপর GAS-এর existing "deleteByIds" action-এ একসাথে (comma-separated)
+     * পাঠানো হয় — প্রতিটা id-র জন্য আলাদা কল না করে একটাই কল প্রতি sheet।
+     */
+    suspend fun deleteBySubjectOrTopic(
+        sheets        : List<String>,
+        subject       : String,
+        subTopic      : String,   // ফাঁকা হলে পুরো subject ডিলিট (deleteSubTopic=false এর সময়)
+        deleteSubTopic: Boolean
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        fun matches(s: String?, st: String?): Boolean {
+            val sTrim  = s?.trim().orEmpty()
+            val stTrim = st?.trim().orEmpty()
+            return if (deleteSubTopic)
+                sTrim.equals(subject.trim(), ignoreCase = true) && stTrim.equals(subTopic.trim(), ignoreCase = true)
+            else
+                sTrim.equals(subject.trim(), ignoreCase = true)
+        }
+        try {
+            var totalDeleted = 0
+            var anyMatch = false
+            for (sheet in sheets) {
+                val ids: List<String> = when (sheet) {
+                    "Quiz"  -> fetchSheetRows<QuizItem>("Quiz").items
+                        .filter { matches(it.subject, it.subTopic) }.mapNotNull { it.id }
+                    "QBank" -> fetchSheetRows<QBankItem>("QBank").items
+                        .filter { matches(it.subject, it.subTopic) }.mapNotNull { it.id }
+                    "Study" -> fetchSheetRows<StudyItem>("Study").items
+                        .filter { matches(it.subject, it.subTopic) }.mapNotNull { it.id }
+                    else -> emptyList()
+                }
+                if (ids.isEmpty()) continue
+                anyMatch = true
+                val ok = callGetAction(mapOf("action" to "deleteByIds", "sheet" to sheet, "ids" to ids.joinToString(",")))
+                if (ok) totalDeleted += ids.size else Log.w(TAG, "deleteBySubjectOrTopic: $sheet bulk delete ব্যর্থ")
+            }
+            when {
+                !anyMatch        -> ApiResult.Error("কোনো matching প্রশ্ন Sheet-এ পাওয়া যায়নি")
+                totalDeleted == 0-> ApiResult.Error("Sheet থেকে delete ব্যর্থ হয়েছে")
+                else              -> ApiResult.Success(totalDeleted)
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Sheet delete failed")
+        }
+    }
+
+    /**
      * Google Sheet মোডে "Typing" ট্যাব — ঠিক Quiz/QBank/Study-এর মতোই getSheetRows
      * action দিয়ে Firebase বাইপাস করে সরাসরি sheet থেকে পড়ে (headers: id, language,
      * content, updatedAt)। ব্যর্থ হলে খালি লিস্ট রিটার্ন করে — caller (TypingPassageProvider)
