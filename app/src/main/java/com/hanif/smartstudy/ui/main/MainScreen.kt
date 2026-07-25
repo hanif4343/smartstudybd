@@ -219,13 +219,20 @@ fun MainScreen(
         }
     }
 
-    // Part ৩ — লাইভ ফোকাস স্টেট, Home/চ্যালেঞ্জ/Menu ট্যাপ ইন্টারসেপ্ট করার জন্য।
+    // Part ৩ — লাইভ ফোকাস স্টেট, Home/চ্যালেঞ্জ ট্যাপ ইন্টারসেপ্ট করার জন্য (Menu আর না, নিচে দেখো)।
     // Study/QBank/Quiz/Wrong Review/Model Test — এদের ক্ষেত্রে কখনোই ব্যবহৃত হয় না।
     val focusState by focusStore.stateFlow.collectAsStateWithLifecycle(
         initialValue = com.hanif.smartstudy.focus.FocusModeState()
     )
     var pendingFocusNudgeTab by remember { mutableStateOf<BottomTab?>(null) }
-    val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE, BottomTab.MENU) }
+    // ── Part ৩ (আপডেট): আগে Home/চ্যালেঞ্জ/Menu — তিনটাই ফোকাস মোড চালু থাকলে
+    // ইন্টারসেপ্ট হতো, মানে Menu-তে যেতে হলেও বাধ্যতামূলক "ফোকাস মোড বন্ধ করো"
+    // চাপতে হতো (FocusNudgeSheet-এ শুধু resume/turn-off অপশন আছে, "চালিয়ে যাও"
+    // বলে কিছু নেই)। কিন্তু Menu-তে Settings/Profile/সহায়তার মতো জরুরি জিনিস থাকে,
+    // এগুলো distraction না — তাই Menu এখন থেকে সবসময় সরাসরি খোলে। ফোকাস মোডের
+    // reminder/notification (FocusReminderReceiver) সম্পূর্ণ আলাদা ব্যাকগ্রাউন্ড
+    // পাইপলাইন, এই পরিবর্তনে সেটা অপ্রভাবিত থাকে — পড়ার তাগাদা আগের মতোই আসতে থাকবে। ──
+    val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE) }
 
     // ── Home-এর "Typing" টাইল বা Menu-এর "Typing Practice" রো থেকে সরাসরি
     // showTyping=true হয়ে যেত — bottom-tab নাজ (nudge) সিস্টেম বাইপাস হয়ে
