@@ -328,12 +328,12 @@ object GasContentService {
     ): ApiResult<Int> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
         fun matches(s: String?, st: String?): Boolean {
-            val sTrim  = s?.trim().orEmpty()
-            val stTrim = st?.trim().orEmpty()
+            val sNorm  = normalizeFieldValue(s)
+            val stNorm = normalizeFieldValue(st)
             return if (deleteSubTopic)
-                sTrim.equals(subject.trim(), ignoreCase = true) && stTrim.equals(subTopic.trim(), ignoreCase = true)
+                sNorm.equals(normalizeFieldValue(subject), ignoreCase = true) && stNorm.equals(normalizeFieldValue(subTopic), ignoreCase = true)
             else
-                sTrim.equals(subject.trim(), ignoreCase = true)
+                sNorm.equals(normalizeFieldValue(subject), ignoreCase = true)
         }
         try {
             var totalDeleted = 0
