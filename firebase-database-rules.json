@@ -24,7 +24,7 @@
       "$mode": {
         "$tag": {
           ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+          ".write": "auth != null && auth.token.admin === true",
           "$subject": {
             ".validate": "newData.isNumber()"
           }
@@ -36,7 +36,7 @@
       "$mode": {
         "$tag": {
           ".read": "auth != null",
-          ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+          ".write": "auth != null && auth.token.admin === true",
           "$subject": {
             "$subTopic": {
               ".validate": "newData.isNumber()"
@@ -48,10 +48,10 @@
 
     "ModelTests": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
+      ".write": "auth != null && auth.token.admin === true"
     },
     "ModelTestSubmissions": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null"
     },
 
@@ -59,12 +59,21 @@
     // যেকোনো সাইন-ইন করা ইউজার সব ইউজারের ফোন/নাম/XP/isAdmin flag পড়তে ও
     // লিখতে পারতো (privacy leak + privilege escalation risk)। এখন প্রতিটা
     // ইউজার শুধু নিজের প্রোফাইল পড়তে/লিখতে পারবে (নিচের UidToPhone ম্যাপিং
-    // দিয়ে যাচাই করে), অ্যাডমিন সবার প্রোফাইল পড়তে পারবে। ──
+    // দিয়ে যাচাই করে), অ্যাডমিন সবার প্রোফাইল পড়তে পারবে।
+    //
+    // ── admin চেক এখন auth.token.admin (Firebase Auth custom claim, দেখো
+    // scripts/set-admin-claim.js) দিয়ে হয় — আগে এখানে একটা "isAdmin" নামের
+    // database field খোঁজা হতো (Users/{phone}/isAdmin), কিন্তু app-এর ডেটা
+    // মডেলে ওই field-ই কখনো লেখা হতো না (আছে শুধু "Role": "Admin" string),
+    // ফলে সেই চেক বাস্তবে কখনোই true হতো না — কোনো admin ফিচারই কাজ করতো
+    // না। custom claim phone প্রোফাইলের সাথে বাঁধা না, তাই phone-less admin
+    // identity (যেমন admin app-এর জন্য আলাদা account)-ও কাজ করে। ──
     "Users": {
       ".indexOn": ["Phone", "phone"],
+      ".read": "auth != null && auth.token.admin === true",
       "$userId": {
-        ".read":  "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)",
-        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)"
+        ".read":  "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || auth.token.admin === true)",
+        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $userId || auth.token.admin === true)"
       }
     },
 
@@ -88,9 +97,9 @@
     // শুধু অ্যাডমিন পড়তে পারবে (Admin Panel-এর "active users" ফিচারের জন্য)। ──
     "users": {
       ".indexOn": ["Phone", "phone"],
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       "$phone": {
-        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $phone || root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true)"
+        ".write": "auth != null && (root.child('UidToPhone').child(auth.uid).val() === $phone || auth.token.admin === true)"
       }
     },
 
@@ -143,7 +152,7 @@
     },
 
     "Reports": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null",
       "$reportId": {
         ".validate": "newData.hasChildren(['questionId','issue','timestamp','status'])",
@@ -161,17 +170,17 @@
     },
 
     "QuizAnswers": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null"
     },
     "StudyLog": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null"
     },
 
     "broadcasts": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
-      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true"
     },
 
     "AdminAppLogcat": {
@@ -183,17 +192,17 @@
       ".write": "auth != null"
     },
     "DebugLogs": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null"
     },
 
     "Routine": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
+      ".write": "auth != null && auth.token.admin === true"
     },
 
     "UserContent": {
-      ".read": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true",
+      ".read": "auth != null && auth.token.admin === true",
       ".write": "auth != null"
     },
     "Techniques": {
@@ -209,7 +218,7 @@
     "meta": {
       ".read": "auth != null",
       "updatedAt": {
-        ".write": "auth != null && root.child('Users').child(root.child('UidToPhone').child(auth.uid).val()).child('isAdmin').val() === true"
+        ".write": "auth != null && auth.token.admin === true"
       }
     }
   }
