@@ -1,0 +1,37 @@
+name: Backfill UidToPhone
+
+# Actions ট্যাব → "Backfill UidToPhone" → "Run workflow"
+# প্রথমবার dry_run = true দিয়ে চালাও (কিছু লেখা হবে না, শুধু preview)।
+# ঠিক আছে মনে হলে dry_run = false দিয়ে আবার চালাও — তখন আসল লেখাটা হবে।
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true = শুধু preview (কিছু লিখবে না), false = আসল লেখা হবে'
+        required: false
+        default: 'true'
+        type: string
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_ADMIN_PROJECT_ID:   ${{ secrets.FIREBASE_ADMIN_PROJECT_ID }}
+      FIREBASE_ADMIN_CLIENT_EMAIL: ${{ secrets.FIREBASE_ADMIN_CLIENT_EMAIL }}
+      FIREBASE_ADMIN_PRIVATE_KEY:  ${{ secrets.FIREBASE_ADMIN_PRIVATE_KEY }}
+      FIREBASE_DATABASE_URL:       ${{ secrets.FIREBASE_DATABASE_URL }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install firebase-admin
+        run: npm install firebase-admin@12
+
+      - name: Backfill UidToPhone mappings
+        run: node scripts/backfill-uid-to-phone.js
