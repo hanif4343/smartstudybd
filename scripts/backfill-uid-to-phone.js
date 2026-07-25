@@ -62,10 +62,26 @@ async function main() {
 
   const db = admin.database();
 
+  // ── Safety timeout — credential/permission ভুল থাকলে Firebase SDK
+  // চুপচাপ retry করতেই থাকে, error throw করে না — এতে GitHub Actions
+  // job অনির্দিষ্টকাল আটকে থাকতে পারে। তাই ৪৫ সেকেন্ডের মধ্যে প্রথম
+  // read সাড়া না দিলে স্পষ্ট error দিয়ে থামিয়ে দেওয়া হচ্ছে। ──
+  const withTimeout = (promise, ms, label) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(
+          `Timeout: ${label} ${ms / 1000}s এর মধ্যে সাড়া দেয়নি — সম্ভবত service ` +
+          `account-এর Realtime Database access নেই (IAM-এ "Firebase Realtime ` +
+          `Database Admin" role আছে কিনা চেক করো), অথবা FIREBASE_DATABASE_URL ভুল।`
+        )), ms)
+      ),
+    ]);
+
   console.log(dryRun ? '🔎 DRY RUN — কোনো ডেটা লেখা হবে না, শুধু preview' : '✍️  LIVE RUN — UidToPhone আপডেট হবে');
 
   // ── Users node পুরোটা একবারে মেমোরিতে আনো (Admin SDK rules ignore করে) ──
-  const usersSnap = await db.ref('Users').once('value');
+  const usersSnap = await withTimeout(db.ref('Users').once('value'), 45000, 'Users node read');
   const usersData = usersSnap.val() || {};
 
   // email(lowercase) → phone, দ্রুত lookup-এর জন্য
@@ -77,7 +93,7 @@ async function main() {
     if (email) emailToPhone.set(email, storedPhone);
   }
 
-  const existingMapSnap = await db.ref('UidToPhone').once('value');
+  const existingMapSnap = await withTimeout(db.ref('UidToPhone').once('value'), 45000, 'UidToPhone node read');
   const existingMap = existingMapSnap.val() || {};
 
   let scanned = 0, matched = 0, alreadyOk = 0, unmatched = 0;
