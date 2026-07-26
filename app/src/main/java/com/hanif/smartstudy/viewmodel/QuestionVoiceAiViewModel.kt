@@ -52,8 +52,10 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(hasAnyKey = session.getAiApiKeys().hasAnyKey()) }
     }
 
-    /** নতুন প্রশ্নে "সুইচ" করে — চ্যাট রিসেট, নতুন context বসে, চাইলে প্রশ্নটা TTS দিয়ে পড়ে শোনায় */
-    fun setQuestion(item: QuestionItem, mode: StudyMode, speakIntro: Boolean = true) {
+    /** নতুন প্রশ্নে "সুইচ" করে — চ্যাট রিসেট, নতুন context বসে, এবং সাথে সাথেই AI
+     * প্রশ্ন+উত্তরের ব্যাখ্যা শুরু করে দেয় (autoExplain) — ইউজারকে আলাদা করে মাইক
+     * চেপে জিজ্ঞেস করতে হয় না, 🤖 বাটন চাপাটাই যথেষ্ট ইঙ্গিত। */
+    fun setQuestion(item: QuestionItem, mode: StudyMode) {
         if (item.id == currentQuestionId) return   // একই প্রশ্নে বারবার রিসেট না হয়
         currentQuestionId = item.id
 
@@ -80,14 +82,54 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
             if (item.technique.isNotBlank()) append("মনে রাখার কৌশল: ${item.technique}\n")
         }
         _state.update { it.copy(messages = emptyList(), error = null, isSending = false) }
+        autoExplain()
+    }
 
-        if (speakIntro && session.getAiApiKeys().hasAnyKey()) {
-            val preview = questionText.take(140)
-            TtsManager.speak("\"$preview\" — এই প্রশ্ন নিয়ে কিছু জিজ্ঞেস করতে চাও?", "voice_ai_intro")
+    /** 🤖 বাটন চাপলেই — ইউজারকে কিছু জিজ্ঞেস করতে হয় না, AI নিজে থেকেই প্রশ্ন+উত্তরের
+     * সহজ ব্যাখ্যা দিয়ে শুরু করে। এই "hidden" instruction টা চ্যাটে user-bubble হিসেবে
+     * দেখানো হয় না (state.messages-এ যোগ হয় না) — শুধু AI-এর জবাবটাই প্রথম বাবল হিসেবে
+     * দেখা যায়, ঠিক যেন AI নিজে থেকেই কথা শুরু করলো। */
+    private fun autoExplain() {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey()) return   // key না থাকলে UI-তে আলাদা warning আছেই, এখানে চুপ থাকি
+        _state.update { it.copy(isSending = true, error = null) }
+        viewModelScope.launch {
+            val hiddenPrompt = AiChatMessage(
+                role = "user",
+                content = "প্রশ্ন আর সঠিক উত্তরটা সংক্ষেপে, সহজ ভাষায় বুঝিয়ে দাও — যেন ছাত্র এই প্রথম শুনছে। " +
+                    "কথা-বলার-মতো ২-৪ বাক্যে বলো, তালিকা/হেডিং ব্যবহার কোরো না।"
+            )
+            val reply = AiChatService.sendMessage(listOf(hiddenPrompt), keys, contextPrefix)
+            if (reply != null) {
+                _state.update { it.copy(messages = listOf(AiChatMessage(role = "assistant", content = reply)), isSending = false) }
+                TtsManager.speak(reply, "voice_ai_reply")
+            } else {
+                _state.update {
+                    it.copy(isSending = false, error = "AI থেকে উত্তর পাওয়া যায়নি — একটু পর আবার চেষ্টা করো, বা Settings-এ API key চেক করো।")
+                }
+            }
         }
     }
 
-    fun sendMessage(text: String) {
+    /** "এই টপিকের মূল বিষয়বস্তু জানুন" কুইক-অ্যাকশন বাটন — পুরো চ্যাপ্টার/টপিক না, শুধু
+     * এই নির্দিষ্ট প্রশ্নে যে ধারণা/নিয়ম পরীক্ষা করা হচ্ছে সেটুকুই সহজ ভাষায় বুঝিয়ে দিতে বলে।
+     * (যেমন: প্রশ্নটা কোনো নির্দিষ্ট কারক নিয়ে হলে, পুরো "কারক" অধ্যায় না — শুধু ওই
+     * নির্দিষ্ট কারকটাই ব্যাখ্যা করবে, কারণ AI-কে ইতিমধ্যে contextPrefix-এ পুরো প্রশ্নটা
+     * দেওয়া আছে, তাই ঠিক কোন অংশটুকু প্রাসঙ্গিক সেটা AI নিজেই বুঝে নিতে পারবে।) */
+    fun explainCoreConcept() {
+        sendMessage(
+            "এই প্রশ্নে যে নির্দিষ্ট ধারণা/নিয়মটা পরীক্ষা করা হচ্ছে (পুরো অধ্যায়/টপিক না, শুধু এইটুকু " +
+                "নির্দিষ্ট অংশ), সেটা সহজ ভাষায়, একটা ছোট উদাহরণসহ বুঝিয়ে দাও।",
+            displayText = "📘 এই টপিকের মূল বিষয়বস্তু জানুন"
+        )
+    }
+
+    /**
+     * @param displayText ঐচ্ছিক — দেওয়া থাকলে চ্যাটে এই ছোট টেক্সটটা user-bubble হিসেবে
+     * দেখানো হয় (যেমন quick-action বাটনের লেবেল), কিন্তু AI-কে পাঠানো হয় `text`-এর পুরো
+     * instruction-টাই। না দিলে দুটোই একই (স্বাভাবিক মাইক/টাইপ করা মেসেজের জন্য)।
+     */
+    fun sendMessage(text: String, displayText: String? = null) {
         val trimmed = text.trim()
         if (trimmed.isBlank() || _state.value.isSending) return
 
@@ -102,13 +144,14 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val historyWithUserMsg = _state.value.messages + AiChatMessage(role = "user", content = trimmed)
+        val apiHistory = _state.value.messages + AiChatMessage(role = "user", content = trimmed)
+        val visibleHistory = _state.value.messages + AiChatMessage(role = "user", content = displayText ?: trimmed)
         _state.update {
-            it.copy(messages = historyWithUserMsg, isSending = true, error = null, hasAnyKey = true)
+            it.copy(messages = visibleHistory, isSending = true, error = null, hasAnyKey = true)
         }
 
         viewModelScope.launch {
-            val reply = AiChatService.sendMessage(historyWithUserMsg, keys, contextPrefix)
+            val reply = AiChatService.sendMessage(apiHistory, keys, contextPrefix)
             if (reply != null) {
                 _state.update {
                     it.copy(
