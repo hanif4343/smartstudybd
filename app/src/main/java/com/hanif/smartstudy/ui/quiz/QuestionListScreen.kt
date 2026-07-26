@@ -870,12 +870,24 @@ fun QuestionListScreen(
     voiceAiIdx?.let { idx ->
         val vq = pagedQuestions.getOrNull(idx)
         if (vq != null) {
+            // ── "একই ক্যাটাগরির আরও দেখুন" বাটনের জন্য — এখন লোড করা pagedQuestions
+            // থেকেই একই subject+subTopic-এর বাকি প্রশ্নগুলো (নিজেরটা বাদ দিয়ে) ──
+            val related = remember(vq.id) {
+                pagedQuestions.filter {
+                    it.id != vq.id && it.subject == vq.subject && it.subTopic == vq.subTopic
+                }
+            }
             com.hanif.smartstudy.ui.aichat.QuestionVoiceAiSheet(
-                item    = vq,
-                mode    = mode,
-                hasNext = idx < pagedQuestions.lastIndex,
-                onNext  = { voiceAiIdx = (idx + 1).coerceAtMost(pagedQuestions.lastIndex) },
-                onClose = { voiceAiIdx = null }
+                item             = vq,
+                mode             = mode,
+                hasNext          = idx < pagedQuestions.lastIndex,
+                onNext           = { voiceAiIdx = (idx + 1).coerceAtMost(pagedQuestions.lastIndex) },
+                onClose          = { voiceAiIdx = null },
+                relatedQuestions = related,
+                onSwitchTo       = { target ->
+                    val targetIdx = pagedQuestions.indexOfFirst { it.id == target.id }
+                    if (targetIdx >= 0) voiceAiIdx = targetIdx
+                }
             )
         } else {
             voiceAiIdx = null
