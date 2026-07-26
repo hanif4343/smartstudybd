@@ -237,6 +237,9 @@ fun QuestionCard(
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete  : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট বাটন — Quiz/QBank/Study তিনটাতেই দেখা যায়।
+    // null থাকলে বাটনটাই রেন্ডার হয় না (যেমন ChallengeExamScreen-এ এখনো ব্যবহার হয়নি)। ──
+    onAskAi        : (() -> Unit)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
@@ -328,6 +331,11 @@ fun QuestionCard(
                                 tint = if (isThisSpeaking || isThisPaused) Indigo600 else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                    }
+                    if (onAskAi != null) {
+                        IconButton(onClick = onAskAi, modifier = Modifier.size(28.dp)) {
+                            Text("🤖", fontSize = 15.sp)
                         }
                     }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
