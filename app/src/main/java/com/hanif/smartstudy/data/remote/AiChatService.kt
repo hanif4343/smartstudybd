@@ -46,14 +46,19 @@ object AiChatService {
 """
 
     /**
+     * @param contextPrefix ঐচ্ছিক — দেওয়া থাকলে SYSTEM_PROMPT-এর সাথে জুড়ে যায় (প্রশ্ন-ভিত্তিক
+     * ভয়েস AI চ্যাটে ব্যবহৃত হয়, দেখো QuestionVoiceAiViewModel)। না দিলে আগের মতোই সাধারণ
+     * ডাউট-সলভার আচরণ (AiChatScreen)।
      * @return AI-এর উত্তর টেক্সট, অথবা null যদি কোনো key সেভ করা না থাকে বা সব প্রোভাইডার ব্যর্থ হয়।
      * null এলে UI-তে "একটু পর আবার চেষ্টা করো / key চেক করো" বার্তা দেখানো হয়।
      */
     suspend fun sendMessage(
         history: List<AiChatMessage>,
-        keys   : AiApiKeys
+        keys   : AiApiKeys,
+        contextPrefix: String? = null
     ): String? = withContext(Dispatchers.IO) {
         if (!keys.hasAnyKey()) return@withContext null
+        val systemPrompt = if (contextPrefix.isNullOrBlank()) SYSTEM_PROMPT else "$SYSTEM_PROMPT\n\n$contextPrefix"
 
         if (keys.groq.isNotBlank()) {
             runCatching {
@@ -61,7 +66,8 @@ object AiChatService {
                     url     = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey  = keys.groq,
                     model   = "llama-3.3-70b-versatile",
-                    history = history
+                    history = history,
+                    systemPrompt = systemPrompt
                 )
             }.onFailure { Log.w(TAG, "Groq failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -73,7 +79,8 @@ object AiChatService {
                     url     = "https://api.mistral.ai/v1/chat/completions",
                     apiKey  = keys.mistral,
                     model   = "mistral-small-latest",
-                    history = history
+                    history = history,
+                    systemPrompt = systemPrompt
                 )
             }.onFailure { Log.w(TAG, "Mistral failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -85,7 +92,8 @@ object AiChatService {
                     url     = "https://api.cerebras.ai/v1/chat/completions",
                     apiKey  = keys.cerebras,
                     model   = "llama-3.3-70b",
-                    history = history
+                    history = history,
+                    systemPrompt = systemPrompt
                 )
             }.onFailure { Log.w(TAG, "Cerebras failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -93,7 +101,7 @@ object AiChatService {
 
         // ── Gemini সবার শেষে — এটা প্রায়ই ফেইল করে (free-tier rate limit/region ইস্যু) ──
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGemini(keys.gemini, history) }
+            runCatching { callGemini(keys.gemini, history, systemPrompt) }
                 .onFailure { Log.w(TAG, "Gemini failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
         }
@@ -102,9 +110,9 @@ object AiChatService {
     }
 
     // ── Groq / Mistral / Cerebras — তিনটাই OpenAI-compatible chat completions ফরম্যাট ──
-    private fun callOpenAiCompatible(url: String, apiKey: String, model: String, history: List<AiChatMessage>): String? {
+    private fun callOpenAiCompatible(url: String, apiKey: String, model: String, history: List<AiChatMessage>, systemPrompt: String): String? {
         val messages = JSONArray().apply {
-            put(JSONObject().apply { put("role", "system"); put("content", SYSTEM_PROMPT) })
+            put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
             history.forEach { m ->
                 put(JSONObject().apply {
                     put("role", if (m.role == "assistant") "assistant" else "user")
@@ -137,7 +145,7 @@ object AiChatService {
         }
     }
 
-    private fun callGemini(apiKey: String, history: List<AiChatMessage>): String? {
+    private fun callGemini(apiKey: String, history: List<AiChatMessage>, systemPrompt: String): String? {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
         val contents = JSONArray().apply {
             history.forEach { m ->
@@ -150,7 +158,7 @@ object AiChatService {
         val payload = JSONObject().apply {
             put("contents", contents)
             put("systemInstruction", JSONObject().apply {
-                put("parts", JSONArray().apply { put(JSONObject().apply { put("text", SYSTEM_PROMPT) }) })
+                put("parts", JSONArray().apply { put(JSONObject().apply { put("text", systemPrompt) }) })
             })
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.4)
