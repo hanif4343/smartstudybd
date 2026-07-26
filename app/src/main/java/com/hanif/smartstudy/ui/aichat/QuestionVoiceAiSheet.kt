@@ -65,28 +65,36 @@ import java.util.Locale
  */
 @Composable
 fun QuestionVoiceAiSheet(
-    item    : QuestionItem,
-    mode    : StudyMode,
-    hasNext : Boolean,
-    onNext  : () -> Unit,
-    onClose : () -> Unit,
-    vm      : QuestionVoiceAiViewModel = viewModel()
+    item             : QuestionItem,
+    mode             : StudyMode,
+    hasNext          : Boolean,
+    onNext           : () -> Unit,
+    onClose          : () -> Unit,
+    // ── "একই ক্যাটাগরির আরো প্রশ্ন-উত্তর দেখুন" বাটনের জন্য — এখন যেই পেজ/লিস্ট লোড
+    // করা আছে (QuestionListScreen-এর pagedQuestions) তার মধ্যে থেকে একই subject+subTopic-এর
+    // বাকি প্রশ্নগুলো। AI দিয়ে বানানো না — আসল প্রশ্ন-ব্যাংক থেকেই, তাই হ্যালুসিনেশনের
+    // ঝুঁকি নেই। ──
+    relatedQuestions : List<QuestionItem> = emptyList(),
+    onSwitchTo       : (QuestionItem) -> Unit = {},
+    vm               : QuestionVoiceAiViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val state by vm.state.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     var autoSpeak by remember { mutableStateOf(true) }
+    var showRelated by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(item.id) { vm.setQuestion(item, mode, speakIntro = autoSpeak) }
+    LaunchedEffect(item.id) { vm.setQuestion(item, mode) }
 
     DisposableEffect(Unit) {
         onDispose { TtsManager.stop() }
     }
 
     LaunchedEffect(state.messages.size, state.isSending) {
-        val lastIdx = state.messages.size - 1 + if (state.isSending) 1 else 0
-        if (lastIdx >= 0) listState.animateScrollToItem(lastIdx)
+        // ── প্রশ্ন-কার্ড সবসময় ইনডেক্স ০-এ থাকে, তাই বাকি আইটেমের ইনডেক্স +১ শিফট হয়ে গেছে ──
+        val lastIdx = state.messages.size + if (state.isSending) 1 else 0
+        listState.animateScrollToItem(lastIdx)
     }
 
     // ── ভয়েস ইনপুট রেজাল্ট হ্যান্ডলার — "next"/"পরের প্রশ্ন" বললে সরাসরি পরের
@@ -127,32 +135,27 @@ fun QuestionVoiceAiSheet(
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize()) {
-                // ── Header ──
-                Column(
+                // ── Header — শুধু টাইটেল + কন্ট্রোল; প্রশ্নটা নিজে নিচে চ্যাটের ভিতর
+                // পূর্ণাঙ্গভাবে দেখানো হয় (দ্বিতীয়বার এখানে ছোট করে দেখানোর দরকার নেই) ──
+                Row(
                     Modifier.fillMaxWidth()
                         .background(Indigo600)
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "🤖 প্রশ্ন নিয়ে কথা বলো", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { autoSpeak = !autoSpeak; if (!autoSpeak) TtsManager.stop() }) {
-                            Icon(
-                                if (autoSpeak) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                                contentDescription = "অটো-স্পিক", tint = Color.White
-                            )
-                        }
-                        IconButton(onClick = { TtsManager.stop(); onClose() }) {
-                            Icon(Icons.Default.Close, contentDescription = "বন্ধ করো", tint = Color.White)
-                        }
-                    }
                     Text(
-                        item.question.ifBlank { item.explanation }.take(90),
-                        fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f),
-                        fontFamily = NotoSansBengali, maxLines = 2
+                        "🤖 প্রশ্ন নিয়ে কথা বলো", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = { autoSpeak = !autoSpeak; if (!autoSpeak) TtsManager.stop() }) {
+                        Icon(
+                            if (autoSpeak) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                            contentDescription = "অটো-স্পিক", tint = Color.White
+                        )
+                    }
+                    IconButton(onClick = { TtsManager.stop(); onClose() }) {
+                        Icon(Icons.Default.Close, contentDescription = "বন্ধ করো", tint = Color.White)
+                    }
                 }
 
                 if (!state.hasAnyKey) {
@@ -169,24 +172,13 @@ fun QuestionVoiceAiSheet(
                 }
 
                 if (state.messages.isEmpty() && state.hasAnyKey) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("🎤", fontSize = 34.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "মাইক চেপে প্রশ্নটা নিয়ে কিছু জিজ্ঞেস করো, অথবা টাইপ করেও লিখতে পারো",
-                            fontSize = 13.sp, fontFamily = NotoSansBengali, textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "\"পরের প্রশ্ন\" বললেই পরের প্রশ্নে চলে যাবে",
-                            fontSize = 11.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        "\"পরের প্রশ্ন\" বললেই পরের প্রশ্নে চলে যাবে",
+                        fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        textAlign = TextAlign.Center
+                    )
                 }
 
                 LazyColumn(
@@ -195,9 +187,69 @@ fun QuestionVoiceAiSheet(
                     contentPadding      = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // ── প্রশ্নটা নিজে চ্যাটের ভিতর একটা কার্ড হিসেবে — প্রতিবার আলাদা
+                    // করে "কী নিয়ে জিজ্ঞেস করবে" জিজ্ঞেস করার বদলে সরাসরি দেখিয়ে দেওয়া,
+                    // যেহেতু 🤖 বাটন চাপাটাই এই প্রশ্ন সম্পর্কে জানার ইচ্ছার ইঙ্গিত ──
+                    item { QuestionContextCard(item) }
                     items(state.messages) { msg -> VoiceChatBubble(msg) }
                     if (state.isSending) {
                         item { VoiceTypingIndicator() }
+                    }
+                }
+
+                // ── দুটো টেমপ্লেট কুইক-অ্যাকশন বাটন — টেক্সটসহ, চাপলেই সেই অনুযায়ী কাজ করে।
+                // "মূল বিষয়বস্তু" বাটন AI-কে কল করে (এই নির্দিষ্ট প্রশ্নের concept-টুকুই,
+                // পুরো টপিক না)। "আরও দেখুন" বাটন AI কল করে না — এখন যে লিস্ট লোড আছে
+                // তা থেকেই একই subject+subTopic-এর আসল প্রশ্ন খুঁজে দেখায় (হ্যালুসিনেশন-মুক্ত)। ──
+                Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        if (relatedQuestions.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = { showRelated = !showRelated },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    "🔎 একই ক্যাটাগরির আরও প্রশ্ন-উত্তর দেখুন",
+                                    fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                    textAlign = TextAlign.Center, lineHeight = 14.sp
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick  = { vm.explainCoreConcept() },
+                            enabled  = !state.isSending && state.hasAnyKey,
+                            modifier = Modifier.weight(1f),
+                            shape    = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                "📘 এই টপিকের মূল বিষয়বস্তু জানুন",
+                                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                textAlign = TextAlign.Center, lineHeight = 14.sp
+                            )
+                        }
+                    }
+                    if (showRelated) {
+                        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            relatedQuestions.take(5).forEach { rq ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSwitchTo(rq); showRelated = false }
+                                        .background(Color(0xFFF1F5F9))
+                                        .padding(10.dp)
+                                ) {
+                                    Text(
+                                        rq.question.ifBlank { rq.explanation }.take(80),
+                                        fontSize = 12.sp, fontFamily = NotoSansBengali, color = Color(0xFF334155)
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
                     }
                 }
 
@@ -256,6 +308,51 @@ fun QuestionVoiceAiSheet(
                         Icon(Icons.Default.SkipNext, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuestionContextCard(item: QuestionItem) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Indigo600.copy(alpha = 0.08f))
+            .padding(12.dp)
+    ) {
+        Text(
+            item.question.ifBlank { item.explanation },
+            fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+            lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurface
+        )
+        if (item.isMcq()) {
+            Spacer(Modifier.height(6.dp))
+            listOf("ক" to item.optionA, "খ" to item.optionB, "গ" to item.optionC, "ঘ" to item.optionD).forEach { (label, opt) ->
+                if (opt.isNotBlank()) {
+                    Text(
+                        "$label) $opt", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+        }
+        // ── উত্তর — MCQ/QBank হলে item.answer (সঠিক অপশনের টেক্সট), Written/Study হলে
+        // explanation-ই মূলত উত্তর হিসেবে কাজ করে (item.answer সাধারণত ফাঁকা থাকে ওই দুই ধরনে) ──
+        val answerText = item.answer.ifBlank { if (!item.isMcq()) item.explanation else "" }
+        if (answerText.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    "উত্তর: ", fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    color = Color(0xFF15803D)
+                )
+                Text(
+                    answerText, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                    lineHeight = 18.sp, color = Color(0xFF15803D)
+                )
             }
         }
     }
