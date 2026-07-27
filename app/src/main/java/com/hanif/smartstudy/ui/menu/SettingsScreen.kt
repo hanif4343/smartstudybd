@@ -218,6 +218,33 @@ fun SettingsScreen(
             SettingsCard("⌨️ টাইপিং সেটিংস") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
+                    // ── Smart Typing মাস্টার টগল — ডিফল্ট বন্ধ, অন করলেই নিচের সব
+                    // নতুন ফিচার (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC,
+                    // Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন)
+                    // টাইপিং স্ক্রিনে দেখা যাবে। বন্ধ থাকলে আগের পরিচিত UI-ই থাকে,
+                    // তাই আগে-পরে তুলনা করে দেখা নিরাপদ ──
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("🧪 Smart Typing (নতুন ফিচার)", fontFamily = NotoSansBengali,
+                                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "অন করলে heatmap, key-unlock কারিকুলাম, Roadmap, Govt Mock, BCC, প্রোফাইল ইত্যাদি নতুন সব ফিচার দেখা যাবে। বন্ধ থাকলে আগের UI-ই থাকবে।",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(
+                            checked = state.smartTypingEnabled,
+                            onCheckedChange = { vm.setSmartTypingEnabled(it) }
+                        )
+                    }
+
+                    androidx.compose.material3.HorizontalDivider()
+
                     // Target WPM stepper
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("টার্গেট WPM", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
