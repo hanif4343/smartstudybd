@@ -57,6 +57,9 @@ data class MenuUiState(
     val isDarkMode      : Boolean            = false,
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
+    // ── Phase ১ (Neonlipi-স্টাইল কাস্টমাইজেশন): Typing Settings ──
+    val typingTargetWpm    : Int    = 20,
+    val typingSoundPreset  : String = "soft",   // "off" | "soft" | "mechanical"
     val isOfflineMode   : Boolean            = false,
     // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
     val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
@@ -320,6 +323,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val isDark     = session.isDarkMode()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
+            val typingTargetWpm   = session.getTypingTargetWpm()
+            val typingSoundPreset = session.getTypingSoundPreset()
             val offlineOn  = session.isOfflineMode()
             val dataSrcMode = session.getDataSourceMode()
             val remOn      = session.isReminderOn()
@@ -373,6 +378,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isDarkMode     = isDark,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
+                    typingTargetWpm   = typingTargetWpm,
+                    typingSoundPreset = typingSoundPreset,
                     isOfflineMode  = offlineOn,
                     dataSourceMode = dataSrcMode,
                     isReminderOn   = remOn,
@@ -518,6 +525,22 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setSoundOff(off)
             _state.update { it.copy(isSoundOff = off) }
+        }
+    }
+
+    // ── Phase ১: Typing Settings — Target WPM ও Sound Preset ─────
+
+    fun setTypingTargetWpm(wpm: Int) {
+        viewModelScope.launch {
+            session.setTypingTargetWpm(wpm)
+            _state.update { it.copy(typingTargetWpm = wpm.coerceIn(5, 200)) }
+        }
+    }
+
+    fun setTypingSoundPreset(preset: String) {
+        viewModelScope.launch {
+            session.setTypingSoundPreset(preset)
+            _state.update { it.copy(typingSoundPreset = preset) }
         }
     }
 
