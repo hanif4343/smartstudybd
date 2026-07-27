@@ -214,6 +214,78 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Typing Settings (Phase ১: Neonlipi-স্টাইল কাস্টমাইজেশন) ──
+            SettingsCard("⌨️ টাইপিং সেটিংস") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+                    // Target WPM stepper
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("টার্গেট WPM", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            "এই লক্ষ্য অনুযায়ী ResultCard-এ অগ্রগতি দেখানো হবে",
+                            fontFamily = NotoSansBengali, fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = {
+                                vm.setTypingTargetWpm((state.typingTargetWpm - 5).coerceAtLeast(5))
+                            }) {
+                                Text("−", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                "${state.typingTargetWpm} WPM",
+                                fontSize = 18.sp, fontWeight = FontWeight.ExtraBold,
+                                fontFamily = NotoSansBengali
+                            )
+                            IconButton(onClick = {
+                                vm.setTypingTargetWpm((state.typingTargetWpm + 5).coerceAtMost(200))
+                            }) {
+                                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    androidx.compose.material3.HorizontalDivider()
+
+                    // Sound preset selector
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("কী-বোর্ড সাউন্ড প্রিসেট", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("off" to "বন্ধ", "soft" to "হালকা", "mechanical" to "মেকানিক্যাল").forEach { (value, label) ->
+                                val selected = state.typingSoundPreset == value
+                                Surface(
+                                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { vm.setTypingSoundPreset(value) }
+                                ) {
+                                    Text(
+                                        label, fontFamily = NotoSansBengali, fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)
+                                    )
+                                }
+                            }
+                        }
+                        // ── গ্লোবাল সাউন্ড টগল বন্ধ থাকলে প্রিসেট যাই হোক, বাজবে না —
+                        // ব্যবহারকারীকে এটা স্পষ্টভাবে জানানো, নাহলে "কেন সাউন্ড আসছে না"
+                        // বলে বিভ্রান্ত হতে পারে ──
+                        if (state.isSoundOff) {
+                            Text(
+                                "⚠️ উপরের \"সাউন্ড ইফেক্ট\" বন্ধ আছে বলে টাইপিং সাউন্ডও বাজবে না",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Written উত্তর AI-অটো-চেক (Study ⌨️ রিকল-টাইপিং মোড) ──
             SettingsCard("🤖 AI দিয়ে Written উত্তর চেক") {
                 AiApiKeysSection(state = state, vm = vm)
