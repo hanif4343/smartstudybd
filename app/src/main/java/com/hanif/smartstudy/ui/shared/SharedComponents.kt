@@ -407,6 +407,17 @@ fun QuestionCard(
                 RichContentText(text = item.visualUrl)
             }
 
+            // "Question Paper" কলাম — আসল প্রশ্নপত্রের ছবি (কমা দিয়ে একাধিক ImgBB
+            // লিংক), শুধু QBank-এই থাকে। এমনিতে হাইড থাকে, প্রয়োজন হলে ট্যাপ করে
+            // দেখা যায় — সবসময় খোলা থাকলে লিস্টে অনেক জায়গা নিয়ে নিত ──
+            if (mode == StudyMode.QBANK) {
+                val questionPaperImages = item.questionPaperImageList()
+                if (questionPaperImages.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    QuestionPaperGallery(urls = questionPaperImages)
+                }
+            }
+
             Spacer(Modifier.height(10.dp))
 
             when {
@@ -414,15 +425,23 @@ fun QuestionCard(
                     McqOptions(item = item, onAnswer = onMcqAnswer)
                 }
                 item.isWritten() && mode == StudyMode.QBANK && !isModelTest -> {
-                    // ── QBank-এর Written প্রশ্নে সরাসরি টাইপ-বক্স দেখা যাবে (Study-র মতো
-                    // আলাদা কীবোর্ড আইকন টগলের দরকার নেই) — উত্তর লেখার পর AI দিয়ে অটো-চেক
-                    // হয় (Study রিকল-টাইপিং মোডের একই নিয়মে), AI ব্যর্থ হলে সাথে সাথেই
-                    // ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক করে। ──
-                    WrittenAiRecallCheck(
-                        item             = item,
-                        onGrade          = onWrittenSelfGrade,
-                        onAiGradeWritten = onAiGradeWritten
-                    )
+                    // ── QBank-এর Written প্রশ্নে ডিফল্টে সরাসরি টাইপ-বক্স দেখা যায় —
+                    // উত্তর লেখার পর AI দিয়ে অটো-চেক হয় (Study রিকল-টাইপিং মোডের একই
+                    // নিয়মে), AI ব্যর্থ হলে সাথে সাথেই ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক করে।
+                    // ── এখন Study-র মতো টপবারের 👁️ (eye) আইকন QBank-এও পাওয়া যায় —
+                    // eye চালু আর ⌨️ keyboard বন্ধ থাকলে টাইপ না করেই সরাসরি "উত্তর দেখুন"
+                    // + নিজে ঠিক/ভুল বিচার করার সহজ ফ্লো (WrittenRevealSelfGrade) দেখাবে।
+                    // ডিফল্ট (দুটো টগলই বন্ধ) বা ⌨️ চালু থাকলে — আগের টাইপ-করে-AI-চেক
+                    // ফ্লো-ই থাকবে, তাই বিদ্যমান ব্যবহারকারীর আচরণ অপরিবর্তিত থাকে। ──
+                    if (studyRevealMode && !studyRecallMode) {
+                        WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
+                    } else {
+                        WrittenAiRecallCheck(
+                            item             = item,
+                            onGrade          = onWrittenSelfGrade,
+                            onAiGradeWritten = onAiGradeWritten
+                        )
+                    }
                 }
                 item.isWritten() && mode != StudyMode.STUDY -> {
                     // ── Model Test ও Quiz-এর Written প্রশ্নে এখনো টাইপ-করে-মেলানোর বদলে
@@ -2148,6 +2167,58 @@ fun ZoomableImage(url: String) {
             imageUrl  = url,
             onDismiss = { zoomed = false }
         )
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// QBank — "Question Paper" কলাম: আসল প্রশ্নপত্রের ছবি (কমা দিয়ে আলাদা করা
+// একাধিক ImgBB লিংক)। ডিফল্ট অবস্থায় বন্ধ/হাইড থাকে — একটা ছোট পিল বাটনে
+// ট্যাপ করলে (প্রয়োজন হলেই) নিচে ছবিগুলো খুলে দেখা যায়, আবার ট্যাপ করলে
+// বন্ধ হয়ে যায় (accordion/expand-collapse)। প্রতিটা ছবি ZoomableImage
+// দিয়েই দেখানো হয়, তাই ট্যাপ করলে ফুল-স্ক্রিন জুম করেও দেখা যাবে। ──
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun QuestionPaperGallery(urls: List<String>, modifier: Modifier = Modifier) {
+    if (urls.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier.fillMaxWidth()) {
+        Surface(
+            onClick = { expanded = !expanded },
+            shape   = RoundedCornerShape(10.dp),
+            color   = Indigo600.copy(alpha = 0.10f),
+            border  = BorderStroke(1.dp, Indigo600.copy(alpha = 0.3f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Image, null, tint = Indigo600, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (urls.size > 1) "প্রশ্নপত্র দেখুন (${urls.size}টি ছবি)" else "প্রশ্নপত্র দেখুন",
+                    fontFamily = NotoSansBengali,
+                    fontSize   = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = Indigo600,
+                    modifier   = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "লুকান" else "দেখুন",
+                    tint     = Indigo600,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                urls.forEach { url ->
+                    ZoomableImage(url = url)
+                }
+            }
+        }
     }
 }
 
