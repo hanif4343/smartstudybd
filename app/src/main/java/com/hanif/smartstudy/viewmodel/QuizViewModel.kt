@@ -72,7 +72,25 @@ data class QuizUiState(
     val isSavingOrder  : Boolean         = false,
     val orderSavedMsg  : String?         = null,
     // ── Pagination ──
-    val currentPage    : Int             = 0         // 0-based page index
+    val currentPage    : Int             = 0,        // 0-based page index
+    // ═══ QBank-only ফিল্টার — শুধু QBank মোডে ব্যবহার হয় ═══
+    // ডিফল্ট পদবী(Designation)-ভিত্তিক — এখনকার Subject→SubTopic হায়ারার্কি অপরিবর্তিত।
+    // প্রতিষ্ঠান(Institution)-ভিত্তিক হলে হায়ারার্কি উল্টে যায় (আগে প্রতিষ্ঠান, তার
+    // আন্ডারে পদবী)। সাল(Year)-ভিত্তিক হলে flat প্রশ্ন-লিস্ট (subject/subTopic নির্বিশেষে)।
+    val qbankFilterMode : QBankFilterMode = QBankFilterMode.DESIGNATION,
+    // প্রতিষ্ঠান-মোড: depth0-এ প্রতিষ্ঠানের লিস্ট (প্রতিটার subTopics ফিল্ডে সেই
+    // প্রতিষ্ঠানের আন্ডারে যত পদবী আছে সেটাই নেস্টেড থাকে — rebuildSubjects()-এর
+    // মতোই একই প্যাটার্নে একবারেই বিল্ড হয়)। একটা প্রতিষ্ঠান বাছাই করলে
+    // qbankSelectedInstitution সেট হয় ও ওই নেস্টেড লিস্টই qbankDesignationsUnderInstitution-এ যায়।
+    val qbankInstitutions : List<SubjectEntry> = emptyList(),
+    val qbankSelectedInstitution : String? = null,
+    val qbankDesignationsUnderInstitution : List<SubTopicEntry> = emptyList(),
+    // সাল-মোড: depth0-এ সালের লিস্ট, একটা সাল বাছাই করলে flat প্রশ্ন-লিস্ট (Room-first pagination)
+    val qbankYears : List<SubjectEntry> = emptyList(),
+    val qbankSelectedYear : String? = null,
+    // QBank-only সার্চ — শুধু depth0-এর নাম-লিস্ট (Designation/Institution/Year)
+    // ক্লায়েন্ট-সাইড ফিল্টার করে, প্রশ্নের কনটেন্টে সার্চ করে না
+    val qbankSearchQuery : String = ""
 )
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
@@ -134,7 +152,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 subjects     = emptyList(),
                 subTopics    = emptyList(),
                 isLoading    = true,
-                error        = null
+                error        = null,
+                // ── অন্য মোডে গেলে/অন্য মোড থেকে QBank-এ এলে ফিল্টার-সিলেকশন রিসেট ──
+                qbankFilterMode = QBankFilterMode.DESIGNATION,
+                qbankInstitutions = emptyList(),
+                qbankSelectedInstitution = null,
+                qbankDesignationsUnderInstitution = emptyList(),
+                qbankYears = emptyList(),
+                qbankSelectedYear = null,
+                qbankSearchQuery = ""
             )
         }
 
@@ -1104,6 +1130,292 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ═════════════════════════════════════════════════════════
+    // QBank-only ফিল্টার: পদবী(Designation, ডিফল্ট) / প্রতিষ্ঠান(Institution) / সাল(Year)
+    //
+    // পদবী-মোড: বিদ্যমান Subject→SubTopic হায়ারার্কি অপরিবর্তিত (rebuildSubjects/
+    // rebuildSubTopics/navigateToSubject/navigateToSubTopic — কিছুই বদলায়নি)।
+    //
+    // প্রতিষ্ঠান-মোড: হায়ারার্কি উল্টে যায় — আগে প্রতিষ্ঠান(=আসল subTopic কলাম) বাছাই,
+    // তারপর তার আন্ডারে পদবী(=আসল subject কলাম)। শেষ ধাপে navPath = (designation,
+    // institution) — এটাই আসল Room/Firebase pair, তাই navigateToSubTopic()-এর
+    // বিদ্যমান পুরো Room-first pagination/report/admin-edit পাইপলাইন অপরিবর্তিত রিইউজ হয়।
+    //
+    // সাল-মোড: subject/subTopic নির্বিশেষে flat প্রশ্ন-লিস্ট, তাই আলাদা Room query লাগে
+    // (getRoomYearTotalCount/getRoomPagedQuestionsByYear — ContentRepository/QuestionDao)।
+    // ═════════════════════════════════════════════════════════
+
+    /** ফিল্টার চিপ ট্যাপ করলে কল হয় — শুধু QBank মোডে effective */
+    fun setQBankFilterMode(newMode: QBankFilterMode) {
+        if (_state.value.mode != StudyMode.QBANK) return
+        if (_state.value.qbankFilterMode == newMode &&
+            _state.value.qbankSelectedInstitution == null &&
+            _state.value.qbankSelectedYear == null &&
+            _state.value.navPath.depth() == 0) return
+
+        timerJob?.cancel()
+        _state.update {
+            it.copy(
+                qbankFilterMode = newMode,
+                navPath = NavPath(),
+                qbankSelectedInstitution = null,
+                qbankDesignationsUnderInstitution = emptyList(),
+                qbankSelectedYear = null,
+                qbankSearchQuery = "",
+                isQuizActive = false,
+                questions = emptyList(),
+                showResult = false,
+                result = null,
+                isLoading = true
+            )
+        }
+        viewModelScope.launch {
+            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+            when (newMode) {
+                QBankFilterMode.DESIGNATION -> rebuildSubjects(content, StudyMode.QBANK)
+                QBankFilterMode.INSTITUTION -> rebuildQBankInstitutions(content)
+                QBankFilterMode.YEAR        -> rebuildQBankYears(content)
+            }
+        }
+    }
+
+    /** QBank-only সার্চ বক্সে টাইপ করলে কল হয় — শুধু নাম-লিস্ট ক্লায়েন্ট-সাইড ফিল্টার করে */
+    fun setQBankSearchQuery(query: String) {
+        _state.update { it.copy(qbankSearchQuery = query) }
+    }
+
+    /** প্রতিষ্ঠান-মোড: subTopic (Institution) ধরে group করা তালিকা — প্রতিটার
+     *  ভিতরে (subTopics ফিল্ডে) সেই প্রতিষ্ঠানের আন্ডারে যত পদবী আছে তার নেস্টেড লিস্ট,
+     *  ঠিক rebuildSubjects()-এর প্যাটার্নেই, শুধু subject↔subTopic উল্টে। */
+    private suspend fun rebuildQBankInstitutions(content: AppContent) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val items    = filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+        val progressMap = loadProgressMap()
+        val mode = StudyMode.QBANK
+
+        val institutions = items
+            .filter { it.subTopic.isNotBlank() }
+            .groupBy { it.subTopic }
+            .map { (inst, qs) ->
+                SubjectEntry(
+                    name      = inst,
+                    totalQ    = qs.size,
+                    doneQ     = qs.count { progressMap.contains("${mode.name}:${it.id}") },
+                    subTopics = qs.filter { it.subject.isNotBlank() }
+                        .groupBy { it.subject }
+                        .map { (desg, dQs) ->
+                            SubTopicEntry(
+                                name         = desg,
+                                subject      = inst,
+                                totalQ       = dQs.size,
+                                doneQ        = dQs.count { progressMap.contains("${mode.name}:${it.id}") },
+                                mcqCount     = dQs.count { it.isMcq() },
+                                writtenCount = dQs.count { it.isWritten() }
+                            )
+                        }
+                        .sortedBy { it.name }
+                )
+            }
+            .sortedBy { it.name }
+        Log.d("QuizVM", "rebuildQBankInstitutions: ${institutions.size}")
+        _state.update { it.copy(qbankInstitutions = institutions, isLoading = false) }
+    }
+
+    /** প্রতিষ্ঠান-মোডের depth0 → একটা প্রতিষ্ঠান বাছাই — নেস্টেড ডেটা আগে থেকেই
+     *  qbankInstitutions-এ আছে, তাই নতুন করে fetch লাগে না। */
+    fun selectQBankInstitution(institution: String) {
+        val designations = _state.value.qbankInstitutions
+            .find { it.name == institution }?.subTopics ?: emptyList()
+        _state.update {
+            it.copy(
+                qbankSelectedInstitution = institution,
+                qbankDesignationsUnderInstitution = designations,
+                qbankSearchQuery = ""
+            )
+        }
+    }
+
+    /** প্রতিষ্ঠান-মোডের depth1 → একটা পদবী বাছাই — আসল subject=designation,
+     *  subTopic=institution পেয়ার দিয়ে বিদ্যমান navigateToSubTopic()-ই কল করা হয়,
+     *  তাই Room-first pagination/report/admin-edit সব আগের মতোই কাজ করবে। */
+    fun selectQBankDesignationUnderInstitution(designation: String) {
+        val institution = _state.value.qbankSelectedInstitution ?: return
+        _state.update { it.copy(navPath = NavPath(designation)) }
+        navigateToSubTopic(institution)
+    }
+
+    /** সাল-মোড: year কলাম ধরে group করা তালিকা — subject/subTopic নির্বিশেষে */
+    private suspend fun rebuildQBankYears(content: AppContent) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val items    = filtered.qbank.map { QuestionItem.fromQBankItem(it) }
+        val progressMap = loadProgressMap()
+        val mode = StudyMode.QBANK
+
+        val years = items
+            .filter { it.year.isNotBlank() }
+            .groupBy { it.year }
+            .map { (yr, qs) ->
+                SubjectEntry(
+                    name   = yr,
+                    totalQ = qs.size,
+                    doneQ  = qs.count { progressMap.contains("${mode.name}:${it.id}") }
+                )
+            }
+            .sortedByDescending { it.name }   // সাম্প্রতিক সাল আগে
+        Log.d("QuizVM", "rebuildQBankYears: ${years.size}")
+        _state.update { it.copy(qbankYears = years, isLoading = false) }
+    }
+
+    /** সাল-মোডের depth0 → একটা সাল বাছাই — flat প্রশ্ন-লিস্ট, Room-first pagination
+     *  (ঠিক navigateToSubTopic()-এর মতোই প্যাটার্ন, শুধু subject/subTopic pair এর
+     *  বদলে শুধু year দিয়ে cross-subject ফিল্টার হয়) */
+    fun selectQBankYear(year: String) {
+        timerJob?.cancel()
+        _state.update {
+            it.copy(
+                qbankSelectedYear = year,
+                // navPath কে শুধু ডিসপ্লে/ডেপথ-ট্র্যাকিং এর জন্য একটা placeholder pair
+                // দেওয়া হলো ("সাল", year) — এটা আসল কোনো subject/subTopic না, তাই
+                // এখান থেকে Room query হয় না (নিচে আলাদাভাবে year দিয়েই হয়)
+                navPath = NavPath("সাল", year),
+                currentPage = 0,
+                qbankSearchQuery = ""
+            )
+        }
+        viewModelScope.launch {
+            val sheet = StudyMode.QBANK.name
+            val user  = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+
+            val roomCount = repo.getRoomYearTotalCount(sheet, year, tag)
+            if (roomCount > 0) {
+                loadQBankYearQuestionsFromRoom(year, tag, page = 0)
+                if (BuildConfig.REALTIME_DATA) {
+                    launch(Dispatchers.IO) {
+                        val content = (repo.getContent() as? DataState.Success)?.data
+                        if (content != null) loadQBankYearQuestionsFallback(content, year)
+                    }
+                }
+            } else {
+                val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
+                loadQBankYearQuestionsFallback(content, year)
+            }
+        }
+    }
+
+    /** Room DB থেকে সাল-ভিত্তিক পেজিনেটেড প্রশ্ন — goToPage() থেকেও কল হয় */
+    private suspend fun loadQBankYearQuestionsFromRoom(year: String, tag: String, page: Int) {
+        _state.update { it.copy(questionsLoading = true) }
+        val sheet = StudyMode.QBANK.name
+        val total = repo.getRoomYearTotalCount(sheet, year, tag)
+        val items = repo.getRoomPagedQuestionsByYear(sheet, year, tag, page, PAGE_SIZE)
+        val bookmarks = _state.value.bookmarkedIds
+
+        val questions = items.map { q ->
+            q.copy(
+                isBookmarked = bookmarks.contains(q.id),
+                isWeakTopic  = isWeak(q.subTopic),
+                isStudyDone  = isStudyDone(q.id)
+            )
+        }.sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+
+        _state.update {
+            it.copy(
+                questions        = questions,
+                totalQuestions   = total,
+                currentPage      = page,
+                questionsLoading = false,
+                isQuizActive     = true,
+                showResult       = false,
+                result           = null,
+                answeredCount    = 0,
+                timerSec         = 0
+            )
+        }
+        startTimer(total)
+    }
+
+    /** Room-এ QBank সিঙ্ক না হয়ে থাকলে Firebase/AppContent থেকে সরাসরি ফলব্যাক (পেজিনেশন ছাড়া) */
+    private suspend fun loadQBankYearQuestionsFallback(content: AppContent, year: String) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val filtered = content.forUser(user, adminTag)
+        val bookmarks = _state.value.bookmarkedIds
+        val items = filtered.qbank.filter { it.year == year }
+            .map { QuestionItem.fromQBankItem(it) }
+            .map {
+                it.copy(
+                    isBookmarked = bookmarks.contains(it.id),
+                    isWeakTopic  = isWeak(it.subTopic),
+                    isStudyDone  = isStudyDone(it.id)
+                )
+            }
+            .sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+        _state.update {
+            it.copy(
+                questions      = items,
+                totalQuestions = items.size,
+                currentPage    = 0,
+                isQuizActive   = true,
+                showResult     = false,
+                result         = null,
+                answeredCount  = 0,
+                timerSec       = 0
+            )
+        }
+        startTimer(items.size)
+    }
+
+    /**
+     * প্রতিষ্ঠান/সাল ফিল্টার মোডে থাকা অবস্থায় CoreScreen এই ফাংশন কল করে (generic
+     * navigateBack()-এর বদলে) — কারণ generic navigateBack() শুধু পদবী(Designation)-মোডের
+     * সাধারণ Subject→SubTopic হায়ারার্কি বোঝে, এই দুই বিশেষ মোডের কাস্টম ধাপ বোঝে না।
+     */
+    fun qbankFilterBack() {
+        when (_state.value.qbankFilterMode) {
+            QBankFilterMode.INSTITUTION -> when {
+                _state.value.navPath.depth() == 2 -> {
+                    // প্রশ্ন-লিস্ট থেকে এই প্রতিষ্ঠানের আন্ডারে পদবী-লিস্টে ফিরে যাও
+                    timerJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            navPath = NavPath(), isQuizActive = false, questions = emptyList(),
+                            timerSec = 0, showResult = false, result = null
+                        )
+                    }
+                }
+                _state.value.qbankSelectedInstitution != null -> {
+                    // পদবী-লিস্ট থেকে প্রতিষ্ঠান-লিস্টে ফিরে যাও
+                    _state.update {
+                        it.copy(
+                            qbankSelectedInstitution = null,
+                            qbankDesignationsUnderInstitution = emptyList(),
+                            qbankSearchQuery = ""
+                        )
+                    }
+                }
+                else -> {}
+            }
+            QBankFilterMode.YEAR -> if (_state.value.qbankSelectedYear != null) {
+                // ফ্ল্যাট প্রশ্ন-লিস্ট থেকে সালের লিস্টে ফিরে যাও
+                timerJob?.cancel()
+                _state.update {
+                    it.copy(
+                        navPath = NavPath(), qbankSelectedYear = null, isQuizActive = false,
+                        questions = emptyList(), timerSec = 0, showResult = false, result = null
+                    )
+                }
+            }
+            else -> {}
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════
     // Admin: ইনলাইন সাবজেক্ট/সাবটপিক ক্রম সাজানো
     // (Subject List / SubTopic List screen-এই ▲▼ বাটন চেপে — Admin Panel এ আলাদা
     //  করে যেতে হয় না। যেহেতু এই স্ক্রিন আগে থেকেই mode (Quiz/QBank/Study) আর
@@ -1249,6 +1561,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val totalPages = (_state.value.totalQuestions + PAGE_SIZE - 1) / PAGE_SIZE
         val safePage = page.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
         if (safePage == _state.value.currentPage) return
+
+        // ── QBank সাল-মোড: subject/subTopic pair নেই, শুধু year দিয়ে cross-subject পেজিনেশন ──
+        val year = _state.value.qbankSelectedYear
+        if (year != null) {
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            viewModelScope.launch { loadQBankYearQuestionsFromRoom(year, tag, safePage) }
+            return
+        }
 
         val navPath  = _state.value.navPath
         val subject  = navPath.subject ?: return
