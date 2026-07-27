@@ -4,14 +4,7 @@ apply plugin: 'com.google.gms.google-services'
 apply plugin: 'com.google.firebase.crashlytics'
 apply plugin: 'com.google.devtools.ksp'
 
-// ── FCM service-account secrets (FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY)
-//    are read from environment variables (set by the GitHub Actions workflow) instead
-//    of the old %%PLACEHOLDER%% + sed approach. The private key contains embedded
-//    newlines (either real ones, or escaped "\n" — either is fine), and a raw sed
-//    substitution into a single-line Groovy string would break the build the moment
-//    it hit one of those. Reading via System.getenv() and re-escaping it ourselves
-//    into a safe Java string literal avoids that entirely, regardless of how the
-//    secret was pasted into GitHub. ──
+// ── FCM service-account secrets ──
 def envOrEmpty = { String name -> (System.getenv(name) ?: "") }
 def toJavaStringLiteral = { String raw ->
     def escaped = raw
@@ -38,40 +31,15 @@ android {
         buildConfigField "String", "FIREBASE_URL",   "\"%%FIREBASE_URL%%\""
         buildConfigField "String", "GEMINI_API_KEY", "\"%%GEMINI_API_KEY%%\""
         buildConfigField "String", "IMGBB_API_KEY",  "\"%%IMGBB_API_KEY%%\""
-        // ── FIREBASE_DB_SECRET সরানো হয়েছে (আগে এখানে ছিল) — এই master secret
-        // APK-তে BuildConfig হিসেবে কম্পাইল হয়ে যেত, decompile করলে যে কেউ
-        // পুরো Firebase Database এ read/write access পেয়ে যেত। এখন
-        // FirebaseTokenProvider.kt শুধু real/anonymous Firebase Auth ID token
-        // ব্যবহার করে, কোনো master secret লাগে না।
-        // ⚠️ পুরনো secret আগেই প্রতিটা পুরনো APK build-এ এমবেড হয়ে গেছে, তাই এটা
-        // সরানোর পাশাপাশি Firebase Console এ গিয়ে Database Secret টা rotate/
-        // regenerate করতে হবে (Project settings → Service accounts → Database
-        // secrets), আর GitHub repo থেকে FIREBASE_DB_SECRET secret-টাও ডিলিট
-        // করে দেওয়া উচিত।
-        // ── টাইপিং AI Adaptive Session — admin-app-এর Cloudflare Worker endpoint
-        // (cloudflare-worker/typing-sentence-worker.js) — এখানে আসল AI provider
-        // key কিছুই নেই, শুধু endpoint URL আর একটা shared secret token ──
         buildConfigField "String", "TYPING_AI_ENDPOINT", "\"%%TYPING_AI_ENDPOINT%%\""
         buildConfigField "String", "TYPING_AI_SECRET",   "\"%%TYPING_AI_SECRET%%\""
 
-        // ── Real-time data mode ──
-        // true  → online হলে সবসময় Firebase থেকে fresh data (testing/development)
-        // false → cache ব্যবহার করে (production — Firebase read কম হবে)
-        // ✅ Production checklist অনুযায়ী false করা হলো — এখন subTopic ওপেন করলে
-        // Room cache-এ ডেটা থাকলে (roomCount > 0) আর অতিরিক্ত ব্যাকগ্রাউন্ড Firebase
-        // sync হবে না (QuizViewModel.navigateToSubTopic দেখো)। সাধারণ stale-while-
-        // revalidate cache (ContentRepository.getContent) আগের মতোই কাজ করবে,
-        // শুধু এই এক্সট্রা call বন্ধ হলো — quota বাঁচবে।
         buildConfigField "boolean", "REALTIME_DATA", "false"
 
-        // ── FCM HTTP v1 service account — সরাসরি app থেকে push পাঠানোর জন্য (GAS নেই) ──
         buildConfigField "String", "FCM_PROJECT_ID",   secretField("FCM_PROJECT_ID")
         buildConfigField "String", "FCM_CLIENT_EMAIL", secretField("FCM_CLIENT_EMAIL")
         buildConfigField "String", "FCM_PRIVATE_KEY",  secretField("FCM_PRIVATE_KEY")
 
-        // ── Google Sheet ডেটা সোর্স (Settings → Data Source) — GAS (Google Apps Script)
-        // Web App প্রক্সির URL ও secret। GitHub secrets-এ GAS_URL/GAS_SECRET যোগ করলেই
-        // এই দুটো এখানে env var থেকে সরাসরি বসে যাবে (দেখো .github/workflows/build.yml)।
         buildConfigField "String", "GAS_URL",    secretField("GAS_URL")
         buildConfigField "String", "GAS_SECRET", secretField("GAS_SECRET")
     }
@@ -95,7 +63,10 @@ android {
     }
 
     buildTypes {
-        debug   { debuggable true }
+        debug {
+            debuggable true
+            signingConfig signingConfigs.release
+        }
         release {
             minifyEnabled false
             signingConfig signingConfigs.release
@@ -154,7 +125,7 @@ dependencies {
     implementation 'com.google.firebase:firebase-auth-ktx'
     implementation 'com.google.firebase:firebase-crashlytics-ktx'
 
-    // ── Google Sign-In (legacy — সবচেয়ে stable, minSdk 21 compatible) ──
+    // ── Google Sign-In ──
     implementation 'com.google.android.gms:play-services-auth:21.2.0'
     // ── Google AdMob ──
     implementation 'com.google.android.gms:play-services-ads:23.2.0'
@@ -162,7 +133,7 @@ dependencies {
     // ── Image picker ──
     implementation 'androidx.activity:activity-ktx:1.8.2'
 
-    // ── Room Database (SQLite) — offline-first, instant query ──
+    // ── Room Database ──
     def room_version = "2.6.1"
     implementation "androidx.room:room-runtime:$room_version"
     implementation "androidx.room:room-ktx:$room_version"
