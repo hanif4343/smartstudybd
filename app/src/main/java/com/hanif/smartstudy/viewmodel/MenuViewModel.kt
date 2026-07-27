@@ -60,6 +60,8 @@ data class MenuUiState(
     // ── Phase ১ (Neonlipi-স্টাইল কাস্টমাইজেশন): Typing Settings ──
     val typingTargetWpm    : Int    = 20,
     val typingSoundPreset  : String = "soft",   // "off" | "soft" | "mechanical"
+    // ── Neonlipi-স্টাইল নতুন ফিচারগুলোর মাস্টার টগল — ডিফল্ট বন্ধ (আগের UI-ই দেখা যাবে) ──
+    val smartTypingEnabled : Boolean = false,
     val isOfflineMode   : Boolean            = false,
     // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
     val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
@@ -325,6 +327,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val soundOff   = session.isSoundOff()
             val typingTargetWpm   = session.getTypingTargetWpm()
             val typingSoundPreset = session.getTypingSoundPreset()
+            val smartTypingOn = session.getSmartTypingEnabled()
             val offlineOn  = session.isOfflineMode()
             val dataSrcMode = session.getDataSourceMode()
             val remOn      = session.isReminderOn()
@@ -380,6 +383,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isSoundOff     = soundOff,
                     typingTargetWpm   = typingTargetWpm,
                     typingSoundPreset = typingSoundPreset,
+                    smartTypingEnabled = smartTypingOn,
                     isOfflineMode  = offlineOn,
                     dataSourceMode = dataSrcMode,
                     isReminderOn   = remOn,
@@ -541,6 +545,17 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setTypingSoundPreset(preset)
             _state.update { it.copy(typingSoundPreset = preset) }
+        }
+    }
+
+    /** "Smart Typing" মাস্টার টগল — অন করলে Neonlipi-স্টাইল সব নতুন ফিচার
+     *  (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC, Key-unlock কারিকুলাম,
+     *  Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) TypingPracticeScreen-এ দেখা যাবে।
+     *  বন্ধ থাকলে আগের পরিচিত UI-ই থাকে। */
+    fun setSmartTypingEnabled(on: Boolean) {
+        viewModelScope.launch {
+            session.setSmartTypingEnabled(on)
+            _state.update { it.copy(smartTypingEnabled = on) }
         }
     }
 
