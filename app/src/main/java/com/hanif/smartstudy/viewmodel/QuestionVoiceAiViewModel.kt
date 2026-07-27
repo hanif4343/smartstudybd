@@ -53,6 +53,11 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
     // দেরিতে আসা পুরনো রেসপন্স নতুন প্রশ্নের স্ক্রিনে ভুল করে TTS চালিয়ে না দেয়
     // (এটাই ছিল "ভয়েস মিলছে না/অন্য কোথাও থেকে আসছে" বাগের মূল কারণ) ──
     private var activeJob: Job? = null
+    // ── ডায়ালগ বন্ধ/back করার পরেও যদি আগের নেটওয়ার্ক কল তখনো শেষ না হয়ে থাকে,
+    // সেটা পরে এসে TTS চালিয়ে দিতে পারে — এই flag দিয়ে সেটা আটকানো হয় ("ব্যাক করে
+    // অন্য জায়গায় গেলেও ভয়েস চলতেই থাকে" বাগের আসল কারণ এটাই ছিল)। close() কল
+    // হলে এটা false হয়ে যায়, তখন থেকে কোনো response আর প্রয়োগ হবে না। ──
+    private var sessionActive = true
 
     init {
         _state.update { it.copy(hasAnyKey = session.getAiApiKeys().hasAnyKey()) }
@@ -62,6 +67,7 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
      * প্রশ্ন+উত্তরের ব্যাখ্যা শুরু করে দেয় (autoExplain) — ইউজারকে আলাদা করে মাইক
      * চেপে জিজ্ঞেস করতে হয় না, 🤖 বাটন চাপাটাই যথেষ্ট ইঙ্গিত। */
     fun setQuestion(item: QuestionItem, mode: StudyMode) {
+        sessionActive = true   // আগে close() হয়ে থাকলেও নতুন প্রশ্ন খোলার সময় আবার সচল করো
         if (item.id == currentQuestionId) return   // একই প্রশ্নে বারবার রিসেট না হয়
         currentQuestionId = item.id
 
@@ -113,8 +119,9 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
             )
             val reply = AiChatService.sendMessage(listOf(hiddenPrompt), keys, contextPrefix)
             // ── এই কল চলাকালীন যদি ইতিমধ্যে অন্য প্রশ্নে সুইচ হয়ে গিয়ে থাকে (currentQuestionId
-            // পাল্টে গেছে), তাহলে এই দেরিতে-আসা রেসপন্স আর UI/TTS-এ প্রয়োগ করা হবে না ──
-            if (questionIdForThisCall != currentQuestionId) return@launch
+            // পাল্টে গেছে) অথবা ডায়ালগ বন্ধ/back করে দেওয়া হয়ে থাকে (sessionActive=false),
+            // তাহলে এই দেরিতে-আসা রেসপন্স আর UI/TTS-এ প্রয়োগ করা হবে না ──
+            if (!sessionActive || questionIdForThisCall != currentQuestionId) return@launch
             if (reply != null) {
                 _state.update { it.copy(messages = listOf(AiChatMessage(role = "assistant", content = reply)), isSending = false) }
                 TtsManager.speak(reply, "voice_ai_reply_${questionIdForThisCall}_${System.nanoTime()}")
@@ -168,9 +175,10 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
 
         activeJob = viewModelScope.launch {
             val reply = AiChatService.sendMessage(apiHistory, keys, contextPrefix)
-            // ── উত্তর আসার আগেই যদি অন্য প্রশ্নে সুইচ হয়ে যায়, এই দেরিতে-আসা রেসপন্স
-            // আর প্রয়োগ করা হবে না (নাহলে ভুল প্রশ্নের ওপর TTS/টেক্সট বসে যেতে পারে) ──
-            if (questionIdForThisCall != currentQuestionId) return@launch
+            // ── উত্তর আসার আগেই যদি অন্য প্রশ্নে সুইচ হয় বা ডায়ালগ বন্ধ হয়ে যায়, এই
+            // দেরিতে-আসা রেসপন্স আর প্রয়োগ করা হবে না (নাহলে ভুল প্রশ্নের ওপর TTS/
+            // টেক্সট বসে যেতে পারে, বা বন্ধ করার পরও ভয়েস চলতে থাকতে পারে) ──
+            if (!sessionActive || questionIdForThisCall != currentQuestionId) return@launch
             if (reply != null) {
                 _state.update {
                     it.copy(
@@ -192,8 +200,18 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() { _state.update { it.copy(error = null) } }
 
+    /** ডায়ালগ বন্ধ হওয়ার সময় (✕, back বাটন, বা screen থেকে বেরিয়ে যাওয়া) কল হয় —
+     * চলমান নেটওয়ার্ক কল/TTS তৎক্ষণাৎ বন্ধ করে, আর ভবিষ্যতে দেরিতে-আসা কোনো
+     * রেসপন্সও (এই ViewModel instance পরে আবার reuse হলেও) আর প্রয়োগ হবে না —
+     * যতক্ষণ না নতুন setQuestion() কল হয়ে sessionActive আবার true হয়। */
+    fun close() {
+        sessionActive = false
+        activeJob?.cancel()
+        TtsManager.stop()
+    }
+
     override fun onCleared() {
         super.onCleared()
-        TtsManager.stop()
+        close()
     }
 }
