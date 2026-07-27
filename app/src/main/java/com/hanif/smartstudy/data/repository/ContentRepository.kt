@@ -92,6 +92,39 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomSubTopicCounts(sheet: String, subject: String) =
         dao.getSubTopicCounts(sheet, subject)
 
+    // ── QBank "প্রতিষ্ঠান-ভিত্তিক" ও "সাল-ভিত্তিক" ফিল্টার — subject/subTopic
+    // হায়ারার্কি উল্টে/পাশ কাটিয়ে দেখার জন্য নতুন Room helper গুলো ──
+
+    /** Room থেকে প্রতিষ্ঠান (Institution) তালিকা — subject-নিরপেক্ষ, সব ডিজিগনেশন মিলিয়ে */
+    suspend fun getRoomInstitutionCounts(sheet: String) = dao.getInstitutionCounts(sheet)
+
+    /** Room থেকে একটা প্রতিষ্ঠানের আন্ডারে যত পদবী (Designation) আছে */
+    suspend fun getRoomDesignationsUnderInstitution(sheet: String, institution: String) =
+        dao.getDesignationsUnderInstitution(sheet, institution)
+
+    /** Room থেকে সালের তালিকা — subject/subTopic নির্বিশেষে */
+    suspend fun getRoomYearCounts(sheet: String) = dao.getYearCounts(sheet)
+
+    /** Room থেকে একটা নির্দিষ্ট সালের সব প্রশ্ন — পেজিনেটেড, subject/subTopic নির্বিশেষে */
+    suspend fun getRoomPagedQuestionsByYear(
+        sheet: String, year: String, tag: String, page: Int, pageSize: Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return if (tag.isBlank() || tag == "all") {
+            dao.getPagedByYear(sheet, year, pageSize, offset)
+        } else {
+            dao.getPagedByYearFiltered(sheet, year, tag, pageSize, offset)
+        }.map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা সালের মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomYearTotalCount(sheet: String, year: String, tag: String): Int =
+        if (tag.isBlank() || tag == "all") {
+            dao.countByYear(sheet, year)
+        } else {
+            dao.countByYearFiltered(sheet, year, tag)
+        }
+
     /**
      * Room থেকে paginated questions — instant, Firebase লাগে না।
      * audienceTag="" হলে সব দেখাবে, নইলে filter হবে।
