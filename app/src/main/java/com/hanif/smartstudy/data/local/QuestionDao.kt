@@ -102,6 +102,68 @@ interface QuestionDao {
     """)
     suspend fun getSubTopicCounts(sheet: String, subject: String): List<SubTopicCount>
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // QBank-only ফিল্টার: "প্রতিষ্ঠান-ভিত্তিক" ও "সাল-ভিত্তিক" — এই দুটোতে
+    // সাধারণ subject/subTopic হায়ারার্কি উল্টে বা পাশ কাটিয়ে দেখতে হয়, তাই
+    // subject-নিরপেক্ষভাবে subTopic (Institution) বা year ধরে group করা লাগে।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // ── প্রতিষ্ঠান তালিকা (subject-নিরপেক্ষ, সব ডিজিগনেশন মিলিয়ে unique subTopic) —
+    // SubjectCount ক্লাসই রিইউজ করা হলো (subTopic কে "subject" কলাম নামে alias করে) ──
+    @Query("""
+        SELECT subTopic as subject, COUNT(*) as count FROM questions
+        WHERE sheet = :sheet AND subTopic != ''
+        GROUP BY subTopic
+        ORDER BY subTopic
+    """)
+    suspend fun getInstitutionCounts(sheet: String): List<SubjectCount>
+
+    // ── একটা নির্দিষ্ট প্রতিষ্ঠানের আন্ডারে যত পদবী (Designation) আছে —
+    // SubTopicCount ক্লাস রিইউজ করা হলো (subject কে "subTopic" কলাম নামে alias করে) ──
+    @Query("""
+        SELECT subject as subTopic, COUNT(*) as count FROM questions
+        WHERE sheet = :sheet AND subTopic = :institution AND subject != ''
+        GROUP BY subject
+        ORDER BY subject
+    """)
+    suspend fun getDesignationsUnderInstitution(sheet: String, institution: String): List<SubTopicCount>
+
+    // ── সালের তালিকা (subject/subTopic-নিরপেক্ষ, সব মিলিয়ে unique year) ──
+    @Query("""
+        SELECT year as subject, COUNT(*) as count FROM questions
+        WHERE sheet = :sheet AND year != ''
+        GROUP BY year
+        ORDER BY year DESC
+    """)
+    suspend fun getYearCounts(sheet: String): List<SubjectCount>
+
+    // ── সাল-ভিত্তিক flat প্রশ্ন-লিস্ট (subject/subTopic নির্বিশেষে) — পেজিনেটেড ──
+    @Query("""
+        SELECT * FROM questions 
+        WHERE sheet = :sheet AND year = :year
+        ORDER BY fbKey
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getPagedByYear(sheet: String, year: String, limit: Int, offset: Int): List<QuestionEntity>
+
+    @Query("""
+        SELECT * FROM questions 
+        WHERE sheet = :sheet AND year = :year
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+        ORDER BY fbKey
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getPagedByYearFiltered(sheet: String, year: String, tag: String, limit: Int, offset: Int): List<QuestionEntity>
+
+    @Query("SELECT COUNT(*) FROM questions WHERE sheet = :sheet AND year = :year")
+    suspend fun countByYear(sheet: String, year: String): Int
+
+    @Query("""
+        SELECT COUNT(*) FROM questions WHERE sheet = :sheet AND year = :year
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+    """)
+    suspend fun countByYearFiltered(sheet: String, year: String, tag: String): Int
+
     // ── DB তে কতটা data আছে ──────────────────────────────────────────────────
     @Query("SELECT COUNT(*) FROM questions WHERE sheet = :sheet")
     suspend fun countAll(sheet: String): Int
