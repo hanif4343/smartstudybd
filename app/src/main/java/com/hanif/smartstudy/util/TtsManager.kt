@@ -42,6 +42,20 @@ object TtsManager {
     private const val TAG = "TtsManager"
     private const val UTTERANCE_PREFIX = "smartstudy_tts_"
 
+    // ── Android-এর Voice.features-এ "gender:male/female" ট্যাগ থিওরিতে থাকার কথা,
+    // কিন্তু বাস্তবে বেশিরভাগ ডিভাইসের TTS ইঞ্জিনে (Google TTS সহ) এই ট্যাগ একদমই
+    // পপুলেট হয় না — মানে নিচের findMaleBanglaVoice()/findMatchingEnglishVoice()-এর
+    // "gender মিলিয়ে voice বাছাই" আসলে কার্যকর হয় না, এলোমেলোভাবে প্রথম voice-টাই
+    // বেছে নেয়। ফলে বাংলা আর ইংরেজি অংশ ভিন্ন ভিন্ন gender-এর voice এ পড়া হয়ে যায়,
+    // মাঝে মধ্যেই কানে বেমানান/অস্বস্তিকর শোনায়।
+    //
+    // আসল, নির্ভরযোগ্য সমাধান: gender-detection-এর ওপর নির্ভর না করে, বাংলা এবং
+    // ইংরেজি — দুই ভাষার segment-এই একই FIXED pitch জোর করে বসিয়ে দেওয়া, যাতে
+    // underlying voice engine যেই gender-ই হোক না কেন, শোনার সময় sound-character
+    // (pitch/timbre) সবসময় সামঞ্জস্যপূর্ণ থাকে। ১.০ = engine-এর ডিফল্ট pitch;
+    // এর চেয়ে একটু কম মানে গলার স্বর একটু ভারী/পুরুষালি শোনাবে। ──
+    private const val UNIFIED_PITCH = 0.90f
+
     private var tts: TextToSpeech? = null
     private var isReady = false
     private var isBanglaAvailable = false
@@ -100,6 +114,7 @@ object TtsManager {
                 tts?.setLanguage(if (isBanglaAvailable) Locale("bn", "BD") else Locale.US)
                 isReady = true
                 tts?.setSpeechRate(0.95f)
+                tts?.setPitch(UNIFIED_PITCH)
 
                 // ── ডিফল্ট engine voice প্রায়ই female হয় — female voice বাদ দিয়ে
                 // একটা male/non-female বাংলা voice খুঁজে সেট করা হলো ──
@@ -277,7 +292,9 @@ object TtsManager {
             if (textToSpeak.isBlank()) continue
 
             if (seg.isEnglish && isEnglishAvailable) {
-                // matched English voice (same gender) ব্যবহার করো — না পেলে locale fallback
+                // ── gender-matched voice খোঁজার চেষ্টা best-effort হিসেবে রাখা হলো (কিছু
+                // ডিভাইসে কাজ করতে পারে), কিন্তু আসল ভরসা নিচের setPitch(UNIFIED_PITCH) —
+                // voice engine যাই বাছাই হোক না কেন, pitch জোর করে সমান রাখা হচ্ছে ──
                 if (matchingEnglishVoice != null) {
                     engine.voice = matchingEnglishVoice
                 } else {
@@ -290,6 +307,12 @@ object TtsManager {
                     engine.language = if (isBanglaAvailable) Locale("bn", "BD") else Locale.US
                 }
             }
+            // ── engine.voice = ... সেট করলে কিছু TTS ইঞ্জিন সেই voice-এর নিজস্ব ডিফল্ট
+            // pitch-এ ফিরিয়ে দেয় — তাই প্রতিটা segment-এর আগে আবার explicit ভাবে
+            // UNIFIED_PITCH বসিয়ে দেওয়া হচ্ছে, যাতে বাংলা↔ইংরেজি switch-এ গলার স্বর
+            // (gender/timbre) কখনো বদলে না যায়। এটাই আসল, নির্ভরযোগ্য ফিক্স —
+            // features-এর "gender" ট্যাগের ওপর ভরসা করে না। ──
+            engine.setPitch(UNIFIED_PITCH)
 
             val mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
             engine.speak(textToSpeak, mode, null, "$UTTERANCE_PREFIX$i")
