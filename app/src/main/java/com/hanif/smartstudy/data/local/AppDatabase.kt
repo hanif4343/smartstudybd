@@ -17,8 +17,10 @@ import androidx.room.RoomDatabase
     // v6 → v7: CustomPassageEntity যোগ হলো — ইউজারের নিজের যোগ করা টাইপিং প্যাসেজ (লোকাল-অনলি)
     // v7 → v8: TypingSheetPassageEntity যোগ হলো — Google Sheet "Typing" ট্যাব থেকে আসা
     // ডিফল্ট প্যাসেজ পুলের অফলাইন cache (হার্ডকোডেড PASSAGES তালিকা রিমুভ করার পর)
+    // v8 → v9: QuestionEntity তে questionPaperUrls column যোগ হলো — QBank-এর
+    // "Question Paper" কলাম থেকে আসা কমা-সেপারেটেড ImgBB লিংক ক্যাশ করার জন্য
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version  = 8,
+    version  = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
