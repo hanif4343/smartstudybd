@@ -47,6 +47,9 @@ data class QuestionItem(
     val examName    : String  = "",      // QBank only
     val imageUrl    : String  = "",      // embedded image
     val visualUrl   : String  = "",      // VisualURL — image/video/pdf links from Firebase
+    // "Question Paper" কলাম — কমা দিয়ে আলাদা একাধিক ImgBB লিংক (আসল প্রশ্নপত্রের ছবি),
+    // শুধু QBank-এই ব্যবহৃত হয়, প্রয়োজন হলেই (টগল করে) দেখানো হয়
+    val questionPaperUrls: String = "",
     // Runtime state
     val answerState : AnswerState = AnswerState.Unanswered,
     val isBookmarked: Boolean     = false,
@@ -59,6 +62,11 @@ data class QuestionItem(
     fun isWritten() = questionType.lowercase().trim() == "written"
     fun isStudy()   = questionType.lowercase().trim() == "study"
     fun isMcq()     = !isWritten() && !isStudy()
+
+    // "Question Paper" কলামের কমা-সেপারেটেড ImgBB লিংকগুলো লিস্ট আকারে —
+    // খালি/স্পেস-শুধু অংশ বাদ দিয়ে
+    fun questionPaperImageList(): List<String> =
+        questionPaperUrls.split(",").map { it.trim() }.filter { it.isNotBlank() }
 
     // "sheet|id" ফরম্যাটে ইউনিক কী — Model Test এ Quiz আর QBank দুই সোর্স মিক্স হয়,
     // তাই শুধু id দিয়ে ইউনিক না-ও হতে পারে (দুই sheet-এ একই index/key থাকা সম্ভব)
@@ -119,6 +127,7 @@ data class QuestionItem(
             year         = q.year ?: "",
             examName     = q.examName ?: "",
             visualUrl    = q.visualUrl ?: "",
+            questionPaperUrls = q.questionPaperUrls ?: "",
             isImportant  = q.important == true,
             sourceSheet  = "QBank"
         )
