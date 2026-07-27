@@ -80,6 +80,11 @@ class SessionManager(private val context: Context) {
         // ── Phase ৩: Roadmap wizard — একবার জেনারেট করা প্ল্যান JSON আকারে রাখা হয়,
         // দেখো getRoadmapPlan()/saveRoadmapPlan() ও ui/typing/RoadmapWizard.kt ──
         val KEY_ROADMAP_PLAN_JSON = stringPreferencesKey("typing_roadmap_plan")
+        // ── Neonlipi-স্টাইল নতুন ফিচারগুলো (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock,
+        // BCC, Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) একটা
+        // মাস্টার টগলের পেছনে — ডিফল্ট বন্ধ (আগের UI-ই দেখা যাবে), Settings থেকে অন
+        // করলে সব একসাথে চালু হয়। দেখো getSmartTypingEnabled()/setSmartTypingEnabled()।
+        val KEY_SMART_TYPING_ON = booleanPreferencesKey("smart_typing_enabled")
         
         // Reminder Keys (Updated for DataStore Consistency)
         val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
@@ -226,6 +231,18 @@ class SessionManager(private val context: Context) {
 
     suspend fun setTypingSoundPreset(preset: String) {
         context.dataStore.edit { it[KEY_TYPING_SOUND_PRESET] = preset }
+    }
+
+    /** Neonlipi-স্টাইল নতুন টাইপিং ফিচারগুলোর মাস্টার সুইচ — ডিফল্ট **false** (আগের,
+     *  পরিচিত UI-ই দেখাবে)। Settings থেকে "Smart Typing" টগল অন করলে heatmap,
+     *  দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC, Key-unlock কারিকুলাম, Roadmap,
+     *  প্রোফাইল/Cloud Sync, আঙুল-পজিশন — সবগুলো একসাথে দেখা যাবে (TypingPracticeScreen.kt)। */
+    fun getSmartTypingEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_SMART_TYPING_ON] ?: false
+    }
+
+    suspend fun setSmartTypingEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_SMART_TYPING_ON] = on }
     }
 
     // ── Phase ৩: Roadmap Wizard ──
