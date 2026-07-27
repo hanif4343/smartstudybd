@@ -264,6 +264,11 @@ fun TypingPracticeScreen(
     var curriculumStage    by remember { mutableStateOf(1) }
     var curriculumProgress by remember { mutableStateOf(listOf<Pair<String, Int>>()) }
     var justUnlockedStage  by remember { mutableStateOf<Int?>(null) }
+    // ── Neonlipi-স্টাইল সব নতুন ফিচার (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock,
+    // BCC, Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) এই একটা
+    // ফ্ল্যাগের পেছনে — Settings-এ "🧪 Smart Typing" টগল বন্ধ থাকলে (ডিফল্ট) নিচের
+    // এই সব UI ব্লক সম্পূর্ণ hide থাকবে, আগের পরিচিত UI-ই দেখা যাবে ──
+    var smartTypingEnabled by remember { mutableStateOf(session.getSmartTypingEnabled()) }
     LaunchedEffect(Unit) {
         bestWpm = session.getTypingBestWpm()
         history = session.getTypingHistory()
@@ -1038,7 +1043,7 @@ fun TypingPracticeScreen(
         if (!isStarted && new.isNotEmpty()) isStarted = true
         // ── Phase ১: কী-সাউন্ড — শুধু ক্যারেক্টার যোগ হলে বাজে (ব্যাকস্পেস/মুছে ফেলায় না,
         // নাহলে ব্যাকস্পেস দেওয়াও "পুরস্কৃত" মনে হতে পারে) ──
-        if (new.length > userInput.length) TypingKeySound.playForCurrentPreset(ctx)
+        if (smartTypingEnabled && new.length > userInput.length) TypingKeySound.playForCurrentPreset(ctx)
         var normalized = normalizeBn(new)
 
         // ── স্মার্ট অটো-রিসিঙ্ক (স্পেস মিস হ্যান্ডলিং) ──
@@ -1611,6 +1616,10 @@ fun TypingPracticeScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
                     }
                 }
+                // ── Neonlipi-স্টাইল নতুন মোড-বাটনগুলো (দুর্বল-কী ড্রিল, চিহ্ন ড্রিল,
+                // BCC পরীক্ষা, Govt Mock, Key-unlock কারিকুলাম) — সবগুলো "🧪 Smart
+                // Typing" টগলের পেছনে, Settings থেকে অন করলেই দেখা যাবে ──
+                if (smartTypingEnabled) {
                 // ── Phase ১: দুর্বল-কী ড্রিল — Neonlipi-এর "দুর্বলতা ধরে ধরে সারানো"
                 // ফিচারের সমতুল্য, একটা আলাদা full-width রো হিসেবে (যথেষ্ট গুরুত্বপূর্ণ,
                 // 2x2 গ্রিডে গুঁজে না দিয়ে) ──
@@ -1737,6 +1746,7 @@ fun TypingPracticeScreen(
                         }
                     }
                 }
+                } // ← if (smartTypingEnabled)
 
                 if (sessionMode == "study") {
                     // ── সাবজেক্ট চিপ ──
@@ -2203,6 +2213,7 @@ fun TypingPracticeScreen(
                 result?.let { r ->
                     ResultCard(r, bestWpm,
                         sessionMistakeWords = sessionMistakeWords.distinct(),
+                        showSmartFeatures = smartTypingEnabled,
                         onRetry = {
                             when {
                                 sessionMode == "freetyping" -> startFreeTyping()
@@ -2237,7 +2248,7 @@ fun TypingPracticeScreen(
             // ── Phase ২: Govt Job মক টেস্টের পেনাল্টি — মূল ResultCard-এর result.wpm
             // অপরিবর্তিত রাখা হয়েছে (bestWPM/history তুলনার জন্য), তাই পেনাল্টি এখানে
             // আলাদা একটা ছোট কার্ডে দেখানো হয় ──
-            AnimatedVisibility(visible = isFinished && sessionMode == "govtmock" && result != null) {
+            AnimatedVisibility(visible = smartTypingEnabled && isFinished && sessionMode == "govtmock" && result != null) {
                 result?.let { r ->
                     Card(
                         Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
@@ -2353,6 +2364,9 @@ fun TypingPracticeScreen(
                     }
                 }
 
+                // ── Neonlipi-স্টাইল Roadmap/প্রোফাইল/আঙুল-পজিশন/হিটম্যাপ — সবগুলো
+                // "🧪 Smart Typing" টগলের পেছনে ──
+                if (smartTypingEnabled) {
                 // ── Phase ৩: Roadmap — প্ল্যান থাকলে সামারি কার্ড, না থাকলে বানানোর বাটন ──
                 roadmapPlan?.let { plan ->
                     RoadmapSummaryCard(plan = plan, onRebuild = { showRoadmapWizard = true })
@@ -2384,6 +2398,7 @@ fun TypingPracticeScreen(
                 // ── Phase ১: লাইভ কী-হিটম্যাপ — এখনো যথেষ্ট ডেটা না জমলে কিছুই দেখায় না
                 // (KeyHeatmapCard নিজেই খালি-চেক করে) ──
                 KeyHeatmapCard(keyHeatmap)
+                } // ← if (smartTypingEnabled)
 
                 // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই।
                 // মোটা/prominent বাটন হিসেবে রাখা হলো (আগে ছিল হালকা TextButton) ──
@@ -2400,11 +2415,14 @@ fun TypingPracticeScreen(
         }
     }
 
-    // ── Phase ৩: তিনটা Dialog — প্রোফাইল, Roadmap wizard, আঙুল-পজিশন ──
-    if (showProfileDialog) {
+    // ── Phase ৩: তিনটা Dialog — প্রোফাইল, Roadmap wizard, আঙুল-পজিশন — normally এগুলো
+    // trigger-বাটনই "🧪 Smart Typing" টগলের পেছনে hidden থাকে, তাও extra safety হিসেবে
+    // এখানেও smartTypingEnabled গার্ড রাখা হলো (টগল বন্ধ করার পরও যদি কোনোভাবে state
+    // true থেকে যায়, তাহলেও ডায়ালগ খুলবে না) ──
+    if (smartTypingEnabled && showProfileDialog) {
         TypingProfileDialog(context = ctx, onDismiss = { showProfileDialog = false })
     }
-    if (showRoadmapWizard) {
+    if (smartTypingEnabled && showRoadmapWizard) {
         RoadmapWizardDialog(
             onDismiss = { showRoadmapWizard = false },
             onComplete = { plan ->
@@ -2414,11 +2432,11 @@ fun TypingPracticeScreen(
             }
         )
     }
-    if (showFingerDialog) {
+    if (smartTypingEnabled && showFingerDialog) {
         FingerPositionDialog(onDismiss = { showFingerDialog = false })
     }
     // ── Phase ৩ (#1+#2): নতুন স্টেজ আনলক হলে ছোট্ট সেলিব্রেশন ডায়ালগ ──
-    justUnlockedStage?.let { stage ->
+    if (smartTypingEnabled) justUnlockedStage?.let { stage ->
         AlertDialog(
             onDismissRequest = { justUnlockedStage = null },
             confirmButton = {
@@ -2692,6 +2710,7 @@ private fun ResultCard(
     result       : TypingResult,
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
+    showSmartFeatures: Boolean = false,
     onRetry      : () -> Unit,
     onNextPassage: () -> Unit
 ) {
@@ -2724,8 +2743,9 @@ private fun ResultCard(
                 fontFamily = NotoSansBengali)
 
             // ── Phase ১: Speed-rank গেমিফিকেশন — সংখ্যার বদলে একটা পরিচিত বাহনের
-            // মাধ্যমে গতি বোঝানো, Neonlipi-এর "৪৫ র‍্যাংক" ফিচারের সরলীকৃত সংস্করণ ──
-            run {
+            // মাধ্যমে গতি বোঝানো, Neonlipi-এর "৪৫ র‍্যাংক" ফিচারের সরলীকৃত সংস্করণ।
+            // "🧪 Smart Typing" টগলের পেছনে — বন্ধ থাকলে আগের মতোই শুধু WPM/Raw দেখাবে ──
+            if (showSmartFeatures) run {
                 val rank = com.hanif.smartstudy.util.SpeedRankUtil.rankFor(result.wpm)
                 val next = com.hanif.smartstudy.util.SpeedRankUtil.nextRank(result.wpm)
                 Surface(
