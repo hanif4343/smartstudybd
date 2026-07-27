@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -87,9 +88,20 @@ fun QuestionVoiceAiSheet(
 
     LaunchedEffect(item.id) { vm.setQuestion(item, mode) }
 
+    // ── এই Dialog composition থেকে বেরিয়ে গেলে (✕, back, বা পুরো screen থেকে
+    // বেরিয়ে গেলে/bottom-nav ট্যাব পাল্টালে) — শুধু TtsManager.stop() যথেষ্ট না,
+    // কারণ তখনো একটা নেটওয়ার্ক কল চলমান থাকতে পারে যেটা পরে এসে আবার speak()
+    // কল করে দিতে পারে ("ব্যাক করে অন্য জায়গায় গেলেও ভয়েস চলতেই থাকে" বাগ)।
+    // vm.close() দিয়ে সেই in-flight কলও cancel হয় আর ভবিষ্যতের কোনো দেরিতে-আসা
+    // রেসপন্সও ব্লক হয়ে যায়। ──
     DisposableEffect(Unit) {
-        onDispose { TtsManager.stop() }
+        onDispose { vm.close() }
     }
+
+    // ── Dialog-এর ডিফল্ট back-dismiss থাকলেও, এটা explicit ভাবে নিশ্চিত করে যে
+    // system back চাপলে ঠিক এই সেশনটাই বন্ধ হয় (আর ভুলবশত parent screen-এর
+    // back navigation-এ leak করে যায় না) ──
+    BackHandler(onBack = { vm.close(); onClose() })
 
     LaunchedEffect(state.messages.size, state.isSending) {
         // ── প্রশ্ন-কার্ড সবসময় ইনডেক্স ০-এ থাকে, তাই বাকি আইটেমের ইনডেক্স +১ শিফট হয়ে গেছে ──
@@ -153,7 +165,7 @@ fun QuestionVoiceAiSheet(
                             contentDescription = "অটো-স্পিক", tint = Color.White
                         )
                     }
-                    IconButton(onClick = { TtsManager.stop(); onClose() }) {
+                    IconButton(onClick = { vm.close(); onClose() }) {
                         Icon(Icons.Default.Close, contentDescription = "বন্ধ করো", tint = Color.White)
                     }
                 }
