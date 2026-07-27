@@ -42,5 +42,7 @@ data class QuestionEntity(
     val examName    : String = "",   // QBank only
     val imageUrl    : String = "",
     val visualUrl   : String = "",
+    // "Question Paper" কলাম — কমা দিয়ে আলাদা করা একাধিক ImgBB লিংক (QBank only)
+    val questionPaperUrls: String = "",
     val syncedAt    : Long   = 0L    // Firebase থেকে কখন এসেছে — delta sync এর জন্য
 )
