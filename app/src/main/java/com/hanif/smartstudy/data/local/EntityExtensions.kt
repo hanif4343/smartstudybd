@@ -48,6 +48,7 @@ fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     examName     = examName ?: "",
     imageUrl     = imageUrl ?: "",
     visualUrl    = visualUrl ?: "",
+    questionPaperUrls = questionPaperUrls ?: "",
     syncedAt     = syncedAt
 )
 
@@ -87,5 +88,6 @@ fun QuestionEntity.toQuestionItem() = QuestionItem(
     year         = year,
     examName     = examName,
     imageUrl     = imageUrl,
-    visualUrl    = visualUrl
+    visualUrl    = visualUrl,
+    questionPaperUrls = questionPaperUrls
 )
