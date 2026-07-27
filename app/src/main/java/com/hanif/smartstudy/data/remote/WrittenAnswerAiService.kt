@@ -13,7 +13,15 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * ── Written উত্তর AI দিয়ে অটো-চেক (স্টাডির ⌨️ রিকল-টাইপিং মোড) ──
+ * ── Viva Mode-এর জন্য রায় + ফিডব্যাক ──
+ * verdict: "CORRECT" | "PARTIAL" | "WRONG"
+ */
+data class VivaVerdict(val verdict: String, val feedback: String) {
+    val isCorrect: Boolean get() = verdict == "CORRECT"
+}
+
+/**
+ * ── Written উত্তর AI দিয়ে অটো-চেক (স্টাডির ⌨️ রিকল-টাইপিং মোড) + Viva Mode গ্রেডিং ──
  *
  * ইউজার টাইপ-বক্সে নিজের উত্তর লিখে জমা দিলে, Settings-এ সেভ করা API key
  * দিয়ে একে একে চেষ্টা করে সঠিক/ভুল বের করে দেওয়া হয়:
@@ -155,6 +163,139 @@ object WrittenAnswerAiService {
 
 শুধু ভুলটা কোথায় সেটা বলো, কোনো ভূমিকা বা উপসংহার লিখবে না।
 """.trimIndent()
+
+    /**
+     * ── Viva Mode: ছাত্র মুখে যা বলেছে (STT দিয়ে টেক্সট হওয়া) তার সাথে দেওয়া
+     * তালিকার (subjects বা subTopics) সবচেয়ে কাছের মিলটা AI দিয়ে বের করে —
+     * সাধারণ string-matching এর বদলে AI ব্যবহার করা হয়েছে কারণ ছাত্র colloquially/
+     * ভুল উচ্চারণে বলতে পারে ("গণিতের সমীকরণ" বললেও আসল subTopic "সরল সমীকরণ"
+     * হতে পারে) — AI ভাষাগত ভিন্নতা সহনশীলভাবে বুঝে সঠিক entry বেছে দিতে পারে।
+     * @return validOptions-এর ভেতরের ঠিক সেই স্ট্রিং (হুবহু casing/spacing) যেটা মিলেছে,
+     * অথবা null (কোনো ভালো মিল পাওয়া যায়নি, বা AI কল ব্যর্থ হয়েছে)।
+     */
+    suspend fun resolveFromList(
+        spokenText  : String,
+        validOptions: List<String>,
+        keys        : AiApiKeys
+    ): String? = withContext(Dispatchers.IO) {
+        if (spokenText.isBlank() || validOptions.isEmpty() || !keys.hasAnyKey()) return@withContext null
+        val prompt = """
+তুমি একটা তালিকা মিলানোর কাজ করছ। একজন ছাত্র মুখে বলেছে: "$spokenText"
+
+নিচের তালিকা থেকে সবচেয়ে কাছের মিলটা বের করো (ছাত্র colloquially/ভুল উচ্চারণে/আংশিকভাবে বলতে পারে):
+${validOptions.joinToString("\n") { "- $it" }}
+
+নিয়ম:
+- তালিকায় যেভাবে লেখা আছে ঠিক হুবহু সেভাবেই (বানান/স্পেসিং অপরিবর্তিত রেখে) একটা লাইন উত্তর দেবে
+- কোনোটার সাথেই যুক্তিসঙ্গত মিল না থাকলে ঠিক একটা শব্দ লিখবে: NONE
+- অন্য কোনো ব্যাখ্যা/ভূমিকা/উপসংহার লিখবে না
+""".trimIndent()
+
+        val raw = tryAllProviders(prompt, keys) ?: return@withContext null
+        val cleaned = raw.trim().trim('"', '।', '.')
+        if (cleaned.equals("NONE", ignoreCase = true)) return@withContext null
+        // AI-এর রেসপন্স তালিকার কোনো একটার সাথে (case-insensitive) মিলছে কিনা যাচাই —
+        // না মিললে AI বানিয়ে বলেছে ধরে নিয়ে null (তালিকার বাইরের কিছু গ্রহণ করি না)
+        validOptions.firstOrNull { it.equals(cleaned, ignoreCase = true) }
+            ?: validOptions.firstOrNull { cleaned.contains(it, ignoreCase = true) || it.contains(cleaned, ignoreCase = true) }
+    }
+
+    /**
+     * ── Viva Mode: ছাত্রের মুখে-বলা (voice-to-text) উত্তর গ্রেড করে — সাধারণ
+     * gradeWrittenAnswer()-এর চেয়ে ইচ্ছাকৃতভাবে ঢিলা (lenient), কারণ voice-to-text
+     * transcription নিজেই ছোটখাটো বানান/স্পেসিং ভুল করে যেটা ছাত্রের দোষ না।
+     * verdict + feedback একসাথে এক কলেই আসে (efficient — প্রতি প্রশ্নে ২টা আলাদা
+     * API কল না করে ১টাই)।
+     */
+    suspend fun gradeVivaAnswer(
+        question        : String,
+        correctAnswer   : String,
+        explanation     : String,
+        studentAnswer   : String,
+        keys            : AiApiKeys
+    ): VivaVerdict? = withContext(Dispatchers.IO) {
+        if (!keys.hasAnyKey()) return@withContext null
+        if (studentAnswer.isBlank()) return@withContext VivaVerdict("WRONG", "কিছু শোনা যায়নি — আবার চেষ্টা করো।")
+
+        val prompt = """
+তুমি একজন বন্ধুত্বপূর্ণ মৌখিক পরীক্ষক (viva examiner)। ছাত্র মুখে উত্তর দিয়েছে, আর voice-to-text
+দিয়ে সেটা লেখায় রূপান্তর করা হয়েছে — তাই ছোটখাটো বানান/স্পেসিং/শব্দ-বিভাজন ভুল থাকতে পারে
+transcription-এর কারণে, এটা ছাত্রের ভুল না। এসব উপেক্ষা করে মূল ধারণা/তথ্যটা ঠিক আছে কিনা
+সেটাই বিচার করো — সংক্ষিপ্ত বা নিজের ভাষায় বললেও মূল তথ্য ঠিক থাকলে গ্রহণযোগ্য।
+
+প্রশ্ন: $question
+সঠিক উত্তর: $correctAnswer
+${if (explanation.isNotBlank()) "ব্যাখ্যা (প্রসঙ্গের জন্য): $explanation" else ""}
+ছাত্রের (voice-to-text) উত্তর: $studentAnswer
+
+নিচের ফরম্যাটে ঠিক দুই লাইনে উত্তর দেবে, অন্য কিছু লিখবে না:
+VERDICT: CORRECT অথবা PARTIAL অথবা WRONG
+FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে সরাসরি মুখে বলার মতো ভাষায় (কথ্য, বন্ধুত্বপূর্ণ) — CORRECT হলে
+সংক্ষিপ্ত প্রশংসা, PARTIAL/WRONG হলে কী বাদ পড়েছে বা সঠিক উত্তরটা কী সেটা সংক্ষেপে বলবে।
+""".trimIndent()
+
+        val raw = tryAllProviders(prompt, keys) ?: return@withContext null
+        parseVivaVerdict(raw)
+    }
+
+    private fun parseVivaVerdict(raw: String): VivaVerdict {
+        val verdictLine = raw.lineSequence().firstOrNull { it.uppercase().contains("VERDICT") }.orEmpty()
+        val verdictUpper = verdictLine.uppercase()
+        val verdict = when {
+            verdictUpper.contains("WRONG") || verdictUpper.contains("INCORRECT") -> "WRONG"
+            verdictUpper.contains("PARTIAL") -> "PARTIAL"
+            verdictUpper.contains("CORRECT") -> "CORRECT"
+            else -> "WRONG"
+        }
+        // ── লাইন-ভিত্তিক না করে পুরো "FEEDBACK:" এর পরের সব টেক্সট নেওয়া হচ্ছে (একাধিক
+        // লাইনে wrap করে গেলেও যেন হারিয়ে না যায়) ──
+        val feedback = raw.substringAfter("FEEDBACK:", "").trim()
+            .ifBlank {
+                when (verdict) {
+                    "CORRECT" -> "সঠিক!"
+                    "PARTIAL" -> "আংশিক সঠিক।"
+                    else      -> "উত্তরটা ঠিক হয়নি।"
+                }
+            }
+        return VivaVerdict(verdict, feedback)
+    }
+
+    /** Groq → Mistral → Cerebras → Gemini — প্রথম যেটা সাড়া দেয় সেটাই ব্যবহার হয় */
+    private fun tryAllProviders(prompt: String, keys: AiApiKeys): String? {
+        if (keys.groq.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Groq failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        if (keys.mistral.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.mistral.ai/v1/chat/completions",
+                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Mistral failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        if (keys.cerebras.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleText(
+                    url = "https://api.cerebras.ai/v1/chat/completions",
+                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Cerebras failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        if (keys.gemini.isNotBlank()) {
+            runCatching { callGeminiText(keys.gemini, prompt) }
+                .onFailure { Log.w(TAG, "Gemini failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        return null
+    }
 
     private fun callOpenAiCompatibleText(url: String, apiKey: String, model: String, prompt: String): String? {
         val messages = JSONArray().apply {

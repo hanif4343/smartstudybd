@@ -8,7 +8,7 @@ package com.hanif.smartstudy.data.model
 data class TestHistoryEntry(
     val id            : String                    = "",
     val timestamp     : Long                      = 0L,
-    val mode          : String                    = "QUIZ",   // QUIZ | QBANK | STUDY
+    val mode          : String                    = "QUIZ",   // QUIZ | QBANK | STUDY | VIVA
     val topics        : List<String>              = emptyList(), // "Subject" বা "Subject - SubTopic"
     val total         : Int                       = 0,
     val correct       : Int                       = 0,
@@ -31,6 +31,7 @@ data class TestHistoryEntry(
     val modeLabel: String get() = when (mode) {
         "QBANK" -> "প্রশ্নভান্ডার"
         "STUDY" -> "পড়া"
+        "VIVA"  -> "মৌখিক পরীক্ষা"
         else    -> "কুইজ"
     }
 

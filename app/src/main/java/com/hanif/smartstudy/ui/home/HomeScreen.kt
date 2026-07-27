@@ -144,6 +144,7 @@ fun HomeScreen(
     onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
+    onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
     onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -196,7 +197,8 @@ fun HomeScreen(
                 onOpenMenuPage = onOpenMenuPage,
                 onOpenMockTest = onOpenMockTest,
                 onOpenFocusMode = onOpenFocusMode,
-                onOpenAiChat = onOpenAiChat
+                onOpenAiChat = onOpenAiChat,
+                onOpenViva = onOpenViva
             )
 
             if (state.isLoading) {
@@ -367,7 +369,8 @@ private fun HomeQuickAccessGrid(
     onOpenMenuPage : (String) -> Unit,
     onOpenMockTest : (Boolean) -> Unit = {},
     onOpenFocusMode: () -> Unit = {},
-    onOpenAiChat   : () -> Unit = {}
+    onOpenAiChat   : () -> Unit = {},
+    onOpenViva     : () -> Unit = {}
 ) {
     var showMockTestPicker by remember { mutableStateOf(false) }
 
@@ -389,6 +392,9 @@ private fun HomeQuickAccessGrid(
                 GridTileData(vecIcon(Icons.Default.Keyboard), "Typing",       Color(0xFF16A34A), onOpenTyping),
                 // Mock Test ট্যাপ করলে আগে Quiz/QBank বেছে নিতে বলা হয়, তারপর সেই মোডে ফুল Mock Test ফ্লো ওপেন হয়
                 GridTileData(vecIcon(Icons.Default.Assignment), "Mock Test",  Color(0xFF7C3AED), { showMockTestPicker = true }),
+                // ── ভয়েসে কথোপকথনমূলক মৌখিক পরীক্ষা — AI ছাত্রের নাম ধরে বিষয়/টপিক
+                // জিজ্ঞেস করে, তারপর Quiz থেকে random প্রশ্ন নিয়ে ভয়েসে যাচাই করে ──
+                GridTileData(emojiIcon("🎙️"), "Viva Mode", Color(0xFFDC2626), onOpenViva),
                 GridTileData(vecIcon(Icons.Default.Cancel),   "Wrong Review", Color(0xFFDC2626), { onOpenMenuPage("wrongreview") })
             )
         )

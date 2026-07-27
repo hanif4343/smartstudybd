@@ -23,6 +23,10 @@ import androidx.room.RoomDatabase
     // ইউজার কোন স্টেজ পর্যন্ত আনলক করেছে (bn/en আলাদা), দেখো data/model/BijoyCurriculum.kt
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
     version  = 10,
+    // v8 → v9: QuestionEntity তে questionPaperUrls column যোগ হলো — QBank-এর
+    // "Question Paper" কলাম থেকে আসা কমা-সেপারেটেড ImgBB লিংক ক্যাশ করার জন্য
+    // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
+    version  = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

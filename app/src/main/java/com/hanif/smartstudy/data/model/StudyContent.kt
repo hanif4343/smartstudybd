@@ -74,6 +74,8 @@ data class QBankItem(
     @SerializedName("Exam_Name")     val examName     : String? = null,
     @SerializedName("Image")         val imageUrl     : String? = null,
     @SerializedName("VisualURL")     val visualUrl    : String? = null,
+    // "Question Paper" কলাম — কমা দিয়ে আলাদা করা একাধিক ImgBB লিংক, আসল প্রশ্নপত্রের ছবি
+    @SerializedName("QuestionPaper") val questionPaperUrls: String? = null,
     // QBank-এ একাধিক Year/Exam-এ repeat হওয়া প্রশ্ন auto-important ধরা হয় (ContentRepository তে),
     // তবে এডমিন চাইলে ম্যানুয়ালিও ফ্ল্যাগ বসাতে পারবে — এই ফিল্ড সেটার জন্য
     @SerializedName("important")     val important    : Boolean? = null,
@@ -195,6 +197,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             // visual url
             k == "visualurl" || k == "visual_url"
                 || k == "visualurl"                 -> "VisualURL"
+            // question paper — প্রশ্নপত্রের ছবি (কমা দিয়ে একাধিক ImgBB লিংক), QBank only
+            k == "question paper" || k == "question_paper"
+                || k == "questionpaper"              -> "QuestionPaper"
             // id
             k == "id"                               -> "id"
             // delta sync টাইমস্ট্যাম্প

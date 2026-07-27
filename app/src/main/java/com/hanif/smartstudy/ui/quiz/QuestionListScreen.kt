@@ -292,6 +292,11 @@ fun QuestionListScreen(
     val vmState by viewModel.state.collectAsState()
     val isModelTest = vmState.activeModelTest != null
 
+    // ── QBank: 👁️/⌨️ আইকন দুটো টপবারে শুধু তখনই দেখা যাবে যখন এই পাতায় (page)
+    // কমপক্ষে একটা Written প্রশ্ন আছে — MCQ-ভিত্তিক subtopic-এ এই আইকন দুটোর
+    // কোনো effect নেই, তাই দেখানোরও দরকার নেই। Study mode-এ আগের মতোই সবসময় দেখা যায়। ──
+    val hasWrittenOnPage = remember(pagedQuestions) { pagedQuestions.any { it.isWritten() } }
+
     val readingIdx by remember { derivedStateOf { pageOffset + listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
 
@@ -312,7 +317,8 @@ fun QuestionListScreen(
                     studyRevealMode = studyRevealMode,
                     onToggleStudyRevealMode = onToggleStudyRevealMode,
                     studyRecallMode = studyRecallMode,
-                    onToggleStudyRecallMode = onToggleStudyRecallMode
+                    onToggleStudyRecallMode = onToggleStudyRecallMode,
+                    hasWrittenQuestions = hasWrittenOnPage
                 )
             }
         ) { padding ->
@@ -941,8 +947,14 @@ private fun QuestionTopBar(
     studyRevealMode         : Boolean = false,
     onToggleStudyRevealMode : (() -> Unit)? = null,
     studyRecallMode         : Boolean = false,
-    onToggleStudyRecallMode : (() -> Unit)? = null
+    onToggleStudyRecallMode : (() -> Unit)? = null,
+    // ── QBank-এ 👁️/⌨️ আইকন দুটো শুধু তখনই দেখাতে হবে যখন এই পাতায় Written
+    // প্রশ্ন আছে। Study mode-এ এই ফ্ল্যাগের কোনো effect নেই (আগের মতোই সবসময় দেখা যায়)। ──
+    hasWrittenQuestions     : Boolean = false
 ) {
+    // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
+    val showRevealRecallIcons = mode == StudyMode.STUDY ||
+        (mode == StudyMode.QBANK && hasWrittenQuestions)
     TopAppBar(
         title = {
             Column {
@@ -970,9 +982,9 @@ private fun QuestionTopBar(
                         color = Indigo600, fontFamily = NotoSansBengali)
                 }
             }
-            // ── Study: "শুধু প্রশ্ন দেখ" টগল — Quiz/QBank-এ এই বাটন দেখা যায় না,
-            //    যেহেতু ওখানে উত্তর এমনিতেই MCQ সিলেক্ট/লেখার আগ পর্যন্ত হাইড থাকে ──
-            if (mode == StudyMode.STUDY && onToggleStudyRevealMode != null) {
+            // ── Study/QBank: "শুধু প্রশ্ন দেখ" টগল — QBank-এ শুধু Written প্রশ্ন
+            //    থাকলেই দেখা যায় (MCQ-তে উত্তর এমনিতেই সিলেক্ট করার আগ পর্যন্ত হাইড থাকে) ──
+            if (showRevealRecallIcons && onToggleStudyRevealMode != null) {
                 IconButton(onClick = onToggleStudyRevealMode) {
                     Icon(
                         if (studyRevealMode) Icons.Default.VisibilityOff else Icons.Default.Visibility,
@@ -983,8 +995,9 @@ private fun QuestionTopBar(
             }
             // ── ⌨️ রিকল-টাইপিং মোড টগল — চালু করলে উত্তর দেখার আগে টাইপ-বক্সে
             //    নিজে লিখে Enter চাপতে হয়, তারপর ঠিক/ভুল বেছে Enter চাপলেই
-            //    পরের প্রশ্নে চলে যায়। বন্ধ থাকলে সবকিছু আগের মতোই। ──
-            if (mode == StudyMode.STUDY && onToggleStudyRecallMode != null) {
+            //    পরের প্রশ্নে চলে যায়। বন্ধ থাকলে সবকিছু আগের মতোই। QBank-এ শুধু
+            //    Written প্রশ্ন থাকলেই দেখা যায়। ──
+            if (showRevealRecallIcons && onToggleStudyRecallMode != null) {
                 IconButton(onClick = onToggleStudyRecallMode) {
                     Icon(
                         Icons.Default.Keyboard,
