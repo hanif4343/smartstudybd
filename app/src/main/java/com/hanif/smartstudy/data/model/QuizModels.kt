@@ -15,6 +15,12 @@ data class NavPath(
 // ── App Mode ──
 enum class StudyMode { QUIZ, STUDY, QBANK }
 
+// ── QBank-only ফিল্টার: ডিফল্ট পদবী (Designation) — এখনকার Subject→SubTopic
+// হায়ারার্কি অপরিবর্তিত। প্রতিষ্ঠান (Institution) বাছাই করলে হায়ারার্কি উল্টে যায়
+// (আগে প্রতিষ্ঠান, তার আন্ডারে যত পদবী)। সাল (Year) বাছাই করলে flat প্রশ্ন-লিস্ট
+// (subject/subTopic নির্বিশেষে ওই সালের সব প্রশ্ন একসাথে)। ──
+enum class QBankFilterMode { DESIGNATION, INSTITUTION, YEAR }
+
 // ── Question answer state (per question) ──
 sealed class AnswerState {
     object Unanswered : AnswerState()
