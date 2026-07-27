@@ -31,15 +31,23 @@ import androidx.compose.ui.window.Dialog
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.CustomPassageEntity
 import com.hanif.smartstudy.data.local.MistakeErrorType
+import com.hanif.smartstudy.data.local.TypingKeyStatEntity
 import com.hanif.smartstudy.data.local.toEntity
+import com.hanif.smartstudy.data.model.BijoyCurriculum
+import com.hanif.smartstudy.data.remote.TypingCloudSyncService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.CurriculumProvider
 import com.hanif.smartstudy.util.Hand
 import com.hanif.smartstudy.util.HandKeyMap
+import com.hanif.smartstudy.util.RoadmapPlan
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.SpeedRankUtil
 import com.hanif.smartstudy.util.TtsManager
 import com.hanif.smartstudy.util.TypingAdaptiveContentProvider
 import com.hanif.smartstudy.util.TypingErrorAnalyzer
 import com.hanif.smartstudy.util.TypingHistoryEntry
+import com.hanif.smartstudy.util.TypingKeySound
+import com.hanif.smartstudy.util.TypingKeyStatStore
 import com.hanif.smartstudy.util.TypingMistakeLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,6 +91,21 @@ data class PassageInfo(val text: String, val difficulty: String)
 // লোড শেষ না হওয়া পর্যন্ত/লোড ব্যর্থ হলে এই তালিকা খালি থাকে — সব pool-getter ও
 // fallback ফাংশন খালি তালিকা নিরাপদে হ্যান্ডেল করে (ক্র্যাশ করে না, খালি স্ট্রিং রিটার্ন করে)।
 private var PASSAGES: List<PassageInfo> = emptyList()
+
+// ── Phase ২: চিহ্ন ও Backspace ড্রিলের জন্য একটা ছোট curated ব্যাংক — সাধারণ Study/Sheet
+// কনটেন্টে বাস্তব-জীবনের চিহ্ন (@, %, &, ., , ইত্যাদি) খুব কম/অসম-ভাবে থাকে, তাই এই
+// নির্দিষ্ট মাইক্রো-ড্রিলের জন্য ইমেইল/দাম/ফর্ম-স্টাইল কয়েকটা বাস্তবসম্মত বাক্য —
+// PASSAGES-এর মতো এটা "সাধারণ টাইপিং কনটেন্ট" না, তাই hardcode রাখা এখানে সমস্যা না ──
+private val SYMBOL_DRILL_BANK = listOf(
+    "rahat.hasan@gmail.com এই ইমেইলে সিভি পাঠান, বিষয়: চাকরির আবেদন (Job Application)।",
+    "পণ্যের দাম: ৫৫০.৫০ টাকা, ভ্যাট ১৫% যোগ হবে। মোট = ৬৩২.৮৫ টাকা (৳)।",
+    "নাম: ______, বয়স: ___, ফোন: +৮৮০১৭xxxxxxxx, ইমেইল: example@mail.com।",
+    "প্রশ্ন: ১) সঠিক উত্তর কোনটি? ক) ২০% খ) ৩৫% গ) ৫০% ঘ) কোনোটিই না।",
+    "Please confirm by 5:00 PM; otherwise, the slot (Ref#: 2025-07) will be cancelled!",
+    "মূল্য-তালিকা: ১০০/-, ২৫০/-, ৫০০/- ও ১,০০০/- টাকার প্যাকেজ পাওয়া যাচ্ছে।",
+    "Subject: Re: Application (Urgent) — attachments: CV.pdf, NID.jpg, Photo.png.",
+    "টেলিফোন: (০২)-৫৫০০-১১২২, মোবাইল: ০১৭xx-xxxxxx; সময়: সকাল ৯টা-বিকাল ৫টা।",
+)
 
 /** TypingPracticeScreen ও TypingRaceScreen — দুটোই স্ক্রিন খোলার সাথে সাথে এটা কল করে,
  *  Sheet থেকে প্যাসেজ পুল একবার লোড করে নেয় (RAM cache থাকলে আবার নেটওয়ার্ক কল হয় না)। */
@@ -217,6 +240,35 @@ fun TypingPracticeScreen(
     var history by remember { mutableStateOf<List<TypingHistoryEntry>>(emptyList()) }
     var weakWordDashboard by remember { mutableStateOf(listOf<String>()) }  // পুরনো/lifetime দুর্বল শব্দ, শুরুর আগে দেখানোর জন্য
     var lifetimeHandSummary by remember { mutableStateOf<Pair<Int, Int>?>(null) }  // (leftErr%, rightErr%) — যথেষ্ট ডেটা থাকলেই non-null
+    // ── Phase ১: প্রতিটা কী-এর accuracy — লাইভ হিটম্যাপ (KeyHeatmapCard) এখান থেকেই আঁকা হয়,
+    // দুর্বল-কী ড্রিলও (startKeyDrillSession()) এই একই DB থেকে ডেটা নেয় ──
+    var keyHeatmap by remember { mutableStateOf(listOf<TypingKeyStatEntity>()) }
+    // ── চলতি সেশনে প্রতিটা কী কতবার সঠিক/ভুল হয়েছে — RAM-এ জমা হয়, সেশন শেষে
+    // (finishSession()/finishExamPhase()) একবারে persist হয়, বারবার DB-write এড়াতে ──
+    val keyStatsDelta = remember { mutableMapOf<Char, IntArray>() }
+    // ── Phase ৩: প্রোফাইল/Roadmap/আঙুল-পজিশন — তিনটাই Dialog হিসেবে, নতুন কোনো
+    // নেভিগেশন রুট লাগেনি। এই ডিক্লেয়ারেশনগুলো এখানেই থাকা জরুরি — নিচের
+    // LaunchedEffect(Unit)-এই এগুলো ব্যবহার হয়, আর Kotlin-এ local var/state
+    // ব্যবহারের আগেই declare করতে হয় (আগে এই ব্লকটা অনেক নিচে ছিল, তাতে
+    // "Unresolved reference" কম্পাইল এরর হচ্ছিল) ──
+    var showProfileDialog by remember { mutableStateOf(false) }
+    var showRoadmapWizard by remember { mutableStateOf(false) }
+    var showFingerDialog  by remember { mutableStateOf(false) }
+    var roadmapPlan       by remember { mutableStateOf<RoadmapPlan?>(null) }
+    // ── Phase ৩ (#1+#2): Key-unlock কারিকুলাম — ট্র্যাক, বর্তমান স্টেজ, স্টেজের
+    // নতুন ক্যারেক্টারগুলোর unlock-প্রগ্রেস (String হিসেবে রাখা হয়, কারণ ড়/ঢ়/য়-এর
+    // মতো কিছু বাংলা অক্ষর একাধিক Unicode codepoint-এর সমন্বয়ে গঠিত — এগুলো একটা
+    // Kotlin Char-এ ধরানো যায় না, তাই BijoyCurriculum.kt-ও String ব্যবহার করে),
+    // আর সদ্য-আনলক সেলিব্রেশন ──
+    var curriculumTrack    by remember { mutableStateOf("bn") }
+    var curriculumStage    by remember { mutableStateOf(1) }
+    var curriculumProgress by remember { mutableStateOf(listOf<Pair<String, Int>>()) }
+    var justUnlockedStage  by remember { mutableStateOf<Int?>(null) }
+    // ── Neonlipi-স্টাইল সব নতুন ফিচার (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock,
+    // BCC, Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) এই একটা
+    // ফ্ল্যাগের পেছনে — Settings-এ "🧪 Smart Typing" টগল বন্ধ থাকলে (ডিফল্ট) নিচের
+    // এই সব UI ব্লক সম্পূর্ণ hide থাকবে, আগের পরিচিত UI-ই দেখা যাবে ──
+    var smartTypingEnabled by remember { mutableStateOf(session.getSmartTypingEnabled()) }
     LaunchedEffect(Unit) {
         bestWpm = session.getTypingBestWpm()
         history = session.getTypingHistory()
@@ -232,6 +284,24 @@ fun TypingPracticeScreen(
             val rightTotal = it.rightCorrectChars + it.rightWrongChars
             if (leftTotal < 100 || rightTotal < 100) null
             else (it.leftErrorRate() * 100).toInt() to (it.rightErrorRate() * 100).toInt()
+        }
+
+        // ── Phase ৩: Roadmap প্ল্যান লোকাল থেকে লোড ──
+        roadmapPlan = session.getRoadmapPlan()
+
+        // ── Phase ৩ (#1+#2): কারিকুলামের বর্তমান স্টেজ ও প্রগ্রেস লোড ──
+        curriculumStage = CurriculumProvider.getCurrentStage(ctx, curriculumTrack)
+        curriculumProgress = CurriculumProvider.stageProgress(ctx, curriculumTrack, curriculumStage)
+
+        // ── Phase ৩: Cloud Sync — স্ক্রিন খোলার সাথে সাথে নীরবে pull করে merge করে
+        // নেয় (guest হলে/ইন্টারনেট না থাকলে silently স্কিপ হয়ে যায়, UI ব্লক করে না) ──
+        session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+            val cloud = TypingCloudSyncService.pull(phone)
+            if (cloud != null) {
+                session.mergeTypingCloudSnapshot(cloud.bestWpm, cloud.history)
+                bestWpm = session.getTypingBestWpm()
+                history = session.getTypingHistory()
+            }
         }
     }
 
@@ -275,7 +345,16 @@ fun TypingPracticeScreen(
 
     // ── AI Adaptive Session — "free" (স্বাভাবিক প্র্যাকটিস) বনাম "adaptive" (দুই-ধাপ) ──
     var sessionMode      by remember { mutableStateOf("free") }   // "free" | "adaptive"
+    // ── Phase ২: Govt Job মক টেস্ট — ইউজার সিলেক্ট করা সময়সীমা (মিনিট) ও শেষে
+    // দেখানোর জন্য পেনাল্টি WPM (দেখো startGovtMockTest()/finishSession()) ──
+    var govtMockMinutes    by remember { mutableStateOf(10) }
+    var govtMockPenaltyWpm by remember { mutableStateOf(0) }
     var sessionLanguage  by remember { mutableStateOf("bn") }     // adaptive মোডে ভাষা মিশবে না
+
+    // ── Phase ১: ভাষা বদলালে (🌐 সিলেক্টর) হিটম্যাপও সেই ভাষার কী-স্ট্যাট দিয়ে রিলোড হয় ──
+    LaunchedEffect(sessionLanguage) {
+        keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
+    }
 
     /** "প্র্যাকটিস" মোডের বর্তমান পুল — difficulty অনুযায়ী (বা "custom" হলে নিজের
      *  প্যাসেজ), এবং টপ বারের 🌐 ভাষা সিলেক্টর অনুযায়ী ফিল্টার করা। ভাষা-ফিল্টারে
@@ -634,6 +713,12 @@ fun TypingPracticeScreen(
             rightCorrect = rightCorrectChars, rightWrong = rightWrongChars,
             syncLossCount = syncLossCount
         )
+        // ── Phase ২: Govt Job মক টেস্টে প্রতিটা ভুল কী-প্রেসের জন্য WPM থেকে পেনাল্টি
+        // কাটা হয় (বাস্তব সরকারি ডেটা এন্ট্রি পরীক্ষার নিয়ম অনুযায়ী) — result.wpm
+        // অপরিবর্তিত থাকে (bestWPM/history-এর সাথে তুলনা সঠিক রাখতে), শুধু আলাদা
+        // state-এ পেনাল্টি রাখা হয়, ResultCard-এর পাশে আলাদা কার্ডে দেখানো হয় ──
+        govtMockPenaltyWpm = if (sessionMode == "govtmock")
+            (incorrectKeystrokes * 0.5).toInt() else 0
         result = r
         onResult(r)
         if (sessionMode == "study") markCurrentStudyItemUsed()
@@ -641,6 +726,13 @@ fun TypingPracticeScreen(
             session.recordTypingResult(r.wpm, r.rawWpm, r.accuracy, r.timeSec)
             bestWpm = maxOf(bestWpm, r.wpm)
             history = session.getTypingHistory()
+
+            // ── Phase ৩: Cloud Sync — লোকাল persist-এর পরই নীরবে cloud-এ push (guest
+            // হলে/নেট না থাকলে ভেতরেই silently স্কিপ/fail হয়, মূল ফলাফল প্রদর্শনে
+            // কোনো প্রভাব পড়ে না) ──
+            session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+                TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
+            }
 
             // ── ধাপ ৪: এই সেশনের হাত-ভিত্তিক ডেটা Room-এ cumulative করে যোগ ──
             val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
@@ -672,6 +764,34 @@ fun TypingPracticeScreen(
                 .getTopWeakWords(userId, "bn", limit = 10).map { it.targetWord } +
                 AppDatabase.getInstance(ctx).typingMistakeDao()
                 .getTopWeakWords(userId, "en", limit = 5).map { it.targetWord }
+
+            // ── Phase ১/২: এই সেশনে জমা হওয়া প্রতিটা কী-এর সঠিক/ভুল কাউন্ট একবারে
+            // persist — প্রতিটা char নিজের ধরন (বাংলা অক্ষর/ইংরেজি অক্ষর/চিহ্ন) অনুযায়ী
+            // আলাদা bucket-এ ভাগ হয়ে যায় ("sym" bucket-টাই Phase ২-এর চিহ্ন-ড্রিলের ভিত্তি) —
+            // তারপর হিটম্যাপ রিফ্রেশ (নতুন সংখ্যা সাথে সাথে দেখাতে) ──
+            if (keyStatsDelta.isNotEmpty()) {
+                val bnDelta  = keyStatsDelta.filterKeys { it.code in 0x0980..0x09FF }
+                val symDelta = keyStatsDelta.filterKeys { it.code !in 0x0980..0x09FF && !it.isLetterOrDigit() }
+                val enDelta  = keyStatsDelta.filterKeys { it.code !in 0x0980..0x09FF && it.isLetterOrDigit() }
+                if (bnDelta.isNotEmpty())  TypingKeyStatStore.addDeltas(ctx, "bn", bnDelta)
+                if (enDelta.isNotEmpty())  TypingKeyStatStore.addDeltas(ctx, "en", enDelta)
+                if (symDelta.isNotEmpty()) TypingKeyStatStore.addDeltas(ctx, "sym", symDelta)
+                keyStatsDelta.clear()
+                keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
+            }
+
+            // ── Phase ৩ (#1+#2): কারিকুলাম-মোডে সেশন শেষ হলে unlock-শর্ত চেক করা হয় —
+            // পূরণ হলে পরের স্টেজে এগিয়ে যায় (celebration UI দেখায়), নাহলে চুপচাপ
+            // বর্তমান স্টেজেরই প্রগ্রেস (progress bar) আপডেট হয় ──
+            if (sessionMode == "curriculum") {
+                val targetWpm = session.getTypingTargetWpm()
+                val advanced = CurriculumProvider.checkAndAdvance(ctx, curriculumTrack, targetWpm, r.wpm)
+                if (advanced != null) {
+                    curriculumStage = advanced
+                    justUnlockedStage = advanced
+                } 
+                curriculumProgress = CurriculumProvider.stageProgress(ctx, curriculumTrack, curriculumStage)
+            }
         }
     }
 
@@ -707,6 +827,19 @@ fun TypingPracticeScreen(
             // ইতি নিচের আলাদা effect-এ হ্যান্ডল হয়) ──
             if (sessionMode == "exam") {
                 val pool = poolForLanguage(examPhase)
+                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                passageIndex = nextIdx
+                passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
+                userInput    = ""
+                frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
+                return@LaunchedEffect
+            }
+
+            // ── Phase ২: Govt Job মক টেস্ট — একটা প্যাসেজ শেষ হলেও নির্বাচিত সময়সীমা
+            // (govtMockMinutes) শেষ না হওয়া পর্যন্ত পরের random প্যাসেজে লুপ করে (সময়-ভিত্তিক
+            // জোরপূর্বক-ইতি নিচের আলাদা effect-এ হ্যান্ডল হয়, ঠিক Exam Simulation-এর মতোই) ──
+            if (sessionMode == "govtmock") {
+                val pool = currentPool()
                 val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
@@ -861,6 +994,19 @@ fun TypingPracticeScreen(
                 )
                 session.addTypingSecondsToday(timeSec)
                 todaySecondsBefore = session.getTypingTodaySeconds()
+
+                // ── Phase ১/২: দুই ফেজ মিলিয়ে জমা হওয়া কী-স্ট্যাট একবারে persist —
+                // বাংলা/ইংরেজি/চিহ্ন — তিন bucket-এ ভাগ হয়ে যায় ──
+                if (keyStatsDelta.isNotEmpty()) {
+                    val bnDelta  = keyStatsDelta.filterKeys { it.code in 0x0980..0x09FF }
+                    val symDelta = keyStatsDelta.filterKeys { it.code !in 0x0980..0x09FF && !it.isLetterOrDigit() }
+                    val enDelta  = keyStatsDelta.filterKeys { it.code !in 0x0980..0x09FF && it.isLetterOrDigit() }
+                    if (bnDelta.isNotEmpty())  TypingKeyStatStore.addDeltas(ctx, "bn", bnDelta)
+                    if (enDelta.isNotEmpty())  TypingKeyStatStore.addDeltas(ctx, "en", enDelta)
+                    if (symDelta.isNotEmpty()) TypingKeyStatStore.addDeltas(ctx, "sym", symDelta)
+                    keyStatsDelta.clear()
+                    keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
+                }
             }
         }
     }
@@ -875,6 +1021,15 @@ fun TypingPracticeScreen(
         finishExamPhase()
     }
 
+    // ── Phase ২: Govt Job মক টেস্ট — নির্বাচিত সময়সীমা (govtMockMinutes) শেষ হলে
+    // মাঝ-প্যাসেজেও জোর করে থামিয়ে দেয়, ঠিক Exam Simulation-এর মতোই ──
+    LaunchedEffect(elapsedSec, sessionMode, govtMockMinutes, isStarted, isFinished) {
+        if (sessionMode != "govtmock" || !isStarted || isFinished) return@LaunchedEffect
+        if (elapsedSec < govtMockMinutes * 60) return@LaunchedEffect
+
+        finishSession()
+    }
+
     // ── Word-by-word matching — একটা শব্দ পুরো টাইপ করে স্পেস চাপলেই (বা প্যাসেজের
     // শেষ শব্দ হলে) সেটা "লক" হয়ে যায়, চিরস্থায়ীভাবে ঠিক/ভুল ফিক্স হয়ে যায়। এতে
     // একটা শব্দে ভুল হলে শুধু সেই শব্দটাই প্রভাবিত হয়, বাকি সব শব্দ (আগে/পরে)
@@ -882,7 +1037,13 @@ fun TypingPracticeScreen(
     // আর নেইই (কোনো resync-heuristic লাগে না, কাঠামোগতভাবেই এড়ানো)। ──
     fun onInputChange(new: String) {
         if (isFinished) return
+        // ── Phase ২: Govt Job মক টেস্টে Backspace/মুছে ফেলা নিষিদ্ধ — বাস্তব সরকারি
+        // ডেটা এন্ট্রি পরীক্ষার নিয়ম অনুযায়ী, ভুল হলেই এগিয়ে যেতে হয়, পেছনে ফেরা যায় না ──
+        if (sessionMode == "govtmock" && new.length < userInput.length) return
         if (!isStarted && new.isNotEmpty()) isStarted = true
+        // ── Phase ১: কী-সাউন্ড — শুধু ক্যারেক্টার যোগ হলে বাজে (ব্যাকস্পেস/মুছে ফেলায় না,
+        // নাহলে ব্যাকস্পেস দেওয়াও "পুরস্কৃত" মনে হতে পারে) ──
+        if (smartTypingEnabled && new.length > userInput.length) TypingKeySound.playForCurrentPreset(ctx)
         var normalized = normalizeBn(new)
 
         // ── স্মার্ট অটো-রিসিঙ্ক (স্পেস মিস হ্যান্ডলিং) ──
@@ -943,6 +1104,8 @@ fun TypingPracticeScreen(
                                 Hand.LEFT  -> leftCorrectChars++
                                 Hand.RIGHT -> rightCorrectChars++
                             }
+                            // ── Phase ১: এই নির্দিষ্ট কী-এর জন্য "সঠিক" গণনা বাড়লো ──
+                            keyStatsDelta.getOrPut(tc) { intArrayOf(0, 0) }[0]++
                         }
                     } else {
                         incorrectKeystrokes++
@@ -951,6 +1114,8 @@ fun TypingPracticeScreen(
                                 Hand.LEFT  -> leftWrongChars++
                                 Hand.RIGHT -> rightWrongChars++
                             }
+                            // ── Phase ১: এই নির্দিষ্ট কী-এর জন্য "ভুল" গণনা বাড়লো ──
+                            keyStatsDelta.getOrPut(tc) { intArrayOf(0, 0) }[1]++
                         }
                     }
                 }
@@ -1030,6 +1195,75 @@ fun TypingPracticeScreen(
         showExamPhaseTransition = false
         // adaptive সেশন-স্টেট এখানে ইচ্ছাকৃতভাবে রিসেট করা হয়নি — free practice-এ ফিরে
         // গেলে sessionMode="free" আলাদাভাবে সেট করে দিলেই যথেষ্ট (নিচের startAdaptiveSession দেখো)
+    }
+
+    /** "🎯 দুর্বল-কী ড্রিল" বাটনে ট্যাপ করলে কল হয় — Phase ১-এর key-stat DB থেকে
+     *  সবচেয়ে কম accuracy-র কী-গুলো বের করে, তারপর ইতিমধ্যে লোড হওয়া (Sheet-সোর্সড)
+     *  পুল থেকে সেই কী-গুলো সবচেয়ে বেশি আছে এমন প্যাসেজটা বেছে নেয় — কোনো নতুন AI কল
+     *  লাগে না, শুধু বিদ্যমান পুল থেকেই সবচেয়ে প্রাসঙ্গিক প্যাসেজ খোঁজা হয়। যথেষ্ট
+     *  দুর্বল-কী ডেটা এখনো জমেনি (নতুন ইউজার) হলে সাধারণ পুল থেকেই random একটা প্যাসেজ। */
+    fun startKeyDrillSession() {
+        scope.launch {
+            val weakChars = TypingKeyStatStore.getWeakest(ctx, sessionLanguage, minSamples = 10, limit = 6)
+                .mapNotNull { it.keyChar.firstOrNull() }
+            val pool = currentPool()
+            val drillText = if (weakChars.isNotEmpty() && pool.isNotEmpty()) {
+                pool.maxByOrNull { p -> weakChars.sumOf { c -> p.text.count { ch -> ch == c } } }?.text
+            } else null
+
+            val finalText = drillText ?: pool.randomOrNull()?.text
+            if (!finalText.isNullOrBlank()) {
+                reset(0, listOf(PassageInfo(finalText, "all")))
+                sessionMode = "keydrill"
+            }
+        }
+    }
+
+    /** "🔣 চিহ্ন ও Backspace প্র্যাকটিস" বাটনে ট্যাপ করলে কল হয় — একই দুর্বল-কী লজিক,
+     *  শুধু "sym" bucket (Phase ১-এর তিন-ভাগ script split থেকে) থেকে দুর্বল চিহ্ন খোঁজে,
+     *  আর সাধারণ Sheet-পুলের বদলে SYMBOL_DRILL_BANK থেকে প্যাসেজ বেছে নেয় (কারণ সাধারণ
+     *  কনটেন্টে চিহ্নের ঘনত্ব যথেষ্ট না) */
+    fun startSymbolDrillSession() {
+        scope.launch {
+            val weakSymbols = TypingKeyStatStore.getWeakest(ctx, "sym", minSamples = 5, limit = 8)
+                .mapNotNull { it.keyChar.firstOrNull() }
+            val drillText = if (weakSymbols.isNotEmpty()) {
+                SYMBOL_DRILL_BANK.maxByOrNull { s -> weakSymbols.sumOf { c -> s.count { ch -> ch == c } } }
+            } else null
+
+            val finalText = drillText ?: SYMBOL_DRILL_BANK.random()
+            reset(0, listOf(PassageInfo(finalText, "all")))
+            sessionMode = "symboldrill"
+        }
+    }
+
+    /** "🏛️ Govt Job মক টেস্ট" শুরু বাটনে (নির্বাচিত সময়সীমাসহ) ট্যাপ করলে কল হয় —
+     *  Backspace বন্ধ থাকবে (দেখো onInputChange()), ভুল হলে WPM থেকে পেনাল্টি কাটা হবে
+     *  (দেখো finishSession()), নির্বাচিত সময় (৫/১০/১৫ মিনিট) শেষ না হওয়া পর্যন্ত
+     *  প্যাসেজে প্যাসেজে লুপ চলতে থাকবে (দেখো "Check completion" effect)। */
+    fun startGovtMockTest(minutes: Int) {
+        govtMockMinutes = minutes
+        govtMockPenaltyWpm = 0
+        val pool = currentPool()
+        reset(0, pool)
+        sessionMode = "govtmock"
+    }
+
+    /** "🗝️ Adaptive Key-Unlock" বাটনে ট্যাপ করলে কল হয় — বর্তমান স্টেজ পর্যন্ত আনলক
+     *  হওয়া ক্যারেক্টার দিয়ে একটা সিন্থেটিক ড্রিল-টেক্সট বানায় (দেখো
+     *  CurriculumProvider.buildDrillPassage())। সেশন শেষে (finishSession()) unlock-শর্ত
+     *  চেক হয়ে পরের স্টেজে এগোনো যায় কিনা দেখা হয়। */
+    fun startCurriculumSession(track: String) {
+        curriculumTrack = track
+        scope.launch {
+            curriculumStage = CurriculumProvider.getCurrentStage(ctx, track)
+            curriculumProgress = CurriculumProvider.stageProgress(ctx, track, curriculumStage)
+            val drillText = CurriculumProvider.buildDrillPassage(track, curriculumStage)
+            if (drillText.isNotBlank()) {
+                reset(0, listOf(PassageInfo(drillText, "all")))
+                sessionMode = "curriculum"
+            }
+        }
     }
 
     // ── আগে হার্ডকোডেড PASSAGES তালিকা এখান থেকেই সরাসরি পড়া হতো। এখন Google Sheet-এর
@@ -1125,6 +1359,11 @@ fun TypingPracticeScreen(
             history = session.getTypingHistory()
             session.addTypingSecondsToday(timeSec)
             todaySecondsBefore = session.getTypingTodaySeconds()
+
+            // ── Phase ৩: Cloud Sync ──
+            session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+                TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
+            }
         }
     }
 
@@ -1377,6 +1616,137 @@ fun TypingPracticeScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
                     }
                 }
+                // ── Neonlipi-স্টাইল নতুন মোড-বাটনগুলো (দুর্বল-কী ড্রিল, চিহ্ন ড্রিল,
+                // BCC পরীক্ষা, Govt Mock, Key-unlock কারিকুলাম) — সবগুলো "🧪 Smart
+                // Typing" টগলের পেছনে, Settings থেকে অন করলেই দেখা যাবে ──
+                if (smartTypingEnabled) {
+                // ── Phase ১: দুর্বল-কী ড্রিল — Neonlipi-এর "দুর্বলতা ধরে ধরে সারানো"
+                // ফিচারের সমতুল্য, একটা আলাদা full-width রো হিসেবে (যথেষ্ট গুরুত্বপূর্ণ,
+                // 2x2 গ্রিডে গুঁজে না দিয়ে) ──
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)),
+                    color    = if (sessionMode == "keydrill") Color(0xFFB91C1C) else MaterialTheme.colorScheme.surfaceVariant,
+                    onClick  = { startKeyDrillSession() }
+                ) {
+                    Text("🎯 দুর্বল-কী ড্রিল", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold,
+                        color = if (sessionMode == "keydrill") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                }
+
+                // ── Phase ২: চিহ্ন ও Backspace ড্রিল + BCC পরীক্ষা — একই রো-তে দুটো বাটন ──
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "symboldrill") Color(0xFF7C3AED) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startSymbolDrillSession() }
+                    ) {
+                        Text("🔣 চিহ্ন ও Backspace", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "symboldrill") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                        color    = if (sessionMode == "exam") Color(0xFF0F766E) else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { startExamSimulation() }
+                    ) {
+                        Text("🏛️ BCC পরীক্ষা", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sessionMode == "exam") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                    }
+                }
+
+                // ── Phase ২: Govt Job মক টেস্ট — শুরু করার আগেই সময়সীমা বেছে নিতে হয়
+                // (Backspace বন্ধ + পেনাল্টি সিস্টেম — দেখো onInputChange()/finishSession()) ──
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF7C2D12).copy(alpha = 0.15f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("🏛️ Govt Job মক টেস্ট (Backspace বন্ধ, ভুলে পেনাল্টি)",
+                        fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(5, 10, 15).forEach { m ->
+                            Surface(
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)),
+                                color = if (sessionMode == "govtmock" && govtMockMinutes == m)
+                                    Color(0xFF9A3412) else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { startGovtMockTest(m) }
+                            ) {
+                                Text("$m মিনিট", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (sessionMode == "govtmock" && govtMockMinutes == m)
+                                        Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                            }
+                        }
+                    }
+                }
+
+                // ── Phase ৩ (#1+#2): Adaptive Key-Unlock কারিকুলাম — ট্র্যাক বেছে নিয়ে
+                // শুরু করা যায়, বর্তমান স্টেজ + নতুন ক্যারেক্টারগুলোর unlock-প্রগ্রেস
+                // বার সবসময় দেখায় (Neonlipi-এর স্টেজ প্রগ্রেস বার-এর সমতুল্য) ──
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("🗝️ Adaptive Key-Unlock", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("স্টেজ $curriculumStage/${BijoyCurriculum.totalStages(curriculumTrack)}",
+                            fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("bn" to "বাংলা", "en" to "ইংরেজি").forEach { (trk, label) ->
+                            Surface(
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)),
+                                color = if (curriculumTrack == trk) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = { startCurriculumSession(trk) }
+                            ) {
+                                Text(label, fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                    color = if (curriculumTrack == trk) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                            }
+                        }
+                    }
+                    if (curriculumProgress.isNotEmpty()) {
+                        Text(
+                            "এই স্টেজের নতুন কী-গুলো:",
+                            fontSize = 10.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        curriculumProgress.forEach { (ch, progress) ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(ch.toString(), fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                    fontWeight = FontWeight.Bold, modifier = Modifier.width(24.dp))
+                                LinearProgressIndicator(
+                                    progress = { progress.toFloat() / CurriculumProvider.UNLOCK_MIN_CORRECT },
+                                    modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                                Text("$progress/${CurriculumProvider.UNLOCK_MIN_CORRECT}", fontSize = 9.sp,
+                                    fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                } // ← if (smartTypingEnabled)
 
                 if (sessionMode == "study") {
                     // ── সাবজেক্ট চিপ ──
@@ -1670,13 +2040,6 @@ fun TypingPracticeScreen(
                                     }
                                 }
                             }
-                            // ── এই প্যাসেজ শেষ হলেও সেশন থামে না — পরেরটা অটো লোড হয়। সেটা
-                            // বোঝানোর জন্য শেষে " ....." দেখানো হচ্ছে (এই ব্লক শুধু
-                            // sessionMode != "freetyping" হলেই রেন্ডার হয়, যেখানে টার্গেট
-                            // প্যাসেজ থাকে) ──
-                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))) {
-                                append(" . . . . .")
-                            }
                         },
                         fontSize = 17.sp, fontWeight = FontWeight.Medium,
                         lineHeight = 29.sp, letterSpacing = 0.3.sp,
@@ -1850,6 +2213,7 @@ fun TypingPracticeScreen(
                 result?.let { r ->
                     ResultCard(r, bestWpm,
                         sessionMistakeWords = sessionMistakeWords.distinct(),
+                        showSmartFeatures = smartTypingEnabled,
                         onRetry = {
                             when {
                                 sessionMode == "freetyping" -> startFreeTyping()
@@ -1878,6 +2242,33 @@ fun TypingPracticeScreen(
                             }
                         }
                     )
+                }
+            }
+
+            // ── Phase ২: Govt Job মক টেস্টের পেনাল্টি — মূল ResultCard-এর result.wpm
+            // অপরিবর্তিত রাখা হয়েছে (bestWPM/history তুলনার জন্য), তাই পেনাল্টি এখানে
+            // আলাদা একটা ছোট কার্ডে দেখানো হয় ──
+            AnimatedVisibility(visible = smartTypingEnabled && isFinished && sessionMode == "govtmock" && result != null) {
+                result?.let { r ->
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF7C2D12).copy(alpha = 0.12f))
+                    ) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("🏛️ Govt Job মক টেস্ট — পেনাল্টি হিসাব", fontSize = 12.sp,
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            Text(
+                                "ভুল কীপ্রেস: ${r.totalChars - r.correctChars}টা → পেনাল্টি: -$govtMockPenaltyWpm WPM",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "কার্যকর WPM (পেনাল্টির পর): ${(r.wpm - govtMockPenaltyWpm).coerceAtLeast(0)}",
+                                fontSize = 14.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF9A3412)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1973,11 +2364,41 @@ fun TypingPracticeScreen(
                     }
                 }
 
+                // ── Neonlipi-স্টাইল Roadmap/প্রোফাইল/আঙুল-পজিশন/হিটম্যাপ — সবগুলো
+                // "🧪 Smart Typing" টগলের পেছনে ──
+                if (smartTypingEnabled) {
+                // ── Phase ৩: Roadmap — প্ল্যান থাকলে সামারি কার্ড, না থাকলে বানানোর বাটন ──
+                roadmapPlan?.let { plan ->
+                    RoadmapSummaryCard(plan = plan, onRebuild = { showRoadmapWizard = true })
+                } ?: run {
+                    OutlinedButton(
+                        onClick = { showRoadmapWizard = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🗺️ তোমার জন্য একটা Roadmap বানাও", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+
+                // ── Phase ৩: প্রোফাইল + আঙুল-পজিশন — একই রো-তে দুটো হালকা বাটন ──
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { showProfileDialog = true }, modifier = Modifier.weight(1f)) {
+                        Text("👤 প্রোফাইল", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { showFingerDialog = true }, modifier = Modifier.weight(1f)) {
+                        Text("✋ আঙুলের পজিশন", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    }
+                }
+
                 // ── "কঠিনতার স্তর" ও "Passage বেছে নিন" UI সম্পূর্ণ রিমুভ করা হলো —
                 // difficulty/passage নির্বাচন এখন আর ইউজারকে ম্যানুয়ালি করতে হয় না, তবে
                 // selectedDifficulty/currentPool()/reset() লজিক অপরিবর্তিত রইলো (ডিফল্ট "all"
                 // দিয়েই প্যাসেজ লুপ চলে, "আমার প্যাসেজ" ফিচার এখনো 📖 Passage কার্ডের +
                 // আইকন দিয়ে কাজ করে) ──
+
+                // ── Phase ১: লাইভ কী-হিটম্যাপ — এখনো যথেষ্ট ডেটা না জমলে কিছুই দেখায় না
+                // (KeyHeatmapCard নিজেই খালি-চেক করে) ──
+                KeyHeatmapCard(keyHeatmap)
+                } // ← if (smartTypingEnabled)
 
                 // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই।
                 // মোটা/prominent বাটন হিসেবে রাখা হলো (আগে ছিল হালকা TextButton) ──
@@ -1992,6 +2413,45 @@ fun TypingPracticeScreen(
                 }
             }
         }
+    }
+
+    // ── Phase ৩: তিনটা Dialog — প্রোফাইল, Roadmap wizard, আঙুল-পজিশন — normally এগুলো
+    // trigger-বাটনই "🧪 Smart Typing" টগলের পেছনে hidden থাকে, তাও extra safety হিসেবে
+    // এখানেও smartTypingEnabled গার্ড রাখা হলো (টগল বন্ধ করার পরও যদি কোনোভাবে state
+    // true থেকে যায়, তাহলেও ডায়ালগ খুলবে না) ──
+    if (smartTypingEnabled && showProfileDialog) {
+        TypingProfileDialog(context = ctx, onDismiss = { showProfileDialog = false })
+    }
+    if (smartTypingEnabled && showRoadmapWizard) {
+        RoadmapWizardDialog(
+            onDismiss = { showRoadmapWizard = false },
+            onComplete = { plan ->
+                scope.launch { session.saveRoadmapPlan(plan) }
+                roadmapPlan = plan
+                showRoadmapWizard = false
+            }
+        )
+    }
+    if (smartTypingEnabled && showFingerDialog) {
+        FingerPositionDialog(onDismiss = { showFingerDialog = false })
+    }
+    // ── Phase ৩ (#1+#2): নতুন স্টেজ আনলক হলে ছোট্ট সেলিব্রেশন ডায়ালগ ──
+    if (smartTypingEnabled) justUnlockedStage?.let { stage ->
+        AlertDialog(
+            onDismissRequest = { justUnlockedStage = null },
+            confirmButton = {
+                TextButton(onClick = { justUnlockedStage = null }) {
+                    Text("চালিয়ে যাও", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            },
+            title = { Text("🎉 নতুন কী আনলক!", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "অভিনন্দন! তুমি স্টেজ $stage-এ পৌঁছে গেছ — নতুন কী: ${BijoyCurriculum.newCharsAt(curriculumTrack, stage).joinToString(" ")}",
+                    fontFamily = NotoSansBengali
+                )
+            }
+        )
     }
 
     // ── নিজের প্যাসেজ যোগ করার ডায়ালগ — শুধু লোকালি সেভ হয় (Room), কোথাও পাঠানো হয় না ──
@@ -2146,6 +2606,54 @@ private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
 }
 
 @Composable
+private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>) {
+    // ── যথেষ্ট ডেটা না জমা পর্যন্ত কিছুই দেখানো হয় না — খালি/অর্থহীন হিটম্যাপ
+    // দেখানোর চেয়ে না-দেখানোই ভালো (নতুন ইউজারদের জন্য বিভ্রান্তিকর হবে না) ──
+    if (stats.isEmpty()) return
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("🌈 কী-ভিত্তিক নির্ভুলতা", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                stats.forEach { s ->
+                    val total = s.correctCount + s.wrongCount
+                    val acc = if (total > 0) s.correctCount * 100 / total else 0
+                    // ── কম নমুনা (< ৫ বার) থাকলে এখনো আত্মবিশ্বাসের সাথে বলা যায় না
+                    // এই কী দুর্বল না ভালো — নিরপেক্ষ ধূসর রঙে দেখানো হয় ──
+                    val color = when {
+                        total < 5  -> MaterialTheme.colorScheme.outline
+                        acc >= 90  -> GreenOk
+                        acc >= 70  -> AmberMid
+                        else       -> RedWrong
+                    }
+                    Surface(shape = RoundedCornerShape(8.dp), color = color) {
+                        Column(
+                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(s.keyChar, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Color.White, fontFamily = NotoSansBengali)
+                            Text("$acc%", fontSize = 9.sp, color = Color.White.copy(alpha = 0.9f))
+                        }
+                    }
+                }
+            }
+            Text(
+                "🟢 ৯০%+  🟡 ৭০-৮৯%  🔴 <৭০%  ⚪ যথেষ্ট প্র্যাকটিস হয়নি",
+                fontSize = 9.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 private fun StatsRow(
     elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
     // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
@@ -2202,6 +2710,7 @@ private fun ResultCard(
     result       : TypingResult,
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
+    showSmartFeatures: Boolean = false,
     onRetry      : () -> Unit,
     onNextPassage: () -> Unit
 ) {
@@ -2232,6 +2741,34 @@ private fun ResultCard(
             Text("Raw ${result.rawWpm} WPM",
                 fontSize = 11.sp, color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = NotoSansBengali)
+
+            // ── Phase ১: Speed-rank গেমিফিকেশন — সংখ্যার বদলে একটা পরিচিত বাহনের
+            // মাধ্যমে গতি বোঝানো, Neonlipi-এর "৪৫ র‍্যাংক" ফিচারের সরলীকৃত সংস্করণ।
+            // "🧪 Smart Typing" টগলের পেছনে — বন্ধ থাকলে আগের মতোই শুধু WPM/Raw দেখাবে ──
+            if (showSmartFeatures) run {
+                val rank = com.hanif.smartstudy.util.SpeedRankUtil.rankFor(result.wpm)
+                val next = com.hanif.smartstudy.util.SpeedRankUtil.nextRank(result.wpm)
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isNewBest) Color.White.copy(alpha = 0.1f) else Indigo600.copy(alpha = 0.1f)
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("${rank.emoji} ${rank.name}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            fontFamily = NotoSansBengali,
+                            color = if (isNewBest) Color.White else Indigo600)
+                        if (next != null) {
+                            Text(
+                                "${next.emoji} ${next.name}-এ যেতে আর ${(next.minWpm - result.wpm).coerceAtLeast(0)} WPM লাগবে",
+                                fontSize = 9.sp, fontFamily = NotoSansBengali,
+                                color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 ResultStat("✅ Accuracy", "${result.accuracy}%",

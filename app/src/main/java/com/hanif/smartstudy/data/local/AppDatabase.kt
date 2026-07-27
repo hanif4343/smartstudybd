@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -17,6 +17,12 @@ import androidx.room.RoomDatabase
     // v6 → v7: CustomPassageEntity যোগ হলো — ইউজারের নিজের যোগ করা টাইপিং প্যাসেজ (লোকাল-অনলি)
     // v7 → v8: TypingSheetPassageEntity যোগ হলো — Google Sheet "Typing" ট্যাব থেকে আসা
     // ডিফল্ট প্যাসেজ পুলের অফলাইন cache (হার্ডকোডেড PASSAGES তালিকা রিমুভ করার পর)
+    // v8 → v9: TypingKeyStatEntity যোগ হলো — Neonlipi-স্টাইল Phase ১: প্রতিটা কী-এর
+    // cumulative সঠিক/ভুল কাউন্ট — লাইভ হিটম্যাপ ও দুর্বল-কী ড্রিলের ভিত্তি
+    // v9 → v10: CurriculumProgressEntity যোগ হলো — Phase ৩ Key-unlock কারিকুলাম:
+    // ইউজার কোন স্টেজ পর্যন্ত আনলক করেছে (bn/en আলাদা), দেখো data/model/BijoyCurriculum.kt
+    // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
+    version  = 10,
     // v8 → v9: QuestionEntity তে questionPaperUrls column যোগ হলো — QBank-এর
     // "Question Paper" কলাম থেকে আসা কমা-সেপারেটেড ImgBB লিংক ক্যাশ করার জন্য
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
@@ -32,6 +38,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun studyTypingProgressDao(): StudyTypingProgressDao
     abstract fun customPassageDao(): CustomPassageDao
     abstract fun typingSheetPassageDao(): TypingSheetPassageDao
+    abstract fun typingKeyStatDao(): TypingKeyStatDao
+    abstract fun curriculumProgressDao(): CurriculumProgressDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

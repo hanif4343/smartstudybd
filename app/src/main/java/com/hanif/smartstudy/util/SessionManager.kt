@@ -23,6 +23,19 @@ data class TypingHistoryEntry(
     val timeSec  : Int
 )
 
+// ── Phase ৩: Roadmap Wizard-এর ফলাফল — ৫-ধাপ প্রশ্নমালার উত্তর থেকে বানানো
+// personalized প্ল্যান, "তোমার Roadmap" কার্ডে সবসময় দেখানো হয় (দেখো RoadmapWizard.kt) ──
+data class RoadmapPlan(
+    val tracks        : List<String> = listOf("bn"),  // "bn" | "en", multi-select
+    val experience    : String       = "new",          // "new" | "some"
+    val targetWpm     : Int          = 20,
+    val planMode      : String       = "daily",        // "daily" | "deadline"
+    val dailyMinutes  : Int          = 30,
+    val deadlineMillis: Long         = 0L,
+    val createdAt     : Long         = 0L,
+    val estimatedDoneMillis: Long    = 0L
+)
+
 class SessionManager(private val context: Context) {
     private val gson = Gson()
 
@@ -57,6 +70,21 @@ class SessionManager(private val context: Context) {
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
         val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
         val KEY_USER_PIC         = stringPreferencesKey("home_user_pic")
+        // ── Phase ১ (Neonlipi-স্টাইল কাস্টমাইজেশন): Typing Settings ──
+        // ইউজার নিজের লক্ষ্য WPM সেট করতে পারে (Settings-এ) — key-unlock/rank সিস্টেম
+        // ছাড়াও এখন থেকে ResultCard-এ target-এর সাপেক্ষে অগ্রগতি দেখানো যাবে।
+        val KEY_TYPING_TARGET_WPM   = intPreferencesKey("typing_target_wpm")
+        // কীবোর্ড ক্লিক-সাউন্ড প্রিসেট — "off" | "soft" | "mechanical" (দেখো
+        // util/TypingKeySound.kt) — গ্লোবাল KEY_SOUND_OFF অন থাকলে এটা যাই হোক না কেন বাজবে না।
+        val KEY_TYPING_SOUND_PRESET = stringPreferencesKey("typing_sound_preset")
+        // ── Phase ৩: Roadmap wizard — একবার জেনারেট করা প্ল্যান JSON আকারে রাখা হয়,
+        // দেখো getRoadmapPlan()/saveRoadmapPlan() ও ui/typing/RoadmapWizard.kt ──
+        val KEY_ROADMAP_PLAN_JSON = stringPreferencesKey("typing_roadmap_plan")
+        // ── Neonlipi-স্টাইল নতুন ফিচারগুলো (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock,
+        // BCC, Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) একটা
+        // মাস্টার টগলের পেছনে — ডিফল্ট বন্ধ (আগের UI-ই দেখা যাবে), Settings থেকে অন
+        // করলে সব একসাথে চালু হয়। দেখো getSmartTypingEnabled()/setSmartTypingEnabled()।
+        val KEY_SMART_TYPING_ON = booleanPreferencesKey("smart_typing_enabled")
         
         // Reminder Keys (Updated for DataStore Consistency)
         val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
@@ -183,6 +211,53 @@ class SessionManager(private val context: Context) {
 
     suspend fun setSoundOff(off: Boolean) {
         context.dataStore.edit { it[KEY_SOUND_OFF] = off }
+    }
+
+    // ── Phase ১: Typing Settings — Target WPM ও Sound Preset ─────
+
+    /** ইউজারের নিজের সেট করা লক্ষ্য WPM — ডিফল্ট ২০ (সরকারি চাকরির সাধারণ মান) */
+    fun getTypingTargetWpm(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_TARGET_WPM] ?: 20
+    }
+
+    suspend fun setTypingTargetWpm(wpm: Int) {
+        context.dataStore.edit { it[KEY_TYPING_TARGET_WPM] = wpm.coerceIn(5, 200) }
+    }
+
+    /** "off" | "soft" | "mechanical" — ডিফল্ট "soft" */
+    fun getTypingSoundPreset(): String = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_SOUND_PRESET] ?: "soft"
+    }
+
+    suspend fun setTypingSoundPreset(preset: String) {
+        context.dataStore.edit { it[KEY_TYPING_SOUND_PRESET] = preset }
+    }
+
+    /** Neonlipi-স্টাইল নতুন টাইপিং ফিচারগুলোর মাস্টার সুইচ — ডিফল্ট **false** (আগের,
+     *  পরিচিত UI-ই দেখাবে)। Settings থেকে "Smart Typing" টগল অন করলে heatmap,
+     *  দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC, Key-unlock কারিকুলাম, Roadmap,
+     *  প্রোফাইল/Cloud Sync, আঙুল-পজিশন — সবগুলো একসাথে দেখা যাবে (TypingPracticeScreen.kt)। */
+    fun getSmartTypingEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_SMART_TYPING_ON] ?: false
+    }
+
+    suspend fun setSmartTypingEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_SMART_TYPING_ON] = on }
+    }
+
+    // ── Phase ৩: Roadmap Wizard ──
+
+    fun getRoadmapPlan(): RoadmapPlan? = runBlocking {
+        val json = context.dataStore.data.first()[KEY_ROADMAP_PLAN_JSON] ?: return@runBlocking null
+        try { gson.fromJson(json, RoadmapPlan::class.java) } catch (e: Exception) { null }
+    }
+
+    suspend fun saveRoadmapPlan(plan: RoadmapPlan) {
+        context.dataStore.edit { it[KEY_ROADMAP_PLAN_JSON] = gson.toJson(plan) }
+    }
+
+    suspend fun clearRoadmapPlan() {
+        context.dataStore.edit { it.remove(KEY_ROADMAP_PLAN_JSON) }
     }
 
     // ── Study: "শুধু প্রশ্ন দেখ" মোড ──────────────────────────
@@ -478,6 +553,34 @@ class SessionManager(private val context: Context) {
                 )
             }.reversed()   // সর্বশেষটা আগে
         } catch (e: Exception) { emptyList() }
+    }
+
+    /** Cloud Sync-এর জন্য raw (chronological, না-reversed) history — TypingCloudSyncService.push()
+     *  এই ফরম্যাটই cloud-এ পাঠায়, pull()-ও একই ফরম্যাটে ফেরত দেয় ──*/
+    fun getRawTypingHistory(): List<Map<String, Any>> = runBlocking {
+        val json = context.dataStore.data.first()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
+        try {
+            val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    /** Cloud থেকে আসা স্ন্যাপশট লোকালের সাথে মিলিয়ে নেয় — bestWpm-এ যেটা বড় সেটা থাকে,
+     *  history দুটোই মিলিয়ে (date+wpm দিয়ে ডুপ্লিকেট বাদ) সাম্প্রতিক ১৫টা রাখা হয়। এভাবে
+     *  একটা ডিভাইসে অফলাইন প্র্যাকটিস করা ডেটা আরেকটা ডিভাইসে sync করলে হারায় না। */
+    suspend fun mergeTypingCloudSnapshot(cloudBestWpm: Int, cloudHistory: List<Map<String, Any>>) {
+        val localBest = getTypingBestWpm()
+        val localHistory = getRawTypingHistory()
+
+        val merged = (localHistory + cloudHistory)
+            .distinctBy { "${it["date"]}_${it["wpm"]}_${it["timeSec"]}" }
+            .sortedBy { (it["date"] as? String) ?: "" }
+            .takeLast(15)
+
+        context.dataStore.edit {
+            it[KEY_TYPING_HISTORY] = gson.toJson(merged)
+            if (cloudBestWpm > localBest) it[KEY_TYPING_BEST_WPM] = cloudBestWpm
+        }
     }
 
     // ── Typing Practice: Daily Discipline Mode ──
