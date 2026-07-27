@@ -9,6 +9,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -74,7 +76,14 @@ fun SubjectListScreen(
     onToggleReorder: () -> Unit    = {},
     onMoveSubject  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubject: (old: String, new: String) -> Unit = { _, _ -> },
-    onDeleteSubject: (name: String) -> Unit = {}
+    onDeleteSubject: (name: String) -> Unit = {},
+    // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + নাম-সার্চ ──
+    // Quiz/Study মোডে showQBankFilterBar=false থাকে বলে কিছুই render হয় না (আগের আচরণ অপরিবর্তিত)।
+    showQBankFilterBar     : Boolean               = false,
+    qbankFilterMode        : QBankFilterMode        = QBankFilterMode.DESIGNATION,
+    onQBankFilterModeChange: (QBankFilterMode) -> Unit = {},
+    qbankSearchQuery       : String                 = "",
+    onQBankSearchQueryChange: (String) -> Unit      = {}
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -99,6 +108,13 @@ fun SubjectListScreen(
     }
     val headerTextColor = if (isNordic) NordicInk else Color.White
     val headerSubTextColor = if (isNordic) NordicMuted else Color.White.copy(0.65f)
+
+    // ── QBank-only সার্চ: শুধু নাম-লিস্ট (Designation/Institution/Year) ক্লায়েন্ট-সাইড
+    // ফিল্টার করে — Rename/Delete ডায়ালগ পুরো (আন-ফিল্টার্ড) subjects লিস্টই ব্যবহার করে,
+    // যাতে সার্চ করা অবস্থায়ও Admin অন্য আইটেম rename/delete করতে পারে ──
+    val displaySubjects = if (showQBankFilterBar && qbankSearchQuery.isNotBlank()) {
+        subjects.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
+    } else subjects
 
     // ── Admin মেনু (ক্রম ঠিক করুন / Rename / Delete) — সবগুলোই বর্তমান sheet
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
@@ -139,6 +155,18 @@ fun SubjectListScreen(
             item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
         }
 
+        // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + সার্চ ──
+        if (showQBankFilterBar) {
+            item {
+                QBankFilterBar(
+                    filterMode        = qbankFilterMode,
+                    onFilterModeChange = onQBankFilterModeChange,
+                    searchQuery       = qbankSearchQuery,
+                    onSearchQueryChange = onQBankSearchQueryChange
+                )
+            }
+        }
+
         // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
         // (টাইপিং প্র্যাকটিসও এই একই সাবজেক্ট-তালিকায় একটা এন্ট্রি হিসেবে আছে, যাতে একই
         // ফোকাস-মোড সেকশন ও নোটিফিকেশন পাইপলাইন টাইপিং-এর জন্যও ব্যবহার করা যায়)
@@ -162,14 +190,15 @@ fun SubjectListScreen(
         }
 
         // Empty state
-        if (!isLoading && subjects.isEmpty()) {
+        if (!isLoading && displaySubjects.isEmpty()) {
             item {
                 androidx.compose.foundation.layout.Column(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                     horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
                 ) {
                     androidx.compose.material3.Text(
-                        text = "⚠️ ডেটা আসেনি",
+                        text = if (showQBankFilterBar && qbankSearchQuery.isNotBlank())
+                                   "🔍 কিছু পাওয়া যায়নি" else "⚠️ ডেটা আসেনি",
                         fontSize = 15.sp,
                         fontFamily = NotoSansBengali,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
@@ -198,27 +227,32 @@ fun SubjectListScreen(
                     horizontalArrangement  = Arrangement.spacedBy(8.dp),
                     verticalArrangement    = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(subjects) { idx, subject ->
+                    itemsIndexed(displaySubjects) { idx, subject ->
                         QBankSubjectCard(
                             subject = subject,
                             onClick = { onSubject(subject.name) },
                             reorderEnabled = isAdmin && isReorderMode,
                             isFirst = idx == 0,
-                            isLast  = idx == subjects.lastIndex,
+                            isLast  = idx == displaySubjects.lastIndex,
                             onMoveUp   = { onMoveSubject(idx, idx - 1) },
-                            onMoveDown = { onMoveSubject(idx, idx + 1) }
+                            onMoveDown = { onMoveSubject(idx, idx + 1) },
+                            subLabelOverride = when (qbankFilterMode) {
+                                QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
+                                QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
+                                QBankFilterMode.DESIGNATION  -> null
+                            }
                         )
                     }
                 }
             }
         } else {
-            itemsIndexed(subjects) { idx, subject ->
+            itemsIndexed(displaySubjects) { idx, subject ->
                 SubjectCard(
                     subject = subject,
                     onClick = { onSubject(subject.name) },
                     reorderEnabled = isAdmin && isReorderMode,
                     isFirst = idx == 0,
-                    isLast  = idx == subjects.lastIndex,
+                    isLast  = idx == displaySubjects.lastIndex,
                     onMoveUp   = { onMoveSubject(idx, idx - 1) },
                     onMoveDown = { onMoveSubject(idx, idx + 1) }
                 )
@@ -226,7 +260,7 @@ fun SubjectListScreen(
         }
 
         // ── QBank subject list — banner ad (list এর শেষে, Mock button এর আগে) ──
-        if (mode == StudyMode.QBANK && subjects.isNotEmpty()) {
+        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
             item {
                 Spacer(Modifier.height(8.dp))
                 AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QBANK_SUBJECT)
@@ -240,7 +274,10 @@ fun SubjectListScreen(
 
         // ── Model Test — শুধু QBank মোডে (এন্ট্রি পয়েন্ট এখানেই, প্রশ্ন আসে Quiz sheet থেকে) —
         // Job ইউজারের জন্য সরাসরি জেনারেট-ফর্ম, Student ইউজারের জন্য আগে subject picker ──
-        if (mode == StudyMode.QBANK && subjects.isNotEmpty()) {
+        // শুধু পদবী(ডিফল্ট) ফিল্টার-মোডে দেখানো হয় — প্রতিষ্ঠান/সাল ফিল্টারে থাকা
+        // অবস্থায় এই বাটন থাকলে বিভ্রান্তিকর হতো (Model Test আসল Subject/SubTopic নেয়)
+        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty() &&
+            (!showQBankFilterBar || qbankFilterMode == QBankFilterMode.DESIGNATION)) {
             item {
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(
@@ -473,6 +510,88 @@ private fun OrderHintBar(isSaving: Boolean, msg: String?) {
     }
 }
 
+// ─────────────────────────────────────────────────────────
+// QBank-only ফিল্টার বার — পদবী(ডিফল্ট)/প্রতিষ্ঠান/সাল চিপ + নাম-সার্চ।
+// শুধু QBank subject-list (এবং প্রতিষ্ঠান/সাল ফিল্টারের depth0-লিস্ট) এর উপরে বসে,
+// Quiz/Study মোডে এই কম্পোনেন্টই কল হয় না।
+// ─────────────────────────────────────────────────────────
+@Composable
+private fun QBankFilterBar(
+    filterMode         : QBankFilterMode,
+    onFilterModeChange  : (QBankFilterMode) -> Unit,
+    searchQuery         : String,
+    onSearchQueryChange : (String) -> Unit
+) {
+    val qbankAccent = Color(0xFF0891B2)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // ── ৩টা ফিল্টার চিপ — পদবী ডিফল্ট ──
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            data class ChipDef(val mode: QBankFilterMode, val label: String, val emoji: String)
+            listOf(
+                ChipDef(QBankFilterMode.DESIGNATION, "পদবী", "🧑‍💼"),
+                ChipDef(QBankFilterMode.INSTITUTION, "প্রতিষ্ঠান", "🏢"),
+                ChipDef(QBankFilterMode.YEAR, "সাল", "📅")
+            ).forEach { chip ->
+                val selected = filterMode == chip.mode
+                Surface(
+                    onClick  = { onFilterModeChange(chip.mode) },
+                    shape    = RoundedCornerShape(20.dp),
+                    color    = if (selected) qbankAccent else qbankAccent.copy(alpha = 0.08f),
+                    border   = if (selected) null else BorderStroke(1.dp, qbankAccent.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(chip.emoji, fontSize = 12.sp)
+                        Text(
+                            chip.label, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selected) Color.White else qbankAccent
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── QBank-only সার্চ — শুধু এই লিস্টের নাম (পদবী/প্রতিষ্ঠান/সাল) খুঁজে বের করে ──
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                Text(
+                    when (filterMode) {
+                        QBankFilterMode.DESIGNATION -> "পদবী খুঁজুন..."
+                        QBankFilterMode.INSTITUTION -> "প্রতিষ্ঠান খুঁজুন..."
+                        QBankFilterMode.YEAR        -> "সাল খুঁজুন..."
+                    },
+                    fontFamily = NotoSansBengali, fontSize = 12.sp
+                )
+            },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = qbankAccent, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "মুছুন", modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = qbankAccent,
+                unfocusedBorderColor = qbankAccent.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
 @Composable
 private fun SubjectCard(
     subject : SubjectEntry,
@@ -547,7 +666,10 @@ private fun QBankSubjectCard(
     isFirst : Boolean = false,
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
-    onMoveDown : () -> Unit = {}
+    onMoveDown : () -> Unit = {},
+    // ── প্রতিষ্ঠান/সাল ফিল্টার লিস্টে ডিফল্ট "X টি অধ্যায়"-এর বদলে অর্থপূর্ণ টেক্সট
+    // (যেমন "X টি পদবী" / "X টি প্রশ্ন") দেখাতে — null থাকলে আগের ডিফল্ট আচরণই থাকে ──
+    subLabelOverride: String? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -581,7 +703,7 @@ private fun QBankSubjectCard(
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("📂", fontSize = 10.sp)
-                Text("${subject.subTopics.size} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
+                Text(subLabelOverride ?: "${subject.subTopics.size} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
             }
 
