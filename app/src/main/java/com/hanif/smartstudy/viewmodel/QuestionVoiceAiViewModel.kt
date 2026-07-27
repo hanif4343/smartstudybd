@@ -10,6 +10,7 @@ import com.hanif.smartstudy.data.model.StudyMode
 import com.hanif.smartstudy.data.remote.AiChatService
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.util.TtsManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,6 +48,11 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
 
     private var contextPrefix: String = ""
     private var currentQuestionId: String = ""
+    // ── আগের প্রশ্নের (বা আগের সেন্ড করা) নেটওয়ার্ক কল এখনো শেষ না হয়ে থাকতে পারে —
+    // নতুন প্রশ্নে সুইচ করলে/নতুন মেসেজ পাঠালে সেই পুরনো কল-টা cancel করা হয়, যাতে
+    // দেরিতে আসা পুরনো রেসপন্স নতুন প্রশ্নের স্ক্রিনে ভুল করে TTS চালিয়ে না দেয়
+    // (এটাই ছিল "ভয়েস মিলছে না/অন্য কোথাও থেকে আসছে" বাগের মূল কারণ) ──
+    private var activeJob: Job? = null
 
     init {
         _state.update { it.copy(hasAnyKey = session.getAiApiKeys().hasAnyKey()) }
@@ -58,6 +64,11 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
     fun setQuestion(item: QuestionItem, mode: StudyMode) {
         if (item.id == currentQuestionId) return   // একই প্রশ্নে বারবার রিসেট না হয়
         currentQuestionId = item.id
+
+        // ── আগের প্রশ্নের জন্য চলমান নেটওয়ার্ক কল/TTS থাকলে সাথে সাথেই বাতিল —
+        // নাহলে সেই পুরনো কল পরে শেষ হয়ে ভুল প্রশ্নের ওপর TTS চালিয়ে দিতে পারে ──
+        activeJob?.cancel()
+        TtsManager.stop()
 
         val modeLabel = when (mode) {
             StudyMode.QUIZ  -> "Quiz"
@@ -92,17 +103,21 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
     private fun autoExplain() {
         val keys = session.getAiApiKeys()
         if (!keys.hasAnyKey()) return   // key না থাকলে UI-তে আলাদা warning আছেই, এখানে চুপ থাকি
+        val questionIdForThisCall = currentQuestionId
         _state.update { it.copy(isSending = true, error = null) }
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             val hiddenPrompt = AiChatMessage(
                 role = "user",
                 content = "প্রশ্ন আর সঠিক উত্তরটা সংক্ষেপে, সহজ ভাষায় বুঝিয়ে দাও — যেন ছাত্র এই প্রথম শুনছে। " +
                     "কথা-বলার-মতো ২-৪ বাক্যে বলো, তালিকা/হেডিং ব্যবহার কোরো না।"
             )
             val reply = AiChatService.sendMessage(listOf(hiddenPrompt), keys, contextPrefix)
+            // ── এই কল চলাকালীন যদি ইতিমধ্যে অন্য প্রশ্নে সুইচ হয়ে গিয়ে থাকে (currentQuestionId
+            // পাল্টে গেছে), তাহলে এই দেরিতে-আসা রেসপন্স আর UI/TTS-এ প্রয়োগ করা হবে না ──
+            if (questionIdForThisCall != currentQuestionId) return@launch
             if (reply != null) {
                 _state.update { it.copy(messages = listOf(AiChatMessage(role = "assistant", content = reply)), isSending = false) }
-                TtsManager.speak(reply, "voice_ai_reply")
+                TtsManager.speak(reply, "voice_ai_reply_${questionIdForThisCall}_${System.nanoTime()}")
             } else {
                 _state.update {
                     it.copy(isSending = false, error = "AI থেকে উত্তর পাওয়া যায়নি — একটু পর আবার চেষ্টা করো, বা Settings-এ API key চেক করো।")
@@ -146,12 +161,16 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
 
         val apiHistory = _state.value.messages + AiChatMessage(role = "user", content = trimmed)
         val visibleHistory = _state.value.messages + AiChatMessage(role = "user", content = displayText ?: trimmed)
+        val questionIdForThisCall = currentQuestionId
         _state.update {
             it.copy(messages = visibleHistory, isSending = true, error = null, hasAnyKey = true)
         }
 
-        viewModelScope.launch {
+        activeJob = viewModelScope.launch {
             val reply = AiChatService.sendMessage(apiHistory, keys, contextPrefix)
+            // ── উত্তর আসার আগেই যদি অন্য প্রশ্নে সুইচ হয়ে যায়, এই দেরিতে-আসা রেসপন্স
+            // আর প্রয়োগ করা হবে না (নাহলে ভুল প্রশ্নের ওপর TTS/টেক্সট বসে যেতে পারে) ──
+            if (questionIdForThisCall != currentQuestionId) return@launch
             if (reply != null) {
                 _state.update {
                     it.copy(
@@ -159,7 +178,7 @@ class QuestionVoiceAiViewModel(app: Application) : AndroidViewModel(app) {
                         isSending = false
                     )
                 }
-                TtsManager.speak(reply, "voice_ai_reply")
+                TtsManager.speak(reply, "voice_ai_reply_${questionIdForThisCall}_${System.nanoTime()}")
             } else {
                 _state.update {
                     it.copy(
