@@ -2353,11 +2353,22 @@ fun AdminFieldEditDialog(
     onAdminEdit   : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
 ) {
-    val sheet = when {
-        item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
-        item.isStudy() -> "Study"
-        item.isMcq()   -> "Quiz"
-        else           -> "Study"
+    // ── আগে এখানে item.year/item.examName-এর উপস্থিতি দিয়ে sheet অনুমান করা হতো —
+    // কিন্তু QBank sheet-এ "year" কলামই নেই এবং "Exam_Name" ফিল্ডও সবসময় populate
+    // হয় না (GAS-এর প্রকৃত কলাম নাম আলাদা হতে পারে) — ফলে বেশিরভাগ QBank প্রশ্ন
+    // ভুলভাবে "Quiz" (MCQ হলে) বা "Study" (written হলে) হিসেবে শনাক্ত হতো, আর
+    // এডিট/ডিলিট ভুল sheet-এ পাঠানো হতো (তাই "instant update" স্ক্রিনে দেখা যেত
+    // না, sync-ও silently fail করতো)। item.sourceSheet — যেটা fromQuizItem/
+    // fromQBankItem/fromStudyItem তৈরির সময়ই সঠিকভাবে বসানো হয় — এখন সরাসরি
+    // ব্যবহার করা হচ্ছে; পুরনো heuristic শুধু fallback হিসেবে থাকলো (যদি কখনো
+    // sourceSheet খালি আসে, যেমন খুব পুরনো cached/serialized item)। ──
+    val sheet = item.sourceSheet.ifBlank {
+        when {
+            item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
+            item.isStudy() -> "Study"
+            item.isMcq()   -> "Quiz"
+            else           -> "Study"
+        }
     }
     val fieldLabel = ADMIN_FIELD_LABELS[fieldId] ?: fieldId
     val adminIndigo = Color(0xFF4F46E5)
