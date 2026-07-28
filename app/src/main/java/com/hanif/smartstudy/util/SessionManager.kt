@@ -98,6 +98,11 @@ class SessionManager(private val context: Context) {
         // ── Typing Practice: বেস্ট WPM + সাম্প্রতিক সেশনগুলোর হিস্ট্রি ──
         val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         val KEY_TYPING_HISTORY   = stringPreferencesKey("typing_history")   // JSON: [{date,wpm,rawWpm,accuracy,timeSec}]
+        // ── ডিফল্ট (non-custom) Sheet-পুলে সর্বশেষ যেই প্যাসেজ ইনডেক্স দেখানো হয়েছিল, তা
+        // persist করে রাখা হয় — আগে persist না থাকায় অ্যাপ বন্ধ করে আবার Typing Practice
+        // খুললেই পুলের প্রথম (index 0) প্যাসেজটাই বারবার দেখা যেত। দেখো
+        // getTypingLastPassageIndex()/setTypingLastPassageIndex() ও TypingPracticeScreen.kt ──
+        val KEY_TYPING_LAST_PASSAGE_INDEX = intPreferencesKey("typing_last_passage_index")
 
         // ── Typing Practice: Daily Discipline Mode (optional, non-coercive) —
         // চালু থাকলে প্রতিদিনের টাইপিং-সময় ট্র্যাক হয় ও লক্ষ্যের সাপেক্ষে progress দেখানো হয়।
@@ -536,6 +541,18 @@ class SessionManager(private val context: Context) {
             it[KEY_TYPING_HISTORY] = gson.toJson(trimmed)
             if (wpm > bestSoFar) it[KEY_TYPING_BEST_WPM] = wpm
         }
+    }
+
+    /** সর্বশেষ persist করা ডিফল্ট-পুল প্যাসেজ ইনডেক্স — কখনো সেট না হয়ে থাকলে -1
+     *  (যাতে caller-এর lastIdx+1 হিসাব প্রথমবার স্বাভাবিকভাবেই 0 থেকে শুরু হয়)। */
+    fun getTypingLastPassageIndex(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_LAST_PASSAGE_INDEX] ?: -1
+    }
+
+    /** একটা ডিফল্ট-পুল প্যাসেজ দেখানো/শেষ হওয়ার পর কল করো — পরের বার স্ক্রিন খুললে
+     *  এই ইনডেক্সের পরেরটা থেকে রোটেশন শুরু হবে (দেখো TypingPracticeScreen.kt)। */
+    suspend fun setTypingLastPassageIndex(index: Int) {
+        context.dataStore.edit { it[KEY_TYPING_LAST_PASSAGE_INDEX] = index }
     }
 
     fun getTypingHistory(): List<TypingHistoryEntry> = runBlocking {
