@@ -727,6 +727,14 @@ fun TypingPracticeScreen(
             bestWpm = maxOf(bestWpm, r.wpm)
             history = session.getTypingHistory()
 
+            // ── ডিফল্ট (non-custom) ফ্রি-প্র্যাকটিস সেশন এখানেই শেষবারের মতো যেই
+            // প্যাসেজ দেখিয়েছিল সেটার ইনডেক্স persist করে রাখা — যাতে সেশন শেষে অ্যাপ
+            // বন্ধ করে আবার Typing Practice খুললে ঠিক এই প্যাসেজের পরেরটা থেকে শুরু হয়,
+            // বারবার একই প্রথম প্যাসেজ না দেখায় ──
+            if (sessionMode == "free" && selectedDifficulty != "custom") {
+                session.setTypingLastPassageIndex(passageIndex)
+            }
+
             // ── Phase ৩: Cloud Sync — লোকাল persist-এর পরই নীরবে cloud-এ push (guest
             // হলে/নেট না থাকলে ভেতরেই silently স্কিপ/fail হয়, মূল ফলাফল প্রদর্শনে
             // কোনো প্রভাব পড়ে না) ──
@@ -792,6 +800,17 @@ fun TypingPracticeScreen(
                 } 
                 curriculumProgress = CurriculumProvider.stageProgress(ctx, curriculumTrack, curriculumStage)
             }
+        }
+    }
+
+    /** ডিফল্ট (non-custom) Sheet-পুলে passageIndex বদলালেই এটা কল করো — SessionManager-এ
+     *  persist হয়ে যায়, যাতে স্ক্রিন/অ্যাপ বন্ধ করে আবার Typing Practice খুললে ঠিক এখান
+     *  থেকেই (পরের প্যাসেজ থেকে) রোটেশন চলতে থাকে, বারবার একই প্রথম প্যাসেজ না আসে। adaptive/
+     *  exam/govtmock/curriculum/keydrill-এর নিজস্ব আলাদা পুল/ইনডেক্স-স্পেস আছে বলে ইচ্ছাকৃতভাবে
+     *  এখানে persist করা হয় না, শুধু ডিফল্ট ফ্রি-প্র্যাকটিস পুলের ক্ষেত্রেই। */
+    fun persistPassageIndex(idx: Int) {
+        if (selectedDifficulty != "custom") {
+            scope.launch { session.setTypingLastPassageIndex(idx) }
         }
     }
 
@@ -903,6 +922,10 @@ fun TypingPracticeScreen(
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
                 frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
+                // ── প্রতিটা প্যাসেজ "সাবমিট" (শেষ) হওয়ার সাথে সাথেই পরের ইনডেক্স persist —
+                // যাতে ঠিক এই মুহূর্তে অ্যাপ বন্ধ করে দিলেও পরের বার সেই একই পুরনো
+                // প্যাসেজে ফিরে না গিয়ে এরপরেরটা থেকে রোটেশন চলতে থাকে ──
+                persistPassageIndex(nextIdx)
                 return@LaunchedEffect
             }
 
@@ -1273,7 +1296,13 @@ fun TypingPracticeScreen(
     LaunchedEffect(Unit) {
         ensureTypingPassagesLoaded(ctx)
         if (passage.isBlank() && sessionMode == "free" && selectedDifficulty != "custom") {
-            reset(0, currentPool())
+            // ── আগে সবসময় reset(0, ...) কল হতো, ফলে অ্যাপ বন্ধ করে আবার Typing
+            // Practice খুললেই পুলের প্রথম (index 0) প্যাসেজটাই বারবার দেখা যেত।
+            // এখন SessionManager-এ persist করা সর্বশেষ ইনডেক্সের পরেরটা থেকে শুরু হয়
+            // (কখনো persist না হয়ে থাকলে getTypingLastPassageIndex() -1 দেয়, তাই
+            // lastIdx+1 স্বাভাবিকভাবেই 0 হয় — আগের আচরণের সাথে সামঞ্জস্যপূর্ণ) ──
+            val lastIdx = session.getTypingLastPassageIndex()
+            reset(lastIdx + 1, currentPool())
         }
     }
 
@@ -1914,6 +1943,25 @@ fun TypingPracticeScreen(
                 freeTypingMode    = sessionMode == "freetyping"
             )
 
+            // ── Live next-key হাইলাইট কীবোর্ডের জন্য — এখন ঠিক কোন ক্যারেক্টার টাইপ
+            // করার কথা সেটা বের করা হয় (দেখো FingerKeyboardDiagram.kt-এর
+            // LiveKeyHighlightKeyboard)। ফ্রি-টাইপিং মোডে কোনো target passage
+            // থাকে না, তাই সেখানে "পরের কী" বলে কিছু নেই ──
+            val nextTypeChar: Char? = remember(userInput, passageWords, frozenWordResults, sessionMode) {
+                if (sessionMode == "freetyping" || passageWords.isEmpty()) null
+                else {
+                    val liveSplit = splitTypedWords(userInput)
+                    val wIdx = frozenWordResults.size
+                    val word = passageWords.getOrNull(wIdx)
+                    when {
+                        word == null -> null
+                        liveSplit.current.length < word.length -> word[liveSplit.current.length]
+                        wIdx < passageWords.size - 1 -> ' '   // শব্দ শেষ — এখন স্পেস চাপার পালা
+                        else -> null                           // পুরো প্যাসেজ শেষ
+                    }
+                }
+            }
+
             // ── Sheet থেকে প্যাসেজ পুল এখনো লোড না হলে (নেট নেই/প্রথমবার) — ব্যবহারকারীকে
             // জানানো, নাহলে খালি স্ক্রিন দেখে "আটকে আছে" মনে হতে পারে ──
             if (passage.isBlank() && sessionMode !in listOf("freetyping", "study")) {
@@ -2078,6 +2126,14 @@ fun TypingPracticeScreen(
                 ),
                 minLines = if (sessionMode == "freetyping") 10 else 4
             )
+
+            // ── Smart Typing: Live next-key হাইলাইট কীবোর্ড — টাইপিং চলাকালীন
+            // (freetyping বাদে সব মোডে) ইনপুট বক্সের ঠিক নিচে সবসময় দেখা যাবে,
+            // এখন যেই কী চাপার কথা সেটা হলুদ হয়ে জ্বলবে (Neonlipi রেফারেন্সের
+            // সমতুল্য) ──
+            if (smartTypingEnabled && sessionMode != "freetyping" && isStarted && !isFinished) {
+                LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
+            }
 
             // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
             // "✅ শেষ করুন" চাপলেই সেশন থামবে এবং ফলাফল দেখাবে ──
