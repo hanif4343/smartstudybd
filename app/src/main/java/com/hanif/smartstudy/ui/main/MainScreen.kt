@@ -56,6 +56,7 @@ fun MainScreen(
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
+    var showViva       by remember { mutableStateOf(false) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -286,6 +287,12 @@ fun MainScreen(
         )
         return
     }
+    if (showViva) {
+        com.hanif.smartstudy.ui.viva.VivaScreen(
+            onBack = { showViva = false }
+        )
+        return
+    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -341,6 +348,7 @@ fun MainScreen(
                     },
                     onOpenFocusMode = { showFocusModeInfo = true },
                     onOpenAiChat    = { showAiChat = true },
+                    onOpenViva      = { showViva = true },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
