@@ -169,6 +169,11 @@ data class MenuUiState(
     val cerebrasApiKey    : String           = "",
     val geminiApiKey      : String           = "",
     val aiKeysSavedMsg    : String?          = null,
+
+    // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস" কার্ড) ──
+    val smartTypingEnabled : Boolean         = false,
+    val typingTargetWpm    : Int             = 40,
+    val typingSoundPreset  : String          = "off",   // "off" | "soft" | "mechanical"
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -354,6 +359,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val adminTag  = if (localUser?.isAdmin() == true) session.getAdminAudienceTag() else ""
 
+            // ── Typing Settings — একই "quiz_prefs" SharedPreferences ফাইলে persist ──
+            val smartTypingOn   = prefs.getBoolean("smart_typing_enabled", false)
+            val typingTargetWpm = prefs.getInt("typing_target_wpm", 40)
+            val typingSoundPr   = prefs.getString("typing_sound_preset", "off") ?: "off"
+
             val aiKeys = session.getAiApiKeys()
 
             val weakTopics = prefs.all.entries
@@ -411,7 +421,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     groqApiKey     = aiKeys.groq,
                     mistralApiKey  = aiKeys.mistral,
                     cerebrasApiKey = aiKeys.cerebras,
-                    geminiApiKey   = aiKeys.gemini
+                    geminiApiKey   = aiKeys.gemini,
+                    smartTypingEnabled = smartTypingOn,
+                    typingTargetWpm    = typingTargetWpm,
+                    typingSoundPreset  = typingSoundPr
                 )
             }
 
@@ -519,6 +532,27 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             session.setSoundOff(off)
             _state.update { it.copy(isSoundOff = off) }
         }
+    }
+
+    // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস") ────
+    // session/SessionManager-এর DataStore-এর বদলে "quiz_prefs" SharedPreferences
+    // ব্যবহার করা হলো — bookmarks/weakTopics-ও এই একই ফাইল ব্যবহার করে, তাই
+    // নতুন কোনো DataStore key/SessionManager পরিবর্তন লাগলো না।
+    private fun quizPrefs() = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
+
+    fun setSmartTypingEnabled(on: Boolean) {
+        quizPrefs().edit().putBoolean("smart_typing_enabled", on).apply()
+        _state.update { it.copy(smartTypingEnabled = on) }
+    }
+
+    fun setTypingTargetWpm(wpm: Int) {
+        quizPrefs().edit().putInt("typing_target_wpm", wpm).apply()
+        _state.update { it.copy(typingTargetWpm = wpm) }
+    }
+
+    fun setTypingSoundPreset(preset: String) {
+        quizPrefs().edit().putString("typing_sound_preset", preset).apply()
+        _state.update { it.copy(typingSoundPreset = preset) }
     }
 
     // ── Offline mode (Firebase disconnect বাটন) ───────────────
