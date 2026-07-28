@@ -57,11 +57,6 @@ data class MenuUiState(
     val isDarkMode      : Boolean            = false,
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
-    // ── Phase ১ (Neonlipi-স্টাইল কাস্টমাইজেশন): Typing Settings ──
-    val typingTargetWpm    : Int    = 20,
-    val typingSoundPreset  : String = "soft",   // "off" | "soft" | "mechanical"
-    // ── Neonlipi-স্টাইল নতুন ফিচারগুলোর মাস্টার টগল — ডিফল্ট বন্ধ (আগের UI-ই দেখা যাবে) ──
-    val smartTypingEnabled : Boolean = false,
     val isOfflineMode   : Boolean            = false,
     // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
     val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
@@ -325,9 +320,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val isDark     = session.isDarkMode()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
-            val typingTargetWpm   = session.getTypingTargetWpm()
-            val typingSoundPreset = session.getTypingSoundPreset()
-            val smartTypingOn = session.getSmartTypingEnabled()
             val offlineOn  = session.isOfflineMode()
             val dataSrcMode = session.getDataSourceMode()
             val remOn      = session.isReminderOn()
@@ -381,9 +373,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     isDarkMode     = isDark,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
-                    typingTargetWpm   = typingTargetWpm,
-                    typingSoundPreset = typingSoundPreset,
-                    smartTypingEnabled = smartTypingOn,
                     isOfflineMode  = offlineOn,
                     dataSourceMode = dataSrcMode,
                     isReminderOn   = remOn,
@@ -529,33 +518,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setSoundOff(off)
             _state.update { it.copy(isSoundOff = off) }
-        }
-    }
-
-    // ── Phase ১: Typing Settings — Target WPM ও Sound Preset ─────
-
-    fun setTypingTargetWpm(wpm: Int) {
-        viewModelScope.launch {
-            session.setTypingTargetWpm(wpm)
-            _state.update { it.copy(typingTargetWpm = wpm.coerceIn(5, 200)) }
-        }
-    }
-
-    fun setTypingSoundPreset(preset: String) {
-        viewModelScope.launch {
-            session.setTypingSoundPreset(preset)
-            _state.update { it.copy(typingSoundPreset = preset) }
-        }
-    }
-
-    /** "Smart Typing" মাস্টার টগল — অন করলে Neonlipi-স্টাইল সব নতুন ফিচার
-     *  (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC, Key-unlock কারিকুলাম,
-     *  Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) TypingPracticeScreen-এ দেখা যাবে।
-     *  বন্ধ থাকলে আগের পরিচিত UI-ই থাকে। */
-    fun setSmartTypingEnabled(on: Boolean) {
-        viewModelScope.launch {
-            session.setSmartTypingEnabled(on)
-            _state.update { it.copy(smartTypingEnabled = on) }
         }
     }
 
@@ -932,83 +894,66 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             _state.update { it.copy(isEditingQuestion = true, editSuccessMsg = null) }
-            // ── পুরো ব্লকটা try/catch দিয়ে ঘেরা — connectivity check, network কল,
-            //    বা অন্য যেকোনো অপ্রত্যাশিত exception হলেও edit-টা হারিয়ে যাবে না।
-            //    exception হলেও সবসময় শেষ ভরসা হিসেবে queue এ ফেলে দেওয়া হবে,
-            //    যাতে Pending Sync ট্যাবে অন্তত entry-টা দেখা যায় আর পরে sync করা যায়। ──
+            // ── FIX (মূল "instant না দেখানো" বাগ): আগে এখানে প্রথমে Firebase PATCH,
+            // তারপর (sequentially) Google Sheet PATCH — এই দুইটা network কল শেষ
+            // হওয়া পর্যন্ত অপেক্ষা করে, তারপর local cache patch + UI update হতো।
+            // GAS/Apps Script কোল্ড-স্টার্টে কয়েক সেকেন্ড সহজেই লাগে, ফলে "instant"
+            // এডিট আসলে ৫-১০ সেকেন্ড পর দেখা যেত। এখন adminDeleteQuestion-এর মতোই
+            // প্যাটার্ন: local cache + UI সাথে সাথেই (network কলের আগে) patch হয়ে
+            // যায়, আর Firebase/Sheet-এ save হওয়াটা সম্পূর্ণ ব্যাকগ্রাউন্ডে/silently
+            // চলতে থাকে — ব্যর্থ হলে pending queue-তে auto ঢুকে যায়, UI আবার ছোঁয়া
+            // লাগে না (যেহেতু ইউজার এমনিতেই edited ভ্যালুটা দেখছে)। ──
             try {
-                val cm = getApplication<android.app.Application>()
-                    .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
-                        as android.net.ConnectivityManager
-                val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                    ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-                android.util.Log.d("AdminEdit", "connectivity check: isOnline=$isOnline")
-
-                if (isOnline) {
-                    // Online — সরাসরি Firebase/Google Sheet এ save (Settings-এ যেটা সিলেক্ট করা আছে)
-                    when (val r = adminUpdateField(sheet, rowKey, fields)) {
-                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                            // পুরো cache clear করে নতুন fetch করানোর বদলে — শুধু এই
-                            // row টাই in-memory + disk cache এ সরাসরি patch করো।
-                            // এতে স্ক্রিন reload হয় না, admin যেখানে ছিল সেখানেই
-                            // থাকে আর পরিবর্তনও সাথে সাথে স্ক্রিনে দেখা যায়।
-                            // TTL (১ ঘণ্টা) শেষ হলে স্বাভাবিক নিয়মেই fresh fetch হবে
-                            // এবং অন্য সব ইউজারের কাছেও আপডেট পৌঁছাবে।
-                            com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                                .patchContentAndPersist(sheet, rowKey, fields)
-                            android.util.Log.i("AdminEdit", "SUCCESS: $sheet/$rowKey updated. In-place patched.")
-                            _state.update { it.copy(isEditingQuestion = false,
-                                editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
-                                contentEditVersion = _state.value.contentEditVersion + 1) }
-                        }
-                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                            // Online কিন্তু fail — queue এ রাখো + লোকাল cache-এও সাথে সাথে
-                            // patch করে দাও, যাতে sync না হওয়া পর্যন্ত এই edit-টাই অ্যাপে
-                            // দেখা যায় (Firebase-এ সিঙ্ক না হলেও UI নিজের local state দেখাবে)।
-                            android.util.Log.e("AdminEdit", "Online but FAILED: ${r.message} — queueing")
-                            com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                                .patchContentAndPersist(sheet, rowKey, fields)
-                            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                            q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
-                            loadPendingEdits()
-                            _state.update { it.copy(isEditingQuestion = false,
-                                editSuccessMsg = "⚠️ সংরক্ষিত — sync হবে", error = "❌ ${r.message}",
-                                contentEditVersion = _state.value.contentEditVersion + 1) }
-                        }
-                    }
-                } else {
-                    // Offline — লোকাল cache-এ সাথে সাথে patch করো (তাই edit-টা সাথে সাথেই
-                    // অ্যাপে দেখা যাবে), আর queue এ রাখো — net আসলে auto sync হবে
-                    android.util.Log.d("AdminEdit", "OFFLINE branch — enqueueing")
-                    com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                        .patchContentAndPersist(sheet, rowKey, fields)
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
-                    val countAfter = q.getPendingAdminEdits().size
-                    android.util.Log.d("AdminEdit", "enqueued OK — pending count now = $countAfter")
-                    loadPendingEdits()
-                    _state.update { it.copy(isEditingQuestion = false,
-                        editSuccessMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে",
-                        contentEditVersion = _state.value.contentEditVersion + 1) }
-                }
+                com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                    .patchContentAndPersist(sheet, rowKey, fields)
+                _state.update { it.copy(isEditingQuestion = false,
+                    editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
+                    contentEditVersion = _state.value.contentEditVersion + 1) }
+                android.util.Log.i("AdminEdit", "Instant local patch done: $sheet/$rowKey")
             } catch (e: Exception) {
-                // ── connectivity check / network কল / patchContentAndPersist —
-                //    যেখানেই exception হোক না কেন, শেষ চেষ্টা হিসেবে queue এ ফেলার
-                //    চেষ্টা করি, যাতে edit-টা একদম হারিয়ে না যায় ──
-                android.util.Log.e("AdminEdit", "EXCEPTION in adminEditQuestion: ${e.message}", e)
+                android.util.Log.e("AdminEdit", "Instant local patch FAILED: ${e.message}", e)
+                _state.update { it.copy(isEditingQuestion = false,
+                    error = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+
+            // ── Background sync (silent) — UI ইতিমধ্যে আপডেট দেখিয়ে দিয়েছে, তাই
+            // এখানে exception হলেও শুধু queue-তে ফেলে রাখাই যথেষ্ট, UI ব্লক করার
+            // দরকার নেই। ──
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                 try {
-                    com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                        .patchContentAndPersist(sheet, rowKey, fields)
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
-                    loadPendingEdits()
-                    _state.update { it.copy(isEditingQuestion = false,
-                        editSuccessMsg = "📴 সংরক্ষিত — net আসলে auto sync হবে",
-                        contentEditVersion = _state.value.contentEditVersion + 1) }
-                } catch (e2: Exception) {
-                    android.util.Log.e("AdminEdit", "QUEUE ALSO FAILED: ${e2.message}", e2)
-                    _state.update { it.copy(isEditingQuestion = false,
-                        error = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e2.message ?: "unknown error"}") }
+                    val cm = getApplication<android.app.Application>()
+                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    android.util.Log.d("AdminEdit", "background sync: isOnline=$isOnline")
+
+                    if (isOnline) {
+                        when (val r = adminUpdateField(sheet, rowKey, fields)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                android.util.Log.i("AdminEdit", "Background sync SUCCESS: $sheet/$rowKey")
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                android.util.Log.e("AdminEdit", "Background sync FAILED: ${r.message} — queueing")
+                                q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
+                                loadPendingEdits()
+                            }
+                        }
+                    } else {
+                        q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
+                        loadPendingEdits()
+                        android.util.Log.d("AdminEdit", "OFFLINE — enqueued for later sync")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AdminEdit", "EXCEPTION in background sync: ${e.message}", e)
+                    try {
+                        q.enqueueAdminEdit(sheet, rowKey, fields, questionPreview)
+                        loadPendingEdits()
+                    } catch (e2: Exception) {
+                        android.util.Log.e("AdminEdit", "QUEUE ALSO FAILED: ${e2.message}", e2)
+                    }
                 }
             }
         }
@@ -1237,60 +1182,57 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(isAddingQuestion = true, addQuestionMsg = null) }
             val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            // অস্থায়ী লোকাল id — অনলাইন হলে Firebase push-key দিয়ে replace হয়ে যাবে,
-            // অফলাইন/fail হলে এটাই থেকে যাবে যতক্ষণ না পরে sync হয়
+            // অস্থায়ী লোকাল id — background sync সফল হলে আসল Firebase/Sheet id
+            // দিয়ে replace হয়ে যাবে (replaceLocalIdAndPersist দিয়ে), fail/offline
+            // হলে এটাই থেকে যাবে যতক্ষণ না পরে sync হয়
             val localId = "-local" + System.currentTimeMillis().toString(36) +
                     (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
+            // ── FIX: adminEditQuestion-এর মতোই — আগে network কল (Firebase/Sheet)
+            // শেষ হওয়া পর্যন্ত অপেক্ষা করে তারপর local cache-এ যোগ হতো, তাই "নতুন
+            // প্রশ্ন যোগ" করাও কয়েক সেকেন্ড দেরি করে দেখাতো। এখন প্রথমে localId
+            // দিয়ে সাথে সাথেই local cache + UI তে যোগ হয়ে যায়, network sync
+            // সম্পূর্ণ ব্যাকগ্রাউন্ডে/silently চলে। ──
             try {
-                val cm = getApplication<android.app.Application>()
-                    .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
-                        as android.net.ConnectivityManager
-                val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                    ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-
-                if (isOnline) {
-                    when (val r = adminAddRow(sheet, fields)) {
-                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                            // পুরো cache clear করার বদলে সরাসরি নতুন row cache-এ যোগ করো —
-                            // তাতে স্ক্রিন reload ছাড়াই সাথে সাথে নতুন প্রশ্নটা দেখা যাবে।
-                            repo.addContentAndPersist(sheet, r.data, fields)
-                            _state.update { it.copy(isAddingQuestion = false,
-                                addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে! Key: ${r.data.take(15)}",
-                                contentEditVersion = it.contentEditVersion + 1) }
-                        }
-                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                            // Online কিন্তু fail — লোকাল id দিয়ে cache-এ দেখাও + queue করো
-                            repo.addContentAndPersist(sheet, localId, fields)
-                            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                            q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                            loadPendingEdits()
-                            _state.update { it.copy(isAddingQuestion = false,
-                                addQuestionMsg = "⚠️ সংরক্ষিত — sync হবে (❌ ${r.message})",
-                                contentEditVersion = it.contentEditVersion + 1) }
-                        }
-                    }
-                } else {
-                    // Offline — লোকাল id দিয়ে cache-এ সাথে সাথে যোগ করো, queue এ রাখো
-                    repo.addContentAndPersist(sheet, localId, fields)
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                    loadPendingEdits()
-                    _state.update { it.copy(isAddingQuestion = false,
-                        addQuestionMsg = "📴 Offline এ সংরক্ষিত — net আসলে auto sync হবে",
-                        contentEditVersion = it.contentEditVersion + 1) }
-                }
+                repo.addContentAndPersist(sheet, localId, fields)
+                _state.update { it.copy(isAddingQuestion = false,
+                    addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে!",
+                    contentEditVersion = it.contentEditVersion + 1) }
             } catch (e: Exception) {
+                _state.update { it.copy(isAddingQuestion = false,
+                    addQuestionMsg = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
                 try {
-                    repo.addContentAndPersist(sheet, localId, fields)
-                    val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                    q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                    loadPendingEdits()
-                    _state.update { it.copy(isAddingQuestion = false,
-                        addQuestionMsg = "📴 সংরক্ষিত — net আসলে auto sync হবে",
-                        contentEditVersion = it.contentEditVersion + 1) }
-                } catch (e2: Exception) {
-                    _state.update { it.copy(isAddingQuestion = false,
-                        addQuestionMsg = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e2.message ?: "unknown error"}") }
+                    val cm = getApplication<android.app.Application>()
+                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+                    if (isOnline) {
+                        when (val r = adminAddRow(sheet, fields)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                // আসল server id দিয়ে অস্থায়ী localId replace করো —
+                                // UI-তে প্রশ্নটা যেখানে ছিল সেখানেই থাকবে, শুধু id বদলাবে
+                                repo.replaceLocalIdAndPersist(sheet, localId, r.data)
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                                loadPendingEdits()
+                            }
+                        }
+                    } else {
+                        q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                        loadPendingEdits()
+                    }
+                } catch (e: Exception) {
+                    try {
+                        q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
+                        loadPendingEdits()
+                    } catch (_: Exception) { }
                 }
             }
         }
