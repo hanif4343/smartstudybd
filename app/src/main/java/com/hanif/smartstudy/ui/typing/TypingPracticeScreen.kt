@@ -1914,6 +1914,25 @@ fun TypingPracticeScreen(
                 freeTypingMode    = sessionMode == "freetyping"
             )
 
+            // ── Live next-key হাইলাইট কীবোর্ডের জন্য — এখন ঠিক কোন ক্যারেক্টার টাইপ
+            // করার কথা সেটা বের করা হয় (দেখো FingerKeyboardDiagram.kt-এর
+            // LiveKeyHighlightKeyboard)। ফ্রি-টাইপিং মোডে কোনো target passage
+            // থাকে না, তাই সেখানে "পরের কী" বলে কিছু নেই ──
+            val nextTypeChar: Char? = remember(userInput, passageWords, frozenWordResults, sessionMode) {
+                if (sessionMode == "freetyping" || passageWords.isEmpty()) null
+                else {
+                    val liveSplit = splitTypedWords(userInput)
+                    val wIdx = frozenWordResults.size
+                    val word = passageWords.getOrNull(wIdx)
+                    when {
+                        word == null -> null
+                        liveSplit.current.length < word.length -> word[liveSplit.current.length]
+                        wIdx < passageWords.size - 1 -> ' '   // শব্দ শেষ — এখন স্পেস চাপার পালা
+                        else -> null                           // পুরো প্যাসেজ শেষ
+                    }
+                }
+            }
+
             // ── Sheet থেকে প্যাসেজ পুল এখনো লোড না হলে (নেট নেই/প্রথমবার) — ব্যবহারকারীকে
             // জানানো, নাহলে খালি স্ক্রিন দেখে "আটকে আছে" মনে হতে পারে ──
             if (passage.isBlank() && sessionMode !in listOf("freetyping", "study")) {
@@ -2078,6 +2097,14 @@ fun TypingPracticeScreen(
                 ),
                 minLines = if (sessionMode == "freetyping") 10 else 4
             )
+
+            // ── Smart Typing: Live next-key হাইলাইট কীবোর্ড — টাইপিং চলাকালীন
+            // (freetyping বাদে সব মোডে) ইনপুট বক্সের ঠিক নিচে সবসময় দেখা যাবে,
+            // এখন যেই কী চাপার কথা সেটা হলুদ হয়ে জ্বলবে (Neonlipi রেফারেন্সের
+            // সমতুল্য) ──
+            if (smartTypingEnabled && sessionMode != "freetyping" && isStarted && !isFinished) {
+                LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
+            }
 
             // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
             // "✅ শেষ করুন" চাপলেই সেশন থামবে এবং ফলাফল দেখাবে ──
