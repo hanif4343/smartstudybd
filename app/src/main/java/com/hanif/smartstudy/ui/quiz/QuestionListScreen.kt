@@ -173,7 +173,13 @@ fun QuestionListScreen(
     highlightQuestionId : String? = null,
     onHighlightConsumed : () -> Unit = {},
     onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
-    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
+    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── "প্রশ্ন" এডিটের সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে অপশন/উত্তর আবার
+    // জেনারেট করা — ডিফল্টভাবেই এই স্ক্রিনের নিজের viewModel (উপরের প্যারামিটার)
+    // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
+    // করতে হবে না — এমনিতেই কাজ করবে। ইচ্ছা করলে override করাও যায় ──
+    onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? =
+        { q -> viewModel.regenerateMcqOptions(q) }
 ) {
     val pageSize = QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
@@ -447,7 +453,7 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
-                                    studyRevealMode = studyRevealMode,
+                                    onRegenerateOptions = onRegenerateOptions,
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
                                     onRecallGraded = onRecallGradedAdvance,
@@ -476,6 +482,7 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
+                            onRegenerateOptions = onRegenerateOptions,
                             studyRevealMode = studyRevealMode,
                             studyRecallMode = studyRecallMode,
                             answerFocusRequester = recallFocusRequesterFor(q.id),
