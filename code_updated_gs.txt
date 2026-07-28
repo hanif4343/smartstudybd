@@ -343,6 +343,7 @@ function syncNFRows(sheetName, folderName){
    doGet
 ══════════════════════════════════════════════════════════ */
 function doGet(e) {
+ try {
   var action = e.parameter.action;
   var cfg    = getProps();
 
@@ -401,7 +402,7 @@ function doGet(e) {
     if(fldC===-1){for(var fc=0;fc<uHdr.length;fc++){if(uHdr[fc].includes(fld)){fldC=fc;break;}}}
     if(idC===-1||fldC===-1)return json({result:"error",error:"Column not found: "+fld});
     var targetId=(e.parameter.id||"").toString().trim();
-    var content=decodeURIComponent(e.parameter.content||"");
+    var content=(e.parameter.content||"");
     var ufAtC=uHdr.indexOf("updatedat");
     for(var ur=1;ur<uRows.length;ur++){
       if(uRows[ur][idC].toString().trim()===targetId){
@@ -485,13 +486,13 @@ function doGet(e) {
     var shName=e.parameter.sheet||"QBank";
     var shMap2={quiz:"Quiz",qbank:"QBank",study:"Study"};
     shName=shMap2[shName.toLowerCase()]||shName;
-    var field=decodeURIComponent(e.parameter.field||"subject");
+    var field=(e.parameter.field||"subject");
     // 🐛 ফিক্স: আগে শুধু .trim() দিয়ে ম্যাচ হতো — invisible zero-width char/nbsp থাকলে
     // (যেমন taxonomy-র পুরনো বাগে ঢুকে যাওয়া \u200b) সেই variant কখনো ম্যাচ হতো না,
     // আলাদা "ভুতুড়ে" ডুপ্লিকেট থেকে যেত। এখন normalizeFieldValue_ দিয়ে ম্যাচ হয়, তাই
     // দেখতে-একই-রকম সব variant (invisible char যাই থাকুক) একবারেই merge হয়ে যায়।
-    var oldV=normalizeFieldValue_(decodeURIComponent(e.parameter.oldVal||e.parameter.old||""));
-    var newV=(decodeURIComponent(e.parameter.newVal||e.parameter.new||"")).trim();
+    var oldV=normalizeFieldValue_(e.parameter.oldVal||e.parameter.old||"");
+    var newV=(e.parameter.newVal||e.parameter.new||"").trim();
     if(!oldV||!newV)return json({result:"error",error:"missing values"});
     var ss3=SpreadsheetApp.getActiveSpreadsheet(), sh3=ss3.getSheetByName(shName);
     if(!sh3)return json({result:"error",error:"sheet not found: "+shName});
@@ -555,7 +556,7 @@ function doGet(e) {
     var shName2=e.parameter.sheet||"QBank";
     var shMap3={quiz:"Quiz",qbank:"QBank",study:"Study"};
     shName2=shMap3[shName2.toLowerCase()]||shName2;
-    var ids=(decodeURIComponent(e.parameter.ids||"")).split(",").map(function(x){return x.trim();}).filter(Boolean);
+    var ids=(e.parameter.ids||"").split(",").map(function(x){return x.trim();}).filter(Boolean);
     if(!ids.length)return json({result:"error",error:"no ids"});
     var ss4=SpreadsheetApp.getActiveSpreadsheet(), sh4=ss4.getSheetByName(shName2);
     if(!sh4)return json({result:"error",error:"sheet not found: "+shName2});
@@ -577,9 +578,9 @@ function doGet(e) {
     var adminPhone=(cfg.ADMIN_PHONE||"").toString().replace(/^'+/,'').trim();
     if(!adminPhone)return json({result:"error",error:"ADMIN_PHONE not set"});
     var evType=e.parameter.event||"login";
-    var uName=decodeURIComponent(e.parameter.name||"কেউ");
-    var uPhone=decodeURIComponent(e.parameter.phone||"");
-    var extra=decodeURIComponent(e.parameter.extra||"");
+    var uName=(e.parameter.name||"কেউ");
+    var uPhone=(e.parameter.phone||"");
+    var extra=(e.parameter.extra||"");
 
     var title, body, navUrl;
 
@@ -611,8 +612,8 @@ function doGet(e) {
   // ── resolveReport ──
   if (action==="resolveReport") {
     var phone=(e.parameter.phone||"").toString().replace(/^'+/,'').trim();
-    var subject=decodeURIComponent(e.parameter.subject||"প্রশ্নটি");
-    var qid=e.parameter.questionId||"", qsheet=decodeURIComponent(e.parameter.qsheet||"");
+    var subject=(e.parameter.subject||"প্রশ্নটি");
+    var qid=e.parameter.questionId||"", qsheet=(e.parameter.qsheet||"");
     if(!phone)return json({result:"error",error:"phone missing"});
     var safePhone=phone.replace(/[.#$\[\]\s]/g,'_');
     var payload={type:'report_resolved',title:'✅ রিপোর্ট সমাধান হয়েছে!',body:'"'+subject+'" সংশোধন করা হয়েছে।',questionId:qid,qsheet:qsheet,time:new Date().toLocaleString(),read:false};
@@ -623,10 +624,10 @@ function doGet(e) {
   // ── sendChallengeNotification ──
   if (action === "sendChallengeNotification") {
     var toPhone   = (e.parameter.toPhone || "").toString().replace(/^'+/, "").trim();
-    var fromName  = decodeURIComponent(e.parameter.fromName  || "কেউ");
+    var fromName  = (e.parameter.fromName  || "কেউ");
     var fromPhone = (e.parameter.fromPhone || "").toString().replace(/^'+/, "").trim();
-    var subject   = decodeURIComponent(e.parameter.subject   || "");
-    var subTopic  = decodeURIComponent(e.parameter.subTopic  || "");
+    var subject   = (e.parameter.subject   || "");
+    var subTopic  = (e.parameter.subTopic  || "");
     var chalId    = (e.parameter.challengeId || "").toString().trim();
     var qCount    = (e.parameter.questionCount || "10").toString().trim();
     var wagerXp   = (e.parameter.wagerXp || "0").toString().trim();
@@ -671,28 +672,28 @@ function doGet(e) {
   // ── personalNotify ──
   if (action==="personalNotify") {
     var phone=(e.parameter.phone||"").toString().replace(/^'+/,'').trim();
-    var title=decodeURIComponent(e.parameter.title||"Smart Study");
-    var body=decodeURIComponent(e.parameter.body||"");
+    var title=(e.parameter.title||"Smart Study");
+    var body=(e.parameter.body||"");
     if(!phone)return json({result:"error",error:"phone missing"});
     var extraData={type:"personal_notification"};
-    var nu=decodeURIComponent(e.parameter.url||"");var nq=decodeURIComponent(e.parameter.questionId||"");var nqs=decodeURIComponent(e.parameter.qsheet||"");
+    var nu=(e.parameter.url||"");var nq=(e.parameter.questionId||"");var nqs=(e.parameter.qsheet||"");
     if(nu)extraData.url=nu;if(nq)extraData.questionId=nq;if(nqs)extraData.qsheet=nqs;
     return json({result:"success",fcm:sendFCMToPhone(phone,title,body,extraData)});
   }
 
   // ── broadcastNotification ──
   if (action==="broadcastNotification") {
-    var title=decodeURIComponent(e.parameter.title||'Smart Study');
-    var body=decodeURIComponent(e.parameter.body||'');
-    return json({result:"success",fcm:sendFCMToAll(title,body,{type:"broadcast",url:decodeURIComponent(e.parameter.url||'qbank')})});
+    var title=(e.parameter.title||'Smart Study');
+    var body=(e.parameter.body||'');
+    return json({result:"success",fcm:sendFCMToAll(title,body,{type:"broadcast",url:(e.parameter.url||'qbank')})});
   }
 
   // ── postNotice ──
   if (action==="postNotice") {
     var ss=SpreadsheetApp.getActiveSpreadsheet(), nSh=ss.getSheetByName("Notice");
     if(!nSh){nSh=ss.insertSheet("Notice");nSh.appendRow(["Date","Title","Message","Timestamp"]);}
-    var nTitle=decodeURIComponent(e.parameter.n_title||""), nMsg=decodeURIComponent(e.parameter.n_msg||"");
-    var nTs=decodeURIComponent(e.parameter.timestamp||new Date().toLocaleString());
+    var nTitle=(e.parameter.n_title||""), nMsg=(e.parameter.n_msg||"");
+    var nTs=(e.parameter.timestamp||new Date().toLocaleString());
     if(!nTitle||!nMsg)return json({result:"error",error:"missing"});
     nSh.appendRow([nTs.split(",")[0]||Utilities.formatDate(new Date(),"GMT+6","dd/MM/yyyy"),nTitle,nMsg,nTs]);
     syncToFirebase("Notice","Notice");
@@ -849,6 +850,14 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({status:"error",message:"ID not found"})).setMimeType(ContentService.MimeType.JSON);
   }
   return json({error:"Unknown action: "+action});
+ } catch(err) {
+  // ── আগে doGet-এর কোনো global try/catch ছিল না — একটা unexpected exception
+  // (যেমন আগে decodeURIComponent-এর malformed URI error) হলে GAS নিজে থেকে
+  // একটা HTML error page ফেরত দিতো, যেটা Android-সাইডে JSON.parse() করার
+  // চেষ্টায় crash/silent-failure হতো (দেখো GasContentService.callGetAction)।
+  // doPost-এর মতোই এখন সবসময় proper JSON error ফেরত যাবে। ──
+  return json({status:"error",result:"error",message:err.toString(),error:err.toString()});
+ }
 }
 
 /* ══════════════════════════════════════════════════════════
