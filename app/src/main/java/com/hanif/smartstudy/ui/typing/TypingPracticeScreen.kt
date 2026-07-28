@@ -2196,7 +2196,7 @@ fun TypingPracticeScreen(
             if (showRoadmapWizard) {
                 RoadmapWizardDialog(
                     onDismiss = { showRoadmapWizard = false },
-                    onSave = { plan ->
+                    onComplete = { plan ->
                         roadmapPlan = plan
                         showRoadmapWizard = false
                     }
@@ -2370,25 +2370,26 @@ private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>, language: String) {
             }
 
             // Top 16 keys sorted by usage
-            val topKeys = remember(stats) { stats.sortedByDescending { it.totalSamples() }.take(16) }
+            val topKeys = remember(stats) { stats.sortedByDescending { it.correctCount + it.wrongCount }.take(16) }
 
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 topKeys.forEach { stat ->
-                    val acc = (stat.accuracy() * 100).toInt()
+                    val total = stat.correctCount + stat.wrongCount
+                    val acc = if (total > 0) stat.correctCount * 100 / total else 0
                     val bgColor = when {
-                        stat.totalSamples() < 5 -> Color(0xFFE2E8F0)
-                        acc >= 90               -> Color(0xFFDCFCE7)
-                        acc >= 75               -> Color(0xFFFEF3C7)
-                        else                    -> Color(0xFFFEE2E2)
+                        total < 5 -> Color(0xFFE2E8F0)
+                        acc >= 90 -> Color(0xFFDCFCE7)
+                        acc >= 75 -> Color(0xFFFEF3C7)
+                        else      -> Color(0xFFFEE2E2)
                     }
                     val textColor = when {
-                        stat.totalSamples() < 5 -> Color(0xFF64748B)
-                        acc >= 90               -> Color(0xFF166534)
-                        acc >= 75               -> Color(0xFF92400E)
-                        else                    -> Color(0xFF991B1B)
+                        total < 5 -> Color(0xFF64748B)
+                        acc >= 90 -> Color(0xFF166534)
+                        acc >= 75 -> Color(0xFF92400E)
+                        else      -> Color(0xFF991B1B)
                     }
 
                     Box(
@@ -2406,7 +2407,7 @@ private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>, language: String) {
                                 color = textColor,
                                 fontFamily = NotoSansBengali
                             )
-                            if (stat.totalSamples() >= 5) {
+                            if (total >= 5) {
                                 Text(
                                     text = "$acc%",
                                     fontSize = 8.sp,
@@ -2512,91 +2513,6 @@ private fun ExamResultCard(
     }
 }
 
-// ── Phase ৩: Roadmap Wizard Dialog ──
-@Composable
-private fun RoadmapWizardDialog(
-    onDismiss: () -> Unit,
-    onSave   : (RoadmapPlan) -> Unit
-) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val session = remember { SessionManager(ctx) }
-
-    var currentWpm by remember { mutableStateOf("15") }
-    var targetWpm  by remember { mutableStateOf("30") }
-    var minutesPerDay by remember { mutableStateOf("20") }
-    var examDaysLeft by remember { mutableStateOf("30") }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            Modifier.fillMaxWidth().padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("🗺️ ব্যক্তিগত টাইপিং রোডম্যাপ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-                Text("তোমার বর্তমান গতি এবং পরীক্ষার ডেট দাও, AI একটি নিখুঁত দৈনন্দিন রুটিন বানিয়ে দেবে।", fontSize = 11.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-                OutlinedTextField(
-                    value = currentWpm,
-                    onValueChange = { currentWpm = it },
-                    label = { Text("বর্তমান গতি (WPM)", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = targetWpm,
-                    onValueChange = { targetWpm = it },
-                    label = { Text("লক্ষ্য গতি (WPM)", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = minutesPerDay,
-                    onValueChange = { minutesPerDay = it },
-                    label = { Text("প্রতিদিন অনুশীলনের সময় (মিনিট)", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = examDaysLeft,
-                    onValueChange = { examDaysLeft = it },
-                    label = { Text("পরীক্ষা বা ডেডলাইনের বাকি দিন", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) }
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            val c = currentWpm.toIntOrNull() ?: 15
-                            val t = targetWpm.toIntOrNull() ?: 30
-                            val m = minutesPerDay.toIntOrNull() ?: 20
-                            val d = examDaysLeft.toIntOrNull() ?: 30
-                            val plan = RoadmapPlan(
-                                currentWpm = c,
-                                targetWpm = t,
-                                minutesPerDay = m,
-                                daysToExam = d,
-                                createdAt = System.currentTimeMillis()
-                            )
-                            session.saveRoadmapPlan(plan)
-                            onSave(plan)
-                        },
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("প্ল্যান তৈরি করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
 // ── Phase ৩: Profile & Sync Dialog ──
 @Composable
 private fun TypingProfileDialog(onDismiss: () -> Unit) {
@@ -2634,13 +2550,13 @@ private fun TypingProfileDialog(onDismiss: () -> Unit) {
                         }
                         isSyncing = true
                         scope.launch {
-                            val pushOk = TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
+                            TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
                             val pullResult = TypingCloudSyncService.pull(phone)
                             if (pullResult != null) {
                                 session.mergeTypingCloudSnapshot(pullResult.bestWpm, pullResult.history)
                             }
                             isSyncing = false
-                            syncMessage = if (pushOk || pullResult != null) "✅ ক্লাউড সিঙ্ক সফল হয়েছে!" else "❌ সিঙ্ক করতে ব্যর্থ হয়েছে।"
+                            syncMessage = if (pullResult != null) "✅ ক্লাউড সিঙ্ক সফল হয়েছে!" else "❌ সিঙ্ক করতে ব্যর্থ হয়েছে।"
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
