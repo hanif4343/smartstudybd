@@ -838,6 +838,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /**
+     * ── "প্রশ্ন এডিট করুন" ডায়ালগে "🔄 Regenerate" বাটনে ব্যবহারের জন্য — প্রশ্ন
+     * এডিট/পুনর্লিখন করার পর তার সাথে মিলিয়ে ৪টা অপশন ও সঠিক উত্তর AI দিয়ে আবার
+     * তৈরি করে দেয় (SharedComponents.kt-এর AdminFieldEditDialog থেকে কল হয়)।
+     * বাল্ক-আপলোড করা প্রশ্নে ভুল ধরা পড়লে প্রশ্ন ঠিক করার সাথে সাথেই অপশন/উত্তরও
+     * মিলিয়ে নেওয়া যায় — আলাদাভাবে ম্যানুয়ালি ৪টা অপশন টাইপ করতে হয় না।
+     */
+    suspend fun regenerateMcqOptions(question: String): com.hanif.smartstudy.data.remote.RegeneratedMcq? {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey()) return null
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.regenerateMcqOptions(
+            question = question,
+            keys     = keys
+        )
+    }
+
 
     fun submitQuiz() {
         timerJob?.cancel()
