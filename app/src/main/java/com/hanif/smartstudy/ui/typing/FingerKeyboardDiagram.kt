@@ -70,7 +70,7 @@ private val ROW_ZXCV = listOf(
 /** Smart Typing: Live next-key হাইলাইট কীবোর্ড — TypingPracticeScreen থেকে টাইপিং
  *  চলাকালীন কল হয়, ঠিক এখন যেই ক্যারেক্টার টাইপ করার কথা (nextChar) সেই কী-টা
  *  হলুদ বর্ডার দিয়ে হাইলাইট হয় দেখানোর জন্য। FingerKeyboardDiagram()-এর সাথে একই
- *  ROW_*/Key/Finger স্ট্রাকচার শেয়ার করে (physical QWERTY পজিশন — ভাষা-নিরপেক্ষ,
+ *  ROW_* তালিকা এবং Key/Finger স্ট্রাকচার শেয়ার করে (physical QWERTY পজিশন — ভাষা-নিরপেক্ষ,
  *  তাই বাংলা অক্ষরের জন্য মিল না পেলে কোনো কী হাইলাইট হবে না, শুধু স্বাভাবিক রঙে দেখাবে)। */
 @Composable
 fun LiveKeyHighlightKeyboard(nextChar: Char?) {
