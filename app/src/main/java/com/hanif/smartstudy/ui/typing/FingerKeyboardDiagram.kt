@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.ui.typing
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +66,54 @@ private val ROW_ZXCV = listOf(
     Key("N", Finger.R_INDEX), Key("M", Finger.R_INDEX), Key(",", Finger.R_MIDDLE),
     Key(".", Finger.R_RING), Key("/", Finger.R_PINKY), Key("Shift", Finger.R_PINKY, 2f)
 )
+
+/** Smart Typing: Live next-key হাইলাইট কীবোর্ড — TypingPracticeScreen থেকে টাইপিং
+ *  চলাকালীন কল হয়, ঠিক এখন যেই ক্যারেক্টার টাইপ করার কথা (nextChar) সেই কী-টা
+ *  হলুদ বর্ডার দিয়ে হাইলাইট হয় দেখানোর জন্য। FingerKeyboardDiagram()-এর সাথে একই
+ *  ROW_*/Key/Finger স্ট্রাকচার শেয়ার করে (physical QWERTY পজিশন — ভাষা-নিরপেক্ষ,
+ *  তাই বাংলা অক্ষরের জন্য মিল না পেলে কোনো কী হাইলাইট হবে না, শুধু স্বাভাবিক রঙে দেখাবে)। */
+@Composable
+fun LiveKeyHighlightKeyboard(nextChar: Char?) {
+    val highlightChar = nextChar?.takeIf { it != ' ' }?.uppercaseChar()
+    val highlightSpace = nextChar == ' '
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        HighlightKeyboardRow(ROW_NUM, highlightChar)
+        HighlightKeyboardRow(ROW_QWERTY, highlightChar)
+        HighlightKeyboardRow(ROW_ASDF, highlightChar)
+        HighlightKeyboardRow(ROW_ZXCV, highlightChar)
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Surface(
+                modifier = Modifier.weight(1f).height(30.dp),
+                shape = RoundedCornerShape(5.dp),
+                color = if (highlightSpace) Color(0xFFFACC15) else Finger.THUMB.color.copy(alpha = 0.85f),
+                border = if (highlightSpace) BorderStroke(2.dp, Color(0xFFB45309)) else null
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Space", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HighlightKeyboardRow(keys: List<Key>, highlightChar: Char?) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        keys.forEach { k ->
+            val isHighlighted = highlightChar != null && k.label.length == 1 && k.label[0] == highlightChar
+            Surface(
+                modifier = Modifier.weight(k.weight).height(34.dp),
+                shape = RoundedCornerShape(5.dp),
+                color = if (isHighlighted) Color(0xFFFACC15) else k.finger.color.copy(alpha = 0.85f),
+                border = if (isHighlighted) BorderStroke(2.dp, Color(0xFFB45309)) else null
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(k.label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun KeyboardRow(keys: List<Key>) {
