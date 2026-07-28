@@ -55,7 +55,6 @@ fun MainScreen(
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
-    var showViva       by remember { mutableStateOf(false) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -286,12 +285,6 @@ fun MainScreen(
         )
         return
     }
-    if (showViva) {
-        com.hanif.smartstudy.ui.viva.VivaScreen(
-            onBack = { showViva = false }
-        )
-        return
-    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -347,7 +340,6 @@ fun MainScreen(
                     },
                     onOpenFocusMode = { showFocusModeInfo = true },
                     onOpenAiChat    = { showAiChat = true },
-                    onOpenViva      = { showViva = true },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
@@ -506,6 +498,34 @@ fun MainScreen(
             },
             onDismiss = { pendingTypingNudge = false }
         )
+    }
+    // ── Admin edit/delete toast — MenuScreen-এর নিজস্ব toast overlay শুধু
+    // Menu ট্যাব খোলা থাকলেই দেখা যেত। কিন্তু adminEditQuestion সাধারণত
+    // Quiz/QBank/Study ট্যাবের প্রশ্ন লিস্ট থেকেই কল হয় (Menu ট্যাব থেকে না) —
+    // ফলে state.toast সেট হলেও কোনো ট্যাবেই সেটা দেখানোর মতো composable
+    // composed থাকতো না, তাই "কোনো toast/message ই আসে না" মনে হতো (যদিও
+    // edit/patch ঠিকই ব্যাকগ্রাউন্ডে হচ্ছিল)। এখন MainScreen-এর top-level Box-এ
+    // (যেটা সবসময় composed থাকে, currentTab যাই হোক না কেন) একটা overlay
+    // রাখা হলো যাতে যেকোনো ট্যাব থেকে edit করলেও confirmation/error দেখা যায়। ──
+    menuState.toast?.let { msg ->
+        LaunchedEffect(msg) {
+            kotlinx.coroutines.delay(2500)
+            menuViewModel.clearToast()
+        }
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
+            Surface(
+                modifier = Modifier.padding(bottom = 90.dp, start = 20.dp, end = 20.dp),
+                shape    = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                color    = MaterialTheme.colorScheme.inverseSurface
+            ) {
+                Text(
+                    msg,
+                    modifier   = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    color      = MaterialTheme.colorScheme.inverseOnSurface,
+                    fontSize   = 13.sp
+                )
+            }
+        }
     }
     } // Box (focus overlay wrapper)
 }
