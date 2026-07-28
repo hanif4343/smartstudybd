@@ -359,10 +359,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val bookmarks = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val adminTag  = if (localUser?.isAdmin() == true) session.getAdminAudienceTag() else ""
 
-            // ── Typing Settings — একই "quiz_prefs" SharedPreferences ফাইলে persist ──
-            val smartTypingOn   = prefs.getBoolean("smart_typing_enabled", false)
-            val typingTargetWpm = prefs.getInt("typing_target_wpm", 40)
-            val typingSoundPr   = prefs.getString("typing_sound_preset", "off") ?: "off"
+            // ── Typing Settings — SessionManager-এর DataStore থেকে পড়া হয় (আগে এখানে
+            // "quiz_prefs" SharedPreferences থেকে পড়া হতো, কিন্তু TypingPracticeScreen.kt
+            // আসলে session.getSmartTypingEnabled() (DataStore) থেকে ফ্ল্যাগ পড়ে — দুই
+            // জায়গায় দুই storage থাকায় Settings-এ টগল অন করলেও TypingPracticeScreen
+            // কখনো সেটা দেখতেই পেত না। এখন দুই পাশই একই source ব্যবহার করছে ──
+            val smartTypingOn   = session.getSmartTypingEnabled()
+            val typingTargetWpm = session.getTypingTargetWpm()
+            val typingSoundPr   = session.getTypingSoundPreset()
 
             val aiKeys = session.getAiApiKeys()
 
@@ -535,24 +539,32 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস") ────
-    // session/SessionManager-এর DataStore-এর বদলে "quiz_prefs" SharedPreferences
-    // ব্যবহার করা হলো — bookmarks/weakTopics-ও এই একই ফাইল ব্যবহার করে, তাই
-    // নতুন কোনো DataStore key/SessionManager পরিবর্তন লাগলো না।
-    private fun quizPrefs() = ctx.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
-
+    // FIX: আগে এখানে "quiz_prefs" SharedPreferences-এ লেখা হতো, কিন্তু
+    // TypingPracticeScreen.kt আসলে session.getSmartTypingEnabled() (SessionManager-এর
+    // DataStore) থেকে ফ্ল্যাগ পড়ে — ফলে Settings-এ টগল অন করলে state.smartTypingEnabled
+    // সাথে সাথে বদলালেও (এবং সেটিংস স্ক্রিনে "চালু আছে" দেখালেও), TypingPracticeScreen
+    // কখনো নতুন ফিচারগুলো (heatmap, Roadmap, Govt Mock, BCC, ইত্যাদি) দেখাতোই না, কারণ
+    // সে যেই DataStore key পড়ছে সেটাতে কিছুই লেখা হচ্ছিল না। এখন session (DataStore)-এই
+    // লেখা হচ্ছে, যাতে দুই পাশ একই সোর্স শেয়ার করে।
     fun setSmartTypingEnabled(on: Boolean) {
-        quizPrefs().edit().putBoolean("smart_typing_enabled", on).apply()
-        _state.update { it.copy(smartTypingEnabled = on) }
+        viewModelScope.launch {
+            session.setSmartTypingEnabled(on)
+            _state.update { it.copy(smartTypingEnabled = on) }
+        }
     }
 
     fun setTypingTargetWpm(wpm: Int) {
-        quizPrefs().edit().putInt("typing_target_wpm", wpm).apply()
-        _state.update { it.copy(typingTargetWpm = wpm) }
+        viewModelScope.launch {
+            session.setTypingTargetWpm(wpm)
+            _state.update { it.copy(typingTargetWpm = wpm.coerceIn(5, 200)) }
+        }
     }
 
     fun setTypingSoundPreset(preset: String) {
-        quizPrefs().edit().putString("typing_sound_preset", preset).apply()
-        _state.update { it.copy(typingSoundPreset = preset) }
+        viewModelScope.launch {
+            session.setTypingSoundPreset(preset)
+            _state.update { it.copy(typingSoundPreset = preset) }
+        }
     }
 
     // ── Offline mode (Firebase disconnect বাটন) ───────────────
