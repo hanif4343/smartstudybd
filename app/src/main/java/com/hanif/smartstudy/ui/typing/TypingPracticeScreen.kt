@@ -366,6 +366,21 @@ fun TypingPracticeScreen(
     var elapsedSec   by remember { mutableStateOf(0) }
     var result       by remember { mutableStateOf<TypingResult?>(null) }
 
+    // ── পর্ব ৪.৫: ব্যাকস্পেস-লক টগল (Normal Typing-এ ঐচ্ছিক, govtmock-এ সবসময় বাধ্যতামূলক) —
+    // ইউজার নিজে অন করলে ব্যাকস্পেস কাজ করবে না, ভুল হলেও এগিয়ে যেতেই হবে (আসল টাচ-টাইপিং
+    // প্রশিক্ষণের স্বীকৃত কৌশল — ভুল ঠিক করতে থামা/আঙুলের পজিশন হারানোই আসল গতি-ক্ষতির কারণ) ──
+    var backspaceLocked      by remember { mutableStateOf(false) }
+    // ── লকড অবস্থায় ব্যাকস্পেস চাপলে সংক্ষিপ্ত ওয়ার্নিং ফ্ল্যাশ — পরের যেকোনো কী-প্রেসে
+    // সাথে সাথেই হাইড হয় (দেখো onInputChange()), আর নিরাপত্তার জন্য একটা টাইম-আউটেও
+    // (নিচের LaunchedEffect) অটো-হাইড হয়, যাতে ইউজার একদমই আর কিছু না চাপলেও আটকে না থাকে ──
+    var showBackspaceWarning by remember { mutableStateOf(false) }
+    LaunchedEffect(showBackspaceWarning) {
+        if (showBackspaceWarning) {
+            delay(1200)
+            showBackspaceWarning = false
+        }
+    }
+
     // ── AI Adaptive Session — "free" (স্বাভাবিক প্র্যাকটিস) বনাম "adaptive" (দুই-ধাপ) ──
     var sessionMode      by remember { mutableStateOf("free") }   // "free" | "adaptive"
     // ── Phase ২: Govt Job মক টেস্ট — ইউজার সিলেক্ট করা সময়সীমা (মিনিট) ও শেষে
@@ -1091,9 +1106,16 @@ fun TypingPracticeScreen(
     // আর নেইই (কোনো resync-heuristic লাগে না, কাঠামোগতভাবেই এড়ানো)। ──
     fun onInputChange(new: String) {
         if (isFinished) return
-        // ── Phase ২: Govt Job মক টেস্টে Backspace/মুছে ফেলা নিষিদ্ধ — বাস্তব সরকারি
-        // ডেটা এন্ট্রি পরীক্ষার নিয়ম অনুযায়ী, ভুল হলেই এগিয়ে যেতে হয়, পেছনে ফেরা যায় না ──
-        if (sessionMode == "govtmock" && new.length < userInput.length) return
+        // ── Phase ২: Govt Job মক টেস্টে Backspace/মুছে ফেলা সবসময় নিষিদ্ধ (বাস্তব সরকারি
+        // ডেটা এন্ট্রি পরীক্ষার নিয়ম) — Normal Typing-এও ইউজার নিজে "🔒 Backspace Lock"
+        // টগল অন করলে একই আচরণ ঐচ্ছিকভাবে চালু হয় (দেখো backspaceLocked, UI-তে টেক্সট-
+        // বক্সের ওপরে-ডানে সুইচ) ──
+        val backspaceIsBlocked = sessionMode == "govtmock" || backspaceLocked
+        if (backspaceIsBlocked && new.length < userInput.length) {
+            showBackspaceWarning = true
+            return
+        }
+        if (showBackspaceWarning) showBackspaceWarning = false
         if (!isStarted && new.isNotEmpty()) isStarted = true
         // ── Phase ১: কী-সাউন্ড — শুধু ক্যারেক্টার যোগ হলে বাজে (ব্যাকস্পেস/মুছে ফেলায় না,
         // নাহলে ব্যাকস্পেস দেওয়াও "পুরস্কৃত" মনে হতে পারে) ──
@@ -2167,6 +2189,41 @@ fun TypingPracticeScreen(
             }
             }
 
+
+            // ── পর্ব ৪.৫: ব্যাকস্পেস-লক টগল — টেক্সট-বক্সের ঠিক ওপরে, ডান পাশে। govtmock-এ
+            // এটা সবসময়-অন ও ডিসেবলড দেখানো হয় (আগে থেকেই বাধ্যতামূলক); freetyping-এ কোনো
+            // target passage নেই বলে toggle-টাই লুকানো থাকে ──
+            if (sessionMode != "freetyping") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AnimatedVisibility(visible = showBackspaceWarning) {
+                        Text(
+                            "🔒 ব্যাকস্পেস লকড — সামনে এগিয়ে যান",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                            fontFamily = NotoSansBengali
+                        )
+                    }
+                    if (!showBackspaceWarning) Spacer(modifier = Modifier.weight(1f))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "🔒 Backspace Lock",
+                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Switch(
+                            checked  = backspaceLocked || sessionMode == "govtmock",
+                            enabled  = sessionMode != "govtmock",   // govtmock-এ সবসময় বাধ্যতামূলক, বদলানো যাবে না
+                            onCheckedChange = { backspaceLocked = it },
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
 
             // Input field
             OutlinedTextField(
