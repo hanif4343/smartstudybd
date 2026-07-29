@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -21,8 +21,11 @@ import androidx.room.RoomDatabase
     // cumulative সঠিক/ভুল কাউন্ট — লাইভ হিটম্যাপ ও দুর্বল-কী ড্রিলের ভিত্তি
     // v9 → v10: CurriculumProgressEntity যোগ হলো — Phase ৩ Key-unlock কারিকুলাম:
     // ইউজার কোন স্টেজ পর্যন্ত আনলক করেছে (bn/en আলাদা), দেখো data/model/BijoyCurriculum.kt
+    // v10 → v11: TypingKeyStatEntity-তে totalLatencyMs/latencySumSqMs/latencySamples কলাম
+    // যোগ হলো, আর TypingKeyPairStatEntity নতুন টেবিল হিসেবে যোগ হলো — Key Analysis
+    // ফিচার (দ্বিধা/স্থিরতা/ধীর জুটি), দেখো ui/typing/TypingPracticeScreen.kt-এর KeyAnalysisSection
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun typingSheetPassageDao(): TypingSheetPassageDao
     abstract fun typingKeyStatDao(): TypingKeyStatDao
     abstract fun curriculumProgressDao(): CurriculumProgressDao
+    abstract fun typingKeyPairStatDao(): TypingKeyPairStatDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
