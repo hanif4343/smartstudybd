@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.sqrt
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.CustomPassageEntity
@@ -2451,39 +2453,82 @@ fun TypingPracticeScreen(
                 } }
             }
 
-            // Result card
-            AnimatedVisibility(visible = isFinished && result != null && !showPhaseTransition && sessionMode != "exam") {
+            // ── পর্ব ৪.৪: Normal Typing-এর (free/freetyping/study) ফলাফল এখন আর নিচে-
+            // স্ক্রল-করা ইনলাইন কার্ড না — সাবমিট হওয়ামাত্র একটা ফুল-স্ক্রিন, নন-
+            // ডিসমিসেবল Dialog হিসেবে আসবে, পেছনের সব UI (ইনপুট/বাটন) সম্পূর্ণ লকড
+            // থাকবে যতক্ষণ না ইউজার নিজে "আবার"/"পরের Passage" চাপে। onRetry/onNextPassage
+            // দুই জায়গাতেই লাগবে বলে একবারই সংজ্ঞায়িত (ডুপ্লিকেশন এড়াতে) ──
+            val isNormalTypingResultMode = sessionMode in setOf("free", "freetyping", "study")
+            val resultOnRetry: () -> Unit = {
+                when {
+                    sessionMode == "freetyping" -> startFreeTyping()
+                    sessionMode == "study" -> {
+                        // ── আবার — একই আইটেম, শুধু টাইপিং স্টেট রিসেট (used হিসেবে
+                        // ইতিমধ্যে সেভ হয়ে গেছে, দ্বিতীয়বার সেভ করলেও ক্ষতি নেই — id একই থাকায় REPLACE হবে) ──
+                        userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
+                        isStarted = false; isFinished = false; elapsedSec = 0; result = null
+                        correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+                        leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+                    }
+                    else -> reset()
+                }
+            }
+            val resultOnNextPassage: () -> Unit = {
+                when {
+                    sessionMode == "freetyping" -> startFreeTyping()
+                    sessionMode == "study" -> {
+                        val subj = studySubject; val st = studySubTopic
+                        if (subj != null && st != null) loadStudyPool(subj, st)
+                    }
+                    else -> {
+                        val pool = currentPool()
+                        reset(passageIndex + 1, pool)
+                    }
+                }
+            }
+
+            if (isFinished && result != null && !showPhaseTransition && isNormalTypingResultMode) {
+                Dialog(
+                    onDismissRequest = { /* ইচ্ছাকৃতভাবে খালি — বাইরে ট্যাপ/ব্যাক-এ বন্ধ হবে না,
+                                             ইউজারকে ResultCard-এর "আবার"/"পরের Passage" বাটন থেকেই
+                                             একটা সিদ্ধান্ত নিতে হবে, তাই ব্যাকগ্রাউন্ড সত্যিকারের অর্থে লকড */ },
+                    properties = DialogProperties(
+                        usePlatformDefaultWidth = false,
+                        dismissOnBackPress = false,
+                        dismissOnClickOutside = false
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            result?.let { r ->
+                                ResultCard(r, bestWpm,
+                                    sessionMistakeWords = sessionMistakeWords.distinct(),
+                                    showSmartFeatures = smartTypingEnabled,
+                                    onRetry = resultOnRetry,
+                                    onNextPassage = resultOnNextPassage
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── অন্যান্য মোডে (govtmock/adaptive/curriculum/keydrill ইত্যাদি — এখনো
+            // পর্ব-৪-এর স্কোপের বাইরে) আগের ইনলাইন আচরণই বহাল রইল, কোনো regression
+            // এড়াতে এখানে হাত দেওয়া হয়নি ──
+            AnimatedVisibility(visible = isFinished && result != null && !showPhaseTransition && sessionMode != "exam" && !isNormalTypingResultMode) {
                 result?.let { r ->
                     ResultCard(r, bestWpm,
                         sessionMistakeWords = sessionMistakeWords.distinct(),
                         showSmartFeatures = smartTypingEnabled,
-                        onRetry = {
-                            when {
-                                sessionMode == "freetyping" -> startFreeTyping()
-                                sessionMode == "study" -> {
-                                    // ── আবার — একই আইটেম, শুধু টাইপিং স্টেট রিসেট (used হিসেবে
-                                    // ইতিমধ্যে সেভ হয়ে গেছে, দ্বিতীয়বার সেভ করলেও ক্ষতি নেই — id একই থাকায় REPLACE হবে) ──
-                                    userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
-                                    isStarted = false; isFinished = false; elapsedSec = 0; result = null
-                                    correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
-                                    leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
-                                }
-                                else -> reset()
-                            }
-                        },
-                        onNextPassage = {
-                            when {
-                                sessionMode == "freetyping" -> startFreeTyping()
-                                sessionMode == "study" -> {
-                                    val subj = studySubject; val st = studySubTopic
-                                    if (subj != null && st != null) loadStudyPool(subj, st)
-                                }
-                                else -> {
-                                    val pool = currentPool()
-                                    reset(passageIndex + 1, pool)
-                                }
-                            }
-                        }
+                        onRetry = resultOnRetry,
+                        onNextPassage = resultOnNextPassage
                     )
                 }
             }
@@ -3258,16 +3303,29 @@ private fun ResultCard(
             // TypingAdaptiveContentProvider.getBlendedPassage), শুধু UI-তে হাইড করা হলো ──
 
             val shareCtx = androidx.compose.ui.platform.LocalContext.current
+            // ── পর্ব ৪.৪: শেয়ার বাটন হালকা pulse-এনিমেশন দিয়ে চোখ টানবে, যাতে ইউজার
+            // শেয়ার করতে আগ্রহী হয় — infiniteTransition দিয়ে scale ১.০↔১.০৬ দোলে ──
+            val shareBtnScale by rememberInfiniteTransition(label = "shareBtnPulse").animateFloat(
+                initialValue = 1f, targetValue = 1.06f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(700, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ), label = "shareBtnScale"
+            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onRetry, modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)) {
                     Text("🔄 আবার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                 }
-                OutlinedButton(
+                Button(
                     onClick = { com.hanif.smartstudy.util.ResultShareUtil.shareTyping(shareCtx, result, isNewBest) },
-                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.weight(1f).scale(shareBtnScale),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC4899))
                 ) {
-                    Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("শেয়ার করো", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                 }
             }
             Button(onClick = onNextPassage, modifier = Modifier.fillMaxWidth(),
