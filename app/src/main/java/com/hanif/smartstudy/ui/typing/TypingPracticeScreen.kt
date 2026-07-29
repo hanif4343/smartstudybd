@@ -737,6 +737,46 @@ fun TypingPracticeScreen(
      *  প্যাসেজ শেষ হলে (বা adaptive/exam-এ সময়-বাজেট শেষ হলে) স্বয়ংক্রিয়ভাবে যা হতো,
      *  ঠিক সেই একই লজিক। "📤 Submit Now" বাটনে ট্যাপ করলেও এটাই কল হয় — তাই যেকোনো
      *  সময় চাপলে স্বাভাবিক ফলাফলই (as usual) দেখা যায়, আলাদা কোনো পথ নেই। */
+    /** পর্ব ৪.২ + ৫.৪: সময়-সীমা শেষে (মাঝ-প্যাসেজেও) জোর করে সেশন থামানো হলে
+     *  finishSession()/finishExamPhase()-এর ঠিক আগে কল হয় — টাইমড-accuracy সঠিক
+     *  রাখতে দুইটা কাজ করে:
+     *   (ক) এই মুহূর্তে যে শব্দটা টাইপ করছিল কিন্তু এখনো "লক" হয়নি (স্পেস দেয়নি),
+     *       সেটার টাইপ-করা অংশও ফাইনাল কাউন্টে যোগ করে — আগে এই আন-লকড শব্দটা
+     *       সম্পূর্ণ বাদ পড়ে যেত (onInputChange()-এর কাউন্টিং শুধু "লক" হওয়া শব্দেই চলে)।
+     *   (খ) বর্তমান প্যাসেজের যে অংশটা ইউজার একদমই শুরু করতে পারেনি (বাকি-থাকা শব্দ),
+     *       সেই পুরো দৈর্ঘ্যটা totalKeystrokes-এ "ভুল" হিসেবে যোগ করে দেয়।
+     *  ফলে accuracy আর শুধু "যতটুকু টাইপ করেছি তার মধ্যে কত% ঠিক" মাপে না —
+     *  "পুরো টার্গেটের কত% ঠিকভাবে শেষ করতে পেরেছি" মাপে, যেটা টাইমড টেস্টে সঠিক আচরণ।
+     *  প্যাসেজ পুরোপুরি শেষ হয়ে থাকলে (স্বাভাবিক completion) এই ফাংশন কার্যত no-op —
+     *  তখন current word null/untouched-words empty হয়ে যায়, তাই নিরাপদে সবসময় কল করা যায়। */
+    fun finalizeTimedCutoff() {
+        val split = splitTypedWords(userInput)
+        val wIdx = split.completed.size
+        val typedWord = split.current
+        val targetWord = passageWords.getOrNull(wIdx)
+
+        // (ক) বর্তমান আন-লকড শব্দ — char-by-char তুলনা করে ফাইনাল কাউন্টে যোগ
+        if (targetWord != null && typedWord.isNotEmpty()) {
+            val len = maxOf(targetWord.length, typedWord.length)
+            for (i in 0 until len) {
+                val t = targetWord.getOrNull(i)
+                val u = typedWord.getOrNull(i)
+                totalKeystrokes++
+                if (t != null && u == t) correctKeystrokes++ else incorrectKeystrokes++
+            }
+        }
+
+        // (খ) একদমই টাইপ-না-করা বাকি শব্দগুলো — পুরো দৈর্ঘ্য "ভুল" হিসেবে যোগ
+        // (+১ প্রতিটার আগের স্পেসের জন্য — বর্তমান শব্দ আর প্রথম untouched শব্দের
+        // মাঝের স্পেসটাও এর মধ্যে ধরা আছে, সেটাও কখনো টাইপ হয়নি)
+        val untouchedWords = passageWords.drop(wIdx + 1)
+        if (untouchedWords.isNotEmpty()) {
+            val missingChars = untouchedWords.sumOf { it.length } + untouchedWords.size
+            totalKeystrokes += missingChars
+            incorrectKeystrokes += missingChars
+        }
+    }
+
     fun finishSession() {
         isFinished = true
         val timeSec = elapsedSec.coerceAtLeast(1)
@@ -1087,6 +1127,7 @@ fun TypingPracticeScreen(
         if (sessionMode != "exam" || !isStarted || isFinished) return@LaunchedEffect
         if (elapsedSec < EXAM_PHASE_SECONDS) return@LaunchedEffect
 
+        finalizeTimedCutoff()
         finishExamPhase()
     }
 
@@ -1096,6 +1137,21 @@ fun TypingPracticeScreen(
         if (sessionMode != "govtmock" || !isStarted || isFinished) return@LaunchedEffect
         if (elapsedSec < govtMockMinutes * 60) return@LaunchedEffect
 
+        finalizeTimedCutoff()
+        finishSession()
+    }
+
+    // ── পর্ব ৪.২/৫.৪: Normal (free) Typing — FREE_MODE_MIN_SECONDS (৫ মিনিট) শেষ হলে
+    // মাঝ-প্যাসেজেও জোর করে থামিয়ে দেয়, ঠিক Exam/Govt Mock-এর মতোই। আগে এখানে কোনো
+    // স্বতন্ত্র টাইম-কাটঅফ ছিল না — শুধু "Check completion" effect-এ (নিচে) বর্তমান
+    // প্যাসেজ শেষ হওয়ার অপেক্ষায় থেকে তারপর সময় চেক হতো ("soft stop"), ফলে ইউজার
+    // ৫ মিনিট পার হয়ে যাওয়ার পরও চলমান প্যাসেজটা শেষ না করা পর্যন্ত সেশন থামত না —
+    // এটাই এখন হার্ড-কাটঅফে বদলানো হলো (মাঝ-শব্দেও থেমে যাবে, বাকি অংশ ভুল হিসেবে গোনা হবে) ──
+    LaunchedEffect(elapsedSec, sessionMode, isStarted, isFinished) {
+        if (sessionMode != "free" || !isStarted || isFinished) return@LaunchedEffect
+        if (elapsedSec < FREE_MODE_MIN_SECONDS) return@LaunchedEffect
+
+        finalizeTimedCutoff()
         finishSession()
     }
 
