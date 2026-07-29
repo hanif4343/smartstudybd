@@ -38,6 +38,7 @@ import com.hanif.smartstudy.data.model.BijoyCurriculum
 import com.hanif.smartstudy.data.remote.TypingCloudSyncService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.CurriculumProvider
+import com.hanif.smartstudy.util.PassageRepeatGuard
 import com.hanif.smartstudy.util.Hand
 import com.hanif.smartstudy.util.HandKeyMap
 import com.hanif.smartstudy.util.RoadmapPlan
@@ -338,6 +339,11 @@ fun TypingPracticeScreen(
         customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
     }
     var passageIndex by remember { mutableStateOf(0) }
+    // ── প্যাসেজ-পুনরাবৃত্তি এড়ানোর গার্ড (৫.১ ফিক্স) — adaptive/exam/govtmock/free
+    // মোডে "পরের প্যাসেজে যাও" মুহূর্তে এটা দিয়েই ইনডেক্স বাছাই হয়, আগের সিকোয়েন্সিয়াল
+    // (passageIndex+1).mod(size) লজিকের বদলে — একই প্যাসেজ মুখস্ত হয়ে গিয়ে WPM কৃত্রিমভাবে
+    // বেড়ে যাওয়ার মূল কারণ এটাই ছিল (বিস্তারিত: ডেভ-প্ল্যান ডকুমেন্ট, পর্ব ৪.১/৫.১) ──
+    val passageGuard = remember { PassageRepeatGuard() }
     // ── PASSAGES এখন Sheet থেকে asynchronously লোড হয় (দেখো ensureTypingPassagesLoaded()),
     // তাই শুরুতে খালি — নিচের LaunchedEffect(Unit) লোড শেষে reset() দিয়ে বৈধ প্যাসেজ বসায় ──
     var passage      by remember { mutableStateOf("") }
@@ -844,7 +850,7 @@ fun TypingPracticeScreen(
             // ADAPTIVE_PHASE1_SECONDS সময় পেরিয়ে যায় (সেটা নিচের আলাদা effect-এ চেক হয়) ──
             if (sessionMode == "adaptive" && adaptivePhase == 1) {
                 val pool = poolForLanguage(sessionLanguage)
-                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                val nextIdx = passageGuard.next(pool.size, passageIndex)
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
@@ -857,7 +863,7 @@ fun TypingPracticeScreen(
             // ইতি নিচের আলাদা effect-এ হ্যান্ডল হয়) ──
             if (sessionMode == "exam") {
                 val pool = poolForLanguage(examPhase)
-                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                val nextIdx = passageGuard.next(pool.size, passageIndex)
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
@@ -870,7 +876,7 @@ fun TypingPracticeScreen(
             // জোরপূর্বক-ইতি নিচের আলাদা effect-এ হ্যান্ডল হয়, ঠিক Exam Simulation-এর মতোই) ──
             if (sessionMode == "govtmock") {
                 val pool = currentPool()
-                val nextIdx = (passageIndex + 1).mod(pool.size.coerceAtLeast(1))
+                val nextIdx = passageGuard.next(pool.size, passageIndex)
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
                 userInput    = ""
@@ -926,8 +932,15 @@ fun TypingPracticeScreen(
                     TypingErrorAnalyzer.detectLanguage(pool[it].text) == currentLang
                 }
                 val candidates = if (sameLangIdx.size > 1) sameLangIdx else pool.indices.toList()
+                // ── আগে এখানে সিকোয়েন্সিয়াল (curPos+1).mod(size) ব্যবহার হতো — তাতে
+                // পুল ছোট হলে অল্প সময়ের মধ্যেই একই প্যাসেজ একই ক্রমে ২-৩ বার ফিরে
+                // আসত, ইউজার টেক্সট মুখস্ত করে ফেলত, আর তখন "মুখস্ত করে টাইপ করা"
+                // আসল রিডিং+টাইপিং স্কিলের চেয়ে দ্রুত হওয়ায় WPM কৃত্রিমভাবে বেড়ে
+                // যেত। এখন candidates-এর মধ্যে থেকে passageGuard একটা "শাফল-ব্যাগ"
+                // থেকে বাছাই করে দেয় — পুরো pool একবার ঘোরা না পর্যন্ত রিপিট হয় না,
+                // আর ক্রমটাও অপ্রেডিক্টেবল থাকে ──
                 val curPos  = candidates.indexOf(passageIndex).let { if (it >= 0) it else 0 }
-                val nextPos = (curPos + 1).mod(candidates.size.coerceAtLeast(1))
+                val nextPos = passageGuard.next(candidates.size, curPos)
                 val nextIdx = candidates.getOrElse(nextPos) { 0 }
                 passageIndex = nextIdx
                 passage      = normalizeBn(pool.getOrNull(nextIdx)?.text ?: passage)
