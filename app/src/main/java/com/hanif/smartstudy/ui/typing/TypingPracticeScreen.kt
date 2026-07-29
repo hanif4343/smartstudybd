@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
+import kotlin.math.sqrt
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.CustomPassageEntity
 import com.hanif.smartstudy.data.local.MistakeErrorType
@@ -243,9 +244,23 @@ fun TypingPracticeScreen(
     // ── Phase ১: প্রতিটা কী-এর accuracy — লাইভ হিটম্যাপ (KeyHeatmapCard) এখান থেকেই আঁকা হয়,
     // দুর্বল-কী ড্রিলও (startKeyDrillSession()) এই একই DB থেকে ডেটা নেয় ──
     var keyHeatmap by remember { mutableStateOf(listOf<TypingKeyStatEntity>()) }
+    // ── Key Analysis কার্ড (দ্বিধা/স্থিরতা/ধীর জুটি) — Neonlipi-স্টাইল বিস্তারিত
+    // প্রতি-কী ব্রেকডাউন, দেখো TypingPracticeScreen.kt-এর KeyAnalysisSection/KeyAnalysisCard ──
+    var keyAnalysis by remember { mutableStateOf(listOf<TypingKeyStatStore.KeyAnalysis>()) }
     // ── চলতি সেশনে প্রতিটা কী কতবার সঠিক/ভুল হয়েছে — RAM-এ জমা হয়, সেশন শেষে
     // (finishSession()/finishExamPhase()) একবারে persist হয়, বারবার DB-write এড়াতে ──
     val keyStatsDelta = remember { mutableMapOf<Char, IntArray>() }
+    // ── Key Analysis-এর "দ্বিধা"/"স্থিরতা"/"ধীর জুটি"-র কাঁচা ডেটা — প্রতি কীপ্রেসে
+    // onInputChange()-এ জমা হয় (শুধু smartTypingEnabled থাকলে), সেশন শেষে persist ──
+    val keyLatencyDelta = remember { mutableMapOf<Char, TypingKeyStatStore.LatencyAgg>() }
+    val keyPairLatencyDelta = remember { mutableMapOf<Pair<Char, Char>, TypingKeyStatStore.PairAgg>() }
+    // ── আগের কীপ্রেসের টাইমস্ট্যাম্প ও টার্গেট-ক্যারেক্টার — এই দুটো দিয়েই পরের
+    // ল্যাটেন্সি/bigram হিসাব হয় ──
+    var lastKeystrokeAt by remember { mutableStateOf<Long?>(null) }
+    var prevTargetChar  by remember { mutableStateOf<Char?>(null) }
+    // ── ছন্দ (Rhythm) মিটার — সাম্প্রতিক ল্যাটেন্সিগুলোর consistency থেকে লাইভ স্কোর (০-১০০) ──
+    val recentLatencies = remember { mutableStateListOf<Long>() }
+    var rhythmScore by remember { mutableStateOf<Int?>(null) }
     // ── Phase ৩: প্রোফাইল/Roadmap/আঙুল-পজিশন — তিনটাই Dialog হিসেবে, নতুন কোনো
     // নেভিগেশন রুট লাগেনি। এই ডিক্লেয়ারেশনগুলো এখানেই থাকা জরুরি — নিচের
     // LaunchedEffect(Unit)-এই এগুলো ব্যবহার হয়, আর Kotlin-এ local var/state
@@ -269,6 +284,8 @@ fun TypingPracticeScreen(
     // ফ্ল্যাগের পেছনে — Settings-এ "🧪 Smart Typing" টগল বন্ধ থাকলে (ডিফল্ট) নিচের
     // এই সব UI ব্লক সম্পূর্ণ hide থাকবে, আগের পরিচিত UI-ই দেখা যাবে ──
     var smartTypingEnabled by remember { mutableStateOf(session.getSmartTypingEnabled()) }
+    // ── Key Analysis কার্ডের "গতি" বার-এর লক্ষ্য — সেটিংসে ইউজারের ঠিক করা টার্গেট WPM ──
+    val typingTargetWpm = remember { session.getTypingTargetWpm() }
     LaunchedEffect(Unit) {
         bestWpm = session.getTypingBestWpm()
         history = session.getTypingHistory()
@@ -354,6 +371,7 @@ fun TypingPracticeScreen(
     // ── Phase ১: ভাষা বদলালে (🌐 সিলেক্টর) হিটম্যাপও সেই ভাষার কী-স্ট্যাট দিয়ে রিলোড হয় ──
     LaunchedEffect(sessionLanguage) {
         keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
+        keyAnalysis = TypingKeyStatStore.getKeyAnalysis(ctx, sessionLanguage)
     }
 
     /** "প্র্যাকটিস" মোডের বর্তমান পুল — difficulty অনুযায়ী (বা "custom" হলে নিজের
@@ -779,7 +797,19 @@ fun TypingPracticeScreen(
                 keyStatsDelta.clear()
                 keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
             }
-
+            // ── Key Analysis: এই সেশনে জমা হওয়া দ্বিধা/স্থিরতা/ধীর জুটির কাঁচা ডেটা
+            // persist, তারপর কার্ডগুলো রিফ্রেশ ──
+            if (keyLatencyDelta.isNotEmpty() || keyPairLatencyDelta.isNotEmpty()) {
+                TypingKeyStatStore.addLatencyDeltas(ctx, sessionLanguage, keyLatencyDelta)
+                TypingKeyStatStore.addPairDeltas(ctx, sessionLanguage, keyPairLatencyDelta)
+                keyLatencyDelta.clear()
+                keyPairLatencyDelta.clear()
+                keyAnalysis = TypingKeyStatStore.getKeyAnalysis(ctx, sessionLanguage)
+            }
+            lastKeystrokeAt = null
+            prevTargetChar = null
+            recentLatencies.clear()
+            rhythmScore = null
             // ── Phase ৩ (#1+#2): কারিকুলাম-মোডে সেশন শেষ হলে unlock-শর্ত চেক করা হয় —
             // পূরণ হলে পরের স্টেজে এগিয়ে যায় (celebration UI দেখায়), নাহলে চুপচাপ
             // বর্তমান স্টেজেরই প্রগ্রেস (progress bar) আপডেট হয় ──
@@ -1007,6 +1037,17 @@ fun TypingPracticeScreen(
                     keyStatsDelta.clear()
                     keyHeatmap = TypingKeyStatStore.getHeatmap(ctx, sessionLanguage)
                 }
+                if (keyLatencyDelta.isNotEmpty() || keyPairLatencyDelta.isNotEmpty()) {
+                    TypingKeyStatStore.addLatencyDeltas(ctx, sessionLanguage, keyLatencyDelta)
+                    TypingKeyStatStore.addPairDeltas(ctx, sessionLanguage, keyPairLatencyDelta)
+                    keyLatencyDelta.clear()
+                    keyPairLatencyDelta.clear()
+                    keyAnalysis = TypingKeyStatStore.getKeyAnalysis(ctx, sessionLanguage)
+                }
+                lastKeystrokeAt = null
+                prevTargetChar = null
+                recentLatencies.clear()
+                rhythmScore = null
             }
         }
     }
@@ -1044,6 +1085,50 @@ fun TypingPracticeScreen(
         // ── Phase ১: কী-সাউন্ড — শুধু ক্যারেক্টার যোগ হলে বাজে (ব্যাকস্পেস/মুছে ফেলায় না,
         // নাহলে ব্যাকস্পেস দেওয়াও "পুরস্কৃত" মনে হতে পারে) ──
         if (smartTypingEnabled && new.length > userInput.length) TypingKeySound.playForCurrentPreset(ctx)
+
+        // ── Key Analysis: দ্বিধা/স্থিরতা/ধীর জুটি/ছন্দ — প্রতিটা নতুন ক্যারেক্টারে এই
+        // মুহূর্তের টার্গেট ক্যারেক্টার আর আগের কীপ্রেসের টাইমস্ট্যাম্প থেকে ল্যাটেন্সি বের
+        // করা হয়। freetyping-এ কোনো target passage নেই বলে এটা এড়ানো হয় ──
+        if (smartTypingEnabled && new.length > userInput.length && sessionMode != "freetyping") {
+            val now = System.currentTimeMillis()
+            val liveSplitBefore = splitTypedWords(userInput)
+            val wIdxBefore = liveSplitBefore.completed.size
+            val wordBefore = passageWords.getOrNull(wIdxBefore)
+            val ciBefore = liveSplitBefore.current.length
+            val targetChar = wordBefore?.getOrNull(ciBefore)
+                ?: ' '.takeIf { wordBefore != null && ciBefore == wordBefore.length }
+            if (targetChar != null) {
+                val prevAt = lastKeystrokeAt
+                if (prevAt != null) {
+                    val latency = now - prevAt
+                    // ── ০-৮ সেকেন্ডের বাইরের গ্যাপ বাদ — ইউজার হয়তো থেমে অন্য কিছু করছিল,
+                    // সেটা "দ্বিধা" না, তাই গড়/stddev-কে কৃত্রিমভাবে নষ্ট করবে না ──
+                    if (latency in 0..8000) {
+                        val agg = keyLatencyDelta.getOrPut(targetChar) { TypingKeyStatStore.LatencyAgg() }
+                        agg.sumMs += latency
+                        agg.sumSqMs += (latency.toDouble() * latency.toDouble())
+                        agg.count++
+                        prevTargetChar?.let { pc ->
+                            val pAgg = keyPairLatencyDelta.getOrPut(pc to targetChar) { TypingKeyStatStore.PairAgg() }
+                            pAgg.sumMs += latency
+                            pAgg.count++
+                        }
+                        // ── ছন্দ (Rhythm) — সাম্প্রতিক ৮টা ল্যাটেন্সির ভ্যারিয়েশন (CV) থেকে
+                        // লাইভ ০-১০০ স্কোর, যত কম ওঠানামা তত বেশি স্কোর ──
+                        recentLatencies.add(latency)
+                        if (recentLatencies.size > 8) recentLatencies.removeAt(0)
+                        if (recentLatencies.size >= 3) {
+                            val mean = recentLatencies.average()
+                            val variance = recentLatencies.sumOf { (it - mean) * (it - mean) } / recentLatencies.size
+                            val cv = if (mean > 0) sqrt(variance) / mean else 0.0
+                            rhythmScore = (100 - (cv * 100)).toInt().coerceIn(0, 100)
+                        }
+                    }
+                }
+                lastKeystrokeAt = now
+                prevTargetChar = targetChar
+            }
+        }
         var normalized = normalizeBn(new)
 
         // ── স্মার্ট অটো-রিসিঙ্ক (স্পেস মিস হ্যান্ডলিং) ──
@@ -2000,778 +2085,1137 @@ fun TypingPracticeScreen(
                     // লাইভ ক্যারেক্টার-বাই-ক্যারেক্টার ফিডব্যাক দেখানো হয়। ──
                     val split = remember(userInput) { splitTypedWords(userInput) }
                     // ── ফিক্সড-হাইট viewport (~৪ লাইন) — লম্বা প্যাসেজেও Card unbounded
-                    // বাড়ে না, ফলে নিচের ইনপুট বক্স স্ক্রিনের বাইরে চলে যায় না ──
+                    // বাড়ে না, ফলে নিচের ইনপুট বক্স সবসময় একই স্ক্রিনে দেখা যায়। টাইপ
+                    // করতে করতে onTextLayout দিয়ে বর্তমান লাইন বের করে স্মুথলি অটো-স্ক্রল
+                    // হয় (আগের লাইন উপরে সরে, নতুন লাইন নিচ থেকে উঠে আসে) ──
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 120.dp)
+                            .heightIn(max = 128.dp)
                             .verticalScroll(passageScrollState)
                     ) {
-                        Text(
-                            text = buildAnnotatedString {
-                                passageWords.forEachIndexed { i, word ->
-                                    if (i < frozenWordResults.size) {
-                                        // ── locked word — পুরো শব্দ সবুজ/লাল/অ্যাম্বার (অটো-ফিক্সড স্পেস) ──
-                                        val wasAutoFixed = autoFixedWordFlags.getOrNull(i) == true
-                                        val isOk = frozenWordResults[i]
-                                        val wordColor = when {
-                                            wasAutoFixed -> AmberWarn  // স্পেস মিস — অ্যাম্বার রঙ
-                                            isOk -> GreenOk
-                                            else -> RedWrong
+                    Text(
+                        buildAnnotatedString {
+                            passageWords.forEachIndexed { wIdx, word ->
+                                if (wIdx > 0) append(" ")
+                                when {
+                                    wIdx < frozenWordResults.size -> {
+                                        val ok = frozenWordResults[wIdx]
+                                        val wasAutoFixed = autoFixedWordFlags.getOrNull(wIdx) == true
+                                        val style = when {
+                                            wasAutoFixed -> SpanStyle(color = AmberWarn, background = Color(0xFFFFF3CD))
+                                            ok            -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                            else          -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
                                         }
-                                        withStyle(SpanStyle(color = wordColor, fontWeight = FontWeight.Bold)) {
-                                            append(word)
+                                        withStyle(style) { append(word) }
+                                    }
+                                    wIdx == frozenWordResults.size -> {
+                                        // বর্তমান শব্দ — প্রতিটা অক্ষর আলাদাভাবে লাইভ মিলিয়ে দেখানো হয়
+                                        for (ci in word.indices) {
+                                            val typedChar = split.current.getOrNull(ci)
+                                            val style = when {
+                                                typedChar == null -> SpanStyle(
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    background = Color(0xFFDBEAFE)
+                                                )
+                                                typedChar == word[ci] -> SpanStyle(color = GreenOk, background = Color(0xFFDCFCE7))
+                                                else -> SpanStyle(color = RedWrong, background = Color(0xFFFEE2E2))
+                                            }
+                                            withStyle(style) { append(word[ci]) }
                                         }
-                                    } else if (i == frozenWordResults.size) {
-                                        // ── current word — লাইভ টাইপ করার সময় char-by-char ফিডব্যাক + নীল ব্যাকগ্রাউন্ড ──
-                                        val curTyped = split.current
-                                        val maxLen = maxOf(word.length, curTyped.length)
-                                        for (j in 0 until maxLen) {
-                                            val tc = word.getOrNull(j)
-                                            val yc = curTyped.getOrNull(j)
-                                            when {
-                                                yc == null -> {
-                                                    // এখনো টাইপ করা হয়নি — মূল অক্ষর
-                                                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)) {
-                                                        append(tc.toString())
-                                                    }
-                                                }
-                                                tc == null -> {
-                                                    // বাড়তি টাইপড অক্ষর — লাল ব্যাকগ্রাউন্ড সহ
-                                                    withStyle(SpanStyle(color = RedWrong, fontWeight = FontWeight.Bold, background = Color(0xFFFEE2E2))) {
-                                                        append(yc.toString())
-                                                    }
-                                                }
-                                                tc == yc -> {
-                                                    // সঠিক টাইপড অক্ষর — সবুজ
-                                                    withStyle(SpanStyle(color = GreenOk, fontWeight = FontWeight.Bold)) {
-                                                        append(tc.toString())
-                                                    }
-                                                }
-                                                else -> {
-                                                    // ভুল টাইপড অক্ষর — লাল
-                                                    withStyle(SpanStyle(color = RedWrong, fontWeight = FontWeight.Bold, background = Color(0xFFFEE2E2))) {
-                                                        append(tc.toString())
-                                                    }
-                                                }
+                                        // ইউজার যদি শব্দের চেয়ে বেশি অক্ষর টাইপ করে ফেলে (স্পেস চাপতে
+                                        // ভুলে পরের শব্দ জুড়ে যাচ্ছে), সেই "অতিরিক্ত" অংশটা আলাদা
+                                        // রঙ + strikethrough দিয়ে দেখানো হয় — পরের (এখনো টাইপ না-হওয়া)
+                                        // শব্দের সাথে যাতে গুলিয়ে না যায় ──
+                                        if (split.current.length > word.length) {
+                                            withStyle(
+                                                SpanStyle(
+                                                    color = AmberWarn,
+                                                    background = Color(0xFFFFF3CD),
+                                                    textDecoration = TextDecoration.LineThrough
+                                                )
+                                            ) {
+                                                append(split.current.substring(word.length))
                                             }
                                         }
-                                    } else {
-                                        // ── upcoming word — এখনো পর্যন্ত পৌঁছায়নি ──
-                                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                                            append(word)
-                                        }
                                     }
-                                    if (i < passageWords.size - 1) append(" ")
+                                    else -> {
+                                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(word) }
+                                    }
                                 }
-                            },
-                            fontSize = 16.sp,
-                            lineHeight = 26.sp,
-                            fontFamily = NotoSansBengali,
-                            onTextLayout = { passageTextLayout = it }
-                        )
+                            }
+                        },
+                        fontSize = 17.sp, fontWeight = FontWeight.Medium,
+                        lineHeight = 29.sp, letterSpacing = 0.3.sp,
+                        onTextLayout = { passageTextLayout = it }
+                    )
                     }
                 }
             }
-            } // if (sessionMode != "freetyping")
+            }
+
 
             // Input field
             OutlinedTextField(
                 value         = userInput,
-                onValueChange = { if (sessionMode == "freetyping") onFreeTypingInputChange(it) else onInputChange(it) },
-                enabled       = !isFinished,
-                placeholder   = {
-                    Text(
-                        if (sessionMode == "freetyping") "বই দেখে এখানে নিজের ইচ্ছামতো টাইপ করুন..."
-                        else "টাইপ শুরু করুন...",
-                        fontFamily = NotoSansBengali
-                    )
+                onValueChange = {
+                    if (sessionMode == "freetyping") onFreeTypingInputChange(it)
+                    else if (!isFinished) onInputChange(it)
                 },
-                modifier      = Modifier.fillMaxWidth().heightIn(min = 90.dp),
-                shape         = RoundedCornerShape(12.dp),
-                textStyle     = LocalTextStyle.current.copy(fontSize = 16.sp, fontFamily = NotoSansBengali),
+                modifier      = Modifier.fillMaxWidth(),
+                label         = { Text(
+                    if (sessionMode == "freetyping") {
+                        if (!isStarted) "বই দেখে এখানে টাইপ করা শুরু করুন..." else "টাইপ চলছে..."
+                    } else if (!isStarted) "এখানে type করা শুরু করুন..." else "টাইপ চলছে...",
+                    fontFamily = NotoSansBengali
+                )},
+                shape         = RoundedCornerShape(14.dp),
+                enabled       = !isFinished,
                 colors        = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = Indigo600,
-                    unfocusedBorderColor = Color(0xFFCBD5E1)
+                    focusedBorderColor = Indigo600,
+                    unfocusedBorderColor = Color(0xFFE2E8F0)
                 ),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
-                    imeAction      = ImeAction.Done
-                )
+                    imeAction = ImeAction.None,
+                    autoCorrect = false
+                ),
+                minLines = if (sessionMode == "freetyping") 10 else 4
             )
 
-            // ── Phase ২: Action buttons row — Reset, Submit Now, Race (যদি উপলব্ধ থাকে) ──
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Reset button — এখন ফ্রি টাইপিং সহ যেকোনো মোডেই কাজ করে
-                OutlinedButton(
-                    onClick  = {
-                        if (sessionMode == "freetyping") startFreeTyping()
-                        else reset((passageIndex + 1).mod(currentPool().size.coerceAtLeast(1)))
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape    = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("রিসেট", fontFamily = NotoSansBengali, fontSize = 12.sp)
-                }
+            // ── Smart Typing: Live next-key হাইলাইট কীবোর্ড — টাইপিং চলাকালীন
+            // (freetyping বাদে সব মোডে) ইনপুট বক্সের ঠিক নিচে সবসময় দেখা যাবে,
+            // এখন যেই কী চাপার কথা সেটা হলুদ হয়ে জ্বলবে (Neonlipi রেফারেন্সের
+            // সমতুল্য) ──
+            if (smartTypingEnabled && sessionMode != "freetyping" && isStarted && !isFinished) {
+                LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
+                RhythmMeter(score = rhythmScore)
+                LessonProgressBar(resolvedCount = resolvedCount, totalCount = passage.length)
+                ProTipBanner(
+                    accuracyPct = if (totalKeystrokes > 0) correctKeystrokes * 100 / totalKeystrokes else 100
+                )
+            }
 
-                // ── "📤 Submit Now" বাটন — ইউজারের টাইপ করা শেষ মনে হলে টাইমার শেষ হওয়ার
-                // আগেই সেশন জমাদান। এখন ফ্রি টাইপিং, Exam, Adaptive ও ফ্রি সেশন —
-                // সব মোডেই যথাযথ হুক কল করে সঙ্গে সঙ্গে জমা নেয় (as usual results) ──
-                if (isStarted && !isFinished) {
-                    Button(
-                        onClick = {
-                            when (sessionMode) {
-                                "freetyping" -> finishFreeTyping()
-                                "exam"       -> finishExamPhase()
-                                else         -> finishSession()
+            // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
+            // "✅ শেষ করুন" চাপলেই সেশন থামবে এবং ফলাফল দেখাবে ──
+            if (sessionMode == "freetyping" && isStarted && !isFinished) {
+                Button(
+                    onClick = { finishFreeTyping() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488))
+                ) {
+                    Text("✅ শেষ করুন", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali)
+                }
+            }
+
+            // ── অন্য সব মোডে (প্র্যাকটিস/adaptive/exam/study) আগে পুরো প্যাসেজ শেষ করতেই
+            // হতো, অথবা exam/adaptive-এ সময়-বাজেট শেষ হওয়ার অপেক্ষা করতে হতো — তবেই
+            // ফলাফল দেখা যেত। এখন "📤 Submit Now" চাপলেই যেকোনো সময় (মাঝপথেও) এখন
+            // পর্যন্ত যা টাইপ হয়েছে তা দিয়ে ঠিক স্বাভাবিক (as usual) ফলাফল দেখানো হয় —
+            // exam মোডে ইংরেজি ফেজে চাপলে বাংলা ফেজে transition, বাংলা ফেজে চাপলে
+            // চূড়ান্ত ExamResultCard (দেখো finishSession()/finishExamPhase()) ──
+            if (sessionMode != "freetyping" && isStarted && !isFinished) {
+                Button(
+                    onClick = { if (sessionMode == "exam") finishExamPhase() else finishSession() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                ) {
+                    Text("📤 Submit Now", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, fontFamily = NotoSansBengali)
+                }
+            }
+
+            // Hint: timer starts on typing
+            if (!isStarted) {
+                Text(
+                    if (sessionMode == "freetyping") "💡 বই দেখে টাইপ শুরু করলেই Timer ও স্পিড কাউন্ট শুরু হবে"
+                    else "💡 Type করলেই Timer শুরু হবে",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
+                    modifier = Modifier.align(Alignment.CenterHorizontally))
+            }
+            } // sessionMode != "study" || passage.isNotBlank()
+
+            // ── Adaptive Session — phase ১→২ ট্রানজিশন সামারি ──
+            AnimatedVisibility(visible = showPhaseTransition) {
+                val weakNow = sessionMistakeWords.distinct().take(8)
+                Card(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Indigo600.copy(alpha = 0.4f))
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("📊 প্রথম ধাপ শেষ!", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                            fontFamily = NotoSansBengali, color = Indigo600)
+                        // ── ভুল হওয়া শব্দের আসল লিস্ট আর সরাসরি দেখানো হয় না — শুধু একটা
+                        // সাধারণ বার্তা, শব্দগুলো AI-এর কাছেই (weakNow) থেকে যায় ──
+                        if (weakNow.isNotEmpty()) {
+                            Text("কিছু শব্দে ভুল হয়েছে — পরের রাউন্ডে সেগুলো নিয়েই বিশেষভাবে অনুশীলন হবে।",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        } else {
+                            Text("এই ধাপে তেমন ভুল হয়নি — চমৎকার! এবার একটু কঠিন কন্টেন্টে যাই।",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        if (phase2Fetching && phase2Passage == null) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Indigo600)
+                                Text("তোমার জন্য প্যাসেজ তৈরি হচ্ছে...", fontSize = 11.sp,
+                                    fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Button(
+                            onClick = { startPhase2() },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                        ) {
+                            Text(
+                                if (weakNow.isNotEmpty()) "🎯 এই ভুলগুলো ঠিক করতে পরের রাউন্ডে যাই"
+                                else "➡️ পরের রাউন্ডে যাই",
+                                fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Color.White, fontFamily = NotoSansBengali
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Exam Simulation — ইংরেজি ফেজ শেষে ট্রানজিশন ──
+            AnimatedVisibility(visible = showExamPhaseTransition) {
+                Card(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F3FF)),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF7C3AED).copy(alpha = 0.4f))
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✅ ইংরেজি ধাপ শেষ!", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                            fontFamily = NotoSansBengali, color = Color(0xFF6D28D9))
+                        examEnglishResult?.let { er ->
+                            Text("${er.wpm} WPM  •  ${er.accuracy}% নির্ভুলতা", fontSize = 13.sp,
+                                fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("এবার বাংলা ধাপ — বিজয় লেআউটে আছ কিনা আরেকবার দেখে নাও।", fontSize = 12.sp,
+                            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Button(
+                            onClick = { startExamBanglaPhase() },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                        ) {
+                            Text("🔤 বাংলা ধাপ শুরু করি", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Color.White, fontFamily = NotoSansBengali)
+                        }
+                    }
+                }
+            }
+
+            // ── Exam Simulation — ফাইনাল রেজাল্ট (দুই ভাষার আলাদা ব্লক) ──
+            AnimatedVisibility(visible = sessionMode == "exam" && examBanglaResult != null) {
+                examEnglishResult?.let { er -> examBanglaResult?.let { br ->
+                    ExamResultCard(englishResult = er, banglaResult = br, onRestart = { reset() })
+                } }
+            }
+
+            // Result card
+            AnimatedVisibility(visible = isFinished && result != null && !showPhaseTransition && sessionMode != "exam") {
+                result?.let { r ->
+                    ResultCard(r, bestWpm,
+                        sessionMistakeWords = sessionMistakeWords.distinct(),
+                        showSmartFeatures = smartTypingEnabled,
+                        onRetry = {
+                            when {
+                                sessionMode == "freetyping" -> startFreeTyping()
+                                sessionMode == "study" -> {
+                                    // ── আবার — একই আইটেম, শুধু টাইপিং স্টেট রিসেট (used হিসেবে
+                                    // ইতিমধ্যে সেভ হয়ে গেছে, দ্বিতীয়বার সেভ করলেও ক্ষতি নেই — id একই থাকায় REPLACE হবে) ──
+                                    userInput = ""; frozenWordResults = emptyList(); autoFixedWordFlags = emptyList()
+                                    isStarted = false; isFinished = false; elapsedSec = 0; result = null
+                                    correctKeystrokes = 0; incorrectKeystrokes = 0; totalKeystrokes = 0
+                                    leftCorrectChars = 0; leftWrongChars = 0; rightCorrectChars = 0; rightWrongChars = 0; syncLossCount = 0
+                                }
+                                else -> reset()
                             }
                         },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                        onNextPassage = {
+                            when {
+                                sessionMode == "freetyping" -> startFreeTyping()
+                                sessionMode == "study" -> {
+                                    val subj = studySubject; val st = studySubTopic
+                                    if (subj != null && st != null) loadStudyPool(subj, st)
+                                }
+                                else -> {
+                                    val pool = currentPool()
+                                    reset(passageIndex + 1, pool)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            // ── Phase ২: Govt Job মক টেস্টের পেনাল্টি — মূল ResultCard-এর result.wpm
+            // অপরিবর্তিত রাখা হয়েছে (bestWPM/history তুলনার জন্য), তাই পেনাল্টি এখানে
+            // আলাদা একটা ছোট কার্ডে দেখানো হয় ──
+            AnimatedVisibility(visible = smartTypingEnabled && isFinished && sessionMode == "govtmock" && result != null) {
+                result?.let { r ->
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF7C2D12).copy(alpha = 0.12f))
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("জমা দিন", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.White)
-                    }
-                }
-
-                // ── 🏎️ Typing Race বাটন — TypingPracticeScreen-এর মধ্যেও সহজ একসেস ──
-                OutlinedButton(
-                    onClick  = onOpenRace,
-                    modifier = Modifier.weight(1f),
-                    shape    = RoundedCornerShape(12.dp),
-                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = Indigo600)
-                ) {
-                    Text("🏎️ রেস", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            // ── Phase ৩ (#3): প্রোফাইল/Roadmap/আঙুল-পজিশন বোতাম row — Neonlipi-স্টাইল
-            // (সবগুলো "🧪 Smart Typing" টগলের পেছনে, Settings থেকে অন করলেই দেখা যাবে) ──
-            if (smartTypingEnabled) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                    onClick  = { showRoadmapWizard = true }
-                ) {
-                    Text("🗺️ রোডম্যাপ", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 10.dp))
-                }
-                Surface(
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                    onClick  = { showProfileDialog = true }
-                ) {
-                    Text("👤 প্রোফাইল & সিঙ্ক", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 10.dp))
-                }
-                Surface(
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                    onClick  = { showFingerDialog = true }
-                ) {
-                    Text("🖐️ আঙুল গাইড", fontSize = 11.sp, fontFamily = NotoSansBengali,
-                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 10.dp))
-                }
-            }
-            } // ← if (smartTypingEnabled)
-
-            // ── Phase ৩: Roadmap Wizard Dialog ──
-            if (showRoadmapWizard) {
-                RoadmapWizardDialog(
-                    onDismiss = { showRoadmapWizard = false },
-                    onComplete = { plan ->
-                        roadmapPlan = plan
-                        showRoadmapWizard = false
-                    }
-                )
-            }
-
-            // ── Phase ৩: Profile & Sync Dialog ──
-            if (showProfileDialog) {
-                TypingProfileDialog(onDismiss = { showProfileDialog = false })
-            }
-
-            // ── Phase ৩: Finger Placement Guide Dialog ──
-            if (showFingerDialog) {
-                FingerPlacementDialog(onDismiss = { showFingerDialog = false })
-            }
-
-            // ── Phase ৩ (#1+#2): Key-unlock কারিকুলাম — সদ্য আনলক হওয়া স্টেজের সেলিব্রেশন UI ──
-            justUnlockedStage?.let { stage ->
-                AlertDialog(
-                    onDismissRequest = { justUnlockedStage = null },
-                    confirmButton = {
-                        Button(onClick = { justUnlockedStage = null }) {
-                            Text("চালিয়ে যান", fontFamily = NotoSansBengali)
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("🏛️ Govt Job মক টেস্ট — পেনাল্টি হিসাব", fontSize = 12.sp,
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            Text(
+                                "ভুল কীপ্রেস: ${r.totalChars - r.correctChars}টা → পেনাল্টি: -$govtMockPenaltyWpm WPM",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "কার্যকর WPM (পেনাল্টির পর): ${(r.wpm - govtMockPenaltyWpm).coerceAtLeast(0)}",
+                                fontSize = 14.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF9A3412)
+                            )
                         }
-                    },
-                    title = { Text("🎉 অভিনন্দন! নতুন স্টেজ আনলক!", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                    text  = { Text("তুমি সফলভাবে স্টেজ ${stage - 1} শেষ করে স্টেজ $stage-এ পৌঁছেছ। নতুন ক্যারেক্টার অনুশীলনের জন্য প্রস্তুত!", fontFamily = NotoSansBengali) }
-                )
-            }
-
-            // ── Phase ১: Key Accuracy Heatmap Card — ইউজারের টাইপিং দুর্বলতা স্পষ্ট
-            // করার জন্য live visual feedback (সব "🧪 Smart Typing" টগলের পেছনে) ──
-            if (smartTypingEnabled && keyHeatmap.isNotEmpty()) {
-                KeyHeatmapCard(stats = keyHeatmap, language = sessionLanguage)
-            }
-
-            // ── Transition dialogs ──
-            if (showPhaseTransition && phase2Passage != null) {
-                AlertDialog(
-                    onDismissRequest = {},
-                    confirmButton = {
-                        Button(onClick = { startPhase2() }) {
-                            Text("Phase ২ শুরু করুন (AI Targeted)", fontFamily = NotoSansBengali)
-                        }
-                    },
-                    title = { Text("🎯 Phase ১ শেষ!", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                    text  = {
-                        Text(
-                            "তোমার প্রথম ৩ মিনিটের পারফরম্যান্স বিশ্লেষণ করে AI একটি বিশেষ প্যাসেজ তৈরি করেছে। এটি টাইপ করলে তোমার দুর্বল অক্ষর ও শব্দগুলোতে গতি বাড়বে।",
-                            fontFamily = NotoSansBengali
-                        )
                     }
-                )
+                }
             }
 
-            if (showExamPhaseTransition) {
-                AlertDialog(
-                    onDismissRequest = {},
-                    confirmButton = {
-                        Button(onClick = { startExamBanglaPhase() }) {
-                            Text("বাংলা অংশ শুরু করুন (১০ মিনিট)", fontFamily = NotoSansBengali)
+            // ── মোড/ভাষা সিলেক্টর হেডার এখন টপ বারের ঠিক নিচে (উপরে সরানো হয়েছে) —
+            // এখানে শুধু মোড-নির্দিষ্ট তথ্য কার্ড, দুর্বল-শব্দ ড্যাশবোর্ড, কঠিনতার স্তর ও
+            // সবশেষে "টাইপিং রেস" — এর পর আর কিছু নেই ──
+            if (!isStarted) {
+
+                if (sessionMode == "exam") {
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F3FF)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7C3AED).copy(alpha = 0.3f))
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("🏛️ বাস্তব BCC পরীক্ষার নিয়ম অনুযায়ী", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali, color = Color(0xFF6D28D9))
+                            Text(
+                                "⌨️ কীবোর্ড বিজয় লেআউটে বদলে নাও (পরীক্ষায় অভ্র চলে না)\n" +
+                                "🔤 প্রথমে ইংরেজি ১০ মিনিট, তারপর বাংলা ১০ মিনিট — কোনো spell-check সাহায্য নেই\n" +
+                                "🎯 গতির চেয়ে নির্ভুলতা বেশি গুরুত্বপূর্ণ",
+                                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
+                            )
                         }
-                    },
-                    title = { Text("🏛️ ইংরেজি পরীক্ষা সম্পূর্ণ!", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                    text  = {
-                        val enWpm = examEnglishResult?.wpm ?: 0
-                        val enAcc = examEnglishResult?.accuracy ?: 0
-                        Text(
-                            "ইংরেজি টাইপিং ফলাফল: $enWpm WPM (Accuracy: $enAcc%)\n\nএখন বাংলা অংশ শুরু হবে। প্রস্তুত হয়ে বোতামে চাপ দিন।",
-                            fontFamily = NotoSansBengali
-                        )
                     }
-                )
-            }
+                }
 
-            // ── Result cards ──
-            if (sessionMode == "exam" && examEnglishResult != null && examBanglaResult != null) {
-                ExamResultCard(
-                    englishResult = examEnglishResult!!,
-                    banglaResult  = examBanglaResult!!,
-                    onRestart     = { startExamSimulation() }
-                )
-            } else if (result != null) {
-                ResultCard(
-                    result     = result!!,
-                    bestWpm    = bestWpm,
-                    onNext     = { reset((passageIndex + 1).mod(currentPool().size.coerceAtLeast(1))) },
-                    sessionMode = sessionMode,
-                    govtMockPenaltyWpm = govtMockPenaltyWpm
-                )
+                if (sessionMode == "freetyping") {
+                    Card(
+                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDFA)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0D9488).copy(alpha = 0.3f))
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("⌨️ ফ্রি টাইপিং — কোনো নির্দিষ্ট Passage নেই", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali, color = Color(0xFF0F766E))
+                            Text(
+                                "📖 হাতের কাছে থাকা যেকোনো বই/কাগজ দেখে নিচের ফাঁকা বক্সে টাইপ করো\n" +
+                                "⏱️ টাইপ শুরু করলেই Timer ও স্পিড (WPM) লাইভ কাউন্ট শুরু হবে\n" +
+                                "✅ থামতে চাইলে \"শেষ করুন\" বাটনে চাপো",
+                                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
+
+                if (sessionMode == "adaptive") {
+                    Text(
+                        "প্রথম ৩ মিনিট random প্যাসেজ, তারপর তোমার ভুল-শব্দ দিয়ে AI বানানো প্যাসেজ — একটাই সমন্বিত ফলাফল।",
+                        fontSize = 10.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("bn" to "বাংলা", "en" to "English").forEach { (code, label) ->
+                            OutlinedButton(
+                                onClick = { startAdaptiveSession(code) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (sessionLanguage == code) Color(0xFFEEF2FF) else Color.Transparent
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp, if (sessionLanguage == code) Indigo600 else Color(0xFFE2E8F0)
+                                )
+                            ) { Text(label, fontFamily = NotoSansBengali, fontSize = 12.sp) }
+                        }
+                    }
+                }
+
+                // ── দুর্বল-শব্দ ড্যাশবোর্ড — এখন আর সরাসরি UI-তে দেখানো হয় না (ইউজারকে
+                // নিজের ভুল-শব্দ লিস্ট আকারে দেখানোর দরকার নেই), তবে weakWordDashboard
+                // ডেটা/লোডিং লজিক অপরিবর্তিত রইলো — AI Adaptive প্যাসেজ বানাতে এটাই
+                // ব্যবহার হয় (দেখো startAdaptiveSession/currentPool এর আশেপাশে) ──
+
+                // ── লাইফটাইম হাত-ভিত্তিক দুর্বলতা — যথেষ্ট ডেটা জমলেই দেখা যাবে ──
+                lifetimeHandSummary?.let { (leftErr, rightErr) ->
+                    val insight = when {
+                        rightErr > leftErr + 5 -> "✋ তোমার সবসময়ই ডান হাতে ভুলের হার বেশি ($rightErr% বনাম $leftErr%) — AI প্র্যাকটিসে এখন এটা মাথায় রেখে শব্দ বাছা হবে।"
+                        leftErr > rightErr + 5 -> "✋ তোমার সবসময়ই বাম হাতে ভুলের হার বেশি ($leftErr% বনাম $rightErr%) — AI প্র্যাকটিসে এখন এটা মাথায় রেখে শব্দ বাছা হবে।"
+                        else -> null
+                    }
+                    insight?.let {
+                        Card(
+                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Indigo600.copy(alpha = 0.25f))
+                        ) {
+                            Text(it, Modifier.padding(12.dp), fontSize = 12.sp,
+                                fontFamily = NotoSansBengali, color = Indigo600)
+                        }
+                    }
+                }
+
+                // ── Neonlipi-স্টাইল Roadmap/প্রোফাইল/আঙুল-পজিশন/হিটম্যাপ — সবগুলো
+                // "🧪 Smart Typing" টগলের পেছনে ──
+                if (smartTypingEnabled) {
+                // ── Phase ৩: Roadmap — প্ল্যান থাকলে সামারি কার্ড, না থাকলে বানানোর বাটন ──
+                roadmapPlan?.let { plan ->
+                    RoadmapSummaryCard(plan = plan, onRebuild = { showRoadmapWizard = true })
+                } ?: run {
+                    OutlinedButton(
+                        onClick = { showRoadmapWizard = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🗺️ তোমার জন্য একটা Roadmap বানাও", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+
+                // ── Phase ৩: প্রোফাইল + আঙুল-পজিশন — একই রো-তে দুটো হালকা বাটন ──
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { showProfileDialog = true }, modifier = Modifier.weight(1f)) {
+                        Text("👤 প্রোফাইল", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { showFingerDialog = true }, modifier = Modifier.weight(1f)) {
+                        Text("✋ আঙুলের পজিশন", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                    }
+                }
+
+                // ── "কঠিনতার স্তর" ও "Passage বেছে নিন" UI সম্পূর্ণ রিমুভ করা হলো —
+                // difficulty/passage নির্বাচন এখন আর ইউজারকে ম্যানুয়ালি করতে হয় না, তবে
+                // selectedDifficulty/currentPool()/reset() লজিক অপরিবর্তিত রইলো (ডিফল্ট "all"
+                // দিয়েই প্যাসেজ লুপ চলে, "আমার প্যাসেজ" ফিচার এখনো 📖 Passage কার্ডের +
+                // আইকন দিয়ে কাজ করে) ──
+
+                // ── Phase ১: লাইভ কী-হিটম্যাপ — এখনো যথেষ্ট ডেটা না জমলে কিছুই দেখায় না
+                // (KeyHeatmapCard নিজেই খালি-চেক করে) ──
+                KeyHeatmapCard(keyHeatmap)
+
+                // ── Key Analysis: প্রতি-কী বিস্তারিত ব্রেকডাউন (প্র্যাকটিস/গতি/নির্ভুলতা/
+                // দ্বিধা/স্থিরতা/ধীর জুটি) — Neonlipi রেফারেন্সের সমতুল্য, নিচে একই ফাইলে
+                // KeyAnalysisSection/KeyAnalysisCard ──
+                KeyAnalysisSection(analysis = keyAnalysis, targetWpm = typingTargetWpm)
+                } // ← if (smartTypingEnabled)
+
+                // ── 🏁 টাইপিং রেস — স্ক্রিনের একদম শেষ এন্ট্রি, এর নিচে আর কিছু নেই।
+                // মোটা/prominent বাটন হিসেবে রাখা হলো (আগে ছিল হালকা TextButton) ──
+                Button(
+                    onClick = onOpenRace,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                ) {
+                    Text("🏁 বন্ধুর সাথে টাইপিং রেস দাও →", fontFamily = NotoSansBengali,
+                        fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                }
             }
-            } // if (sessionMode != "study" || passage.isNotBlank())
         }
+    }
+
+    // ── Phase ৩: তিনটা Dialog — প্রোফাইল, Roadmap wizard, আঙুল-পজিশন — normally এগুলো
+    // trigger-বাটনই "🧪 Smart Typing" টগলের পেছনে hidden থাকে, তাও extra safety হিসেবে
+    // এখানেও smartTypingEnabled গার্ড রাখা হলো (টগল বন্ধ করার পরও যদি কোনোভাবে state
+    // true থেকে যায়, তাহলেও ডায়ালগ খুলবে না) ──
+    if (smartTypingEnabled && showProfileDialog) {
+        TypingProfileDialog(context = ctx, onDismiss = { showProfileDialog = false })
+    }
+    if (smartTypingEnabled && showRoadmapWizard) {
+        RoadmapWizardDialog(
+            onDismiss = { showRoadmapWizard = false },
+            onComplete = { plan ->
+                scope.launch { session.saveRoadmapPlan(plan) }
+                roadmapPlan = plan
+                showRoadmapWizard = false
+            }
+        )
+    }
+    if (smartTypingEnabled && showFingerDialog) {
+        FingerPositionDialog(onDismiss = { showFingerDialog = false })
+    }
+    // ── Phase ৩ (#1+#2): নতুন স্টেজ আনলক হলে ছোট্ট সেলিব্রেশন ডায়ালগ ──
+    if (smartTypingEnabled) justUnlockedStage?.let { stage ->
+        AlertDialog(
+            onDismissRequest = { justUnlockedStage = null },
+            confirmButton = {
+                TextButton(onClick = { justUnlockedStage = null }) {
+                    Text("চালিয়ে যাও", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            },
+            title = { Text("🎉 নতুন কী আনলক!", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "অভিনন্দন! তুমি স্টেজ $stage-এ পৌঁছে গেছ — নতুন কী: ${BijoyCurriculum.newCharsAt(curriculumTrack, stage).joinToString(" ")}",
+                    fontFamily = NotoSansBengali
+                )
+            }
+        )
+    }
+
+    // ── নিজের প্যাসেজ যোগ করার ডায়ালগ — শুধু লোকালি সেভ হয় (Room), কোথাও পাঠানো হয় না ──
+    if (showAddPassageDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddPassageDialog = false },
+            title = { Text("✍️ নিজের প্যাসেজ যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "যেকোনো বাংলা বা ইংরেজি লেখা পেস্ট/টাইপ করুন — শুধু আপনার ফোনেই সেভ থাকবে।",
+                        fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customPassageInput,
+                        onValueChange = { customPassageInput = it },
+                        modifier = Modifier.fillMaxWidth().height(160.dp),
+                        placeholder = { Text("এখানে প্যাসেজ লিখুন...", fontFamily = NotoSansBengali) }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customPassageInput.trim().length >= 10,
+                    onClick = {
+                        val text = normalizeBn(customPassageInput.trim())
+                        scope.launch {
+                            AppDatabase.getInstance(ctx).customPassageDao().insert(
+                                CustomPassageEntity(
+                                    text = text,
+                                    language = TypingErrorAnalyzer.detectLanguage(text),
+                                    createdAt = System.currentTimeMillis()
+                                )
+                            )
+                            customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
+                            selectedDifficulty = "custom"
+                            customCyclesDone = 0
+                            reset(0, customPassages.map { PassageInfo(it.text, "custom") })
+                            customPassageInput = ""
+                            showAddPassageDialog = false
+                        }
+                    }
+                ) { Text("সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddPassageDialog = false; customPassageInput = "" }) {
+                    Text("বাতিল", fontFamily = NotoSansBengali)
+                }
+            }
+        )
+    }
+
+    // ── "📖 Passage" কার্ডের + আইকনে চাপলে খোলে — "আমার প্যাসেজ" ফিচার এখন এখানেই,
+    // আগে যেটা "কঠিনতার স্তর"-এর নিচে আলাদা একটা রো হিসেবে থাকতো ──
+    if (showCustomPassageManager) {
+        AlertDialog(
+            onDismissRequest = { showCustomPassageManager = false },
+            title = { Text("✍️ আমার প্যাসেজ", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (customPassages.isEmpty()) {
+                        Text(
+                            "এখনো কোনো প্যাসেজ যোগ করা হয়নি — নিচের \"+ নতুন যোগ করুন\" বাটনে চাপুন।",
+                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(
+                            Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            customPassages.forEach { cp ->
+                                Row(
+                                    Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            selectedDifficulty = "custom"
+                                            customCyclesDone = 0
+                                            reset(customPassages.indexOf(cp), customPassages.map { PassageInfo(it.text, "custom") })
+                                            showCustomPassageManager = false
+                                        },
+                                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(
+                                            cp.text.take(40) + if (cp.text.length > 40) "..." else "",
+                                            fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    IconButton(onClick = {
+                                        scope.launch {
+                                            AppDatabase.getInstance(ctx).customPassageDao().delete(cp)
+                                            customPassages = AppDatabase.getInstance(ctx).customPassageDao().getAll()
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = RedWrong)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCustomPassageManager = false; showAddPassageDialog = true }) {
+                    Text("+ নতুন যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomPassageManager = false }) {
+                    Text("বন্ধ করুন", fontFamily = NotoSansBengali)
+                }
+            }
+        )
     }
 }
 
-// ── Daily Discipline Banner UI Component ──
 @Composable
 private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
     val goalSeconds = (goalMinutes * 60).coerceAtLeast(1)
     val progress = (todaySeconds.toFloat() / goalSeconds).coerceIn(0f, 1f)
-    val todayMinutes = todaySeconds / 60
-    val isGoalMet = todaySeconds >= goalSeconds
-
+    val doneMin = todaySeconds / 60
+    val reached = todaySeconds >= goalSeconds
     Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isGoalMet) Color(0xFFF0FDF4) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            if (reached) Color(0xFFECFDF5) else Color(0xFFFFFBEB)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, if (reached) GreenOk.copy(alpha = 0.4f) else AmberMid.copy(alpha = 0.4f)
         )
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isGoalMet) "🎉 আজকের টাইপিং লক্ষ্য পূর্ণ হয়েছে!" else "⏱️ আজকের টাইপিং সময়",
-                    fontSize = 11.sp,
-                    fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isGoalMet) GreenOk else MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "$todayMinutes / $goalMinutes মি.",
-                    fontSize = 11.sp,
-                    fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Indigo600
-                )
-            }
+            Text(
+                if (reached) "🎯 আজকের লক্ষ্য পূরণ হয়েছে! ($doneMin/$goalMinutes মিনিট)"
+                else "🎯 আজকে $doneMin/$goalMinutes মিনিট টাইপ করেছ",
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                color = if (reached) GreenOk else Color(0xFFB45309)
+            )
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = if (isGoalMet) GreenOk else Indigo600,
-                trackColor = Color(0xFFE2E8F0)
+                color = if (reached) GreenOk else AmberMid,
+                trackColor = (if (reached) GreenOk else AmberMid).copy(alpha = 0.15f)
             )
         }
     }
 }
 
-// ── Key Heatmap Visualizer ──
 @Composable
-private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>, language: String) {
+private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>) {
+    // ── যথেষ্ট ডেটা না জমা পর্যন্ত কিছুই দেখানো হয় না — খালি/অর্থহীন হিটম্যাপ
+    // দেখানোর চেয়ে না-দেখানোই ভালো (নতুন ইউজারদের জন্য বিভ্রান্তিকর হবে না) ──
+    if (stats.isEmpty()) return
     Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "🔥 কী-নিখুঁততা হিটম্যাপ (${if (language == "bn") "বাংলা" else "English"})",
-                    fontSize = 11.sp,
-                    fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "সবুজ = ৯%+, লাল = দুর্বল",
-                    fontSize = 9.sp,
-                    fontFamily = NotoSansBengali,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Top 16 keys sorted by usage
-            val topKeys = remember(stats) { stats.sortedByDescending { it.correctCount + it.wrongCount }.take(16) }
-
+            Text("🌈 কী-ভিত্তিক নির্ভুলতা", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                topKeys.forEach { stat ->
-                    val total = stat.correctCount + stat.wrongCount
-                    val acc = if (total > 0) stat.correctCount * 100 / total else 0
-                    val bgColor = when {
-                        total < 5 -> Color(0xFFE2E8F0)
-                        acc >= 90 -> Color(0xFFDCFCE7)
-                        acc >= 75 -> Color(0xFFFEF3C7)
-                        else      -> Color(0xFFFEE2E2)
+                stats.forEach { s ->
+                    val total = s.correctCount + s.wrongCount
+                    val acc = if (total > 0) s.correctCount * 100 / total else 0
+                    // ── কম নমুনা (< ৫ বার) থাকলে এখনো আত্মবিশ্বাসের সাথে বলা যায় না
+                    // এই কী দুর্বল না ভালো — নিরপেক্ষ ধূসর রঙে দেখানো হয় ──
+                    val color = when {
+                        total < 5  -> MaterialTheme.colorScheme.outline
+                        acc >= 90  -> GreenOk
+                        acc >= 70  -> AmberMid
+                        else       -> RedWrong
                     }
-                    val textColor = when {
-                        total < 5 -> Color(0xFF64748B)
-                        acc >= 90 -> Color(0xFF166534)
-                        acc >= 75 -> Color(0xFF92400E)
-                        else      -> Color(0xFF991B1B)
-                    }
-
-                    Box(
-                        Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(bgColor),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = stat.keyChar,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor,
-                                fontFamily = NotoSansBengali
-                            )
-                            if (total >= 5) {
-                                Text(
-                                    text = "$acc%",
-                                    fontSize = 8.sp,
-                                    color = textColor,
-                                    fontFamily = NotoSansBengali
-                                )
-                            }
+                    Surface(shape = RoundedCornerShape(8.dp), color = color) {
+                        Column(
+                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(s.keyChar, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Color.White, fontFamily = NotoSansBengali)
+                            Text("$acc%", fontSize = 9.sp, color = Color.White.copy(alpha = 0.9f))
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-// ── Exam Dual Result Display ──
-@Composable
-private fun ExamResultCard(
-    englishResult: TypingResult,
-    banglaResult : TypingResult,
-    onRestart    : () -> Unit
-) {
-    val totalWpm = (englishResult.wpm + banglaResult.wpm) / 2
-    val totalAcc = (englishResult.accuracy + banglaResult.accuracy) / 2
-    val passed   = englishResult.wpm >= 30 && banglaResult.wpm >= 20 && totalAcc >= 85
-
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (passed) Color(0xFFF0FDF4) else Color(0xFFFEF2F2)
-        ),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (passed) GreenOk else RedWrong)
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (passed) "🎉 BCC পরীক্ষায় উত্তীর্ণ!" else "❌ আরও অনুশীলন প্রয়োজন",
-                    fontSize = 16.sp,
-                    fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (passed) GreenOk else RedWrong
-                )
-                Text(
-                    text = "গড়: $totalWpm WPM",
-                    fontSize = 14.sp,
-                    fontFamily = NotoSansBengali,
-                    fontWeight = FontWeight.Bold,
-                    color = Indigo600
-                )
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // English Box
-                Card(
-                    Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🌐 English", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                        Text("${englishResult.wpm} WPM", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
-                        Text("নিখুঁততা: ${englishResult.accuracy}%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                        Text("লক্ষ্য: ৩০ WPM", fontSize = 9.sp, color = if (englishResult.wpm >= 30) GreenOk else RedWrong, fontFamily = NotoSansBengali)
-                    }
-                }
-
-                // Bangla Box
-                Card(
-                    Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("🇧🇩 বাংলা", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
-                        Text("${banglaResult.wpm} WPM", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
-                        Text("নিখুঁততা: ${banglaResult.accuracy}%", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                        Text("লক্ষ্য: ২০ WPM", fontSize = 9.sp, color = if (banglaResult.wpm >= 20) GreenOk else RedWrong, fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-
             Text(
-                text = "BCC স্ট্যান্ডার্ড: ইংরেজিতে ৩০ WPM, বাংলায় ২০ WPM এবং ৮৫%+ নিখুঁততা আবশ্যক।",
-                fontSize = 10.sp,
-                fontFamily = NotoSansBengali,
+                "🟢 ৯০%+  🟡 ৭০-৮৯%  🔴 <৭০%  ⚪ যথেষ্ট প্র্যাকটিস হয়নি",
+                fontSize = 9.sp, fontFamily = NotoSansBengali,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
-            Button(
-                onClick = onRestart,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
-            ) {
-                Text("পুনরায় পরীক্ষা দিন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-            }
         }
     }
 }
 
-// ── Phase ৩: Profile & Sync Dialog ──
+/**
+ * Neonlipi-স্টাইল বিস্তারিত Key Analysis — প্রতিটা কী-এর প্র্যাকটিস/গতি/নির্ভুলতা/
+ * দ্বিধা/স্থিরতা/ধীর জুটি একটা কার্ডে। ডেটা আসে [TypingKeyStatStore.getKeyAnalysis]
+ * থেকে (দেখো TypingPracticeScreen-এর keyAnalysis state)।
+ */
 @Composable
-private fun TypingProfileDialog(onDismiss: () -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val session = remember { SessionManager(ctx) }
-    val scope = rememberCoroutineScope()
-
-    var isSyncing by remember { mutableStateOf(false) }
-    var syncMessage by remember { mutableStateOf<String?>(null) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            Modifier.fillMaxWidth().padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("👤 টাইপিং প্রোফাইল & ক্লাউড সিঙ্ক", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-
-                val user = session.getCurrentUser()
-                Text("ব্যবহারকারী: ${user?.phone?.ifBlank { "Guest User" } ?: "Guest User"}", fontSize = 12.sp, fontFamily = NotoSansBengali)
-                Text("সর্বোচ্চ গতি (Best WPM): ${session.getTypingBestWpm()}", fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Indigo600)
-                Text("মোট সেশন সম্পন্ন: ${session.getTypingHistory().size}", fontSize = 12.sp, fontFamily = NotoSansBengali)
-
-                syncMessage?.let {
-                    Text(it, fontSize = 11.sp, fontFamily = NotoSansBengali, color = GreenOk)
-                }
-
-                Button(
-                    onClick = {
-                        val phone = user?.phone?.takeIf { it.isNotBlank() }
-                        if (phone == null) {
-                            syncMessage = "❌ লগইন করা নেই। অতিথিদের ক্লাউড সিঙ্ক উপলব্ধ নয়।"
-                            return@Button
-                        }
-                        isSyncing = true
-                        scope.launch {
-                            TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
-                            val pullResult = TypingCloudSyncService.pull(phone)
-                            if (pullResult != null) {
-                                session.mergeTypingCloudSnapshot(pullResult.bestWpm, pullResult.history)
-                            }
-                            isSyncing = false
-                            syncMessage = if (pullResult != null) "✅ ক্লাউড সিঙ্ক সফল হয়েছে!" else "❌ সিঙ্ক করতে ব্যর্থ হয়েছে।"
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSyncing,
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                    } else {
-                        Text("☁️ এখনই সিঙ্ক করুন (Manual Sync)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-                    Text("বন্ধ করুন", fontFamily = NotoSansBengali)
-                }
-            }
-        }
-    }
-}
-
-// ── Phase ৩: Finger Placement Guide Dialog ──
-@Composable
-private fun FingerPlacementDialog(onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            Modifier.fillMaxWidth().padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("🖐️ আদর্শ আঙুল পজিশনিং গাইড", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("১. Home Row Position:", fontWeight = FontWeight.Bold, fontSize = 12.sp, fontFamily = NotoSansBengali)
-                    Text("• বাম হাত: A, S, D, F (কানি আঙুল থেকে তর্জনী)", fontSize = 11.sp, fontFamily = NotoSansBengali)
-                    Text("• ডান হাত: J, K, L, ; (তর্জনী থেকে কানি আঙুল)", fontSize = 11.sp, fontFamily = NotoSansBengali)
-                    Text("• বৃদ্ধা আঙুল: Spacebar-এর জন্য নির্ধারিত।", fontSize = 11.sp, fontFamily = NotoSansBengali)
-
-                    Spacer(Modifier.height(4.dp))
-                    Text("২. বিজয় বাংলা কীবোর্ড হোম-কী:", fontWeight = FontWeight.Bold, fontSize = 12.sp, fontFamily = NotoSansBengali)
-                    Text("• F কী = ি / ী (Shift)", fontSize = 11.sp, fontFamily = NotoSansBengali)
-                    Text("• J কী = হ / ঃ (Shift)", fontSize = 11.sp, fontFamily = NotoSansBengali)
-                    Text("• G কী (যুক্তবর্ণ লিঙ্কার) = বাম তর্জনী প্রসারিত করে চাপতে হয়।", fontSize = 11.sp, fontFamily = NotoSansBengali)
-                }
-
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("বুঝতে পেরেছি", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-// ── StatsRow Component ──
-@Composable
-private fun StatsRow(
-    elapsedSec: Int,
-    resolvedCount: Int,
-    passage: String,
-    isStarted: Boolean,
-    correctKeystrokes: Int,
-    freeTypingMode: Boolean
-) {
-    val timeMin = elapsedSec / 60.0
-    val liveWpm = if (timeMin > 0) (correctKeystrokes / 5.0 / timeMin).toInt() else 0
-    val progress = if (freeTypingMode || passage.isEmpty()) 0f else (resolvedCount.toFloat() / passage.length).coerceIn(0f, 1f)
-
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Live WPM Card
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Indigo600.copy(alpha = 0.1f))
-        ) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("⚡ ", fontSize = 14.sp)
-                Text("$liveWpm ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600, fontFamily = NotoSansBengali)
-                Text("WPM", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Indigo600, fontFamily = NotoSansBengali)
-            }
-        }
-
-        // Timer Display
-        val mins = elapsedSec / 60
-        val secs = elapsedSec % 60
+private fun KeyAnalysisSection(analysis: List<TypingKeyStatStore.KeyAnalysis>, targetWpm: Int) {
+    if (analysis.isEmpty()) return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = String.format("%02d:%02d", mins, secs),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontFamily = NotoSansBengali
+            "🔬 Key Analysis · সর্বশেষ আনলক উপরে",
+            fontSize = 13.sp, fontFamily = NotoSansBengali,
+            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface
         )
+        Text(
+            "লক্ষ্য: ২০০ বার · ≥$targetWpm wpm · ≥৯০%",
+            fontSize = 10.sp, fontFamily = NotoSansBengali,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        analysis.forEach { KeyAnalysisCard(it, targetWpm) }
     }
+}
 
-    if (!freeTypingMode && passage.isNotEmpty()) {
+@Composable
+private fun KeyAnalysisCard(a: TypingKeyStatStore.KeyAnalysis, targetWpm: Int) {
+    // ── স্কোর: accuracy আর speed দুটোই টার্গেট ছুঁলে "ভালো", একেবারেই কম হলে "খারাপ",
+    // মাঝামাঝি "নরমাল" — ৩ রঙে ভাগ (screenshot-এর মতোই) ──
+    val accScore = (a.accuracyPct / 90f).coerceIn(0f, 1.2f)
+    val speedScore = if (targetWpm > 0) (a.speedWpm / targetWpm.toFloat()).coerceIn(0f, 1.2f) else 1f
+    val combined = (accScore + speedScore) / 2f
+    val (statusLabel, statusColor) = when {
+        a.practiceCount < 5   -> "নতুন" to MaterialTheme.colorScheme.outline
+        combined >= 1f        -> "ভালো" to GreenOk
+        combined >= 0.6f       -> "নরমাল" to AmberMid
+        else                   -> "খারাপ" to RedWrong
+    }
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, statusColor.copy(alpha = 0.5f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = RoundedCornerShape(8.dp), color = statusColor.copy(alpha = 0.15f)) {
+                    Text(a.keyChar, Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = statusColor)
+                }
+                Text(statusLabel, fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = statusColor)
+            }
+            KeyAnalysisBar("প্র্যাকটিস", "${a.practiceCount}/200", (a.practiceCount / 200f))
+            KeyAnalysisBar("গতি", "${a.speedWpm}/$targetWpm wpm", speedScore.coerceAtMost(1f))
+            KeyAnalysisBar("নির্ভুলতা", "${a.accuracyPct}/৯০%", accScore.coerceAtMost(1f))
+            a.avgLatencyMs?.let { KeyAnalysisBar("দ্বিধা", "${it}ms", (1f - (it / 2000f)).coerceIn(0f, 1f)) }
+            a.stdDevLatencyMs?.let { KeyAnalysisBar("স্থিরতা", "±${it}ms", (1f - (it / 800f)).coerceIn(0f, 1f)) }
+            if (a.slowestPairLabel != null && a.slowestPairMs != null) {
+                Surface(shape = RoundedCornerShape(8.dp), color = RedWrong.copy(alpha = 0.12f)) {
+                    Text(
+                        "ধীর জুটি: ${a.slowestPairLabel} ${a.slowestPairMs}ms",
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        fontSize = 10.sp, fontFamily = NotoSansBengali, color = RedWrong
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, fontSize = 10.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(valueText, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        }
+        val barColor = when {
+            fraction >= 0.85f -> GreenOk
+            fraction >= 0.5f  -> AmberMid
+            else              -> RedWrong
+        }
         LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-            color = Indigo600,
-            trackColor = Color(0xFFE2E8F0)
+            progress = { fraction.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
+            color = barColor, trackColor = barColor.copy(alpha = 0.15f)
         )
     }
 }
 
-// ── ResultCard Component ──
+/**
+ * ছন্দ (RHYTHM) — লাইভ টাইপিং-রিদম মিটার, TypingPracticeScreen-এর rhythmScore থেকে
+ * (সাম্প্রতিক কীপ্রেস-ল্যাটেন্সিগুলোর ওঠানামা যত কম, স্কোর তত বেশি)। টাইপ শুরুর আগে
+ * (৩টার কম নমুনা) placeholder টেক্সট দেখায়, ঠিক Neonlipi রেফারেন্সের মতোই।
+ */
 @Composable
-private fun ResultCard(
-    result: TypingResult,
-    bestWpm: Int,
-    onNext: () -> Unit,
-    sessionMode: String,
-    govtMockPenaltyWpm: Int = 0
-) {
-    val isNewRecord = result.wpm > bestWpm && bestWpm > 0
-
+private fun RhythmMeter(score: Int?) {
     Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("📊 সেশন ফলাফল", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-                if (isNewRecord) {
-                    Text("🎉 নতুন রেকর্ড!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = GreenOk, fontFamily = NotoSansBengali)
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("🎵 ছন্দ (RHYTHM)", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (score == null) {
+                Text("টাইপ শুরু করলে ছন্দ মাপা শুরু হবে…", fontSize = 10.sp, fontFamily = NotoSansBengali,
+                    color = MaterialTheme.colorScheme.outline)
+            } else {
+                val color = when {
+                    score >= 80 -> GreenOk
+                    score >= 50 -> AmberMid
+                    else        -> RedWrong
                 }
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Net WPM
-                Card(
-                    Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Indigo600.copy(alpha = 0.05f))
-                ) {
-                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Net Speed", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                        Text("${result.wpm}", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
-                        Text("WPM", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Indigo600)
-                    }
-                }
-
-                // Accuracy
-                Card(
-                    Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = GreenOk.copy(alpha = 0.05f))
-                ) {
-                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Accuracy", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                        Text("${result.accuracy}%", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = GreenOk)
-                        Text("নিখুঁততা", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk, fontFamily = NotoSansBengali)
-                    }
-                }
-
-                // Time
-                Card(
-                    Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                ) {
-                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Time", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                        Text("${result.timeSec}s", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
-                        Text("সময়", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-
-            if (sessionMode == "govtmock" && govtMockPenaltyWpm > 0) {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2))
-                ) {
-                    Row(
-                        Modifier.padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🏛️ Govt Mock Penalty Applied:", fontSize = 11.sp, fontFamily = NotoSansBengali, color = RedWrong)
-                        Text("-$govtMockPenaltyWpm WPM (ভুল কী-প্রেসের কারণে)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = RedWrong, fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-
-            if (result.syncLossCount > 0) {
-                Text(
-                    "🔄 এই সেশনে $result.syncLossCount বার স্পেস বা ট্র্যাকিং মিস হয়েছে।",
-                    fontSize = 11.sp,
-                    fontFamily = NotoSansBengali,
-                    color = AmberWarn
+                LinearProgressIndicator(
+                    progress = { score / 100f },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = color, trackColor = color.copy(alpha = 0.15f)
                 )
             }
+        }
+    }
+}
 
-            Button(
-                onClick = onNext,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
-            ) {
-                Text("পরবর্তী প্যাসেজ ➔", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+/**
+ * সম্পূর্ণ লেসন/প্যাসেজের কত শতাংশ শেষ হলো — Neonlipi-এর "AI Adaptive Feedback"
+ * সেকশনের ওভারঅল প্রগ্রেস বার-এর সমতুল্য। resolvedCount/totalCount দুটোই
+ * ক্যারেক্টার-ইউনিটে (দেখো TypingPracticeScreen-এর resolvedCount হিসাব)।
+ */
+@Composable
+private fun LessonProgressBar(resolvedCount: Int, totalCount: Int) {
+    if (totalCount <= 0) return
+    val pct = ((resolvedCount.toFloat() / totalCount) * 100).toInt().coerceIn(0, 100)
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("📊 লেসন অগ্রগতি", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("$pct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Indigo600)
+            }
+            LinearProgressIndicator(
+                progress = { pct / 100f },
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = Indigo600, trackColor = Indigo600.copy(alpha = 0.15f)
+            )
+        }
+    }
+}
+
+/**
+ * ডাইনামিক প্রো-টিপ ব্যানার — Neonlipi-এর বাল্ব-আইকন গাইডেন্স ব্যানারের সমতুল্য।
+ * লাইভ accuracy কম থাকলে (< ৮৫%) প্রেক্ষাপট-ভিত্তিক "গতি কমান" পরামর্শ দেখায়,
+ * নাহলে কয়েক সেকেন্ড পরপর সাধারণ টাইপিং-টিপস ঘুরিয়ে দেখায়।
+ */
+@Composable
+private fun ProTipBanner(accuracyPct: Int) {
+    val tips = remember {
+        listOf(
+            "স্পিড বাড়ানোর চেষ্টা করবেন না — ধীরে কিন্তু সঠিক key চাপতে থাকুন। accuracy ঠিক থাকলে স্পিড এমনিতেই বাড়বে।",
+            "চোখ কিবোর্ডে না রেখে স্ক্রিনের দিকে রাখুন — নিচের লাইভ কীবোর্ড হাইলাইট দেখে আঙুল চালান।",
+            "একটানা অনেকক্ষণ প্র্যাকটিস করলে মাঝে ছোট বিরতি নিন — ক্লান্ত আঙুলে ভুল বাড়ে।",
+            "যেই কী-তে বারবার ভুল হচ্ছে, সেটার জন্য আলাদা করে কিছুক্ষণ প্র্যাকটিস করুন।",
+            "টাইপ করার সময় কব্জি সোজা রাখুন, কিবোর্ডে বেশি জোরে চাপ দেওয়ার দরকার নেই।"
+        )
+    }
+    var index by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(12000)
+            index = (index + 1) % tips.size
+        }
+    }
+    // ── লাইভ accuracy কম থাকলে সাধারণ ঘোরানো টিপসের বদলে সরাসরি প্রেক্ষাপট-ভিত্তিক
+    // পরামর্শ দেখানো হয় — Neonlipi-এর "গতি একটু কমান..." কার্ডের সমতুল্য ──
+    val tipText = if (accuracyPct in 1..84)
+        "গতি একটু কমান — এখন accuracy $accuracyPct%, লক্ষ্য ৯০%+। নিখুঁতভাবে টাইপ করুন, স্পিড এমনিতেই বাড়বে।"
+    else tips[index]
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = AmberMid.copy(alpha = 0.10f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, AmberMid.copy(alpha = 0.35f))
+    ) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("💡", fontSize = 14.sp)
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("প্রো টিপ: ") }
+                    append(tipText)
+                },
+                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatsRow(
+    elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
+    // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
+    // Progress% ও "resolved/total" এর বদলে শুধু এখন পর্যন্ত মোট টাইপ করা অক্ষর সংখ্যা দেখানো হয় ──
+    freeTypingMode: Boolean = false
+) {
+    val mins = elapsedSec / 60
+    val secs = elapsedSec % 60
+    val progress = if (!freeTypingMode && passage.isNotEmpty()) resolvedCount.toFloat() / passage.length else 0f
+    // লাইভ WPM এখন correct keystroke ভিত্তিক (৫-ক্যারেক্টার/word স্ট্যান্ডার্ড) — final হিসাবের
+    // সাথে সামঞ্জস্যপূর্ণ, স্পেস-স্প্লিট word count-এর চেয়ে বেশি সঠিক অনুমান দেয়
+    val liveWpm = if (elapsedSec > 0 && isStarted) {
+        (correctKeystrokes / 5.0 / (elapsedSec / 60.0)).toInt()
+    } else 0
+
+    // ── আগে গাঢ় নেভি (0xFF1E1B4B) ব্যাকগ্রাউন্ড ছিল — চোখে লাগতো। এখন হালকা,
+    // নিরপেক্ষ ব্যাকগ্রাউন্ড (কোনো ভারী কালার ছাড়া) ব্যবহার করা হচ্ছে ──
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                StatBox("⏱️", "%02d:%02d".format(mins, secs), "সময়", Color(0xFF2563EB))
+                StatBox("⌨️", "$liveWpm", "WPM", Color(0xFF059669))
+                if (freeTypingMode) {
+                    StatBox("🔴", if (isStarted) "চলছে" else "—", "স্ট্যাটাস", Color(0xFF7C3AED))
+                } else {
+                    StatBox("📊", "${(progress * 100).toInt()}%", "Progress", Color(0xFF7C3AED))
+                }
+                StatBox("📝", if (freeTypingMode) "$resolvedCount" else "$resolvedCount/${passage.length}", "অক্ষর", Color(0xFFB45309))
+            }
+            if (!freeTypingMode) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Indigo600, trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun StatBox(icon: String, value: String, label: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(icon, fontSize = 14.sp)
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+            color = color, fontFamily = NotoSansBengali)
+        Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+    }
+}
+
+@Composable
+private fun ResultCard(
+    result       : TypingResult,
+    bestWpm      : Int,
+    sessionMistakeWords: List<String> = emptyList(),
+    showSmartFeatures: Boolean = false,
+    onRetry      : () -> Unit,
+    onNextPassage: () -> Unit
+) {
+    val isNewBest = result.wpm > bestWpm
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            if (isNewBest) Color(0xFF1E1B4B) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isNewBest) androidx.compose.foundation.BorderStroke(
+            2.dp, Brush.horizontalGradient(listOf(Color(0xFFFBBF24), Color(0xFFF59E0B)))
+        ) else null,
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+
+            if (isNewBest) {
+                Text("🏆 নতুন Record!", fontSize = 14.sp, color = Color(0xFFFBBF24),
+                    fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+            }
+
+            Text("${result.wpm} WPM",
+                fontSize = 42.sp, fontWeight = FontWeight.ExtraBold,
+                color = if (isNewBest) Color.White else Indigo600, fontFamily = NotoSansBengali)
+            // Raw (ভুলসহ) WPM ছোট করে সাব-টেক্সটে — ইন্ডাস্ট্রি-স্ট্যান্ডার্ড টাইপিং সাইটগুলোর
+            // মতোই Net (চূড়ান্ত) আর Raw (অপরিশোধিত) দুটোই দেখানো হয়
+            Text("Raw ${result.rawWpm} WPM",
+                fontSize = 11.sp, color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = NotoSansBengali)
+
+            // ── Phase ১: Speed-rank গেমিফিকেশন — সংখ্যার বদলে একটা পরিচিত বাহনের
+            // মাধ্যমে গতি বোঝানো, Neonlipi-এর "৪৫ র‍্যাংক" ফিচারের সরলীকৃত সংস্করণ।
+            // "🧪 Smart Typing" টগলের পেছনে — বন্ধ থাকলে আগের মতোই শুধু WPM/Raw দেখাবে ──
+            if (showSmartFeatures) run {
+                val rank = com.hanif.smartstudy.util.SpeedRankUtil.rankFor(result.wpm)
+                val next = com.hanif.smartstudy.util.SpeedRankUtil.nextRank(result.wpm)
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isNewBest) Color.White.copy(alpha = 0.1f) else Indigo600.copy(alpha = 0.1f)
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("${rank.emoji} ${rank.name}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            fontFamily = NotoSansBengali,
+                            color = if (isNewBest) Color.White else Indigo600)
+                        if (next != null) {
+                            Text(
+                                "${next.emoji} ${next.name}-এ যেতে আর ${(next.minWpm - result.wpm).coerceAtLeast(0)} WPM লাগবে",
+                                fontSize = 9.sp, fontFamily = NotoSansBengali,
+                                color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                ResultStat("✅ Accuracy", "${result.accuracy}%",
+                    if (result.accuracy >= 90) GreenOk else if (result.accuracy >= 70) Color(0xFFF59E0B) else RedWrong,
+                    isNewBest)
+                ResultStat("⏱️ সময়", "${result.timeSec}s", Color(0xFF60A5FA), isNewBest)
+                ResultStat("📝 সঠিক", "${result.correctChars}/${result.totalChars}", GreenOk, isNewBest)
+            }
+
+            val grade = when {
+                result.wpm >= 60 && result.accuracy >= 95 -> "S" to "⚡ Excellent!"
+                result.wpm >= 40 && result.accuracy >= 90 -> "A" to "👍 Very Good!"
+                result.wpm >= 25 && result.accuracy >= 80 -> "B" to "📈 Good!"
+                result.wpm >= 15 -> "C" to "💪 Keep Practicing!"
+                else -> "D" to "🔄 Try Again!"
+            }
+            Text("${grade.first} Grade — ${grade.second}", fontSize = 13.sp,
+                color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+
+            // ── ধাপ ৪: হাত-ভিত্তিক ইনসাইট — যথেষ্ট ডেটা থাকলেই দেখানো হয় (নাহলে বিভ্রান্তিকর) ──
+            val leftTotal  = result.leftCorrect + result.leftWrong
+            val rightTotal = result.rightCorrect + result.rightWrong
+            if (leftTotal >= 15 && rightTotal >= 15) {
+                val leftErr  = result.leftWrong * 100 / leftTotal
+                val rightErr = result.rightWrong * 100 / rightTotal
+                val insight = when {
+                    rightErr > leftErr + 5 -> "✋ এই সেশনে ডান হাতে ভুলের হার বেশি ($rightErr% বনাম $leftErr%)"
+                    leftErr > rightErr + 5 -> "✋ এই সেশনে বাম হাতে ভুলের হার বেশি ($leftErr% বনাম $rightErr%)"
+                    else -> null
+                }
+                insight?.let {
+                    Text(it, fontSize = 11.sp, fontFamily = NotoSansBengali,
+                        color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (result.syncLossCount > 0) {
+                Text("🔄 ${result.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ — ধীরে টাইপ করার চেষ্টা করো",
+                    fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
+            }
+
+            // ── এই সেশনে ভুল হওয়া শব্দের তালিকা এখন আর সরাসরি দেখানো হয় না — sessionMistakeWords
+            // ডেটা এখনো AI Adaptive প্যাসেজ বানানোর জন্য ব্যবহার হয় (দেখো startPhase2/
+            // TypingAdaptiveContentProvider.getBlendedPassage), শুধু UI-তে হাইড করা হলো ──
+
+            val shareCtx = androidx.compose.ui.platform.LocalContext.current
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onRetry, modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)) {
+                    Text("🔄 আবার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+                OutlinedButton(
+                    onClick = { com.hanif.smartstudy.util.ResultShareUtil.shareTyping(shareCtx, result, isNewBest) },
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+            Button(onClick = onNextPassage, modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Indigo600)) {
+                Text("➡️ পরের Passage", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExamResultCard(englishResult: TypingResult, banglaResult: TypingResult, onRestart: () -> Unit) {
+    val shareCtx = androidx.compose.ui.platform.LocalContext.current
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F3FF)),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF7C3AED).copy(alpha = 0.4f))
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("🏛️ BCC Exam Simulation — ফলাফল", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                fontFamily = NotoSansBengali, color = Color(0xFF6D28D9),
+                modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("🔤 ইংরেজি" to englishResult, "🅱️ বাংলা" to banglaResult).forEach { (label, r) ->
+                    Card(
+                        Modifier.weight(1f), shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White)
+                    ) {
+                        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                            Text("${r.wpm}", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF7C3AED))
+                            Text("WPM", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${r.accuracy}% নির্ভুলতা", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            val overallPass = englishResult.wpm >= 20 && banglaResult.wpm >= 20 &&
+                englishResult.accuracy >= 80 && banglaResult.accuracy >= 80
+            Text(
+                if (overallPass) "✅ দুটো ধাপেই সাধারণ BCC বেঞ্চমার্ক (~২০ WPM, ৮০%+ নির্ভুলতা) পূরণ হয়েছে"
+                else "💪 আরও প্র্যাকটিস দরকার — টার্গেট: প্রতিটা ভাষায় অন্তত ২০ WPM ও ৮০%+ নির্ভুলতা",
+                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                color = if (overallPass) GreenOk else AmberMid,
+                modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onRestart, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
+                    Text("🔄 আবার দাও", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+                OutlinedButton(
+                    onClick = {
+                        // ── শেয়ার কার্ড বাংলা ফেজের ফলাফল দিয়ে বানানো হচ্ছে (একটাই কার্ড লাগে) ──
+                        com.hanif.smartstudy.util.ResultShareUtil.shareTyping(shareCtx, banglaResult, false)
+                    },
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
+        Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
     }
 }
