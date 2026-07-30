@@ -152,4 +152,15 @@ object TypingKeyStatStore {
             )
         }
     }
+
+    /** পর্ব ২.৩ ফিচার #১: সবচেয়ে ধীর N-টা bigram (জুটি) — "🎯 ধীর জুটি প্র্যাকটিস"
+     *  বাটনের ডেটা-সোর্স। প্রতিটা এন্ট্রি (fromChar, toChar, avgMs)। */
+    suspend fun getSlowestPairsGlobal(
+        context: Context, language: String, minCount: Int = 3, limit: Int = 6
+    ): List<Triple<String, String, Long>> {
+        val db = AppDatabase.getInstance(context)
+        val userId = currentUserId(context)
+        return db.typingKeyPairStatDao().getSlowestPairs(userId, language, minCount, limit)
+            .map { Triple(it.fromChar, it.toChar, if (it.count > 0) it.totalMs / it.count else 0L) }
+    }
 }
