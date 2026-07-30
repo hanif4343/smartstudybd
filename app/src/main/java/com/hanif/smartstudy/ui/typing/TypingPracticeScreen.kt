@@ -190,6 +190,18 @@ internal fun splitTypedWords(normalized: String): TypedWordSplit {
     return TypedWordSplit(completed, current)
 }
 
+/** পর্ব ১ আইটেম #১৪ (CURRENT KEY + ALL KEYS বক্স): নির্দিষ্ট ট্র্যাকের (bn/en) প্রতিটা
+ *  ক্যারেক্টারের accuracy%/samples একসাথে স্ন্যাপশট হিসেবে নিয়ে আসে — DB কল একবারই,
+ *  তারপর UI থেকে কোনো নির্দিষ্ট char lookup করা যায় (char -> accuracyPct to samples)। */
+internal suspend fun loadKeyStatSnapshot(ctx: android.content.Context, track: String): Map<String, Pair<Int, Int>> {
+    val lang = if (track == "en") "en" else "bn"
+    return TypingKeyStatStore.getHeatmap(ctx, lang, limit = 200).associate { stat ->
+        val samples = stat.correctCount + stat.wrongCount
+        val accPct  = if (samples > 0) stat.correctCount * 100 / samples else 0
+        stat.keyChar to (accPct to samples)
+    }
+}
+
 /** Adaptive Session-এ ভাষা মিশে না যাওয়ার জন্য — শুধু একটা ভাষার প্যাসেজ পুল */
 private fun poolForLanguage(language: String): List<PassageInfo> =
     PASSAGES.filter { TypingErrorAnalyzer.detectLanguage(it.text) == language }.ifEmpty { PASSAGES }
@@ -282,6 +294,15 @@ fun TypingPracticeScreen(
     var curriculumStage    by remember { mutableStateOf(1) }
     var curriculumProgress by remember { mutableStateOf(listOf<Pair<String, Int>>()) }
     var justUnlockedStage  by remember { mutableStateOf<Int?>(null) }
+    // ── পর্ব ১ আইটেম #১৪: CURRENT KEY + ALL KEYS বক্সের জন্য — allUnlockedKeys একটা
+    // pure ফাংশন থেকে derive করা (DB লাগে না, তাই curriculumTrack/Stage বদলালেই
+    // স্বয়ংক্রিয়ভাবে আপডেট হয়ে যায়); keyStatSnapshot-এ প্রতিটা ক্যারেক্টারের
+    // accuracy%/samples থাকে — এটা DB থেকে আসে বলে LaunchedEffect দিয়ে লোড হয়
+    // (initial load, সেশন শেষে, ট্র্যাক বদলালে — নিচে দেখো) ──
+    val allUnlockedKeys = remember(curriculumTrack, curriculumStage) {
+        BijoyCurriculum.stagesFor(curriculumTrack).take(curriculumStage).flatten()
+    }
+    var keyStatSnapshot by remember { mutableStateOf(mapOf<String, Pair<Int, Int>>()) } // char -> (accuracyPct, samples)
     // ── Neonlipi-স্টাইল সব নতুন ফিচার (heatmap, দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock,
     // BCC, Key-unlock কারিকুলাম, Roadmap, প্রোফাইল/Cloud Sync, আঙুল-পজিশন) এই একটা
     // ফ্ল্যাগের পেছনে — Settings-এ "🧪 Smart Typing" টগল বন্ধ থাকলে (ডিফল্ট) নিচের
@@ -312,6 +333,8 @@ fun TypingPracticeScreen(
         // ── Phase ৩ (#1+#2): কারিকুলামের বর্তমান স্টেজ ও প্রগ্রেস লোড ──
         curriculumStage = CurriculumProvider.getCurrentStage(ctx, curriculumTrack)
         curriculumProgress = CurriculumProvider.stageProgress(ctx, curriculumTrack, curriculumStage)
+        // ── পর্ব ১ #১৪: ALL KEYS ব্যাজগুলোর জন্য accuracy%/samples স্ন্যাপশট ──
+        keyStatSnapshot = loadKeyStatSnapshot(ctx, curriculumTrack)
 
         // ── Phase ৩: Cloud Sync — স্ক্রিন খোলার সাথে সাথে নীরবে pull করে merge করে
         // নেয় (guest হলে/ইন্টারনেট না থাকলে silently স্কিপ হয়ে যায়, UI ব্লক করে না) ──
@@ -885,6 +908,12 @@ fun TypingPracticeScreen(
                 } 
                 curriculumProgress = CurriculumProvider.stageProgress(ctx, curriculumTrack, curriculumStage)
             }
+            // ── পর্ব ১ #১৪: যেকোনো Smart Typing সেশন শেষে ALL KEYS ব্যাজের accuracy%/
+            // samples আপ-টু-ডেট রাখা (শুধু curriculum মোডে না — keydrill/adaptive-এও
+            // একই ক্যারেক্টারগুলোর ডেটা বদলাতে পারে) ──
+            if (smartTypingEnabled) {
+                keyStatSnapshot = loadKeyStatSnapshot(ctx, curriculumTrack)
+            }
         }
     }
 
@@ -1436,6 +1465,7 @@ fun TypingPracticeScreen(
         scope.launch {
             curriculumStage = CurriculumProvider.getCurrentStage(ctx, track)
             curriculumProgress = CurriculumProvider.stageProgress(ctx, track, curriculumStage)
+            keyStatSnapshot = loadKeyStatSnapshot(ctx, track)
             val drillText = CurriculumProvider.buildDrillPassage(track, curriculumStage)
             if (drillText.isNotBlank()) {
                 reset(0, listOf(PassageInfo(drillText, "all")))
@@ -2111,6 +2141,14 @@ fun TypingPracticeScreen(
                 }
             }
 
+            // ── পর্ব ১ #১৪: CURRENT KEY বক্সে "স্পেস" দেখানো বিভ্রান্তিকর — nextTypeChar
+            // স্পেস হলে (মানে শব্দ শেষ, স্পেসের অপেক্ষায়) পরের শব্দের প্রথম অক্ষরটাই
+            // বরং প্রাসঙ্গিক তথ্য (ইউজার আসলে যেটার জন্য প্রস্তুতি নিচ্ছে) ──
+            val currentKeyForBox: String? = remember(nextTypeChar, frozenWordResults, passageWords) {
+                if (nextTypeChar != null && nextTypeChar != ' ') nextTypeChar.toString()
+                else passageWords.getOrNull(frozenWordResults.size + 1)?.firstOrNull()?.toString()
+            }
+
             // ── Sheet থেকে প্যাসেজ পুল এখনো লোড না হলে (নেট নেই/প্রথমবার) — ব্যবহারকারীকে
             // জানানো, নাহলে খালি স্ক্রিন দেখে "আটকে আছে" মনে হতে পারে ──
             if (passage.isBlank() && sessionMode !in listOf("freetyping", "study")) {
@@ -2316,6 +2354,18 @@ fun TypingPracticeScreen(
             // এখন যেই কী চাপার কথা সেটা হলুদ হয়ে জ্বলবে (Neonlipi রেফারেন্সের
             // সমতুল্য) ──
             if (smartTypingEnabled && sessionMode != "freetyping" && isStarted && !isFinished) {
+                // ── পর্ব ১ #১৪: CURRENT KEY + ALL KEYS বক্স — এক্সটার্নাল-কিবোর্ড ইউজারের
+                // জন্য এটাই মূল ভিজ্যুয়াল অ্যাঙ্কর (ফিজিক্যাল-কী-হাইলাইটের বিকল্প/সম্পূরক)।
+                // শুধু curriculum/keydrill-জাতীয় সেশনে দেখানো হয় (allUnlockedKeys খালি
+                // না থাকলে) — adaptive/govtmock-এর মতো মোডে curriculum stage-ভিত্তিক
+                // "ALL KEYS" ধারণাটাই প্রযোজ্য না ──
+                if (allUnlockedKeys.isNotEmpty() && sessionMode in setOf("curriculum", "keydrill", "symboldrill")) {
+                    CurrentKeyAndAllKeysBox(
+                        allKeys = allUnlockedKeys,
+                        currentKey = currentKeyForBox,
+                        statSnapshot = keyStatSnapshot
+                    )
+                }
                 LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
                 RhythmMeter(score = rhythmScore)
                 LessonProgressBar(resolvedCount = resolvedCount, totalCount = passage.length)
@@ -3030,6 +3080,80 @@ private fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
             modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
             color = barColor, trackColor = barColor.copy(alpha = 0.15f)
         )
+    }
+}
+
+/**
+ * পর্ব ১ আইটেম #১৪ (Neonlipi রেফারেন্স) — ALL KEYS: এই কারিকুলাম-স্টেজ পর্যন্ত আনলক
+ * হওয়া সব ক্যারেক্টার একটা horizontal-scroll ব্যাজ-রোতে, বর্তমানটা গোলাপি হাইলাইট।
+ * CURRENT KEY: বর্তমান ক্যারেক্টারটা বড় করে, সাথে তার নিজের accuracy%/samples —
+ * এক্সটার্নাল-কিবোর্ড ইউজারের জন্য এটাই মূল ভিজ্যুয়াল অ্যাঙ্কর (কিবোর্ডের দিকে না
+ * তাকিয়েও "এখন কোন অক্ষর, কতটা দক্ষ তাতে" এক নজরে বোঝা যায়)।
+ */
+@Composable
+private fun CurrentKeyAndAllKeysBox(
+    allKeys: List<String>,
+    currentKey: String?,
+    statSnapshot: Map<String, Pair<Int, Int>>   // char -> (accuracyPct, samples)
+) {
+    Card(
+        Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            // ── ALL KEYS ──
+            Text(
+                "ALL KEYS", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = NotoSansBengali
+            )
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                allKeys.forEach { ch ->
+                    val isCurrent = ch == currentKey
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isCurrent) Color(0xFFEC4899) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            ch, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            color = if (isCurrent) Color.White else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+
+            // ── CURRENT KEY ──
+            currentKey?.let { ck ->
+                val (accPct, samples) = statSnapshot[ck] ?: (0 to 0)
+                Row(
+                    Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "CURRENT KEY", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali
+                    )
+                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFEC4899)) {
+                        Text(
+                            ck, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                        )
+                    }
+                    Text(
+                        "Acc: $accPct%   Samples: $samples", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
