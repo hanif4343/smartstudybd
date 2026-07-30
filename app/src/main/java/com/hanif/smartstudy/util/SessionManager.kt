@@ -106,6 +106,9 @@ class SessionManager(private val context: Context) {
         val KEY_TYPING_DAILY_GOAL_MIN  = intPreferencesKey("typing_daily_goal_min")   // ডিফল্ট ৬০
         val KEY_TYPING_TODAY_SECONDS   = intPreferencesKey("typing_today_seconds")
         val KEY_TYPING_TODAY_DATE      = stringPreferencesKey("typing_today_date")
+        // ── পর্ব ২.৩ ফিচার #৬: স্ট্রিক-ক্যালেন্ডার হিটম্যাপের ডেটা-সোর্স — date -> seconds
+        // (JSON ম্যাপ, ছোট থাকে বলে ইচ্ছাকৃতভাবে trim করা হয়নি — বছরে ~৩৬৫ এন্ট্রি, নগণ্য সাইজ) ──
+        val KEY_TYPING_DAILY_MAP       = stringPreferencesKey("typing_daily_minutes_map")
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -624,6 +627,28 @@ class SessionManager(private val context: Context) {
             it[KEY_TYPING_TODAY_DATE]    = today
             it[KEY_TYPING_TODAY_SECONDS] = base + seconds
         }
+        addTypingSecondsToDailyMap(seconds)
+    }
+
+    /** পর্ব ২.৩ ফিচার #৬: প্রতিদিনের মোট টাইপিং-সেকেন্ড আলাদাভাবে জমা রাখে (date -> seconds),
+     *  স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — addTypingSecondsToday()-এর ভেতর থেকেই কল হয়,
+     *  আলাদা করে কল করার দরকার নেই। */
+    private suspend fun addTypingSecondsToDailyMap(seconds: Int) {
+        val prefs = context.dataStore.data.first()
+        val json  = prefs[KEY_TYPING_DAILY_MAP] ?: "{}"
+        val type  = object : TypeToken<MutableMap<String, Double>>() {}.type
+        val map: MutableMap<String, Double> = try { gson.fromJson(json, type) ?: mutableMapOf() } catch (e: Exception) { mutableMapOf() }
+        val today = todayString()
+        map[today] = (map[today] ?: 0.0) + seconds
+        context.dataStore.edit { it[KEY_TYPING_DAILY_MAP] = gson.toJson(map) }
+    }
+
+    /** স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — date string ("YYYY-M-D") -> মিনিট */
+    fun getDailyPracticeMinutes(): Map<String, Int> = runBlocking {
+        val json = context.dataStore.data.first()[KEY_TYPING_DAILY_MAP] ?: "{}"
+        val type = object : TypeToken<Map<String, Double>>() {}.type
+        val map: Map<String, Double> = try { gson.fromJson(json, type) ?: emptyMap() } catch (e: Exception) { emptyMap() }
+        map.mapValues { (it.value / 60).toInt() }
     }
 
 
