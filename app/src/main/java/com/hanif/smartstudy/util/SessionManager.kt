@@ -109,6 +109,9 @@ class SessionManager(private val context: Context) {
         // ── পর্ব ২.৩ ফিচার #৬: স্ট্রিক-ক্যালেন্ডার হিটম্যাপের ডেটা-সোর্স — date -> seconds
         // (JSON ম্যাপ, ছোট থাকে বলে ইচ্ছাকৃতভাবে trim করা হয়নি — বছরে ~৩৬৫ এন্ট্রি, নগণ্য সাইজ) ──
         val KEY_TYPING_DAILY_MAP       = stringPreferencesKey("typing_daily_minutes_map")
+        // ── প্যাসেজ-পুনরাবৃত্তি এড়ানো (অ্যাপ-রিস্টার্ট/স্ক্রিন-পুনঃপ্রবেশের পরও) — শেষ কয়েকটা
+        // দেখানো প্যাসেজের hash — Normal Typing স্ক্রিনে ঢোকার সময় এগুলো বাদ দিয়ে বাছাই হয় ──
+        val KEY_TYPING_RECENT_PASSAGES = stringPreferencesKey("typing_recent_passage_hashes")
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -649,6 +652,28 @@ class SessionManager(private val context: Context) {
         val type = object : TypeToken<Map<String, Double>>() {}.type
         val map: Map<String, Double> = try { gson.fromJson(json, type) ?: emptyMap() } catch (e: Exception) { emptyMap() }
         map.mapValues { (it.value / 60).toInt() }
+    }
+
+    /** প্যাসেজ-পুনরাবৃত্তি এড়ানো — Normal Typing-এ কোনো প্যাসেজ ইউজারকে দেখানো হলেই (সম্পূর্ণ
+     *  করুক বা না করুক) এটা কল করে জমা রাখা হয়, যাতে অ্যাপ রিস্টার্ট করলেও ঠিক ওই একই
+     *  প্যাসেজটাই আবার প্রথমে ফিরে না আসে (শেষ ৮টার hash জমা থাকে, most-recent-last)। */
+    suspend fun recordShownPassage(text: String) {
+        val prefs = context.dataStore.data.first()
+        val json  = prefs[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
+        val type  = object : TypeToken<MutableList<Int>>() {}.type
+        val list: MutableList<Int> = try { gson.fromJson(json, type) ?: mutableListOf() } catch (e: Exception) { mutableListOf() }
+        val h = text.hashCode()
+        list.remove(h)   // ডুপ্লিকেট থাকলে সরিয়ে শেষে যোগ (most-recent-last অর্ডার বজায় রাখতে)
+        list.add(h)
+        val trimmed = if (list.size > 8) list.takeLast(8) else list
+        context.dataStore.edit { it[KEY_TYPING_RECENT_PASSAGES] = gson.toJson(trimmed) }
+    }
+
+    /** getRecentPassageHashes() — এই hash-গুলো বাদ দিয়ে পরের প্যাসেজ বাছাই করা উচিত */
+    fun getRecentPassageHashes(): Set<Int> = runBlocking {
+        val json = context.dataStore.data.first()[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
+        val type = object : TypeToken<List<Int>>() {}.type
+        try { (gson.fromJson(json, type) ?: emptyList<Int>()).toSet() } catch (e: Exception) { emptySet() }
     }
 
 
