@@ -112,6 +112,12 @@ class SessionManager(private val context: Context) {
         // ── প্যাসেজ-পুনরাবৃত্তি এড়ানো (অ্যাপ-রিস্টার্ট/স্ক্রিন-পুনঃপ্রবেশের পরও) — শেষ কয়েকটা
         // দেখানো প্যাসেজের hash — Normal Typing স্ক্রিনে ঢোকার সময় এগুলো বাদ দিয়ে বাছাই হয় ──
         val KEY_TYPING_RECENT_PASSAGES = stringPreferencesKey("typing_recent_passage_hashes")
+        // ── পর্ব-১ #১৫ (মাল্টি-লেআউট সিলেক্টর) — ইউজার কোন কীবোর্ড-লেআউটে টাইপ করছে তা
+        // মনে রাখা (bijoy/national/phonetic/probhat/unibijoy/software) — শুধু UI প্রেফারেন্স,
+        // কোর টাইপিং-ইঞ্জিনে কোনো প্রভাব নেই (আউটপুট-ক্যারেক্টার-ভিত্তিক ট্র্যাকিং, তাই
+        // ফলাফল যেকোনো লেআউটেই সঠিক) — শুধু Live Key Highlight ভিজ্যুয়াল ফিচার এটার ওপর
+        // নির্ভর করে (দেখো TypingPracticeScreen.kt) ──
+        val KEY_TYPING_KEYBOARD_LAYOUT = stringPreferencesKey("typing_keyboard_layout")
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -674,6 +680,14 @@ class SessionManager(private val context: Context) {
         val json = context.dataStore.data.first()[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
         val type = object : TypeToken<List<Int>>() {}.type
         try { (gson.fromJson(json, type) ?: emptyList<Int>()).toSet() } catch (e: Exception) { emptySet() }
+    }
+
+    /** পর্ব-১ #১৫: ইউজারের বেছে নেওয়া কীবোর্ড-লেআউট — ডিফল্ট "bijoy" */
+    fun getKeyboardLayout(): String = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_KEYBOARD_LAYOUT] ?: "bijoy"
+    }
+    suspend fun setKeyboardLayout(layout: String) {
+        context.dataStore.edit { it[KEY_TYPING_KEYBOARD_LAYOUT] = layout }
     }
 
 
