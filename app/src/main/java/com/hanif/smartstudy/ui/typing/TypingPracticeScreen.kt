@@ -413,6 +413,14 @@ fun TypingPracticeScreen(
     // "⚡ Quick 3" বাটনে ৩ মিনিটে (১৮০s) ওভাররাইড হয় — বাকি সব লজিক (hard cutoff,
     // finalizeTimedCutoff ইত্যাদি, দেখো ৪.২/৫.৪) অপরিবর্তিত থাকে, শুধু সময়সীমা কমে ──
     var freeModeBudgetSec     by remember { mutableStateOf(FREE_MODE_MIN_SECONDS) }
+    // ── পর্ব-১ #১৫: মাল্টি-লেআউট সিলেক্টর — শুধু UI প্রেফারেন্স, কোর টাইপিং-ইঞ্জিনে
+    // কোনো প্রভাব নেই (আউটপুট-ক্যারেক্টার-ভিত্তিক ট্র্যাকিং যেকোনো লেআউটেই কাজ করে)।
+    // "bijoy" ছাড়া অন্য কোনো লেআউটের জন্য নির্ভুল ভেরিফাইড কী-পজিশন ডেটা না থাকায়
+    // (দেখো util/BijoyKeyMap.kt-এর কমেন্ট) Live Key Highlight শুধু bijoy-তেই দেখানো
+    // হয় — ভুল হাইলাইট দেখানোর চেয়ে না-দেখানো নিরাপদ, বিশেষ করে সরকারি পরীক্ষার
+    // প্রস্তুতির প্রেক্ষাপটে ──
+    var keyboardLayout        by remember { mutableStateOf("bijoy") }
+    LaunchedEffect(Unit) { keyboardLayout = session.getKeyboardLayout() }
     // ── লকড অবস্থায় ব্যাকস্পেস চাপলে সংক্ষিপ্ত ওয়ার্নিং ফ্ল্যাশ — পরের যেকোনো কী-প্রেসে
     // সাথে সাথেই হাইড হয় (দেখো onInputChange()), আর নিরাপত্তার জন্য একটা টাইম-আউটেও
     // (নিচের LaunchedEffect) অটো-হাইড হয়, যাতে ইউজার একদমই আর কিছু না চাপলেও আটকে না থাকে ──
@@ -2070,6 +2078,51 @@ fun TypingPracticeScreen(
                     }
                 }
 
+                // ── পর্ব-১ #১৫: কীবোর্ড-লেআউট সিলেক্টর — Neonlipi-এর ৭-অপশন লেআউট-গ্রিডের
+                // সমতুল্য (সংক্ষেপে)। "bijoy" ছাড়া বাকিগুলোর জন্য এখনো ভেরিফাইড কী-চার্ট
+                // নেই, তাই সেগুলো বেছে নিলে Live Key Highlight (নিচে) স্বয়ংক্রিয়ভাবে বন্ধ
+                // হয়ে যায় (accuracy/WPM/curriculum ঠিকই কাজ করে, শুধু ফিজিক্যাল-কী-হাইলাইট
+                // ভিজ্যুয়ালটাই থাকে না) — এটা কার্ডের ভেতরেই ছোট নোট হিসেবে লেখা আছে ──
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("⌨️ কীবোর্ড লেআউট", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "bijoy" to "বিজয়", "unibijoy" to "UniBijoy", "national" to "জাতীয়",
+                            "phonetic" to "ফোনেটিক/অভ্র", "probhat" to "প্রভাত", "software" to "IME দিয়ে টাইপ"
+                        ).forEach { (key, label) ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (keyboardLayout == key) Indigo600 else MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.clickable {
+                                    keyboardLayout = key
+                                    scope.launch { session.setKeyboardLayout(key) }
+                                }
+                            ) {
+                                Text(label, fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                    color = if (keyboardLayout == key) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                            }
+                        }
+                    }
+                    if (keyboardLayout != "bijoy") {
+                        Text(
+                            "ℹ️ এই লেআউটে ফিজিক্যাল-কী হাইলাইট এখনো সাপোর্ট করে না — নিজের কীবোর্ড/IME দিয়েই টাইপ করো, WPM/Accuracy ঠিকই সঠিকভাবে মাপা হবে।",
+                            fontSize = 10.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 // ── Phase ৩ (#1+#2): Adaptive Key-Unlock কারিকুলাম — ট্র্যাক বেছে নিয়ে
                 // শুরু করা যায়, বর্তমান স্টেজ + নতুন ক্যারেক্টারগুলোর unlock-প্রগ্রেস
                 // বার সবসময় দেখায় (Neonlipi-এর স্টেজ প্রগ্রেস বার-এর সমতুল্য) ──
@@ -2564,7 +2617,9 @@ fun TypingPracticeScreen(
                         statSnapshot = keyStatSnapshot
                     )
                 }
-                LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
+                if (keyboardLayout == "bijoy") {
+                    LiveKeyHighlightKeyboard(nextChar = nextTypeChar)
+                }
                 RhythmMeter(score = rhythmScore)
                 LessonProgressBar(resolvedCount = resolvedCount, totalCount = passage.length)
                 ProTipBanner(
