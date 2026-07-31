@@ -1421,6 +1421,15 @@ fun TypingPracticeScreen(
         userInput = normalized
     }
 
+    /** পুল থেকে persisted-recent-history বাদ দিয়ে একটা ইনডেক্স বেছে দেয় — "নতুন করে শুরু"
+     *  (initial-load, difficulty-switch ইত্যাদি) মুহূর্তে hardcoded index 0-এর বদলে এটা
+     *  ব্যবহার করলে অ্যাপ-রিস্টার্ট/স্ক্রিন-পুনঃপ্রবেশের পরও একই প্যাসেজ প্রথমে আসে না। */
+    fun pickFreshPassageIndex(pool: List<PassageInfo>, recentHashes: Set<Int>): Int {
+        if (pool.isEmpty()) return 0
+        val candidates = pool.indices.filter { pool[it].text.hashCode() !in recentHashes }
+        return candidates.randomOrNull() ?: pool.indices.random()
+    }
+
     fun reset(newIndex: Int = passageIndex, pool: List<PassageInfo> = currentPool()) {
         val idx = if (pool.isNotEmpty()) newIndex.mod(pool.size) else 0
         passageIndex = idx
@@ -1563,7 +1572,25 @@ fun TypingPracticeScreen(
     LaunchedEffect(Unit) {
         ensureTypingPassagesLoaded(ctx)
         if (passage.isBlank() && sessionMode == "free" && selectedDifficulty != "custom") {
-            reset(0, currentPool())
+            // ── আগে এখানে সবসময় hardcoded reset(0, ...) হতো — মানে স্ক্রিনে (পুনরায়)
+            // ঢুকলে বা অ্যাপ রিস্টার্ট করলে সবসময় পুলের ১ম প্যাসেজই ফিরে আসত, ঠিক যে
+            // সমস্যাটা ৫.১-এ ফিক্স করা হয়েছিল কিন্তু in-memory guard (PassageRepeatGuard)
+            // অ্যাপ-রিস্টার্টে persist করে না বলে এখানে আবার একই বাগ দেখা যাচ্ছিল। এখন
+            // persisted "সাম্প্রতিক দেখানো প্যাসেজ" (SessionManager.recordShownPassage/
+            // getRecentPassageHashes) বাদ দিয়ে বাছাই হয় — DataStore-এ থাকায় অ্যাপ বন্ধ
+            // করে আবার খুললেও কাজ করে ──
+            val pool = currentPool()
+            val recentHashes = session.getRecentPassageHashes()
+            reset(pickFreshPassageIndex(pool, recentHashes), pool)
+        }
+    }
+
+    // ── Normal Typing-এ যেকোনো প্যাসেজ ইউজারকে দেখানো হলেই (সম্পূর্ণ করুক বা না করুক)
+    // সেটা persist করে রাখা হয় — উদ্দেশ্য উপরের ইনিশিয়াল-লোড LaunchedEffect(Unit)-এর
+    // জন্য ডেটা জোগানো, যাতে পরের বার অ্যাপ খুললে এটাই আবার "প্রথম প্যাসেজ" না হয় ──
+    LaunchedEffect(passage, sessionMode) {
+        if (sessionMode == "free" && passage.isNotBlank()) {
+            session.recordShownPassage(passage)
         }
     }
 
@@ -1832,14 +1859,20 @@ fun TypingPracticeScreen(
                                     text = { Text("🌐 বাংলা", fontFamily = NotoSansBengali) },
                                     onClick = {
                                         sessionLanguage = "bn"; showLangMenu = false
-                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") {
+                                            val pool = currentPool()
+                                            reset(pickFreshPassageIndex(pool, session.getRecentPassageHashes()), pool)
+                                        }
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("🌐 English", fontFamily = NotoSansBengali) },
                                     onClick = {
                                         sessionLanguage = "en"; showLangMenu = false
-                                        if (sessionMode == "free" && selectedDifficulty != "custom") reset(0, currentPool())
+                                        if (sessionMode == "free" && selectedDifficulty != "custom") {
+                                            val pool = currentPool()
+                                            reset(pickFreshPassageIndex(pool, session.getRecentPassageHashes()), pool)
+                                        }
                                     }
                                 )
                             }
@@ -1873,7 +1906,10 @@ fun TypingPracticeScreen(
                             freeModeBudgetSec = FREE_MODE_MIN_SECONDS   // Quick-3 থেকে ফিরলে স্বাভাবিক ৫ মিনিটে রিসেট
                             // ── Study Typing মোড থেকে এলে passage খালি থাকতে পারে —
                             // তখন একটা ভ্যালিড প্যাসেজ লোড করে দেওয়া নিশ্চিত করা হলো ──
-                            if (passage.isBlank()) reset(0, currentPool())
+                            if (passage.isBlank()) {
+                                val pool = currentPool()
+                                reset(pickFreshPassageIndex(pool, session.getRecentPassageHashes()), pool)
+                            }
                         }
                     ) {
                         Text("✍️ প্র্যাকটিস", fontSize = 12.sp, fontFamily = NotoSansBengali,
@@ -1892,7 +1928,10 @@ fun TypingPracticeScreen(
                         onClick  = {
                             sessionMode = "free"; adaptivePhase = 1
                             freeModeBudgetSec = 180
-                            if (passage.isBlank()) reset(0, currentPool())
+                            if (passage.isBlank()) {
+                                val pool = currentPool()
+                                reset(pickFreshPassageIndex(pool, session.getRecentPassageHashes()), pool)
+                            }
                         }
                     ) {
                         Text("⚡ Quick 3", fontSize = 12.sp, fontFamily = NotoSansBengali,
@@ -2428,9 +2467,9 @@ fun TypingPracticeScreen(
             }
 
 
-            // ── পর্ব ৪.৫: ব্যাকস্পেস-লক টগল — টেক্সট-বক্সের ঠিক ওপরে, ডান পাশে। govtmock-এ
-            // এটা সবসময়-অন ও ডিসেবলড দেখানো হয় (আগে থেকেই বাধ্যতামূলক); freetyping-এ কোনো
-            // target passage নেই বলে toggle-টাই লুকানো থাকে ──
+            // ── ডিজাইন-ফিডব্যাক: আগে Backspace Lock ও Blind Mode দুইটা আলাদা পূর্ণ-প্রস্থ
+            // Row (Switch + লেখা) হিসেবে বেশ কিছুটা উলম্ব জায়গা নিচ্ছিল। এখন দুইটাই এক
+            // লাইনে, ছোট আইকন-চিপ হিসেবে (CompactToggleChip) — অনেক চিকন, একই কাজ ──
             if (sessionMode != "freetyping") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2439,47 +2478,23 @@ fun TypingPracticeScreen(
                 ) {
                     AnimatedVisibility(visible = showBackspaceWarning) {
                         Text(
-                            "🔒 ব্যাকস্পেস লকড — সামনে এগিয়ে যান",
+                            "🔒 লকড — সামনে এগিয়ে যান",
                             color = MaterialTheme.colorScheme.error,
-                            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp, fontWeight = FontWeight.Medium,
                             fontFamily = NotoSansBengali
                         )
                     }
                     if (!showBackspaceWarning) Spacer(modifier = Modifier.weight(1f))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "🔒 Backspace Lock",
-                            fontSize = 12.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Switch(
-                            checked  = backspaceLocked || sessionMode == "govtmock",
-                            enabled  = sessionMode != "govtmock",   // govtmock-এ সবসময় বাধ্যতামূলক, বদলানো যাবে না
-                            onCheckedChange = { backspaceLocked = it },
-                            modifier = Modifier.padding(start = 6.dp)
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CompactToggleChip(
+                            icon = "🔒", label = "Backspace",
+                            checked = backspaceLocked || sessionMode == "govtmock",
+                            enabled = sessionMode != "govtmock"   // govtmock-এ সবসময় বাধ্যতামূলক, বদলানো যাবে না
+                        ) { backspaceLocked = !backspaceLocked }
+                        if (smartTypingEnabled) {
+                            CompactToggleChip(icon = "🙈", label = "Blind", checked = blindMode) { blindMode = !blindMode }
+                        }
                     }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            // ── পর্ব ২.৩ ফিচার #৮: Blind Mode টগল — শুধু Smart Typing-এ, অ্যাডভান্সড
-            // ইউজারদের জন্য ঐচ্ছিক (ডিফল্ট বন্ধ) ──
-            if (smartTypingEnabled && sessionMode != "freetyping") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "🙈 Blind Mode", fontSize = 12.sp, fontFamily = NotoSansBengali,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Switch(
-                        checked = blindMode,
-                        onCheckedChange = { blindMode = it },
-                        modifier = Modifier.padding(start = 6.dp)
-                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
             }
@@ -3340,6 +3355,27 @@ private fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
                 }
             }
         }
+    }
+}
+
+/**
+ * ডিজাইন-ফিডব্যাক অনুযায়ী — Backspace Lock/Blind Mode-এর মতো ছোট টগলগুলোর জন্য পুরো
+ * Switch+লেখা না দেখিয়ে একটা ছোট্ট আইকন-চিপ। checked হলে রঙিন ফিল, না হলে নিরপেক্ষ।
+ */
+@Composable
+private fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (checked) Indigo600.copy(alpha = if (enabled) 1f else 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .let { if (enabled) it.clickable(onClick = onToggle) else it }
+    ) {
+        Text(
+            "$icon $label", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+            color = if (checked) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+        )
     }
 }
 
