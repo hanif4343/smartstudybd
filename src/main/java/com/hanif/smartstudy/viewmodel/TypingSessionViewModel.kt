@@ -86,6 +86,11 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
     private val session = SessionManager(app)
     private val passageGuard = PassageRepeatGuard()
 
+    /** Normal (free) মোডে সময়-বাজেটের মধ্যে একের-পর-এক প্যাসেজ লুপ করার জন্য বর্তমান
+     *  পুল মনে রাখা হয় — startSession()/advanceToNextPassage() সেট করে, onInputChange()-
+     *  এর ভেতরের auto-advance লজিক এটাই ব্যবহার করে (UI থেকে বারবার পাস করতে হয় না)। */
+    private var currentPool: List<PassageInfo> = emptyList()
+
     private val _state = MutableStateFlow(TypingSessionUiState())
     val state: StateFlow<TypingSessionUiState> = _state.asStateFlow()
 
@@ -105,6 +110,7 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
      *  ব্যবহার করে সাম্প্রতিক-দেখানো প্যাসেজ এড়িয়ে বাছাই করে। */
     fun startSession(mode: String, pool: List<PassageInfo>, budgetSec: Int = 300) {
         stopTimer()
+        currentPool = pool
         val recentHashes = session.getRecentPassageHashes()
         val candidates = pool.indices.filter { pool[it].text.hashCode() !in recentHashes }
         val idx = candidates.randomOrNull() ?: pool.indices.randomOrNull() ?: 0
@@ -137,21 +143,29 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** পরের প্যাসেজে যাও — শাফল-ব্যাগ-ভিত্তিক no-repeat গার্ড (পর্ব ৫.১) দিয়ে বাছাই। */
+    /** পরের প্যাসেজে যাও — শাফল-ব্যাগ-ভিত্তিক no-repeat গার্ড (পর্ব ৫.১) দিয়ে বাছাই।
+     *  ⚠️ গুরুত্বপূর্ণ: cumulative কীস্ট্রোক-কাউন্টার/elapsedSec/isStarted **সংরক্ষিত
+     *  থাকে** (রিসেট হয় না) — কারণ Normal মোডে সময়-বাজেটের মধ্যে একাধিক প্যাসেজ
+     *  লুপ করা হয়, চূড়ান্ত WPM/Accuracy পুরো সেশনের (একাধিক প্যাসেজ মিলিয়ে) হওয়া
+     *  উচিত, শুধু শেষ প্যাসেজেরটা না। শুধু প্যাসেজ-স্পেসিফিক ফিল্ড (userInput,
+     *  frozenWordResults ইত্যাদি) রিসেট হয়। */
     fun advanceToNextPassage(pool: List<PassageInfo>) {
-        stopTimer()
         if (pool.isEmpty()) return
-        val curIdx = _state.value.passageIndex
-        val nextIdx = passageGuard.next(pool.size, curIdx)
+        currentPool = pool
+        val cur = _state.value
+        val nextIdx = passageGuard.next(pool.size, cur.passageIndex)
         val chosen = pool[nextIdx]
-        _state.value = TypingSessionUiState(
-            sessionMode = _state.value.sessionMode,
-            passageIndex = nextIdx,
-            passage = chosen.text,
-            passageDifficulty = chosen.difficulty,
-            freeModeBudgetSec = _state.value.freeModeBudgetSec
-        )
-        if (_state.value.sessionMode == "free" && chosen.text.isNotBlank()) {
+        _state.update {
+            it.copy(
+                passageIndex = nextIdx, passage = chosen.text, passageDifficulty = chosen.difficulty,
+                userInput = "", frozenWordResults = emptyList(), autoFixedWordFlags = emptyList(),
+                showBackspaceWarning = false
+                // ── ইচ্ছাকৃতভাবে বাদ: correctKeystrokes/incorrectKeystrokes/totalKeystrokes/
+                // elapsedSec/isStarted/leftCorrectChars/... — এগুলো cumulative, প্যাসেজ
+                // পাল্টালেও অক্ষত থাকা উচিত ──
+            )
+        }
+        if (cur.sessionMode == "free" && chosen.text.isNotBlank()) {
             viewModelScope.launch { session.recordShownPassage(chosen.text) }
         }
     }
@@ -294,15 +308,21 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
 
         _state.update { it.copy(userInput = normalized) }
 
-        // ── প্যাসেজ সম্পূর্ণ হলে (allDone) স্বয়ংক্রিয়ভাবে finishSession() —
-        // Normal মোডে (multi-passage loop UI-স্তরে হ্যান্ডল হয়, এখানে শুধু
-        // single-passage completion detect করা হচ্ছে) ──
+        // ── প্যাসেজ সম্পূর্ণ হলে (allDone): Normal (free) মোডে সময়-বাজেট এখনো বাকি
+        // থাকলে পরের প্যাসেজে লুপ করে (cumulative স্ট্যাট সংরক্ষিত থাকে, দেখো
+        // advanceToNextPassage()) — সময় শেষ বা free-না-হলে তবেই সেশন সত্যিকারভাবে
+        // finishSession() দিয়ে শেষ হয় ──
         val finalSplit = splitTypedWords(normalized)
         val allDone = finalSplit.completed.size >= passageWords.size ||
             (finalSplit.completed.size == passageWords.size - 1 &&
                 finalSplit.current == passageWords.lastOrNull())
         if (allDone && !_state.value.isFinished) {
-            finishSession()
+            val latest = _state.value
+            if (latest.sessionMode == "free" && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
+                advanceToNextPassage(currentPool)
+            } else {
+                finishSession()
+            }
         }
     }
 
