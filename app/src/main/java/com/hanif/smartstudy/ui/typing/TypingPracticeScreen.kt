@@ -81,11 +81,11 @@ private const val EXAM_PHASE_SECONDS = 600
 // না কমপক্ষে এই সময় (৫ মিনিট) পার হয়। এরপর যে প্যাসেজ চলছিল সেটা শেষ হলেই সেশন থামে ──
 private const val FREE_MODE_MIN_SECONDS = 300
 
-private val Indigo600 = Color(0xFF4F46E5)
-private val GreenOk   = Color(0xFF10B981)
-private val RedWrong  = Color(0xFFEF4444)
-private val AmberWarn = Color(0xFFB45309)  // স্পেস-মিস হওয়া শব্দ/অক্ষরের জন্য — লাল থেকে আলাদা রঙ, যাতে বানান-ভুল আর স্পেস-ভুল গুলিয়ে না যায়
-private val AmberMid  = Color(0xFFF59E0B)
+internal val Indigo600 = Color(0xFF4F46E5)
+internal val GreenOk   = Color(0xFF10B981)
+internal val RedWrong  = Color(0xFFEF4444)
+internal val AmberWarn = Color(0xFFB45309)  // স্পেস-মিস হওয়া শব্দ/অক্ষরের জন্য — লাল থেকে আলাদা রঙ, যাতে বানান-ভুল আর স্পেস-ভুল গুলিয়ে না যায়
+internal val AmberMid  = Color(0xFFF59E0B)
 // SlateText -> MaterialTheme.colorScheme.onSurface
 // MutedText -> MaterialTheme.colorScheme.onSurfaceVariant
 // CardBg -> MaterialTheme.colorScheme.surface
@@ -3418,7 +3418,7 @@ private fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
  * Switch+লেখা না দেখিয়ে একটা ছোট্ট আইকন-চিপ। checked হলে রঙিন ফিল, না হলে নিরপেক্ষ।
  */
 @Composable
-private fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
+internal fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = if (checked) Indigo600.copy(alpha = if (enabled) 1f else 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
@@ -3700,7 +3700,7 @@ private fun ProTipBanner(accuracyPct: Int) {
 }
 
 @Composable
-private fun StatsRow(
+internal fun StatsRow(
     elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
     // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
     // Progress% ও "resolved/total" এর বদলে শুধু এখন পর্যন্ত মোট টাইপ করা অক্ষর সংখ্যা দেখানো হয় ──
@@ -3753,7 +3753,7 @@ private fun StatsRow(
 }
 
 @Composable
-private fun StatBox(icon: String, value: String, label: String, color: Color) {
+internal fun StatBox(icon: String, value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 14.sp)
         Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
@@ -3763,7 +3763,7 @@ private fun StatBox(icon: String, value: String, label: String, color: Color) {
 }
 
 @Composable
-private fun ResultCard(
+internal fun ResultCard(
     result       : TypingResult,
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
@@ -3966,7 +3966,7 @@ private fun ExamResultCard(englishResult: TypingResult, banglaResult: TypingResu
 }
 
 @Composable
-private fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
+internal fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
         Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
