@@ -81,11 +81,11 @@ private const val EXAM_PHASE_SECONDS = 600
 // না কমপক্ষে এই সময় (৫ মিনিট) পার হয়। এরপর যে প্যাসেজ চলছিল সেটা শেষ হলেই সেশন থামে ──
 private const val FREE_MODE_MIN_SECONDS = 300
 
-private val Indigo600 = Color(0xFF4F46E5)
-private val GreenOk   = Color(0xFF10B981)
-private val RedWrong  = Color(0xFFEF4444)
-private val AmberWarn = Color(0xFFB45309)  // স্পেস-মিস হওয়া শব্দ/অক্ষরের জন্য — লাল থেকে আলাদা রঙ, যাতে বানান-ভুল আর স্পেস-ভুল গুলিয়ে না যায়
-private val AmberMid  = Color(0xFFF59E0B)
+internal val Indigo600 = Color(0xFF4F46E5)
+internal val GreenOk   = Color(0xFF10B981)
+internal val RedWrong  = Color(0xFFEF4444)
+internal val AmberWarn = Color(0xFFB45309)  // স্পেস-মিস হওয়া শব্দ/অক্ষরের জন্য — লাল থেকে আলাদা রঙ, যাতে বানান-ভুল আর স্পেস-ভুল গুলিয়ে না যায়
+internal val AmberMid  = Color(0xFFF59E0B)
 // SlateText -> MaterialTheme.colorScheme.onSurface
 // MutedText -> MaterialTheme.colorScheme.onSurfaceVariant
 // CardBg -> MaterialTheme.colorScheme.surface
@@ -247,6 +247,11 @@ fun TypingPracticeScreen(
     onBack    : () -> Unit,
     onResult  : (TypingResult) -> Unit = {},
     onOpenRace: () -> Unit = {},
+    // ── পর্ব ৩/৫.৩ — মোড-সেপারেশনের প্রথম ধাপ: নতুন, স্বতন্ত্র NormalTypingScreen-এ
+    // যাওয়ার জন্য — MainScreen নিজে showNormalTyping=true সেট করে দেবে। ঐচ্ছিক
+    // (ডিফল্ট {}), তাই যেসব জায়গা থেকে TypingPracticeScreen কল হয় কিন্তু এই নতুন
+    // প্যারামিটার পাস করে না, তারা ভাঙবে না — শুধু বাটনটা কিছু করবে না (নিচে দেখো) ──
+    onOpenNormalTyping: () -> Unit = {},
     // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
     // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
     // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
@@ -1905,6 +1910,29 @@ fun TypingPracticeScreen(
                 }
                 AnimatedVisibility(visible = modeTypeExpanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // ── পর্ব ৩/৫.৩ — মোড-সেপারেশন: নতুন, স্বতন্ত্র NormalTypingScreen-এ
+                // যাওয়ার জন্য প্রমিনেন্ট বাটন। onOpenNormalTyping ঐচ্ছিক (ডিফল্ট {}) —
+                // যেসব caller এখনো নতুন প্যারামিটার পাস করেনি তাদের জন্যও নিরাপদ,
+                // তখন এই বাটন কিছু করবে না (কোনো ক্র্যাশ হবে না) ──
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                    color = Color(0xFF059669),
+                    onClick = onOpenNormalTyping
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("⌨️ নতুন Normal Typing স্ক্রিন", fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Text("সহজ, পরিষ্কার — শুধু সাধারণ প্র্যাকটিসের জন্য", fontSize = 10.sp,
+                                fontFamily = NotoSansBengali, color = Color.White.copy(alpha = 0.85f))
+                        }
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
@@ -3418,7 +3446,7 @@ private fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
  * Switch+লেখা না দেখিয়ে একটা ছোট্ট আইকন-চিপ। checked হলে রঙিন ফিল, না হলে নিরপেক্ষ।
  */
 @Composable
-private fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
+internal fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = if (checked) Indigo600.copy(alpha = if (enabled) 1f else 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
@@ -3700,7 +3728,7 @@ private fun ProTipBanner(accuracyPct: Int) {
 }
 
 @Composable
-private fun StatsRow(
+internal fun StatsRow(
     elapsedSec: Int, resolvedCount: Int, passage: String, isStarted: Boolean, correctKeystrokes: Int,
     // ── "ফ্রি টাইপিং" মোডে কোনো নির্দিষ্ট target passage/length থাকে না, তাই এখানে
     // Progress% ও "resolved/total" এর বদলে শুধু এখন পর্যন্ত মোট টাইপ করা অক্ষর সংখ্যা দেখানো হয় ──
@@ -3753,7 +3781,7 @@ private fun StatsRow(
 }
 
 @Composable
-private fun StatBox(icon: String, value: String, label: String, color: Color) {
+internal fun StatBox(icon: String, value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 14.sp)
         Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
@@ -3763,7 +3791,7 @@ private fun StatBox(icon: String, value: String, label: String, color: Color) {
 }
 
 @Composable
-private fun ResultCard(
+internal fun ResultCard(
     result       : TypingResult,
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
@@ -3966,7 +3994,7 @@ private fun ExamResultCard(englishResult: TypingResult, banglaResult: TypingResu
 }
 
 @Composable
-private fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
+internal fun ResultStat(label: String, value: String, color: Color, dark: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = color, fontFamily = NotoSansBengali)
         Text(label, fontSize = 9.sp, color = if (dark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
