@@ -247,6 +247,11 @@ fun TypingPracticeScreen(
     onBack    : () -> Unit,
     onResult  : (TypingResult) -> Unit = {},
     onOpenRace: () -> Unit = {},
+    // ── পর্ব ৩/৫.৩ — মোড-সেপারেশনের প্রথম ধাপ: নতুন, স্বতন্ত্র NormalTypingScreen-এ
+    // যাওয়ার জন্য — MainScreen নিজে showNormalTyping=true সেট করে দেবে। ঐচ্ছিক
+    // (ডিফল্ট {}), তাই যেসব জায়গা থেকে TypingPracticeScreen কল হয় কিন্তু এই নতুন
+    // প্যারামিটার পাস করে না, তারা ভাঙবে না — শুধু বাটনটা কিছু করবে না (নিচে দেখো) ──
+    onOpenNormalTyping: () -> Unit = {},
     // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
     // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
     // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
@@ -1905,6 +1910,29 @@ fun TypingPracticeScreen(
                 }
                 AnimatedVisibility(visible = modeTypeExpanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // ── পর্ব ৩/৫.৩ — মোড-সেপারেশন: নতুন, স্বতন্ত্র NormalTypingScreen-এ
+                // যাওয়ার জন্য প্রমিনেন্ট বাটন। onOpenNormalTyping ঐচ্ছিক (ডিফল্ট {}) —
+                // যেসব caller এখনো নতুন প্যারামিটার পাস করেনি তাদের জন্যও নিরাপদ,
+                // তখন এই বাটন কিছু করবে না (কোনো ক্র্যাশ হবে না) ──
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                    color = Color(0xFF059669),
+                    onClick = onOpenNormalTyping
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("⌨️ নতুন Normal Typing স্ক্রিন", fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Text("সহজ, পরিষ্কার — শুধু সাধারণ প্র্যাকটিসের জন্য", fontSize = 10.sp,
+                                fontFamily = NotoSansBengali, color = Color.White.copy(alpha = 0.85f))
+                        }
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
