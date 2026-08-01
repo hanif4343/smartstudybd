@@ -61,11 +61,19 @@ import com.hanif.smartstudy.viewmodel.TypingSessionViewModel
 @Composable
 fun NormalTypingScreen(
     onBack: () -> Unit,
+    onResult: (TypingResult) -> Unit = {},
     vm: TypingSessionViewModel = viewModel()
 ) {
     val ctx = LocalContext.current
     val session = remember { SessionManager(ctx) }
     val state by vm.state.collectAsState()
+
+    // ── পুরনো TypingPracticeScreen-এর মতোই — ফলাফল এলেই onResult() কল হয়
+    // (MainScreen-এ achievement-unlock এই কলব্যাকের ওপর নির্ভর করে, দেখো
+    // onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }) ──
+    LaunchedEffect(state.result) {
+        state.result?.let { onResult(it) }
+    }
 
     var difficulty by remember { mutableStateOf("all") }   // all/easy/medium/hard
     var language   by remember { mutableStateOf("bn") }     // bn/en
