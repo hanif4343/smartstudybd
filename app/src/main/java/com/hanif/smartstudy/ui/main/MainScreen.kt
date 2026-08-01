@@ -53,6 +53,10 @@ fun MainScreen(
     var currentTab     by remember { mutableStateOf(BottomTab.HOME) }
     var showSearch     by remember { mutableStateOf(false) }
     var showTyping     by remember { mutableStateOf(false) }
+    // ── পর্ব ৩/৫.৩ — মোড-সেপারেশন: নতুন, স্বতন্ত্র NormalTypingScreen-এর জন্য আলাদা
+    // state — showTyping (পুরনো TypingPracticeScreen, Smart/Exam/curriculum সহ)
+    // থেকে সম্পূর্ণ স্বতন্ত্র, একটাও অন্যটাকে প্রভাবিত করে না ──
+    var showNormalTyping by remember { mutableStateOf(false) }
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
@@ -108,6 +112,7 @@ fun MainScreen(
         when {
             showSearch                    -> showSearch = false
             showTyping                    -> showTyping = false
+            showNormalTyping              -> showNormalTyping = false
             showTypingRace                -> showTypingRace = false
             showFocusModeInfo             -> showFocusModeInfo = false
             currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
@@ -266,7 +271,17 @@ fun MainScreen(
             onBack     = { showTyping = false },
             onResult   = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") },
             onOpenRace = { showTyping = false; showTypingRace = true },
+            // ── পর্ব ৩/৫.৩ — পুরনো স্ক্রিনের ভেতরের "⌨️ নতুন Normal Typing স্ক্রিন"
+            // বাটনে ট্যাপ করলে এখানে চলে আসবে, নতুন স্বতন্ত্র স্ক্রিনে ──
+            onOpenNormalTyping = { showTyping = false; showNormalTyping = true },
             focusStudySubjects = studyStateForFocus.subjects.map { it.name }
+        )
+        return
+    }
+    if (showNormalTyping) {
+        com.hanif.smartstudy.ui.typing.NormalTypingScreen(
+            onBack   = { showNormalTyping = false },
+            onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }
         )
         return
     }
