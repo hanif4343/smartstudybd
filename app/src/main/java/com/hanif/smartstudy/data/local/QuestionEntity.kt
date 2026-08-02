@@ -18,7 +18,11 @@ import androidx.room.Index
     indices = [
         Index(value = ["sheet", "subject", "subTopic"]),
         Index(value = ["sheet", "subject"]),
-        Index(value = ["sheet"])
+        Index(value = ["sheet"]),
+        // ── Phase 6: নতুন schema (subject_id/topic_id) — future getQuestionsPage-স্টাইল
+        // ক্যোয়ারির জন্য, আর groupId দিয়ে multi-part প্রশ্নের sub-question একসাথে বের করতে ──
+        Index(value = ["sheet", "subjectId", "topicId"]),
+        Index(value = ["sheet", "groupId"])
     ]
 )
 data class QuestionEntity(
@@ -44,5 +48,15 @@ data class QuestionEntity(
     val visualUrl   : String = "",
     // "Question Paper" কলাম — কমা দিয়ে আলাদা করা একাধিক ImgBB লিংক (QBank only)
     val questionPaperUrls: String = "",
+    // ── Phase 5/6 নতুন schema fields — Admin App migration-এর পর Sheet-এ এই কলামগুলো
+    // বসেছে (subject_id/topic_id/subtopic_id/group_id/sub_index)। খালি থাকলে (পুরনো row
+    // যেগুলো এখনো reference-টেবিলে link হয়নি) "" / 0 ডিফল্ট। ──
+    val subjectId   : String = "",
+    val topicId     : String = "",
+    val subtopicId  : String = "",   // QBank only
+    // multi-part প্রশ্ন (একই instruction-এর কয়েকটা sub-question, যেমন "কারক নির্ণয় কর")
+    // একই groupId শেয়ার করে — খালি groupId মানে standalone প্রশ্ন
+    val groupId     : String = "",
+    val subIndex    : Int    = 0,
     val syncedAt    : Long   = 0L    // Firebase থেকে কখন এসেছে — delta sync এর জন্য
 )
