@@ -177,14 +177,30 @@ fun CoreScreen(
                         // QBank সাল-মোড: navPath আসল কোনো subject/subTopic pair না (শুধু
                         // ডেপথ ঠিক রাখতে বসানো placeholder), তাই সরাসরি ওই সালটাই আবার লোড করি।
                         viewModel.selectQBankYear(state.qbankSelectedYear!!)
+                    } else if (mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+                               state.navPath.subject == "পদ") {
+                        // Phase 6: পদ-মোড — navPath("পদ", institutionName) placeholder, আসল
+                        // subject/subTopic pair না, তাই সরাসরি সেই institution আবার লোড করি
+                        val institutionName = state.navPath.subTopic
+                        viewModel.navigateBack()
+                        if (institutionName != null) viewModel.selectQBankInstitutionUnderPost(institutionName)
                     } else {
-                        // Same topic reload — QBank প্রতিষ্ঠান-মোডেও navPath আসল
-                        // (designation, institution) pair-ই থাকে, তাই এটাই কাজ করে।
+                        // Same topic reload — QBank প্রতিষ্ঠান-মোডে navPath আসল (designation,
+                        // institution) pair (পুরনো Room/raw-text scheme) — সেখানে পুরনো
+                        // navigateToSubTopic() ঠিক আছে। বাকি সব জায়গায় (ডিফল্ট Quiz/Study/
+                        // QBank-পদবী) navPath এখন Phase 6-এর লেজি টপিক-নাম, তাই
+                        // navigateToSubTopicLazy() ব্যবহার করতে হবে (topicId নাম দিয়ে
+                        // state.subTopics থেকে resolve করে) — নাহলে পুরনো path Room-এ কিছু
+                        // না পেয়ে আবার পুরো sheet fetch করতে যেত।
                         val subj = state.navPath.subject
                         val st   = state.navPath.subTopic
                         if (subj != null && st != null) {
                             viewModel.navigateBack()
-                            viewModel.navigateToSubTopic(st)
+                            if (mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.INSTITUTION) {
+                                viewModel.navigateToSubTopic(st)
+                            } else {
+                                viewModel.navigateToSubTopicLazy(st)
+                            }
                         }
                     }
                 },
@@ -215,13 +231,14 @@ fun CoreScreen(
             )
         }
 
-        // ── SubTopic List (depth 1) ──
+        // ── SubTopic List (depth 1) — Phase 6: এখন লেজি (Topics reference-টেবিল
+        // থেকে, প্রশ্ন ডাউনলোড ছাড়াই) — দেখো QuizViewModel.navigateToSubjectLazy ──
         state.navPath.depth() == 1 -> {
             SubTopicListScreen(
                 subject     = state.navPath.subject ?: "",
                 mode        = state.mode,
                 subTopics   = state.subTopics,
-                onSubTopic  = { viewModel.navigateToSubTopic(it) },
+                onSubTopic  = { viewModel.navigateToSubTopicLazy(it) },
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.navigateBack() },
                 isAdmin         = state.isAdmin,
@@ -340,7 +357,8 @@ fun CoreScreen(
             )
         }
 
-        // ── Subject List (depth 0, root) — পদবী(ডিফল্ট) ফিল্টার-মোড, Quiz, Study ──
+        // ── Subject List (depth 0, root) — পদবী(ডিফল্ট) ফিল্টার-মোড, Quiz, Study —
+        // Phase 6: এখন লেজি (Subjects reference-টেবিল থেকে) ──
         else -> {
             SubjectListScreen(
                 mode       = state.mode,
@@ -348,7 +366,7 @@ fun CoreScreen(
                 weakTopics = state.weakTopics,
                 isLoading  = state.isLoading,
                 error      = state.error,
-                onSubject  = { viewModel.navigateToSubject(it) },
+                onSubject  = { viewModel.navigateToSubjectLazy(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
                 isAdmin         = state.isAdmin,
