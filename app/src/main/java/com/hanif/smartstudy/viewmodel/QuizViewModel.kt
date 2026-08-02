@@ -180,38 +180,134 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // ── Stale-While-Revalidate ────────────────────────────────────────
-            // Cache থাকলে → instant subjects দেখাও
-            // Background এ → Firebase check করো, নতুন data এলে silently update করো
-            val result = withTimeoutOrNull(30_000L) {
-                repo.getContent(
-                    onBackgroundUpdate = { freshData ->
-                        // Background এ নতুন data এলে subjects silently update হবে
-                        viewModelScope.launch {
-                            Log.d("QuizVM", "Background update received: quiz=${freshData.quiz.size}")
-                            rebuildSubjects(freshData, newMode)
-                        }
-                    }
-                )
-            } ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি।")
-
-            val content = (result as? DataState.Success)?.data ?: AppContent()
-            val errMsg  = (result as? DataState.Error)?.message
-            val hasContent = !content.isEmpty()
-
-            Log.d("QuizVM", "setMode done: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
-
-            _state.update {
-                it.copy(
-                    contentLoaded = hasContent,
-                    isLoading     = false,
-                    error         = if (!hasContent) (errMsg ?: "Data empty") else null
-                )
-            }
-            if (hasContent) rebuildSubjects(content, newMode)
+            // ── Phase 6 লেজি-লোডিং ফিক্স (db-migration-v2) ────────────────────
+            // আগে এখানে repo.getContent() দিয়ে পুরো ~১৪,০০০ row Quiz+QBank+Study
+            // একসাথে টেনে তারপর subject বের করা হতো — Subject লিস্ট দেখানোর আগেই
+            // পুরো fetch শেষ হওয়া লাগতো (৩০/৯০ সেকেন্ড টাইমআউট)। এখন Subject লিস্ট
+            // সরাসরি Room-এর reference-টেবিল (Subjects, GAS getReferenceData দিয়ে
+            // populate) থেকে আসে — ছোট, দ্রুত, প্রশ্ন ডাউনলোড করা লাগে না। Topic লিস্ট
+            // ও প্রশ্ন — নিচে navigateToSubjectLazy()/navigateToSubTopicLazy() দেখো।
+            rebuildSubjectsLazy(newMode)
+            _state.update { it.copy(isLoading = false) }
         }
     }
 
+    /**
+     * Phase 6 — Subject লিস্ট Room-এর reference-টেবিল (Subjects, GAS getReferenceData
+     * দিয়ে populate) থেকে সরাসরি লোড করে — কোনো প্রশ্ন ডাউনলোড করা লাগে না, তাই
+     * তাৎক্ষণিক। পুরনো rebuildSubjects(content, mode) (পুরো sheet স্ক্যান করে) এখনো
+     * আছে (search/model-test-generation ইত্যাদির জন্য), শুধু এখানে আর ব্যবহার হয় না।
+     */
+    private suspend fun rebuildSubjectsLazy(mode: StudyMode) {
+        val sheet = when (mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        repo.syncReferenceData()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে
+        val subjectRows = repo.getRoomSubjectsRefBySheet(sheet)
+        val subjects = subjectRows.map { s ->
+            // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
+            // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
+            SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
+        }.sortedBy { it.name }
+        Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${subjects.size}")
+        _state.update {
+            it.copy(subjects = subjects, contentLoaded = true, error = if (subjects.isEmpty()) "কোনো Subject পাওয়া যায়নি" else null)
+        }
+    }
+
+    /**
+     * Phase 6 — Subject-এ ঢুকলে Topic লিস্ট Room-এর reference-টেবিল (Topics) থেকে
+     * সরাসরি (fast, প্রশ্ন ডাউনলোড ছাড়াই)। subjectId রিজলভ হয় ইতিমধ্যে-লোড হওয়া
+     * state.subjects থেকে (নাম মিলিয়ে) — SubjectListScreen-এর onSubject callback
+     * এখনো নাম-ভিত্তিক (String) বলে callback-signature বদলাতে হয়নি।
+     */
+    fun navigateToSubjectLazy(subjectName: String) {
+        _state.update { it.copy(navPath = NavPath(subjectName), subTopics = emptyList(), isLoading = true) }
+        val subjectId = _state.value.subjects.find { it.name == subjectName }?.subjectId.orEmpty()
+        if (subjectId.isBlank()) {
+            _state.update { it.copy(isLoading = false, error = "এই Subject-এর ID পাওয়া যায়নি — Admin App-এ Reference ঠিক আছে কিনা দেখো") }
+            return
+        }
+        viewModelScope.launch {
+            val topicRows = repo.getRoomTopicsForSubject(subjectId)
+            val subTopics = topicRows.map { t ->
+                SubTopicEntry(
+                    name      = t.name,
+                    subject   = subjectName,
+                    totalQ    = t.rowCount,   // Topics reference-টেবিলে indexed count (থাকলে), নাহলে ০
+                    doneQ     = 0,
+                    subjectId = t.subjectId,
+                    topicId   = t.topicId
+                )
+            }.sortedBy { it.name }
+            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
+            _state.update { it.copy(subTopics = subTopics, isLoading = false) }
+        }
+    }
+
+    /**
+     * Phase 6 — Topic-এ ঢুকলে প্রথম ৫০টা প্রশ্ন সরাসরি GAS `getQuestionsPage` থেকে
+     * (topic_id দিয়ে, Topics ট্যাবের row-range index ব্যবহার করে — পুরো sheet স্ক্যান
+     * করে না)। topicId রিজলভ হয় state.subTopics থেকে (নাম মিলিয়ে)।
+     *
+     * ⚠️ সীমাবদ্ধতা: এই মুহূর্তে শুধু প্রথম ৫০টা প্রশ্নই দেখানো হয় (totalQuestions =
+     * loaded আইটেম সংখ্যা, GAS-এর hasMore/nextCursor আপাতত ব্যবহার হয় না) — কোনো
+     * টপিকে ৫০-এর বেশি প্রশ্ন থাকলে বাকিগুলো এখন দেখা যাবে না। "আরও লোড করো" বাটন/
+     * cursor-ভিত্তিক pagination আলাদা ফলো-আপ হিসেবে যোগ করা যাবে প্রয়োজন হলে।
+     */
+    fun navigateToSubTopicLazy(topicName: String) {
+        val subject = _state.value.navPath.subject ?: return
+        val topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
+        timerJob?.cancel()
+        _state.update { it.copy(navPath = NavPath(subject, topicName), currentPage = 0, isLoading = true) }
+        if (topicId.isBlank()) {
+            _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি") }
+            return
+        }
+        viewModelScope.launch {
+            val sheet = when (_state.value.mode) {
+                StudyMode.QUIZ  -> "Quiz"
+                StudyMode.QBANK -> "QBank"
+                StudyMode.STUDY -> "Study"
+            }
+            when (val result = repo.getQuestionsPage(sheet, topicId, null, null, 50)) {
+                is DataState.Success -> {
+                    val bookmarks = _state.value.bookmarkedIds
+                    val items = result.data.items.map { q ->
+                        q.copy(
+                            isBookmarked = bookmarks.contains(q.id),
+                            isWeakTopic  = isWeak(q.subTopic),
+                            isStudyDone  = isStudyDone(q.id)
+                        )
+                    }
+                    Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) items=${items.size} hasMore=${result.data.hasMore}")
+                    _state.update {
+                        it.copy(
+                            questions      = items,
+                            totalQuestions = items.size,
+                            currentPage    = 0,
+                            isQuizActive   = true,
+                            showResult     = false,
+                            result         = null,
+                            answeredCount  = 0,
+                            timerSec       = 0,
+                            isLoading      = false
+                        )
+                    }
+                    startTimer(items.size)
+                }
+                is DataState.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
+            }
+        }
+    }
+
+    // ── পুরনো, পুরো-কনটেন্ট-নির্ভর ফাংশন — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
+    // deep-link/focus-navigation (নোটিফিকেশন থেকে বা search থেকে এসে সরাসরি একটা
+    // subject/subTopic-এ ঢোকা) এই ঠিক এই নামেই কল করে। CoreScreen.kt-এর সাধারণ
+    // ব্রাউজিং ফ্লো এখন ওপরের navigateToSubjectLazy()/navigateToSubTopicLazy()
+    // ব্যবহার করে — এই দুটো এখন শুধু deep-link/legacy call site গুলোর জন্য। ──
     fun navigateToSubject(subject: String) {
         _state.update { it.copy(navPath = NavPath(subject)) }
         viewModelScope.launch {
