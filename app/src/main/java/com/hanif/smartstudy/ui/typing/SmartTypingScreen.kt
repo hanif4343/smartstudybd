@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
  * mistake-DB, TTS — এখনো পুরনো `TypingPracticeScreen.kt`-এই আছে (আলাদা,
  * পরবর্তী ধাপ)।
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartTypingScreen(
     onBack: () -> Unit,
@@ -238,6 +239,7 @@ fun SmartTypingScreen(
             }
 
             // ── প্যাসেজ প্রদর্শন ──
+            val onSurfaceColor = MaterialTheme.colorScheme.onSurface
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
                 val liveSplit = remember(state.userInput) { splitTypedWords(state.userInput) }
                 val annotated = remember(state.passage, state.frozenWordResults, liveSplit, blindMode) {
@@ -247,7 +249,7 @@ fun SmartTypingScreen(
                                 wIdx < state.frozenWordResults.size -> {
                                     val ok = state.frozenWordResults[wIdx]
                                     val wasAutoFixed = state.autoFixedWordFlags.getOrNull(wIdx) == true
-                                    val style = if (blindMode) SpanStyle(color = MaterialTheme.colorScheme.onSurface) else when {
+                                    val style = if (blindMode) SpanStyle(color = onSurfaceColor) else when {
                                         wasAutoFixed -> SpanStyle(color = AmberWarn)
                                         ok -> SpanStyle(color = GreenOk)
                                         else -> SpanStyle(color = RedWrong)
