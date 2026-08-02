@@ -252,6 +252,7 @@ fun TypingPracticeScreen(
     // (ডিফল্ট {}), তাই যেসব জায়গা থেকে TypingPracticeScreen কল হয় কিন্তু এই নতুন
     // প্যারামিটার পাস করে না, তারা ভাঙবে না — শুধু বাটনটা কিছু করবে না (নিচে দেখো) ──
     onOpenNormalTyping: () -> Unit = {},
+    onOpenSmartTyping: () -> Unit = {},
     // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
     // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
     // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
@@ -1933,6 +1934,26 @@ fun TypingPracticeScreen(
                         Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
                     }
                 }
+                // ── পর্ব ৩/৫.৩ ধাপ ৩: নতুন, স্বতন্ত্র SmartTypingScreen-এ যাওয়ার বাটন ──
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                    color = Color(0xFF7C3AED),
+                    onClick = onOpenSmartTyping
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("🧠 নতুন Smart Typing স্ক্রিন", fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Text("Adaptive Key-Unlock + দুর্বল-কী/জুটি ড্রিল", fontSize = 10.sp,
+                                fontFamily = NotoSansBengali, color = Color.White.copy(alpha = 0.85f))
+                        }
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
@@ -3229,7 +3250,7 @@ fun TypingPracticeScreen(
 }
 
 @Composable
-private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
+internal fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
     val goalSeconds = (goalMinutes * 60).coerceAtLeast(1)
     val progress = (todaySeconds.toFloat() / goalSeconds).coerceIn(0f, 1f)
     val doneMin = todaySeconds / 60
@@ -3261,7 +3282,7 @@ private fun DailyGoalBanner(todaySeconds: Int, goalMinutes: Int) {
 }
 
 @Composable
-private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>) {
+internal fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>) {
     // ── যথেষ্ট ডেটা না জমা পর্যন্ত কিছুই দেখানো হয় না — খালি/অর্থহীন হিটম্যাপ
     // দেখানোর চেয়ে না-দেখানোই ভালো (নতুন ইউজারদের জন্য বিভ্রান্তিকর হবে না) ──
     if (stats.isEmpty()) return
@@ -3314,7 +3335,7 @@ private fun KeyHeatmapCard(stats: List<TypingKeyStatEntity>) {
  * থেকে (দেখো TypingPracticeScreen-এর keyAnalysis state)।
  */
 @Composable
-private fun KeyAnalysisSection(analysis: List<TypingKeyStatStore.KeyAnalysis>, targetWpm: Int) {
+internal fun KeyAnalysisSection(analysis: List<TypingKeyStatStore.KeyAnalysis>, targetWpm: Int) {
     if (analysis.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -3332,7 +3353,7 @@ private fun KeyAnalysisSection(analysis: List<TypingKeyStatStore.KeyAnalysis>, t
 }
 
 @Composable
-private fun KeyAnalysisCard(a: TypingKeyStatStore.KeyAnalysis, targetWpm: Int) {
+internal fun KeyAnalysisCard(a: TypingKeyStatStore.KeyAnalysis, targetWpm: Int) {
     // ── স্কোর: accuracy আর speed দুটোই টার্গেট ছুঁলে "ভালো", একেবারেই কম হলে "খারাপ",
     // মাঝামাঝি "নরমাল" — ৩ রঙে ভাগ (screenshot-এর মতোই) ──
     val accScore = (a.accuracyPct / 90f).coerceIn(0f, 1.2f)
@@ -3376,7 +3397,7 @@ private fun KeyAnalysisCard(a: TypingKeyStatStore.KeyAnalysis, targetWpm: Int) {
 }
 
 @Composable
-private fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
+internal fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, fontSize = 10.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -3402,7 +3423,7 @@ private fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
  * হলে লাল বর্ডার (বেশি জরুরি), তার বেশি হলে কমলা।
  */
 @Composable
-private fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
+internal fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
     val incomplete = progress.filter { it.second < CurriculumProvider.UNLOCK_MIN_CORRECT }
     if (incomplete.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3470,7 +3491,7 @@ internal fun CompactToggleChip(icon: String, label: String, checked: Boolean, en
  * তাকিয়েও "এখন কোন অক্ষর, কতটা দক্ষ তাতে" এক নজরে বোঝা যায়)।
  */
 @Composable
-private fun CurrentKeyAndAllKeysBox(
+internal fun CurrentKeyAndAllKeysBox(
     allKeys: List<String>,
     currentKey: String?,
     statSnapshot: Map<String, Pair<Int, Int>>   // char -> (accuracyPct, samples)
@@ -3542,7 +3563,7 @@ private fun CurrentKeyAndAllKeysBox(
  * pure habit-tracking — "লেগে থাকা"-র জন্য psychological reinforcement।
  */
 @Composable
-private fun PracticeStreakHeatmap(dailyMap: Map<String, Int>) {
+internal fun PracticeStreakHeatmap(dailyMap: Map<String, Int>) {
     val days = remember(dailyMap) {
         val base = java.util.Calendar.getInstance()
         (27 downTo 0).map { offset ->
@@ -3588,7 +3609,7 @@ private fun PracticeStreakHeatmap(dailyMap: Map<String, Int>) {
  * (পুরনো-থেকে-নতুন) ক্রমে দেখানোর জন্য reversed করা হয়েছে।
  */
 @Composable
-private fun WpmTrendChart(history: List<TypingHistoryEntry>) {
+internal fun WpmTrendChart(history: List<TypingHistoryEntry>) {
     val entries = remember(history) { history.reversed() }
     val maxWpm = remember(entries) { (entries.maxOfOrNull { it.wpm } ?: 1).coerceAtLeast(1) }
     Column(Modifier.fillMaxWidth()) {
@@ -3625,7 +3646,7 @@ private fun WpmTrendChart(history: List<TypingHistoryEntry>) {
  * (৩টার কম নমুনা) placeholder টেক্সট দেখায়, ঠিক Neonlipi রেফারেন্সের মতোই।
  */
 @Composable
-private fun RhythmMeter(score: Int?) {
+internal fun RhythmMeter(score: Int?) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
@@ -3658,7 +3679,7 @@ private fun RhythmMeter(score: Int?) {
  * ক্যারেক্টার-ইউনিটে (দেখো TypingPracticeScreen-এর resolvedCount হিসাব)।
  */
 @Composable
-private fun LessonProgressBar(resolvedCount: Int, totalCount: Int) {
+internal fun LessonProgressBar(resolvedCount: Int, totalCount: Int) {
     if (totalCount <= 0) return
     val pct = ((resolvedCount.toFloat() / totalCount) * 100).toInt().coerceIn(0, 100)
     Card(
@@ -3686,7 +3707,7 @@ private fun LessonProgressBar(resolvedCount: Int, totalCount: Int) {
  * নাহলে কয়েক সেকেন্ড পরপর সাধারণ টাইপিং-টিপস ঘুরিয়ে দেখায়।
  */
 @Composable
-private fun ProTipBanner(accuracyPct: Int) {
+internal fun ProTipBanner(accuracyPct: Int) {
     val tips = remember {
         listOf(
             "স্পিড বাড়ানোর চেষ্টা করবেন না — ধীরে কিন্তু সঠিক key চাপতে থাকুন। accuracy ঠিক থাকলে স্পিড এমনিতেই বাড়বে।",
