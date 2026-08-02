@@ -19,7 +19,14 @@ enum class StudyMode { QUIZ, STUDY, QBANK }
 // হায়ারার্কি অপরিবর্তিত। প্রতিষ্ঠান (Institution) বাছাই করলে হায়ারার্কি উল্টে যায়
 // (আগে প্রতিষ্ঠান, তার আন্ডারে যত পদবী)। সাল (Year) বাছাই করলে flat প্রশ্ন-লিস্ট
 // (subject/subTopic নির্বিশেষে ওই সালের সব প্রশ্ন একসাথে)। ──
-enum class QBankFilterMode { DESIGNATION, INSTITUTION, YEAR }
+//
+// POST (Phase 6, db-migration-v2) — নতুন schema-র Posts/Institutions/Exam_Appearances
+// reference-টেবিল থেকে আসে (দেখো data/local/ReferenceDao.kt)। DESIGNATION/INSTITUTION
+// মোড OLD schema-র raw subject/sub_topic টেক্সট থেকে আসে (১ প্রশ্ন = ১টা মাত্র
+// designation+institution জোড়া) — POST মোডে একই প্রশ্ন একাধিক পরীক্ষায় (ভিন্ন
+// Institution/Year) আলাদা appearance-row হিসেবে থাকতে পারে, তাই এই মোডে একই প্রশ্ন
+// একাধিক জায়গায় দেখা যেতে পারে।
+enum class QBankFilterMode { DESIGNATION, INSTITUTION, YEAR, POST }
 
 // ── Question answer state (per question) ──
 sealed class AnswerState {
@@ -63,11 +70,19 @@ data class QuestionItem(
     val isStudyDone : Boolean     = false,  // Study mode: "পড়া হয়েছে" টিকমার্ক — লিস্টের নিচে যাবে, হাইড হবে না
     // ── Model Test এর জন্য ──
     val isImportant  : Boolean    = false,  // admin ম্যানুয়াল ফ্ল্যাগ / বা একাধিক Year-এ repeat হওয়ায় auto-detected
-    val sourceSheet  : String     = ""      // "Quiz" | "QBank" | "Study" — কোন sheet থেকে এসেছে
+    val sourceSheet  : String     = "",     // "Quiz" | "QBank" | "Study" — কোন sheet থেকে এসেছে
+    // ── Phase 6 নতুন schema fields (Admin App migration v2) — খালি স্ট্রিং/０ মানে
+    // এখনো reference-টেবিলে link হয়নি বা standalone (group ছাড়া) প্রশ্ন ──
+    val subjectId    : String     = "",
+    val topicId      : String     = "",
+    val subtopicId   : String     = "",     // QBank only
+    val groupId      : String     = "",     // multi-part প্রশ্নের সব sub-question একই groupId শেয়ার করে
+    val subIndex     : Int        = 0       // group-এর ভেতর ক্রম (১,২,৩...) — sourceKey দিয়ে unique না বলে আলাদা
 ) {
     fun isWritten() = questionType.lowercase().trim() == "written"
     fun isStudy()   = questionType.lowercase().trim() == "study"
     fun isMcq()     = !isWritten() && !isStudy()
+    fun isGrouped() = groupId.isNotBlank()
 
     // "Question Paper" কলামের কমা-সেপারেটেড ImgBB লিংকগুলো লিস্ট আকারে —
     // খালি/স্পেস-শুধু অংশ বাদ দিয়ে
@@ -94,7 +109,11 @@ data class QuestionItem(
             questionType = s.questionType?.lowercase()?.trim() ?: "study",
             audienceTags = s.audienceTags ?: "",
             visualUrl    = s.visualUrl ?: "",
-            sourceSheet  = "Study"
+            sourceSheet  = "Study",
+            subjectId    = s.subjectId ?: "",
+            topicId      = s.topicId ?: "",
+            groupId      = s.groupId ?: "",
+            subIndex     = s.subIndex?.toIntOrNull() ?: 0
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
             id           = q.id ?: "",
@@ -113,7 +132,11 @@ data class QuestionItem(
             audienceTags = q.audienceTags ?: "",
             visualUrl    = q.visualUrl ?: "",
             isImportant  = q.important == true,
-            sourceSheet  = "Quiz"
+            sourceSheet  = "Quiz",
+            subjectId    = q.subjectId ?: "",
+            topicId      = q.topicId ?: "",
+            groupId      = q.groupId ?: "",
+            subIndex     = q.subIndex?.toIntOrNull() ?: 0
         )
         fun fromQBankItem(q: QBankItem) = QuestionItem(
             id           = q.id ?: "",
@@ -135,7 +158,12 @@ data class QuestionItem(
             visualUrl    = q.visualUrl ?: "",
             questionPaperUrls = q.questionPaperUrls ?: "",
             isImportant  = q.important == true,
-            sourceSheet  = "QBank"
+            sourceSheet  = "QBank",
+            subjectId    = q.subjectId ?: "",
+            topicId      = q.topicId ?: "",
+            subtopicId   = q.subtopicId ?: "",
+            groupId      = q.groupId ?: "",
+            subIndex     = q.subIndex?.toIntOrNull() ?: 0
         )
 
         // NOTE: আগে এখানে fromStudyMcqCandidate() নামে একটা ফাংশন ছিল যেটা
@@ -153,7 +181,12 @@ data class SubjectEntry(
     val name         : String,
     val totalQ       : Int,
     val doneQ        : Int,
-    val subTopics    : List<SubTopicEntry> = emptyList()
+    val subTopics    : List<SubTopicEntry> = emptyList(),
+    // ── Phase 6 (db-migration-v2) — reference-টেবিলের subject_id, খালি হতে পারে যদি
+    // QuizViewModel এখনো Room Subjects ম্যাপ থেকে resolve না করে থাকে (backward-compat)।
+    // ⚠️ এখনো UI-তে ব্যবহৃত হচ্ছে না — SubjectListScreen.kt-এর onSubject callback এখনো
+    // নাম-ভিত্তিক (QuizViewModel.kt/CoreScreen.kt আপডেট না হওয়া পর্যন্ত এটাই নিরাপদ পথ)।
+    val subjectId    : String = ""
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
 }
@@ -171,7 +204,15 @@ data class SubTopicEntry(
     val modelTestCount  : Int     = 0,      // কতগুলো Model Test আছে ওই subject-এ (সাবটাইটেলে দেখানোর জন্য)
     // ── QBank: এই সাবটপিকের প্রশ্নগুলো MCQ নাকি Written — কার্ডে ব্যাজ দেখানোর জন্য ──
     val mcqCount     : Int = 0,
-    val writtenCount : Int = 0
+    val writtenCount : Int = 0,
+    // ── Phase 6 (db-migration-v2) — দেখো SubjectEntry.subjectId এর নোট, একই কারণ প্রযোজ্য ──
+    val subjectId    : String = "",
+    val topicId      : String = "",
+    // ── Phase 6 POST মোড: এই (Post+Institution) জোড়ার আন্ডারে যত প্রশ্ন Exam_Appearances-এ
+    // appear করেছে তাদের সরাসরি fbKey লিস্ট — ট্যাপ করলে repo.getRoomQuestionsByIds() দিয়ে
+    // সরাসরি এই ID গুলো টেনে দেখানো হয়, কোনো subject/subTopic টেক্সট ম্যাচিং লাগে না
+    // (দেখো QuizViewModel.selectQBankInstitutionUnderPost)
+    val linkedQuestionIds : List<String> = emptyList()
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
 
