@@ -804,6 +804,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: load list of phones that have debug logs ──
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 📋 Logs ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin Web
+    // App-এ ডুপ্লিকেট ছিল), তাই এই ফাংশনের এখন কোনো caller নেই। ডিলিট না করে শুধু
+    // @Deprecated রাখা হলো (safe cleanup পরে, MenuUiState.debugLogPhones/debugLogs field
+    // দুটোও একইসাথে সরানো যাবে যখন নিশ্চিত হওয়া যাবে অন্য কোথাও লাগছে না)।
+    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadDebugLogPhones() {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -817,6 +822,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: load logs for a phone (or "" = own phone) ──
+    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadDebugLogs(phone: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -1180,6 +1186,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     fun clearEditMsg() { _state.update { it.copy(editSuccessMsg = null) } }
 
     // ── Admin: Report Queue ───────────────────────────────────
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🚩 Reports ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
+    // Web App-এ ডুপ্লিকেট ছিল), তাই এই দুটো ফাংশনের এখন কোনো caller নেই। ডিলিট না করে
+    // শুধু @Deprecated রাখা হলো।
+    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadPendingReports() {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -1194,6 +1204,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Report resolve + reporter কে notification পাঠাও */
+    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun resolveReport(
         reportKey      : String,
         status         : String,
@@ -1437,6 +1448,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: Bulk Audience Update ───────────────────────────
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
+    // Web App-এ ডুপ্লিকেট + পুরনো raw-text subject/sub_topic matching-এর ওপর নির্ভরশীল
+    // ছিল, দেখো FirebaseDataService.adminBulkAudienceUpdate-এর @Deprecated নোট) — তাই এই
+    // wrapper-এর এখন কোনো caller নেই।
+    @Deprecated("AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun adminBulkAudienceUpdate(sheet: String, subject: String, subTopic: String, newTag: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
