@@ -201,6 +201,148 @@ object GasContentService {
         }
 
     // ══════════════════════════════════════════════════════════
+    // PHASE 6 — Reference data (Subjects/Topics/SubTopics/Tags/Posts/Institutions)
+    // ══════════════════════════════════════════════════════════
+
+    /**
+     * GAS action=getReferenceData — Admin App-এর ReferenceManagerTab.jsx যেই একই action
+     * ব্যবহার করে (Phase 5, GAS `code_updated.gs`)। ছোট রেফারেন্স-টেবিল, একবারে বাল্ক-ফেচ।
+     * ব্যর্থ হলে null রিটার্ন করে — caller (ContentRepository.syncReferenceData) তখন
+     * Room-এর পুরনো cache অপরিবর্তিত রাখবে।
+     */
+    suspend fun fetchReferenceData(): com.hanif.smartstudy.data.model.ReferenceData? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            try {
+                val url = "$BASE_URL?action=getReferenceData&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (!resp.isSuccessful || body.isBlank()) return@withContext null
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("status")?.asString != "success") {
+                    Log.w(TAG, "fetchReferenceData non-success: ${body.take(150)}")
+                    return@withContext null
+                }
+                val dataEl = obj.get("data") ?: return@withContext null
+                val raw = plainGson.fromJson(dataEl, com.hanif.smartstudy.data.model.ReferenceData::class.java)
+                // ⚠️ vanilla Gson Kotlin data class instantiate করার সময় constructor call করে
+                // না (Unsafe.allocateInstance ব্যবহার করে) — তাই JSON-এ কোনো key না থাকলে
+                // Kotlin-এর non-null default (= emptyList()) কাজ করে না, ফিল্ডটা আসলে null
+                // থেকে যায় যদিও compiler টাইপ non-null বলছে। code_updated.gs-এর REF_TABS
+                // (Subjects/Topics/Tags/Posts/Institutions) দেখে কনফার্ম করা গেছে "subtopics"
+                // key আদৌ পাঠানোই হয় না — তাই raw?.subtopics runtime-এ null থাকবেই, প্রতিটা
+                // ফিল্ড এখানে ডিফেন্সিভলি null-coalesce করা হলো যাতে .map/.isEmpty() কল করলে
+                // NPE না হয়।
+                com.hanif.smartstudy.data.model.ReferenceData(
+                    subjects     = raw?.subjects ?: emptyList(),
+                    topics       = raw?.topics ?: emptyList(),
+                    subtopics    = raw?.subtopics ?: emptyList(),   // GAS আপাতত এই key পাঠায় না — সবসময় খালি থাকবে
+                    tags         = raw?.tags ?: emptyList(),
+                    posts        = raw?.posts ?: emptyList(),
+                    institutions = raw?.institutions ?: emptyList()
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchReferenceData error: ${e.message}")
+                null
+            }
+        }
+
+    /** getQuestionsPage-এর রেসপন্স — এই page-এর rows + পরের page-এর cursor (null হলে আর পেজ নেই) */
+    data class QuestionsPageResult<T>(val items: List<T>, val nextCursor: String?, val hasMore: Boolean)
+
+    /**
+     * GAS action=getQuestionsPage — topicId (+ ঐচ্ছিক subtopicId, QBank-এ) + cursor + limit
+     * নিয়ে সেই topic-এর প্রশ্ন page-by-page আনে, Topics ট্যাবের row_start/row_count index
+     * ব্যবহার করে (পুরো sheet স্ক্যান করে না — দেখো Phase 3 GAS `rebuildIndex`)।
+     *
+     * ⚠️ response-এর ঠিক ফিল্ড-নাম (`rows`/`nextCursor`/`hasMore`) `code_updated.gs`-এর
+     * বাস্তব response-এর সাথে মিলিয়ে verify করে নেওয়া উচিত এই মেথড প্রথমবার UI-তে wire করার
+     * আগে — এখানে getSheetRows-এর কনভেনশন (status/rows) অনুসরণ করা হয়েছে, `hasMore` field
+     * না থাকলে rows.size >= limit থেকে অনুমান করা হয়।
+     */
+    private suspend inline fun <reified T> fetchQuestionsPage(
+        sheet: String, topicId: String, subtopicId: String?, cursor: String?, limit: Int
+    ): QuestionsPageResult<T> = withContext(Dispatchers.IO) {
+        if (!isConfigured() || topicId.isBlank()) return@withContext QuestionsPageResult(emptyList(), null, false)
+        try {
+            var url = "$BASE_URL?action=getQuestionsPage&sheet=$sheet&topicId=${enc(topicId)}&limit=$limit&secret=${enc(SECRET)}"
+            if (!subtopicId.isNullOrBlank()) url += "&subtopicId=${enc(subtopicId)}"
+            if (!cursor.isNullOrBlank())     url += "&cursor=${enc(cursor)}"
+            val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            if (!resp.isSuccessful || body.isBlank()) return@withContext QuestionsPageResult(emptyList(), null, false)
+            val obj = JsonParser.parseString(body).asJsonObject
+            if (obj.get("status")?.asString != "success") {
+                Log.w(TAG, "getQuestionsPage non-success: ${body.take(150)}")
+                return@withContext QuestionsPageResult(emptyList(), null, false)
+            }
+            val rows = obj.getAsJsonArray("rows") ?: return@withContext QuestionsPageResult(emptyList(), null, false)
+            val items = rows.mapNotNull { el ->
+                try {
+                    if (!el.isJsonObject) return@mapNotNull null
+                    val o = el.asJsonObject.deepCopy()
+                    val idVal = o.get("id")
+                    if (idVal == null || idVal.isJsonNull || idVal.asString.isBlank()) {
+                        o.get("_fbKey")?.takeIf { !it.isJsonNull }?.let { o.addProperty("id", it.asString) }
+                    }
+                    gson.fromJson(o, T::class.java)
+                } catch (e: Exception) { null }
+            }
+            val nextCursor = obj.get("nextCursor")?.takeIf { !it.isJsonNull }?.asString
+            val hasMore = obj.get("hasMore")?.takeIf { !it.isJsonNull }?.asBoolean ?: (rows.size() >= limit)
+            QuestionsPageResult(items, nextCursor, hasMore)
+        } catch (e: Exception) {
+            Log.e(TAG, "getQuestionsPage<$sheet> error: ${e.message}")
+            QuestionsPageResult(emptyList(), null, false)
+        }
+    }
+
+    /** Quiz sheet-এর জন্য getQuestionsPage — QuizItem হিসেবে parse */
+    suspend fun fetchQuizPage(topicId: String, cursor: String?, limit: Int = 50) =
+        fetchQuestionsPage<com.hanif.smartstudy.data.model.QuizItem>("Quiz", topicId, null, cursor, limit)
+
+    /** QBank sheet-এর জন্য getQuestionsPage — QBankItem হিসেবে parse, subtopicId ঐচ্ছিক (৩-লেভেল cascading) */
+    suspend fun fetchQBankPage(topicId: String, subtopicId: String?, cursor: String?, limit: Int = 50) =
+        fetchQuestionsPage<com.hanif.smartstudy.data.model.QBankItem>("QBank", topicId, subtopicId, cursor, limit)
+
+    /** Study sheet-এর জন্য getQuestionsPage — StudyItem হিসেবে parse */
+    suspend fun fetchStudyPage(topicId: String, cursor: String?, limit: Int = 50) =
+        fetchQuestionsPage<com.hanif.smartstudy.data.model.StudyItem>("Study", topicId, null, cursor, limit)
+
+    /**
+     * Phase 6 — GAS action=getAllExamAppearances (code_updated.gs-এ যোগ করা হয়েছে, getReferenceData-এর
+     * বাল্ক-ফেচ প্যাটার্নেই) পুরো Exam_Appearances টেবিল একবারে ফেচ করে। Admin App-এর
+     * `getExamAppearances` action-এর থেকে আলাদা — সেটা একটা নির্দিষ্ট questionId-scoped
+     * (single-question), এটা পুরো টেবিল (bulk, "পদ অনুযায়ী ব্রাউজ" ফ্লো-র জন্য)।
+     */
+    suspend fun fetchAllExamAppearances(): List<com.hanif.smartstudy.data.model.ExamAppearanceRef>? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            try {
+                val url = "$BASE_URL?action=getAllExamAppearances&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (!resp.isSuccessful || body.isBlank()) return@withContext null
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("status")?.asString != "success") {
+                    Log.w(TAG, "fetchAllExamAppearances non-success: ${body.take(150)}")
+                    return@withContext null
+                }
+                val arr = obj.getAsJsonArray("appearances") ?: return@withContext emptyList()
+                arr.mapNotNull { el ->
+                    try { plainGson.fromJson(el, com.hanif.smartstudy.data.model.ExamAppearanceRef::class.java) }
+                    catch (e: Exception) { null }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchAllExamAppearances error: ${e.message}")
+                null
+            }
+        }
+
+    // ══════════════════════════════════════════════════════════
     // WRITE (admin)
     // ══════════════════════════════════════════════════════════
 
