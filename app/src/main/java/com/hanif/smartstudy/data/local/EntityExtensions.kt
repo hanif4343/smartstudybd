@@ -4,6 +4,13 @@ import com.hanif.smartstudy.data.model.QBankItem
 import com.hanif.smartstudy.data.model.QuizItem
 import com.hanif.smartstudy.data.model.StudyItem
 import com.hanif.smartstudy.data.model.QuestionItem
+import com.hanif.smartstudy.data.model.SubjectRef
+import com.hanif.smartstudy.data.model.TopicRef
+import com.hanif.smartstudy.data.model.SubTopicRef
+import com.hanif.smartstudy.data.model.TagRef
+import com.hanif.smartstudy.data.model.PostRef
+import com.hanif.smartstudy.data.model.InstitutionRef
+import com.hanif.smartstudy.data.model.ExamAppearanceRef
 
 // ── Firebase model → Room Entity ─────────────────────────────────────────────
 
@@ -25,6 +32,10 @@ fun QuizItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEnt
     audienceTags = audienceTags ?: "",
     imageUrl     = imageUrl ?: "",
     visualUrl    = visualUrl ?: "",
+    subjectId    = subjectId ?: "",
+    topicId      = topicId ?: "",
+    groupId      = groupId ?: "",
+    subIndex     = subIndex?.toIntOrNull() ?: 0,
     syncedAt     = syncedAt
 )
 
@@ -49,6 +60,11 @@ fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     imageUrl     = imageUrl ?: "",
     visualUrl    = visualUrl ?: "",
     questionPaperUrls = questionPaperUrls ?: "",
+    subjectId    = subjectId ?: "",
+    topicId      = topicId ?: "",
+    subtopicId   = subtopicId ?: "",
+    groupId      = groupId ?: "",
+    subIndex     = subIndex?.toIntOrNull() ?: 0,
     syncedAt     = syncedAt
 )
 
@@ -65,7 +81,56 @@ fun StudyItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     questionType = questionType ?: "study",
     audienceTags = audienceTags ?: "",
     visualUrl    = visualUrl ?: "",
+    subjectId    = subjectId ?: "",
+    topicId      = topicId ?: "",
+    groupId      = groupId ?: "",
+    subIndex     = subIndex?.toIntOrNull() ?: 0,
     syncedAt     = syncedAt
+)
+
+// ── GAS getReferenceData model → Room Entity (Phase 6) ───────────────────────
+
+fun SubjectRef.toEntity() = SubjectEntity(
+    subjectId = subjectId ?: "",
+    name      = name ?: "",
+    sheet     = sheet ?: ""
+)
+
+fun TopicRef.toEntity() = TopicEntity(
+    topicId   = topicId ?: "",
+    subjectId = subjectId ?: "",
+    name      = name ?: "",
+    rowStart  = rowStart ?: 0,
+    rowCount  = rowCount ?: 0
+)
+
+fun SubTopicRef.toEntity() = SubTopicEntity(
+    subtopicId = subtopicId ?: "",
+    topicId    = topicId ?: "",
+    name       = name ?: ""
+)
+
+fun TagRef.toEntity() = TagEntity(
+    tagId = tagId ?: "",
+    name  = name ?: ""
+)
+
+fun PostRef.toEntity() = PostEntity(
+    postId = postId ?: "",
+    name   = name ?: ""
+)
+
+fun InstitutionRef.toEntity() = InstitutionEntity(
+    institutionId = institutionId ?: "",
+    name          = name ?: ""
+)
+
+fun ExamAppearanceRef.toEntity() = ExamAppearanceEntity(
+    appearanceId  = appearanceId ?: "",
+    questionId    = questionId ?: "",
+    postId        = postId ?: "",
+    institutionId = institutionId ?: "",
+    year          = year ?: ""
 )
 
 // ── Room Entity → QuestionItem (domain model) ─────────────────────────────────
@@ -90,6 +155,11 @@ fun QuestionEntity.toQuestionItem() = QuestionItem(
     imageUrl     = imageUrl,
     visualUrl    = visualUrl,
     questionPaperUrls = questionPaperUrls,
+    subjectId    = subjectId,
+    topicId      = topicId,
+    subtopicId   = subtopicId,
+    groupId      = groupId,
+    subIndex     = subIndex,
     // ── FIX: আগে এখানে sourceSheet সেট করা হতো না, তাই Room-first fast-path
     // (navigateToSubTopic → loadQuestionsFromRoom) থেকে লোড হওয়া প্রতিটি
     // QuestionItem-এর sourceSheet খালি ("") থেকে যেত। AdminFieldEditDialog তখন
