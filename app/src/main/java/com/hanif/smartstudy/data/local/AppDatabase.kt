@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -21,8 +21,13 @@ import androidx.room.RoomDatabase
     // cumulative সঠিক/ভুল কাউন্ট — লাইভ হিটম্যাপ ও দুর্বল-কী ড্রিলের ভিত্তি
     // v9 → v10: CurriculumProgressEntity যোগ হলো — Phase ৩ Key-unlock কারিকুলাম:
     // ইউজার কোন স্টেজ পর্যন্ত আনলক করেছে (bn/en আলাদা), দেখো data/model/BijoyCurriculum.kt
+    // v10 → v11: Phase 6 (DB migration v2, User App) — QuestionEntity-তে subjectId/topicId/
+    // subtopicId/groupId/subIndex কলাম যোগ (Admin App-এর নতুন Sheet schema-র সাথে সামঞ্জস্য),
+    // আর ৭টা নতুন reference-টেবিলের local cache: SubjectEntity/TopicEntity/SubTopicEntity/
+    // TagEntity/PostEntity/InstitutionEntity/ExamAppearanceEntity (GAS getReferenceData থেকে
+    // populate হবে — দেখো data/model/ReferenceModels.kt, data/local/ReferenceDao.kt)।
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +41,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun typingSheetPassageDao(): TypingSheetPassageDao
     abstract fun typingKeyStatDao(): TypingKeyStatDao
     abstract fun curriculumProgressDao(): CurriculumProgressDao
+    abstract fun referenceDao(): ReferenceDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
