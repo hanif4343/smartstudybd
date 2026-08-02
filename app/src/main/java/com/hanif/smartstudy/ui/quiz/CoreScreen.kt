@@ -68,12 +68,19 @@ fun CoreScreen(
     val isInsideQBankInstitutionPicker = mode == StudyMode.QBANK &&
         state.qbankFilterMode == QBankFilterMode.INSTITUTION &&
         state.qbankSelectedInstitution != null
+    // ── Phase 6: পদ-মোডেও ঠিক একই কারণে (navPath এখনো depth0-ই থাকে যখন পদ বাছাই
+    // করা হয়েছে কিন্তু প্রতিষ্ঠান এখনো না, দেখো selectQBankPost()) — নইলে সিস্টেম ব্যাক
+    // সরাসরি HOME এ চলে যেত ──
+    val isInsideQBankPostPicker = mode == StudyMode.QBANK &&
+        state.qbankFilterMode == QBankFilterMode.POST &&
+        state.qbankSelectedPost != null
     val isInsideNav = state.isMockZone ||
                       state.isModelTestZone ||
                       state.isModelTestSubjectPicker ||
                       state.showResult ||
                       state.navPath.depth() > 0 ||
-                      isInsideQBankInstitutionPicker
+                      isInsideQBankInstitutionPicker ||
+                      isInsideQBankPostPicker
     BackHandler(enabled = isInsideNav) {
         // ── QBank প্রতিষ্ঠান/সাল ফিল্টার-মোডে থাকা অবস্থায় কাস্টম back — generic
         // navigateBack() এই দুই মোডের উল্টানো/flat হায়ারার্কি বোঝে না। পদবী(ডিফল্ট)
@@ -290,6 +297,46 @@ fun CoreScreen(
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
                 qbankSearchQuery        = state.qbankSearchQuery,
                 onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+            )
+        }
+
+        // ── Phase 6: QBank পদ-মোড, depth0, পদ এখনো বাছাই করা হয়নি — পদের তালিকা।
+        // নতুন schema-র Posts/Institutions/Exam_Appearances reference-টেবিল থেকে
+        // (দেখো QuizViewModel.rebuildQBankPosts) — INSTITUTION মোডের প্যাটার্নেই ──
+        mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+            state.navPath.depth() == 0 && state.qbankSelectedPost == null -> {
+            SubjectListScreen(
+                mode       = state.mode,
+                subjects   = state.qbankPosts,
+                weakTopics = emptyList(),
+                isLoading  = state.isLoading,
+                error      = state.error,
+                onSubject  = { viewModel.selectQBankPost(it) },
+                onMockZone = { viewModel.openMockZone() },
+                onModelTestZone = { viewModel.openModelTestPicker() },
+                // ── পদ/প্রতিষ্ঠান লিস্ট synthetic (Subject/SubTopic নয়) — তাই Admin
+                // rename/delete/reorder বন্ধ, ভুল ডেটার ওপর কাজ করে ফেলার ঝুঁকি এড়াতে ──
+                isAdmin         = false,
+                showQBankFilterBar      = true,
+                qbankFilterMode         = state.qbankFilterMode,
+                onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
+                qbankSearchQuery        = state.qbankSearchQuery,
+                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+            )
+        }
+
+        // ── Phase 6: QBank পদ-মোড, পদ বাছাই করা হয়েছে — এর আন্ডারে প্রতিষ্ঠানের তালিকা
+        // (navPath এখনো depth0-ই, ইচ্ছাকৃতভাবে — দেখো selectQBankPost()) ──
+        mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+            state.navPath.depth() == 0 && state.qbankSelectedPost != null -> {
+            SubTopicListScreen(
+                subject     = state.qbankSelectedPost ?: "",
+                mode        = state.mode,
+                subTopics   = state.qbankInstitutionsUnderPost,
+                onSubTopic  = { viewModel.selectQBankInstitutionUnderPost(it) },
+                onModelTest = { viewModel.openModelTestZone(it) },
+                onBack      = { viewModel.qbankFilterBack() },
+                isAdmin     = false
             )
         }
 
