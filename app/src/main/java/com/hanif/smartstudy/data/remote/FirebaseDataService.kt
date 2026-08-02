@@ -381,6 +381,15 @@ object FirebaseDataService {
     // ══════════════════════════════════════════════════════════
     //  ADMIN FUNCTIONS
     // ══════════════════════════════════════════════════════════
+    //
+    // ⚠️ Phase 6 নোট (db-migration-v2): এই সেকশনের ফাংশনগুলো Android App-এর নিজের
+    // `AdminPage.kt`-এর জন্য (Admin Web App-এর ডুপ্লিকেট) — plan-এর Phase 6 item 13
+    // অনুযায়ী এই ট্যাবগুলোর বেশিরভাগ (Rename/Delete/Bulk-Tag/subject-order) `AdminPage.kt`
+    // থেকে সরিয়ে ফেলা হবে, শুধু ➕ নতুন প্রশ্ন/⚡ Bulk Upload/⏳ Sync/✅ চেকলিস্ট থাকবে।
+    // সেই কাজ না হওয়া পর্যন্ত কম্পাইল না ভাঙার জন্য এখানে ফাংশন-বডি অপরিবর্তিত রাখা
+    // হলো — শুধু `@Deprecated` দিয়ে চিহ্নিত করা হলো, যাতে call site গুলো (AdminPage.kt/
+    // MenuViewModel.kt) IDE/build warning এ স্পষ্ট দেখা যায় এবং item 13-এ ঠিক কোথায়
+    // হাত দিতে হবে সেটা সহজে খুঁজে পাওয়া যায়।
 
     // ── Firebase path-safe tag encoding ───────────────────────────────────────
     // Audience tags যেমন "Masters 1", "Honours 2", "Class 10" — এগুলোতে space আছে।
@@ -394,6 +403,11 @@ object FirebaseDataService {
      * Path: SubjectOrder/{mode}/{encodedTag} — PUT দিয়ে এই node সম্পূর্ণ replace হয়।
      * এই node এখন একটি নির্দিষ্ট tag এর জন্যই dedicated — তাই PUT নিরাপদ (cross-tag collision নেই)।
      */
+    @Deprecated(
+        "Firebase-only ফিচার — Google Sheet মোডে SubjectOrder-এর কোনো GAS action নেই " +
+        "(দেখো GasContentService.kt-এর টপ কমেন্ট), তাই ওই মোডে subject serial সবসময় নামানুসারে " +
+        "(alphabetical fallback) দেখায়। Phase 6 item 13-এ AdminPage.kt থেকে এই ফিচার সরে যাবে।"
+    )
     suspend fun adminSetSubjectOrderBulk(mode: String, tag: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
@@ -419,6 +433,9 @@ object FirebaseDataService {
      * subject নাম path এ না বসিয়ে PATCH body তে key হিসেবে পাঠানো হয় বলে বাংলা/স্পেশাল
      * ক্যারেক্টার নিয়ে URL-encoding এর ঝামেলা নেই।
      */
+    @Deprecated(
+        "Firebase-only ফিচার — দেখো adminSetSubjectOrderBulk এর @Deprecated নোট, একই কারণ প্রযোজ্য।"
+    )
     suspend fun adminSetSubTopicOrderBulk(mode: String, tag: String, subject: String, order: Map<String, Int>): ApiResult<Unit> =
         withContext(Dispatchers.IO) {
             try {
@@ -656,7 +673,17 @@ object FirebaseDataService {
         } catch (e: Exception) { ApiResult.Error(e.message ?: "Update failed") }
     }
 
-    /** Admin: Bulk audience tag update */
+    /**
+     * Admin: Bulk audience tag update
+     */
+    @Deprecated(
+        "পুরনো 'content-পড়ার' পথ — পুরো Quiz/QBank/Study node Firebase থেকে ডাউনলোড করে " +
+        "subject/sub_topic টেক্সট মিলিয়ে (normalizeFieldValue দিয়ে, উপরের ফাইল-কমেন্টে বর্ণিত " +
+        "invisible-character bug-এর মূল কারণ) সব matching row বের করে — বড় sheet-এ ধীর ও ভঙ্গুর। " +
+        "Admin Web App-এর নতুন পথ: reference-টেবিলের tag_id দিয়ে GAS bulk-tag action (এখনো " +
+        "Admin App-এও deferred, দেখো FINAL_MASTER_PLAN.md Phase 7 future task)। Phase 6 item 13-এ " +
+        "AdminPage.kt থেকে এই ফিচার সরে যাবে।"
+    )
     suspend fun adminBulkAudienceUpdate(
         sheet    : String,
         subject  : String,
@@ -706,6 +733,14 @@ object FirebaseDataService {
      * প্রতিটি sheet এ matching সব row খুঁজে বের করে শুধু subject/sub_topic ফিল্ড PATCH করা হয় —
      * বাকি সব ফিল্ড (question, options, answer, audience ইত্যাদি) অপরিবর্তিত থাকে।
      */
+    @Deprecated(
+        "পুরনো 'content-পড়ার' পথ — পুরো Quiz/QBank/Study node Firebase থেকে ডাউনলোড করে subject/" +
+        "sub_topic টেক্সট মিলিয়ে rename করে (একই fragile pattern যেটা এই ফাইলের টপ কমেন্টে বর্ণিত " +
+        "invisible-character bug-এর কারণ ছিল)। Admin Web App-এ এটা ইতিমধ্যে GAS `renameReferenceItem` " +
+        "action (subject_id/topic_id দিয়ে ঠিক ১টা reference-রো বদলায়, Quiz/QBank/Study টাচ করে না) " +
+        "দিয়ে প্রতিস্থাপিত হয়ে গেছে (Phase 5, ReferenceManagerTab.jsx)। Phase 6 item 13-এ AdminPage.kt " +
+        "থেকে rename ফিচার সরে যাবে — subject/topic rename এখন থেকে শুধু Admin Web App দিয়ে হবে।"
+    )
     suspend fun adminRenameSubjectOrTopic(
         sheets         : List<String>,
         oldSubject     : String,
@@ -771,6 +806,13 @@ object FirebaseDataService {
      * rename এর বদলে প্রতিটা matching key-তে DELETE কল যায়। deleteSubTopic=false হলে
      * পুরো subject-এর সব প্রশ্ন (সব অধ্যায়সহ) মুছে যায়।
      */
+    @Deprecated(
+        "পুরনো 'content-পড়ার' পথ — দেখো adminRenameSubjectOrTopic এর @Deprecated নোট, একই কারণ " +
+        "প্রযোজ্য। Admin Web App-এ এটা GAS `deleteByReferenceId` action (row_start/row_count " +
+        "index ব্যবহার করে single contiguous delete, বড় Subject-এও দ্রুত) দিয়ে প্রতিস্থাপিত " +
+        "হয়ে গেছে (Phase 5, DeleteTab.jsx)। Phase 6 item 13-এ AdminPage.kt থেকে subject/topic " +
+        "delete ফিচার সরে যাবে।"
+    )
     suspend fun adminDeleteBySubjectOrTopic(
         sheets         : List<String>,
         oldSubject     : String,
