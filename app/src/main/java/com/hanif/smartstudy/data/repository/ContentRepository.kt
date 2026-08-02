@@ -37,6 +37,7 @@ class ContentRepository(private val context: Context) {
     private val session = SessionManager(context)
     private val db      = AppDatabase.getInstance(context)
     private val dao     = db.questionDao()
+    private val refDao  = db.referenceDao()   // Phase 6 — Subjects/Topics/SubTopics/Tags/Posts/Institutions
 
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
@@ -168,6 +169,141 @@ class ContentRepository(private val context: Context) {
         if (content.qbank.isNotEmpty()) dao.upsertAll(content.qbank.map { it.toEntity(now) })
         if (content.study.isNotEmpty()) dao.upsertAll(content.study.map { it.toEntity(now) })
         Log.d("Repo", "syncToRoom: done")
+    }
+
+    // ── Phase 6: Reference data (Subjects/Topics/SubTopics/Tags/Posts/Institutions) ──
+
+    /**
+     * GAS `getReferenceData` থেকে Subjects/Topics/SubTopics/Tags/Posts/Institutions টেনে
+     * Room-এ পুরো replace করে (ছোট টেবিল বলে delete-then-insert নিরাপদ, delta লাগে না)।
+     * শুধু Google Sheet ডেটা-সোর্স মোডে কাজ করে — Firebase মোডে Phase 4 এখনো deferred, তাই
+     * ওই মোডে এই reference টেবিলগুলো ফাঁকাই থাকবে (কল করলে false রিটার্ন করে, কিছু ভাঙে না)।
+     * ব্যর্থ হলে চুপচাপ (Room-এর পুরনো ডেটা অপরিবর্তিত থাকে) — non-critical background sync,
+     * এখনো কোনো ViewModel থেকে auto-call হয় না, প্রয়োজনমতো explicitly call করতে হবে।
+     */
+    suspend fun syncReferenceData(): Boolean = withContext(Dispatchers.IO) {
+        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
+            return@withContext false
+        }
+        val data = com.hanif.smartstudy.data.remote.GasContentService.fetchReferenceData()
+            ?: return@withContext false
+        if (data.isEmpty()) return@withContext false
+        refDao.replaceAll(
+            subjects     = data.subjects.map { it.toEntity() },
+            topics       = data.topics.map { it.toEntity() },
+            subtopics    = data.subtopics.map { it.toEntity() },
+            tags         = data.tags.map { it.toEntity() },
+            posts        = data.posts.map { it.toEntity() },
+            institutions = data.institutions.map { it.toEntity() }
+        )
+        Log.d("Repo", "syncReferenceData: subjects=${data.subjects.size} topics=${data.topics.size} subtopics=${data.subtopics.size}")
+        true
+    }
+
+    // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
+    suspend fun getRoomSubjectsRef()                     = refDao.getAllSubjects()
+    suspend fun getRoomSubjectsRefBySheet(sheet: String)  = refDao.getSubjectsBySheet(sheet)
+    suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
+    suspend fun getRoomSubTopicsForTopic(topicId: String)  = refDao.getSubTopicsForTopic(topicId)
+    suspend fun getRoomTags()                             = refDao.getAllTags()
+    suspend fun getRoomPosts()                            = refDao.getAllPosts()
+    suspend fun getRoomInstitutions()                     = refDao.getAllInstitutions()
+    suspend fun getRoomAppearancesForQuestion(questionId: String) = refDao.getAppearancesForQuestion(questionId)
+    suspend fun getRoomAppearancesForPost(postId: String)          = refDao.getAppearancesForPost(postId)
+    suspend fun getRoomAppearancesForInstitution(institutionId: String) = refDao.getAppearancesForInstitution(institutionId)
+
+    /**
+     * Phase 6 — "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: GAS `getAllExamAppearances` থেকে পুরো
+     * Exam_Appearances টেবিল টেনে Room-এ replace করে। শুধু Google Sheet ডেটা-সোর্স মোডে
+     * কাজ করে। GAS-এ action না থাকলে বা নেটওয়ার্ক ব্যর্থ হলে false রিটার্ন করবে — Room-এর
+     * exam_appearances টেবিল খালিই থাকবে, POST browse mode-এ তখন "কোনো প্রশ্ন নেই" দেখাবে
+     * (crash হবে না)।
+     */
+    suspend fun syncExamAppearances(): Boolean = withContext(Dispatchers.IO) {
+        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
+            return@withContext false
+        }
+        val appearances = com.hanif.smartstudy.data.remote.GasContentService.fetchAllExamAppearances()
+            ?: return@withContext false
+        refDao.deleteAllExamAppearances()
+        if (appearances.isNotEmpty()) {
+            refDao.upsertExamAppearances(appearances.map { it.toEntity() })
+        }
+        Log.d("Repo", "syncExamAppearances: ${appearances.size}")
+        true
+    }
+
+    /**
+     * একগুচ্ছ questionId (Exam_Appearances থেকে পাওয়া) দিয়ে সরাসরি সেই নির্দিষ্ট প্রশ্নগুলো
+     * Room থেকে টেনে আনে (audience-filtered) — "পদ অনুযায়ী ব্রাউজ"-এ Post+Institution
+     * বাছাইয়ের পর ফ্ল্যাট প্রশ্ন-লিস্ট দেখানোর জন্য।
+     */
+    suspend fun getRoomQuestionsByIds(sheet: String, ids: List<String>, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext emptyList()
+            val entities = dao.getByFbKeysFiltered(sheet, ids, tag)
+            entities.map { it.toQuestionItem() }
+        }
+
+
+    /** GAS getQuestionsPage-এর ফলাফল — এই page-এর প্রশ্নগুলো + পরের page-এর cursor */
+    data class QuestionsPage(
+        val items      : List<com.hanif.smartstudy.data.model.QuestionItem>,
+        val nextCursor : String?,
+        val hasMore    : Boolean
+    )
+
+    /**
+     * Phase 6 — GAS-এর নতুন paginated `getQuestionsPage` endpoint কল করে (শুধু Google Sheet
+     * মোডে; Firebase মোডে Phase 4 deferred বলে সমতুল্য pagination নেই)। topicId Room-এর
+     * TopicEntity থেকে আসে (subject/topic-এর নাম দিয়ে না, topic_id দিয়ে) — caller আগে
+     * getRoomTopicsForSubject() দিয়ে topicId বের করে নেবে।
+     *
+     * ⚠️ এটা এখনো UI (QuestionListScreen/QuizViewModel) থেকে call হয় না — সেই wiring পরের
+     * ধাপে ("Infinite-scroll wiring") হবে। এই মেথড শুধু নেটওয়ার্ক-লেয়ার প্রস্তুত রাখে,
+     * আর UI wire করার আগে GAS response-এর ঠিক ফিল্ড-নাম verify করে নেওয়া উচিত
+     * (দেখো GasContentService.fetchQuestionsPage-এর কমেন্ট)।
+     */
+    suspend fun getQuestionsPage(
+        sheet      : String,             // "Quiz" | "QBank" | "Study"
+        topicId    : String,
+        subtopicId : String? = null,     // শুধু QBank-এ ব্যবহৃত (ঐচ্ছিক)
+        cursor     : String? = null,
+        limit      : Int = 50
+    ): DataState<QuestionsPage> {
+        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
+            return DataState.Error("getQuestionsPage শুধু Google Sheet ডেটা-সোর্স মোডে কাজ করে")
+        }
+        return withContext(Dispatchers.IO) {
+            try {
+                when (sheet) {
+                    "Quiz" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQuizPage(topicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromQuizItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    "QBank" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, subtopicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromQBankItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    "Study" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchStudyPage(topicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromStudyItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    else -> DataState.Error("Unknown sheet: $sheet")
+                }
+            } catch (e: Exception) {
+                DataState.Error(e.message ?: "getQuestionsPage failed")
+            }
+        }
     }
 
     // ── Delta/Incremental sync ──────────────────────────────────────────────────
