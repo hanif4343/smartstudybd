@@ -239,6 +239,7 @@ fun SubjectListScreen(
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
+                                QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                                 QBankFilterMode.DESIGNATION  -> null
                             }
                         )
@@ -527,13 +528,18 @@ private fun QBankFilterBar(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // ── ৩টা ফিল্টার চিপ — পদবী ডিফল্ট ──
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // ── ৪টা ফিল্টার চিপ — পদবী ডিফল্ট (Phase 6: "পদ" নতুন, Posts/Institutions/
+        // Exam_Appearances reference-টেবিল থেকে — দেখো QuizViewModel.rebuildQBankPosts) ──
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState())
+        ) {
             data class ChipDef(val mode: QBankFilterMode, val label: String, val emoji: String)
             listOf(
                 ChipDef(QBankFilterMode.DESIGNATION, "পদবী", "🧑‍💼"),
                 ChipDef(QBankFilterMode.INSTITUTION, "প্রতিষ্ঠান", "🏢"),
-                ChipDef(QBankFilterMode.YEAR, "সাল", "📅")
+                ChipDef(QBankFilterMode.YEAR, "সাল", "📅"),
+                ChipDef(QBankFilterMode.POST, "পদ", "🎯")
             ).forEach { chip ->
                 val selected = filterMode == chip.mode
                 Surface(
@@ -558,7 +564,7 @@ private fun QBankFilterBar(
             }
         }
 
-        // ── QBank-only সার্চ — শুধু এই লিস্টের নাম (পদবী/প্রতিষ্ঠান/সাল) খুঁজে বের করে ──
+        // ── QBank-only সার্চ — শুধু এই লিস্টের নাম (পদবী/প্রতিষ্ঠান/সাল/পদ) খুঁজে বের করে ──
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
@@ -569,6 +575,7 @@ private fun QBankFilterBar(
                         QBankFilterMode.DESIGNATION -> "পদবী খুঁজুন..."
                         QBankFilterMode.INSTITUTION -> "প্রতিষ্ঠান খুঁজুন..."
                         QBankFilterMode.YEAR        -> "সাল খুঁজুন..."
+                        QBankFilterMode.POST        -> "পদ খুঁজুন..."
                     },
                     fontFamily = NotoSansBengali, fontSize = 12.sp
                 )
