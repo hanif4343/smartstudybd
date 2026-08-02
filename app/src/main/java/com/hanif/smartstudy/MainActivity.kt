@@ -113,6 +113,12 @@ class MainActivity : ComponentActivity() {
 
         session = SessionManager(this)
 
+        // ── Phase 6 (db-migration-v2): পুরনো Sheet schema মাইগ্রেশনে সব প্রশ্নের ID
+        // রিজেনারেট হয়েছে — bookmarks/wrong-answer/progress/study-done-এর পুরনো cache
+        // (পুরনো ID দিয়ে সেভ) এখন orphaned, per-install একবারই ক্লিয়ার করা হয় (দেখো
+        // SessionManager.clearStaleContentIdCacheIfNeeded()-এর কমেন্ট) ──
+        session.clearStaleContentIdCacheIfNeeded()
+
         // Google Sign-In client configure
         val webClientId = getString(R.string.default_web_client_id)
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
