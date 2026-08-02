@@ -53,6 +53,10 @@ fun GlobalSearchScreen(
 ) {
     val context     = LocalContext.current
     val dao         = remember { AppDatabase.getInstance(context).questionDao() }
+    // ── Phase 6 ফিক্স: আগে dao.search() কোনো audience-tag ফিল্টার করত না — অন্য
+    // audience group-এর প্রশ্নও ফলাফলে চলে আসতো (দেখো QuestionDao.search-এর কমেন্ট)।
+    // এখন বাকি অ্যাপের মতোই session থেকে বর্তমান ইউজারের audience tag বের করে পাঠানো হয়। ──
+    val session     = remember { com.hanif.smartstudy.util.SessionManager(context) }
 
     var query       by remember { mutableStateOf("") }
     var activeQuery by remember { mutableStateOf("") }
@@ -75,7 +79,8 @@ fun GlobalSearchScreen(
 
     LaunchedEffect(Unit) { focusReq.requestFocus() }
 
-    // Room cache (persistent, অফলাইনেও থাকে) থেকে খোঁজে — Quiz + QBank + Study
+    // Room cache (persistent, অফলাইনেও থাকে) থেকে খোঁজে — Quiz + QBank + Study,
+    // audience-tag অনুযায়ী ফিল্টার করা (দেখো উপরের কমেন্ট)
     LaunchedEffect(activeQuery) {
         if (activeQuery.length < 2) {
             results = emptyList()
@@ -83,9 +88,13 @@ fun GlobalSearchScreen(
             return@LaunchedEffect
         }
         val found = withContext(Dispatchers.IO) {
-            val quiz  = dao.search("QUIZ",  activeQuery)
-            val qbank = dao.search("QBANK", activeQuery)
-            val study = dao.search("STUDY", activeQuery)
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val quiz  = dao.search("QUIZ",  activeQuery, tag)
+            val qbank = dao.search("QBANK", activeQuery, tag)
+            val study = dao.search("STUDY", activeQuery, tag)
             (quiz + qbank + study).map { it.toQuestionItem() }
         }
         results = found.take(60)
