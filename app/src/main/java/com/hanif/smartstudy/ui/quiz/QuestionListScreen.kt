@@ -298,6 +298,28 @@ fun QuestionListScreen(
     val vmState by viewModel.state.collectAsState()
     val isModelTest = vmState.activeModelTest != null
 
+    // ── Phase 6: Infinite-scroll wiring — পাতার শেষ কয়েকটা প্রশ্নের কাছাকাছি স্ক্রল
+    // করলে "পরবর্তী ➜" বাটনে ট্যাপ না করেই অটোমেটিক পরের পাতা লোড হয়ে যায়।
+    // ⚠️ ইচ্ছাকৃতভাবে ভেতরের pageOffset/goToPage()-ভিত্তিক আর্কিটেকচার অপরিবর্তিত
+    // রাখা হলো (highlight/scroll-to-item/voice-AI ইনডেক্সিং, admin edit/delete —
+    // সবকিছু এই page-based ইনডেক্সিং-এর ওপর নির্ভরশীল, পুরো ফাইল জুড়ে ছড়ানো, তাই
+    // continuous-append এ রিরাইট করা এই ধাপে ঝুঁকিপূর্ণ) — শুধু পরের-পাতা-লোডের
+    // ট্রিগারটা ম্যানুয়াল বাটন-ট্যাপ থেকে স্ক্রল-পজিশনে সরানো হলো। বাটনও রয়ে গেছে
+    // (এক লাফে/অ্যাক্সেসিবিলিটির জন্য) — দুটোই একই goToPage() কল করে, দুবার একসাথে
+    // ট্রিগার হলেও goToPage()-এর নিজের "safePage == currentPage হলে no-op" গার্ড
+    // ডাবল-লোড আটকায়।
+    val isNearListEnd by remember {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            pagedQuestions.isNotEmpty() && lastVisible >= pagedQuestions.lastIndex - 3
+        }
+    }
+    LaunchedEffect(isNearListEnd, safeCurrentPage, isLastPage, vmState.questionsLoading) {
+        if (isNearListEnd && !isLastPage && !vmState.questionsLoading) {
+            viewModel.goToPage(safeCurrentPage + 1)
+        }
+    }
+
     // ── QBank: 👁️/⌨️ আইকন দুটো টপবারে শুধু তখনই দেখা যাবে যখন এই পাতায় (page)
     // কমপক্ষে একটা Written প্রশ্ন আছে — MCQ-ভিত্তিক subtopic-এ এই আইকন দুটোর
     // কোনো effect নেই, তাই দেখানোরও দরকার নেই। Study mode-এ আগের মতোই সবসময় দেখা যায়। ──
@@ -405,11 +427,32 @@ fun QuestionListScreen(
                         //    animateItemPlacement() দিয়ে এই পজিশন-চেঞ্জটা হালকা স্মূথ এনিমেশনে
                         //    হয়, পুরো স্ক্রিন/স্ক্রল জাম্প করে না, বাকি আইটেমগুলো নিজ জায়গায়
                         //    স্মূথভাবে সরে আসে আর পরের প্রশ্নটা এমনিতেই ভেসে ওঠে ──
-                        Box(
+                        // ── Phase 6: group_id-aware রেন্ডারিং — multi-part প্রশ্নের (একই
+                        // instruction থেকে আসা কয়েকটা sub-question, Admin App-এর 🔗 Group Mode
+                        // দিয়ে যোগ করা, যেমন "কারক নির্ণয় কর" এর ৫টা sub-question) প্রথম
+                        // sub-question এর ঠিক আগে একটা connector-header, আর প্রতিটা grouped
+                        // আইটেমেই একটা "সেট x/y" ব্যাজ দেখায় — শুধুই display, স্কোরিং/উত্তর
+                        // এখনো প্রতিটা প্রশ্নে সম্পূর্ণ আলাদাভাবেই হয় (নিচের viewModel.answerMcq/
+                        // answerWritten কল globalIdx/q.id ধরেই কাজ করে, তাতে কিছু বদলায়নি)।
+                        // ⚠️ groupSize/position এই পাতায় (pagedQuestions, বর্তমানে loaded ৫০টা)
+                        // যতগুলো আছে তা দিয়েই হিসাব হয় — কোনো group পেজ-বাউন্ডারিতে ভেঙে গেলে
+                        // (পাতার একদম শেষ প্রশ্ন থেকে গ্রুপ শুরু হলে) সংখ্যাটা ভুল দেখাতে পারে,
+                        // এটা গ্রহণযোগ্য edge case (Admin App-এর ModelTestGenerator-এর মতো এখানে
+                        // group কখনো "ভাঙা" হয় না, শুধু বড় গ্রুপের count কখনো আন্ডার-কাউন্ট হতে পারে)।
+                        Column(
                             modifier = Modifier.animateItemPlacement(
                                 animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
                             )
                         ) {
+                        if (q.isGrouped()) {
+                            val groupItems = pagedQuestions.filter { it.groupId == q.groupId }
+                            val position   = groupItems.indexOfFirst { it.id == q.id } + 1
+                            val groupSize  = groupItems.size
+                            if (localIdx == 0 || pagedQuestions[localIdx - 1].groupId != q.groupId) {
+                                GroupConnectorHeader(groupSize = groupSize)
+                            }
+                            GroupPositionBadge(position = position, groupSize = groupSize)
+                        }
                         if (isHighlighted) {
                             // ── Report-resolved glow highlight ─────────────────
                             val hlTransition = rememberInfiniteTransition(label = "reportResolvedHL")
@@ -904,6 +947,52 @@ fun QuestionListScreen(
             )
         } else {
             voiceAiIdx = null
+        }
+    }
+}
+
+/**
+ * Phase 6 — group_id-aware রেন্ডারিং: multi-part প্রশ্নের (একই instruction থেকে আসা কয়েকটা
+ * sub-question) প্রথম sub-question এর ঠিক আগে এই connector-header দেখা যায়, বাকিগুলোতে
+ * না — যাতে ইউজার বুঝতে পারে নিচের কয়েকটা প্রশ্ন একই সেট থেকে এসেছে।
+ */
+@Composable
+private fun GroupConnectorHeader(groupSize: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("🔗", fontSize = 13.sp)
+        Text(
+            "নিচের ${groupSize}টি প্রশ্ন একই সেট থেকে (একসাথে এসেছে)",
+            fontFamily = NotoSansBengali,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color      = Color(0xFF7C3AED)
+        )
+    }
+}
+
+/** প্রতিটা grouped প্রশ্নের কার্ডের ঠিক ওপরে ছোট্ট "🔗 সেট ২/৫" ব্যাজ — স্কোরিং প্রতিটা প্রশ্নে সম্পূর্ণ আলাদাই থাকে */
+@Composable
+private fun GroupPositionBadge(position: Int, groupSize: Int) {
+    Box(modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF7C3AED).copy(alpha = 0.12f))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                "🔗 সেট $position/$groupSize",
+                fontFamily = NotoSansBengali,
+                fontSize   = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color      = Color(0xFF7C3AED)
+            )
         }
     }
 }
