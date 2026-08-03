@@ -299,6 +299,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     startTimer(items.size)
                 }
                 is DataState.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
+                else -> _state.update { it.copy(isLoading = false, error = "অজানা ত্রুটি ঘটেছে") }
             }
         }
     }
@@ -381,7 +382,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * এখন: in-memory content (যেটা ইতিমধ্যে ViewModel এর সাথে patch হয়ে গেছে)
      * থেকে navPath অপরিবর্তিত রেখেই শুধু বর্তমান স্ক্রিনের ডাটা rebuild করা হয়।
      * Admin ঠিক যেখানে ছিল সেখানেই থাকে, আর edit করা কনটেন্ট সাথে সাথে
-     * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
+     * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
      */
     fun adminRefreshContent() {
         viewModelScope.launch {
@@ -391,7 +392,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // rename করার পরপরই একটা transient network/Sheet ব্যর্থতায় পুরো
             // subject/QBank/Study list "উধাও" হয়ে যেত, যদিও আসল ডেটা অক্ষত ছিল।
             // এখন fetch ব্যর্থ হলে screen-এর বিদ্যমান state-ই অক্ষত থাকবে,
-            // পরের successful refresh না আসা পর্যন্ত কিছু bদলাবে না। ──
+            // পরের successful refresh না আসা পর্যন্ত কিছু বদলাবে না। ──
             val content = (repo.getContent() as? DataState.Success)?.data
             if (content == null) {
                 Log.w("QuizVM", "adminRefreshContent: fetch failed, বিদ্যমান content অক্ষত রাখা হলো")
@@ -989,7 +990,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 is AnswerState.McqSelected      -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenSubmitted -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenRecorded  -> { recorded++ }   // Model Test written — গ্রেডিং হয়নি, শুধু জমা হয়েছে
-                else -> skipped++
+                else                            -> skipped++
             }
             val subj = q.subject.ifBlank { "অন্যান্য" }
             val prev = subjectMap[subj] ?: SubjectScore(subj, 0, 0)
