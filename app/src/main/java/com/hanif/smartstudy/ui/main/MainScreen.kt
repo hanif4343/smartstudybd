@@ -59,6 +59,8 @@ fun MainScreen(
     var showNormalTyping by remember { mutableStateOf(false) }
     // ── পর্ব ৩/৫.৩ ধাপ ৩: Smart Typing-এর জন্যও আলাদা, স্বতন্ত্র state ──
     var showSmartTyping by remember { mutableStateOf(false) }
+    // ── পর্ব ৩/৫.৩ ধাপ ৪: Exam/Govt Mock-এর জন্য তৃতীয় স্বতন্ত্র state ──
+    var showExamTyping by remember { mutableStateOf(false) }
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
@@ -116,6 +118,7 @@ fun MainScreen(
             showTyping                    -> showTyping = false
             showNormalTyping              -> showNormalTyping = false
             showSmartTyping               -> showSmartTyping = false
+            showExamTyping                -> showExamTyping = false
             showTypingRace                -> showTypingRace = false
             showFocusModeInfo             -> showFocusModeInfo = false
             currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
@@ -278,6 +281,7 @@ fun MainScreen(
             // বাটনে ট্যাপ করলে এখানে চলে আসবে, নতুন স্বতন্ত্র স্ক্রিনে ──
             onOpenNormalTyping = { showTyping = false; showNormalTyping = true },
             onOpenSmartTyping = { showTyping = false; showSmartTyping = true },
+            onOpenExamTyping = { showTyping = false; showExamTyping = true },
             focusStudySubjects = studyStateForFocus.subjects.map { it.name }
         )
         return
@@ -292,6 +296,13 @@ fun MainScreen(
     if (showSmartTyping) {
         com.hanif.smartstudy.ui.typing.SmartTypingScreen(
             onBack   = { showSmartTyping = false },
+            onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }
+        )
+        return
+    }
+    if (showExamTyping) {
+        com.hanif.smartstudy.ui.typing.ExamTypingScreen(
+            onBack   = { showExamTyping = false },
             onResult = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") }
         )
         return
