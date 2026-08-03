@@ -195,9 +195,13 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay(1000)
                 _state.update { it.copy(elapsedSec = it.elapsedSec + 1) }
-                // ── হার্ড টাইম-কাটঅফ (পর্ব ৪.২/৫.৪-এর সমতুল্য) — মাঝ-প্যাসেজেও থামায় ──
+                // ── হার্ড টাইম-কাটঅফ (পর্ব ৪.২/৫.৪-এর সমতুল্য) — মাঝ-প্যাসেজেও থামায়।
+                // "free"-এর পাশাপাশি exam/govtmock-ও টাইমড মোড (দেখো পর্ব ৫.৮ ধাপ-১
+                // — Exam স্প্লিট) — curriculum/keydrill ইচ্ছাকৃতভাবে বাদ, ওগুলোতে কোনো
+                // হার্ড টাইম-বাজেট নেই (মূল অ্যাপেও ছিল না, শুধু প্যাসেজ শেষ হলে থামে) ──
                 val s = _state.value
-                if (s.sessionMode == "free" && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
+                val isTimedMode = s.sessionMode == "free" || s.sessionMode == "exam" || s.sessionMode == "govtmock"
+                if (isTimedMode && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
                     finishSession()
                 }
             }
@@ -358,7 +362,11 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 finalSplit.current == passageWords.lastOrNull())
         if (allDone && !_state.value.isFinished) {
             val latest = _state.value
-            if (latest.sessionMode == "free" && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
+            // ── free/exam/govtmock — তিনটাই সময়-বাজেটের মধ্যে একাধিক প্যাসেজে লুপ করে
+            // (মূল TypingPracticeScreen.kt-এর আচরণের সাথে হুবহু মিলিয়ে) — curriculum/
+            // keydrill ইত্যাদিতে লুপ হয় না, একটা প্যাসেজ শেষ = সেশন শেষ ──
+            val loopsWithinBudget = latest.sessionMode == "free" || latest.sessionMode == "exam" || latest.sessionMode == "govtmock"
+            if (loopsWithinBudget && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
                 advanceToNextPassage(currentPool)
             } else {
                 finishSession()
@@ -442,8 +450,15 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
         val lang = s.sessionLanguage
         val correctWrongSnapshot = keyCorrectWrongBuffer.toMap()
         val latencySnapshot = keyLatencyBuffer.toMap()
+        keyCorrectWrongBuffer.clear(); keyLatencyBuffer.clear()
+        // ── ⚠️ Exam Simulation-এর ফলাফল সাধারণ "প্র্যাকটিস বেস্ট WPM"/হিস্ট্রিতে যোগ
+        // হয় না — মূল TypingPracticeScreen.kt-এর finishExamPhase()-ও এটাই করত (আলাদা
+        // ExamResultCard-এ দেখানো হয়, bestWpm/history দূষিত হয় না) ──
+        val shouldRecordAsNormalResult = s.sessionMode != "exam"
         viewModelScope.launch {
-            session.recordTypingResult(result.wpm, result.rawWpm, result.accuracy, result.timeSec)
+            if (shouldRecordAsNormalResult) {
+                session.recordTypingResult(result.wpm, result.rawWpm, result.accuracy, result.timeSec)
+            }
             session.addTypingSecondsToday(timeSec)
             if (correctWrongSnapshot.isNotEmpty()) {
                 TypingKeyStatStore.addDeltas(getApplication(), lang, correctWrongSnapshot)
