@@ -73,7 +73,7 @@ private const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECOND
 
 // ── BCC Exam Simulation Mode — বাস্তব বাংলাদেশ কম্পিউটার কাউন্সিল পরীক্ষার নিয়ম অনুযায়ী
 // প্রতিটা ভাষায় ঠিক ১০ মিনিট (৬০০ সেকেন্ড) — দেখো রোডম্যাপ সেকশন ৮ ──
-private const val EXAM_PHASE_SECONDS = 600
+internal const val EXAM_PHASE_SECONDS = 600
 
 // ── Free/সাধারণ প্র্যাকটিস মোড — একটা প্যাসেজ (৭০-৮০ অক্ষর) সাধারণ স্পিডে
 // মাত্র ১৫-২০ সেকেন্ডে শেষ হয়ে যায়, তাতে একটানা লেখার অনুশীলন হয় না। তাই এখন
@@ -253,6 +253,7 @@ fun TypingPracticeScreen(
     // প্যারামিটার পাস করে না, তারা ভাঙবে না — শুধু বাটনটা কিছু করবে না (নিচে দেখো) ──
     onOpenNormalTyping: () -> Unit = {},
     onOpenSmartTyping: () -> Unit = {},
+    onOpenExamTyping: () -> Unit = {},
     // ── Focus Mode কার্ড এখন এই স্ক্রিন থেকেও চালু করা যায় (আগে শুধু Study ট্যাব
     // থেকে করা যেত, যেটা অসামঞ্জস্যপূর্ণ ছিল)। MainScreen থেকে আসল Study
     // সাবজেক্টের তালিকা পাস করা হয় — টাইপিং নিজেই সবসময় প্রথম এন্ট্রি হিসেবে
@@ -1954,9 +1955,26 @@ fun TypingPracticeScreen(
                         Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
+                // ── পর্ব ৩/৫.৩ ধাপ ৪: নতুন, স্বতন্ত্র ExamTypingScreen-এ যাওয়ার বাটন ──
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+                    color = Color(0xFF1D4ED8),
+                    onClick = onOpenExamTyping
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("🏛️ নতুন Exam / Govt Mock স্ক্রিন", fontSize = 13.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Text("BCC Exam Simulation + Govt Job মক টেস্ট", fontSize = 10.sp,
+                                fontFamily = NotoSansBengali, color = Color.White.copy(alpha = 0.85f))
+                        }
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
+                    }
+                }
                         color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
                         onClick  = {
                             sessionMode = "free"; adaptivePhase = 1
@@ -3956,7 +3974,7 @@ internal fun ResultCard(
 }
 
 @Composable
-private fun ExamResultCard(englishResult: TypingResult, banglaResult: TypingResult, onRestart: () -> Unit) {
+internal fun ExamResultCard(englishResult: TypingResult, banglaResult: TypingResult, onRestart: () -> Unit) {
     val shareCtx = androidx.compose.ui.platform.LocalContext.current
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
