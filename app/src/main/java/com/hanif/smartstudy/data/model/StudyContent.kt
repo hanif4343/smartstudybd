@@ -33,7 +33,11 @@ data class StudyItem(
     @SerializedName("subject_id")    val subjectId    : String? = null,
     @SerializedName("topic_id")      val topicId      : String? = null,
     @SerializedName("group_id")      val groupId      : String? = null,
-    @SerializedName("sub_index")     val subIndex     : String? = null
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 data class QuizItem(
@@ -64,7 +68,11 @@ data class QuizItem(
     // multi-part প্রশ্ন (একই instruction-এর কয়েকটা sub-question, "🔗 Group Mode" দিয়ে
     // Admin App-এ যোগ করা) — একই group_id শেয়ার করে, sub_index দিয়ে ক্রম ঠিক থাকে
     @SerializedName("group_id")      val groupId      : String? = null,
-    @SerializedName("sub_index")     val subIndex     : String? = null
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 data class QBankItem(
@@ -99,7 +107,11 @@ data class QBankItem(
     @SerializedName("topic_id")      val topicId      : String? = null,
     @SerializedName("subtopic_id")   val subtopicId   : String? = null,
     @SerializedName("group_id")      val groupId      : String? = null,
-    @SerializedName("sub_index")     val subIndex     : String? = null
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 // ── Gson case-insensitive + multi-alias adapter ──
@@ -223,6 +235,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             k == "id"                               -> "id"
             // delta sync টাইমস্ট্যাম্প
             k == "updatedat" || k == "updated_at"    -> "updatedAt"
+            // ── Review System (Admin-only) — দেখো QuizItem/QBankItem/StudyItem-এর কমেন্ট ──
+            k == "reviewed"                          -> "reviewed"
+            k == "reviewedat" || k == "reviewed_at"  -> "reviewedAt"
             // ── Phase 5/6 নতুন schema (Admin App migration v2) — Subjects/Topics/SubTopics
             // reference-টেবিলের সাথে link করার id, আর multi-part প্রশ্নের group_id/sub_index ──
             k == "subject_id" || k == "subjectid"    -> "subject_id"
