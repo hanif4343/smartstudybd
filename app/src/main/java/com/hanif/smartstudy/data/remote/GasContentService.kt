@@ -342,6 +342,56 @@ object GasContentService {
             }
         }
 
+    /** GAS `getReviewProgress`-এর ফলাফল — subject_id/topic_id ধরে {total, reviewed} */
+    data class ReviewCount(val total: Int, val reviewed: Int) {
+        val pct: Int get() = if (total > 0) (reviewed * 100) / total else 0
+    }
+    data class ReviewProgress(
+        val subjects: Map<String, ReviewCount> = emptyMap(),
+        val topics: Map<String, ReviewCount> = emptyMap()
+    )
+
+    /**
+     * Review System (Admin-only) — GAS `getReviewProgress` কল করে একটা sheet-এর প্রতিটা
+     * subject_id/topic_id-এ মোট প্রশ্ন ও তার কতগুলো reviewed, হালকা অ্যাগ্রিগেট আকারে
+     * (পুরো প্রশ্ন ডেটা না)। SubjectListScreen/SubTopicListScreen-এ progress bar দেখানোর জন্য।
+     */
+    suspend fun fetchReviewProgress(sheet: String): ReviewProgress = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ReviewProgress()
+        try {
+            val url = "$BASE_URL?action=getReviewProgress&sheet=${enc(sheet)}&secret=${enc(SECRET)}"
+            val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            if (!resp.isSuccessful || body.isBlank()) return@withContext ReviewProgress()
+            val obj = JsonParser.parseString(body).asJsonObject
+            if (obj.get("status")?.asString != "success") {
+                Log.w(TAG, "fetchReviewProgress non-success: ${body.take(150)}")
+                return@withContext ReviewProgress()
+            }
+            fun parseMap(el: com.google.gson.JsonElement?): Map<String, ReviewCount> {
+                if (el == null || !el.isJsonObject) return emptyMap()
+                val out = mutableMapOf<String, ReviewCount>()
+                el.asJsonObject.entrySet().forEach { (key, v) ->
+                    if (v.isJsonObject) {
+                        val o = v.asJsonObject
+                        val total = o.get("total")?.asInt ?: 0
+                        val reviewed = o.get("reviewed")?.asInt ?: 0
+                        out[key] = ReviewCount(total, reviewed)
+                    }
+                }
+                return out
+            }
+            ReviewProgress(
+                subjects = parseMap(obj.get("subjects")),
+                topics   = parseMap(obj.get("topics"))
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchReviewProgress error: ${e.message}")
+            ReviewProgress()
+        }
+    }
+
     // ══════════════════════════════════════════════════════════
     // WRITE (admin)
     // ══════════════════════════════════════════════════════════
