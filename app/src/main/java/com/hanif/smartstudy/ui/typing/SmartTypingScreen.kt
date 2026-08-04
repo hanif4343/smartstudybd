@@ -33,14 +33,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.model.BijoyCurriculum
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.CurriculumProvider
 import com.hanif.smartstudy.util.SessionManager
-import com.hanif.smartstudy.util.TypingErrorAnalyzer
 import com.hanif.smartstudy.util.TypingKeyStatStore
-import com.hanif.smartstudy.util.TypingMistakeLogger
 import com.hanif.smartstudy.viewmodel.TypingSessionViewModel
 import kotlinx.coroutines.launch
 
@@ -81,9 +78,6 @@ fun SmartTypingScreen(
     var blindMode by remember { mutableStateOf(false) }
     var showKeyAnalysis by remember { mutableStateOf(false) }
     var keyAnalysisList by remember { mutableStateOf(listOf<TypingKeyStatStore.KeyAnalysis>()) }
-    // ── পর্ব ৩/৫.৩ ধাপ ২: দুর্বল-শব্দ ড্যাশবোর্ড + এই-সেশনের ভুল-শব্দ ট্র্যাকিং ──
-    var weakWordDashboard by remember { mutableStateOf(listOf<String>()) }
-    var sessionMistakeWords by remember { mutableStateOf(listOf<String>()) }
 
     val allUnlockedKeys = remember(curriculumTrack, curriculumStage) {
         BijoyCurriculum.stagesFor(curriculumTrack).take(curriculumStage).flatten()
@@ -140,31 +134,7 @@ fun SmartTypingScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        vm.syncFromCloud()
-        val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
-        weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
-            .getTopWeakWords(userId, "bn", limit = 10).map { it.targetWord } +
-            AppDatabase.getInstance(ctx).typingMistakeDao()
-                .getTopWeakWords(userId, "en", limit = 5).map { it.targetWord }
-        startCurriculumSession("bn")
-    }
-
-    // ── পর্ব ৩/৫.৩ ধাপ ২: প্রতিটা "লক" হওয়া শব্দ TypingMistakeLogger-এ লগ হয় (spaced-
-    // repetition দুর্বল-শব্দ ট্র্যাকিং), আর এই সেশনের ভুল শব্দগুলো লোকাল লিস্টে জমা হয় ──
-    LaunchedEffect(state.lastLockedWordIndex) {
-        if (state.lastLockedWordIndex < 0) return@LaunchedEffect
-        val target = state.lastLockedWordTarget
-        val typed = state.lastLockedWordTyped
-        if (target.isBlank()) return@LaunchedEffect
-        val lang = TypingErrorAnalyzer.detectLanguage(target)
-        if (state.lastLockedWordCorrect) {
-            TypingMistakeLogger.logCorrect(ctx, target, lang)
-        } else {
-            TypingMistakeLogger.logMistake(ctx, target, typed, lang)
-            sessionMistakeWords = (sessionMistakeWords + target).distinct().takeLast(10)
-        }
-    }
+    LaunchedEffect(Unit) { startCurriculumSession("bn") }
 
     // ── সেশন শেষ হলে: curriculum unlock-চেক + key-stat স্ন্যাপশট রিফ্রেশ + onResult কল ──
     LaunchedEffect(state.isFinished, state.result) {
@@ -246,21 +216,6 @@ fun SmartTypingScreen(
 
             Text("স্টেজ $curriculumStage / ${BijoyCurriculum.totalStages(curriculumTrack)}",
                 fontSize = 11.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            // ── পর্ব ৩/৫.৩ ধাপ ২: দুর্বল-শব্দ ড্যাশবোর্ড — পুরনো সেশনগুলো থেকে যেসব
-            // শব্দে বারবার ভুল হয়েছে, সেগুলো এক নজরে (spaced-repetition সচেতনতা) ──
-            if (weakWordDashboard.isNotEmpty() && !state.isStarted) {
-                Card(
-                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFB45309).copy(alpha = 0.1f))
-                ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("📌 তোমার দুর্বল শব্দগুলো (আগের সেশন থেকে)", fontSize = 11.sp,
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        Text(weakWordDashboard.joinToString("   "), fontSize = 13.sp, fontFamily = NotoSansBengali)
-                    }
-                }
-            }
 
             // ── লাইভ স্ট্যাটস (Accuracy% সহ) ──
             val resolvedCount = remember(state.userInput, state.passage) {
@@ -399,10 +354,8 @@ fun SmartTypingScreen(
                     state.result?.let { r ->
                         ResultCard(
                             result = r, bestWpm = bestWpm, showSmartFeatures = true,
-                            sessionMistakeWords = sessionMistakeWords,
                             onRetry = { vm.restartCurrentPassage() },
                             onNextPassage = {
-                                sessionMistakeWords = emptyList()
                                 when (state.sessionMode) {
                                     "curriculum" -> startCurriculumSession(curriculumTrack)
                                     "keydrill" -> startKeyDrillSession()

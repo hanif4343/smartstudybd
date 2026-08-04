@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -14,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.BijoyKeyMap
 
 /**
  * Phase ৩: আঙুল-পজিশন রেফারেন্স কীবোর্ড — Neonlipi-এর "প্রথমে আঙুলগুলো বসিয়ে নাও"
@@ -173,6 +175,103 @@ private fun LegendRow(f: Finger) {
                 .background(f.color, RoundedCornerShape(3.dp))
         )
         Text(f.label, fontSize = 10.sp, fontFamily = NotoSansBengali)
+    }
+}
+
+// ── Live next-key হাইলাইট কীবোর্ড — উপরের static ডায়াগ্রামের একই Key/Finger
+// রো-ডেটা reuse করে, শুধু এখানে normal ফাংশন সব কী-এর ফিজিক্যাল পজিশন খুঁজতে ──
+private val ALL_ROWS = listOf(ROW_NUM, ROW_QWERTY, ROW_ASDF, ROW_ZXCV)
+
+@Composable
+private fun LiveKeyboardRow(keys: List<Key>, targetLabel: String?, targetShift: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        keys.forEach { k ->
+            val isTarget = targetLabel != null && k.label.equals(targetLabel, ignoreCase = true)
+            // ── Shift লাগলে দুই পাশের Shift কী-ও হালকা হাইলাইট হয়, যাতে বোঝা যায়
+            // এই কী-এর জন্য Shift চাপা লাগবে (real কীবোর্ডে যেভাবে দুই আঙুল লাগে) ──
+            val isShiftHelper = targetShift && k.label == "Shift"
+            val highlight = isTarget || isShiftHelper
+            Surface(
+                modifier = Modifier.weight(k.weight).height(34.dp),
+                shape = RoundedCornerShape(5.dp),
+                color = if (highlight) Color(0xFFFACC15) else k.finger.color.copy(alpha = 0.35f),
+                border = if (isTarget) BorderStroke(2.dp, Color.White) else null
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        k.label, fontSize = 10.sp,
+                        fontWeight = if (highlight) FontWeight.ExtraBold else FontWeight.Medium,
+                        color = if (highlight) Color(0xFF1F2937) else Color.White.copy(alpha = 0.85f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Live next-key হাইলাইট কীবোর্ড — Neonlipi রেফারেন্সের মতোই, টাইপিং চলাকালীন
+ * এখন কোন ফিজিক্যাল কী চাপতে হবে সেটা উজ্জ্বল হলুদ করে দেখায় (স্পেস চাপার
+ * আগেই স্পেস, "ক" চাপার আগেই "J" কী হলুদ হয়ে থাকে ইত্যাদি)। বাংলা ক্যারেক্টারের
+ * জন্য BijoyKeyMap দিয়ে লুকআপ হয়, ইংরেজি অক্ষর/সংখ্যার জন্য সরাসরি নিজের কী।
+ *
+ * এটা [FingerPositionDialog]-এর স্ট্যাটিক রেফারেন্স ডায়াগ্রাম থেকে আলাদা —
+ * এটা লাইভ, TypingPracticeScreen থেকে প্রতিটা নতুন ক্যারেক্টারে রিকম্পোজ হয়।
+ */
+@Composable
+fun LiveKeyHighlightKeyboard(nextChar: Char?, modifier: Modifier = Modifier) {
+    val (targetLabel, targetShift) = remember(nextChar) {
+        when {
+            nextChar == null -> null to false
+            nextChar == ' '  -> "SPACE" to false
+            nextChar.code in 0x0980..0x09FF -> {
+                val k = BijoyKeyMap.keyFor(nextChar)
+                k?.label to (k?.shift ?: false)
+            }
+            nextChar.isLetter() -> nextChar.uppercaseChar().toString() to nextChar.isUpperCase()
+            nextChar.isDigit()  -> nextChar.toString() to false
+            else -> null to false
+        }
+    }
+    val fingerLabel = remember(targetLabel) {
+        when {
+            targetLabel == null    -> null
+            targetLabel == "SPACE" -> "থাম্ব"
+            else -> ALL_ROWS.flatten().firstOrNull { it.label.equals(targetLabel, ignoreCase = true) }?.finger?.label
+        }
+    }
+    Card(
+        modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (fingerLabel != null) {
+                Text(
+                    "👉 $fingerLabel", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.Bold, color = Color(0xFFFACC15)
+                )
+            }
+            LiveKeyboardRow(ROW_NUM, targetLabel, targetShift)
+            LiveKeyboardRow(ROW_QWERTY, targetLabel, targetShift)
+            LiveKeyboardRow(ROW_ASDF, targetLabel, targetShift)
+            LiveKeyboardRow(ROW_ZXCV, targetLabel, targetShift)
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                val spaceHighlight = targetLabel == "SPACE"
+                Surface(
+                    Modifier.weight(1f).height(30.dp), shape = RoundedCornerShape(5.dp),
+                    color = if (spaceHighlight) Color(0xFFFACC15) else Finger.THUMB.color.copy(alpha = 0.35f),
+                    border = if (spaceHighlight) BorderStroke(2.dp, Color.White) else null
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Space", fontSize = 10.sp,
+                            fontWeight = if (spaceHighlight) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (spaceHighlight) Color(0xFF1F2937) else Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

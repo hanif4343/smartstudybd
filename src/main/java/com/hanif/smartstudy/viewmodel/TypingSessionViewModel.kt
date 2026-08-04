@@ -11,7 +11,6 @@ import com.hanif.smartstudy.util.Hand
 import com.hanif.smartstudy.util.HandKeyMap
 import com.hanif.smartstudy.util.PassageRepeatGuard
 import com.hanif.smartstudy.util.SessionManager
-import com.hanif.smartstudy.util.TypingKeyStatStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,28 +21,34 @@ import kotlinx.coroutines.launch
 
 /**
  * ═══════════════════════════════════════════════════════════════════════
- *  TypingSessionViewModel — পর্ব ৩/৫.৩ (মোড-সেপারেশন আর্কিটেকচার)
+ *  TypingSessionViewModel — পর্ব ৩/৫.৩ (মোড-সেপারেশন আর্কিটেকচার) — ধাপ ১
  * ═══════════════════════════════════════════════════════════════════════
  *
- * ⚠️ স্কোপ-নোট (আপ-টু-ডেট — ধাপ ৩ পর্যন্ত):
+ * ⚠️ গুরুত্বপূর্ণ স্কোপ-নোট (প্রতারণা এড়াতে স্পষ্ট করে লেখা হলো):
+ * এটা `TypingPracticeScreen.kt`-এর ~৪০০০ লাইনের **সম্পূর্ণ প্রতিস্থাপন না** —
+ * সেটা একবারে (কম্পাইলার ছাড়া) করা অত্যন্ত ঝুঁকিপূর্ণ হতো। এখানে শুধু
+ * **কোর ইঞ্জিন** অংশটুকু আনা হয়েছে, যেটা Normal ও Smart Typing দুই মোডেই
+ * অভিন্নভাবে দরকার হবে:
  *
  *   ✅ আছে: প্যাসেজ/সেশন স্টেট, টাইমার, কীস্ট্রোক-কাউন্টিং (correct/incorrect/
  *      total + হাত-ভিত্তিক), ব্যাকস্পেস-লক, অটো-রিসিঙ্ক (স্পেস-মিস হ্যান্ডলিং),
  *      no-repeat প্যাসেজ-গার্ড (in-session + persisted-across-restart),
  *      হার্ড টাইম-কাটঅফ, WPM/Accuracy ক্যালকুলেশন, বেসিক persist (history/
- *      bestWpm/daily-seconds), **প্রতি-ক্যারেক্টার সঠিক/ভুল + latency ট্র্যাকিং
- *      (TypingKeyStatStore-এ persist), লাইভ রিদম-স্কোর।**
+ *      bestWpm/daily-seconds)।
  *
- *   ❌ এখনো নেই (curriculum-স্তরের UI স্টেট, exam/govtmock-স্পেসিফিক লজিক,
- *      cloud sync, mistake-DB লগিং, TTS টিপস, সাউন্ড/ভাইব্রেশন, weak-word
- *      ড্যাশবোর্ড) — এগুলো `SmartTypingScreen.kt`/`TypingPracticeScreen.kt`-এ
- *      লোকাল স্টেট হিসেবে থেকে যাচ্ছে, কারণ এগুলো curriculum-নির্দিষ্ট ব্যবসায়িক
- *      লজিক (CurriculumProvider ইত্যাদি), কোর টাইপিং-ইঞ্জিনের অংশ না।
+ *   ❌ এখনো নেই (পরের ফেজে যোগ হবে, আপাতত TypingPracticeScreen.kt-এই থেকে
+ *      যাচ্ছে): curriculum/adaptive/exam/govtmock-স্পেসিফিক লজিক, cloud sync,
+ *      key-latency/rhythm অ্যানালিটিক্স, mistake-DB লগিং, TTS টিপস, সাউন্ড/
+ *      ভাইব্রেশন, hand-stats DB persist, weak-word ড্যাশবোর্ড।
+ *
+ * `TypingPracticeScreen.kt`-এর বিদ্যমান কোড **এখনো এই ViewModel ব্যবহার করছে
+ * না** — সেটা একটা পরবর্তী, ইচ্ছাকৃতভাবে আলাদা ধাপ, যাতে এই ফাইলটা প্রথমে
+ * এককভাবে কম্পাইল/রিভিউ করা যায়, তারপর ধাপে ধাপে existing state-কে এখানে
+ * migrate করে reference করানো হবে।
  */
 
 data class TypingSessionUiState(
     val sessionMode: String = "free",
-    val sessionLanguage: String = "bn",   // key-stat persist বাকেট (bn/en) — curriculum track-এর সাথে মেলে
 
     // ── প্যাসেজ/সেশন ──
     val passageIndex: Int = 0,
@@ -72,10 +77,6 @@ data class TypingSessionUiState(
     val backspaceLocked: Boolean = false,
     val showBackspaceWarning: Boolean = false,
 
-    // ── পর্ব ৩/৫.৩ ধাপ ৩ (Smart Typing সম্প্রসারণ): লাইভ রিদম স্কোর (০-১০০),
-    // সাম্প্রতিক কী-প্রেস ল্যাটেন্সির consistency থেকে — null মানে যথেষ্ট নমুনা এখনো হয়নি ──
-    val rhythmScore: Int? = null,
-
     // ── ফলাফল ──
     val result: TypingResult? = null
 )
@@ -89,16 +90,6 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
      *  পুল মনে রাখা হয় — startSession()/advanceToNextPassage() সেট করে, onInputChange()-
      *  এর ভেতরের auto-advance লজিক এটাই ব্যবহার করে (UI থেকে বারবার পাস করতে হয় না)। */
     private var currentPool: List<PassageInfo> = emptyList()
-
-    // ── পর্ব ৩/৫.৩ ধাপ ৩ (Smart Typing সম্প্রসারণ): প্রতি-ক্যারেক্টার সঠিক/ভুল ও
-    // ল্যাটেন্সি — সেশন চলাকালীন RAM-এ জমে, finishSession()-এ একবারে TypingKeyStatStore-এ
-    // flush হয় (ঠিক মূল TypingPracticeScreen.kt-এর প্যাটার্নেই — batch persist, বারবার
-    // DB-write এড়াতে)। শুধু smartTypingEnabled সেশনেই এটা দরকার — Normal Typing-এ এই
-    // বাফারগুলো সবসময় খালি থাকবে (কেউ populate করবে না), তাই flush করলেও কিছু হবে না ──
-    private val keyCorrectWrongBuffer = mutableMapOf<Char, IntArray>()      // char -> [correctDelta, wrongDelta]
-    private val keyLatencyBuffer = mutableMapOf<Char, TypingKeyStatStore.LatencyAgg>()
-    private var lastCharAtMs: Long = 0L
-    private val recentLatenciesMs = ArrayDeque<Long>(8)   // রিদম-স্কোরের জন্য সর্বশেষ ৮টা
 
     private val _state = MutableStateFlow(TypingSessionUiState())
     val state: StateFlow<TypingSessionUiState> = _state.asStateFlow()
@@ -117,17 +108,15 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
     /** নতুন সেশন শুরু করে — সাধারণত মোড-সিলেক্ট বা "Practice"/"Quick 3" বাটনে।
      *  no-repeat গার্ড (persisted, দেখো পর্ব ৫.১-এর ক্রিটিক্যাল ফলো-আপ ফিক্স)
      *  ব্যবহার করে সাম্প্রতিক-দেখানো প্যাসেজ এড়িয়ে বাছাই করে। */
-    fun startSession(mode: String, pool: List<PassageInfo>, budgetSec: Int = 300, language: String = "bn") {
+    fun startSession(mode: String, pool: List<PassageInfo>, budgetSec: Int = 300) {
         stopTimer()
         currentPool = pool
-        keyCorrectWrongBuffer.clear(); keyLatencyBuffer.clear(); recentLatenciesMs.clear(); lastCharAtMs = 0L
         val recentHashes = session.getRecentPassageHashes()
         val candidates = pool.indices.filter { pool[it].text.hashCode() !in recentHashes }
         val idx = candidates.randomOrNull() ?: pool.indices.randomOrNull() ?: 0
         val chosen = pool.getOrNull(idx)
         _state.value = TypingSessionUiState(
             sessionMode = mode,
-            sessionLanguage = language,
             passageIndex = idx,
             passage = chosen?.text ?: "",
             passageDifficulty = chosen?.difficulty ?: "",
@@ -195,13 +184,9 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay(1000)
                 _state.update { it.copy(elapsedSec = it.elapsedSec + 1) }
-                // ── হার্ড টাইম-কাটঅফ (পর্ব ৪.২/৫.৪-এর সমতুল্য) — মাঝ-প্যাসেজেও থামায়।
-                // "free"-এর পাশাপাশি exam/govtmock-ও টাইমড মোড (দেখো পর্ব ৫.৮ ধাপ-১
-                // — Exam স্প্লিট) — curriculum/keydrill ইচ্ছাকৃতভাবে বাদ, ওগুলোতে কোনো
-                // হার্ড টাইম-বাজেট নেই (মূল অ্যাপেও ছিল না, শুধু প্যাসেজ শেষ হলে থামে) ──
+                // ── হার্ড টাইম-কাটঅফ (পর্ব ৪.২/৫.৪-এর সমতুল্য) — মাঝ-প্যাসেজেও থামায় ──
                 val s = _state.value
-                val isTimedMode = s.sessionMode == "free" || s.sessionMode == "exam" || s.sessionMode == "govtmock"
-                if (isTimedMode && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
+                if (s.sessionMode == "free" && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
                     finishSession()
                 }
             }
@@ -234,31 +219,6 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
         if (!s.isStarted && new.isNotEmpty()) {
             _state.update { it.copy(isStarted = true) }
             ensureTimerRunning()
-        }
-
-        // ── পর্ব ৩/৫.৩ ধাপ ৩: রিদম-স্কোরের জন্য ল্যাটেন্সি ক্যাপচার — শুধু "পরিষ্কার"
-        // এক-অক্ষর ফরওয়ার্ড কী-প্রেসেই মাপা হয় (paste/backspace/auto-resync-এ না,
-        // কারণ তখন সময়ের হিসাব অর্থহীন হয়ে যায়) ──
-        val nowMs = System.currentTimeMillis()
-        if (new.length == s.userInput.length + 1 && lastCharAtMs > 0L) {
-            val latency = nowMs - lastCharAtMs
-            if (latency in 1..10_000) {   // অস্বাভাবিক (অ্যাপ ব্যাকগ্রাউন্ডে ছিল ইত্যাদি) মান বাদ
-                recentLatenciesMs.addLast(latency)
-                if (recentLatenciesMs.size > 8) recentLatenciesMs.removeFirst()
-                val typedChar = new.lastOrNull()
-                if (typedChar != null) {
-                    val agg = keyLatencyBuffer.getOrPut(typedChar) { TypingKeyStatStore.LatencyAgg() }
-                    agg.sumMs += latency; agg.sumSqMs += (latency.toDouble() * latency); agg.count++
-                }
-            }
-        }
-        lastCharAtMs = nowMs
-        if (recentLatenciesMs.size >= 3) {
-            val mean = recentLatenciesMs.average()
-            val variance = recentLatenciesMs.map { (it - mean) * (it - mean) }.average()
-            val cv = if (mean > 0) kotlin.math.sqrt(variance) / mean else 0.0
-            val score = (100 - (cv * 100)).toInt().coerceIn(0, 100)
-            _state.update { it.copy(rhythmScore = score) }
         }
 
         val passageWords = passageWords()
@@ -309,15 +269,11 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                         if (HandKeyMap.isTrackable(tc)) {
                             when (HandKeyMap.handOf(tc)) { Hand.LEFT -> leftC++; Hand.RIGHT -> rightC++ }
                         }
-                        // ── পর্ব ৩/৫.৩ ধাপ ৩: প্রতি-ক্যারেক্টার সঠিক-ডেল্টা — curriculum
-                        // unlock, KeyHeatmapCard, দুর্বল-কী ড্রিল সবকিছুরই ডেটা-সোর্স ──
-                        keyCorrectWrongBuffer.getOrPut(tc) { intArrayOf(0, 0) }[0]++
                     } else {
                         incorrectKs++
                         if (tc != null && HandKeyMap.isTrackable(tc)) {
                             when (HandKeyMap.handOf(tc)) { Hand.LEFT -> leftW++; Hand.RIGHT -> rightW++ }
                         }
-                        if (tc != null) keyCorrectWrongBuffer.getOrPut(tc) { intArrayOf(0, 0) }[1]++
                     }
                 }
                 if (i < passageWords.size - 1) {
@@ -362,11 +318,7 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 finalSplit.current == passageWords.lastOrNull())
         if (allDone && !_state.value.isFinished) {
             val latest = _state.value
-            // ── free/exam/govtmock — তিনটাই সময়-বাজেটের মধ্যে একাধিক প্যাসেজে লুপ করে
-            // (মূল TypingPracticeScreen.kt-এর আচরণের সাথে হুবহু মিলিয়ে) — curriculum/
-            // keydrill ইত্যাদিতে লুপ হয় না, একটা প্যাসেজ শেষ = সেশন শেষ ──
-            val loopsWithinBudget = latest.sessionMode == "free" || latest.sessionMode == "exam" || latest.sessionMode == "govtmock"
-            if (loopsWithinBudget && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
+            if (latest.sessionMode == "free" && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
                 advanceToNextPassage(currentPool)
             } else {
                 finishSession()
@@ -444,28 +396,9 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
 
         _state.update { it.copy(isFinished = true, result = result) }
 
-        // ── পর্ব ৩/৫.৩ ধাপ ৩: Smart Typing-এর কী-স্ট্যাট বাফার (correct/wrong + latency)
-        // এখানে batch-flush হয় — Normal Typing-এ বাফার খালি থাকে বলে addDeltas()/
-        // addLatencyDeltas() no-op হয়ে যায় (কিছুই করার নেই), তাই এটা সব মোডেই নিরাপদ ──
-        val lang = s.sessionLanguage
-        val correctWrongSnapshot = keyCorrectWrongBuffer.toMap()
-        val latencySnapshot = keyLatencyBuffer.toMap()
-        keyCorrectWrongBuffer.clear(); keyLatencyBuffer.clear()
-        // ── ⚠️ Exam Simulation-এর ফলাফল সাধারণ "প্র্যাকটিস বেস্ট WPM"/হিস্ট্রিতে যোগ
-        // হয় না — মূল TypingPracticeScreen.kt-এর finishExamPhase()-ও এটাই করত (আলাদা
-        // ExamResultCard-এ দেখানো হয়, bestWpm/history দূষিত হয় না) ──
-        val shouldRecordAsNormalResult = s.sessionMode != "exam"
         viewModelScope.launch {
-            if (shouldRecordAsNormalResult) {
-                session.recordTypingResult(result.wpm, result.rawWpm, result.accuracy, result.timeSec)
-            }
+            session.recordTypingResult(result.wpm, result.rawWpm, result.accuracy, result.timeSec)
             session.addTypingSecondsToday(timeSec)
-            if (correctWrongSnapshot.isNotEmpty()) {
-                TypingKeyStatStore.addDeltas(getApplication(), lang, correctWrongSnapshot)
-            }
-            if (latencySnapshot.isNotEmpty()) {
-                TypingKeyStatStore.addLatencyDeltas(getApplication(), lang, latencySnapshot)
-            }
         }
     }
 

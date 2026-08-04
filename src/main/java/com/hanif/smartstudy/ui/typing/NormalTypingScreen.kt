@@ -58,7 +58,6 @@ import com.hanif.smartstudy.viewmodel.TypingSessionViewModel
  * পয়েন্ট যোগ করা (এই ফাইল এখনো কোথাও থেকে কল হচ্ছে না) — ইচ্ছাকৃতভাবে আলাদা
  * রাখা হয়েছে, যাতে এই ফাইলটা আগে এককভাবে কম্পাইল-রিভিউ করা যায়।
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NormalTypingScreen(
     onBack: () -> Unit,
