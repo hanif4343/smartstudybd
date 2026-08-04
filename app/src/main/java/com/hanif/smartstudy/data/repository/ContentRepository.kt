@@ -8,6 +8,7 @@ import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
 import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.TopicSyncEntity
 import com.hanif.smartstudy.data.local.toEntity
 import com.hanif.smartstudy.data.local.toQuestionItem
 import com.hanif.smartstudy.data.model.AppContent
@@ -38,6 +39,7 @@ class ContentRepository(private val context: Context) {
     private val db      = AppDatabase.getInstance(context)
     private val dao     = db.questionDao()
     private val refDao  = db.referenceDao()   // Phase 6 — Subjects/Topics/SubTopics/Tags/Posts/Institutions
+    private val topicSyncDao = db.topicSyncDao()  // প্রতিটা Topic-এ কতদূর আনা হয়েছে (progressive fill)
 
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
@@ -243,6 +245,89 @@ class ContentRepository(private val context: Context) {
             if (ids.isEmpty()) return@withContext emptyList()
             val entities = dao.getByFbKeysFiltered(sheet, ids, tag)
             entities.map { it.toQuestionItem() }
+        }
+
+    // ── Review System (Admin-only) ────────────────────────────────────────
+
+    /**
+     * GAS `getReviewProgress` থেকে একটা sheet-এর subject/topic-ভিত্তিক reviewed-percentage
+     * — SubjectListScreen/SubTopicListScreen-এ progress bar দেখানোর জন্য। শুধু Google Sheet
+     * মোডে কাজ করে, ব্যর্থ হলে খালি map রিটার্ন করে (progress bar দেখাবে না, crash করবে না)।
+     */
+    suspend fun getReviewProgress(sheet: String): com.hanif.smartstudy.data.remote.GasContentService.ReviewProgress {
+        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
+            return com.hanif.smartstudy.data.remote.GasContentService.ReviewProgress()
+        }
+        return com.hanif.smartstudy.data.remote.GasContentService.fetchReviewProgress(sheet)
+    }
+
+    /**
+     * একটা প্রশ্নকে "রিভিউ করা হয়েছে" মার্ক করে — GAS-এ লেখে (source of truth) এবং সফল
+     * হলে Room cache-ও সাথে সাথে আপডেট করে (fresh fetch ছাড়াই local state নির্ভুল থাকে)।
+     * reviewed=false পাঠিয়ে আনমার্কও করা যায় (ভুলে টিক পড়লে undo করার জন্য)।
+     */
+    suspend fun markQuestionReviewed(sheet: String, rowKey: String, reviewed: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return@withContext false
+        val now = System.currentTimeMillis()
+        val fields = mapOf(
+            "reviewed"   to reviewed.toString(),
+            "reviewedAt" to if (reviewed) now.toString() else "0"
+        )
+        val result = com.hanif.smartstudy.data.remote.GasContentService.updateFields(sheet, rowKey, fields)
+        if (result is com.hanif.smartstudy.data.remote.ApiResult.Success) {
+            dao.updateReviewed(sheet.uppercase(), rowKey, reviewed, if (reviewed) now else 0L)
+            true
+        } else false
+    }
+
+    // ── Progressive topic-fill (অফলাইন-সক্ষম, ব্যাচ-ব্যাচ ক্যাশিং) ────────────────
+
+    /**
+     * একটা Topic-এর পরের ৫০-প্রশ্নের ব্যাচ (আগেরটা না, নতুনটা — TopicSyncEntity-তে
+     * সেভ করা cursor থেকে) GAS `getQuestionsPage` দিয়ে এনে Room-এ যোগ করে। ইতিমধ্যে
+     * পুরো Topic লোকালি থাকলে (hasMore==false) নেটওয়ার্ক কলই করে না — instant false।
+     * অফলাইনে exception ছুঁড়তে পারে — caller-কে try/catch করে চুপচাপ উপেক্ষা করতে হবে
+     * (Room-এ যা আছে তাই দেখানো হবে)।
+     *
+     * @return নতুন প্রশ্ন যোগ হয়েছে কিনা
+     */
+    suspend fun cacheNextTopicBatch(sheet: String, topicId: String): Boolean = withContext(Dispatchers.IO) {
+        val sync = topicSyncDao.get(topicId)
+        if (sync != null && !sync.hasMore) return@withContext false   // ইতিমধ্যে সম্পূর্ণ — নেটওয়ার্ক লাগবে না
+        val cursor = sync?.nextCursor
+        val now = System.currentTimeMillis()
+        when (sheet) {
+            "Quiz" -> {
+                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQuizPage(topicId, cursor, 50)
+                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
+                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                page.items.isNotEmpty()
+            }
+            "QBank" -> {
+                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, null, cursor, 50)
+                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
+                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                page.items.isNotEmpty()
+            }
+            "Study" -> {
+                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchStudyPage(topicId, cursor, 50)
+                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
+                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                page.items.isNotEmpty()
+            }
+            else -> false
+        }
+    }
+
+    /** এই মুহূর্তে Topic-টা লোকালি ১০০% আছে কিনা (hasMore==false মানে আর ফেচ করার কিছু নেই) */
+    suspend fun isTopicFullySynced(topicId: String): Boolean = withContext(Dispatchers.IO) {
+        topicSyncDao.get(topicId)?.hasMore == false
+    }
+
+    /** একটা Topic-এ Room-এ এখন পর্যন্ত যতটুকু cache হয়েছে সব (audience-filtered) — cacheNextTopicBatch()-এর পরে কল করো */
+    suspend fun getRoomQuestionsForTopic(sheet: String, topicId: String, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        withContext(Dispatchers.IO) {
+            dao.getByTopicId(sheet.uppercase(), topicId, tag).map { it.toQuestionItem() }
         }
 
 
