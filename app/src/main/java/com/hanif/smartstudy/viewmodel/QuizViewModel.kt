@@ -388,7 +388,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val progress = repo.getReviewProgress(sheet)
             _state.update { it.copy(reviewProgressSubjects = progress.subjects, reviewProgressTopics = progress.topics) }
         }
-    } — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
+    }
+
+    // ── navigateToSubject/navigateToSubTopic — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
     // deep-link/focus-navigation (নোটিফিকেশন থেকে বা search থেকে এসে সরাসরি একটা
     // subject/subTopic-এ ঢোকা) এই ঠিক এই নামেই কল করে। CoreScreen.kt-এর সাধারণ
     // ব্রাউজিং ফ্লো এখন ওপরের navigateToSubjectLazy()/navigateToSubTopicLazy()
