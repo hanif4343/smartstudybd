@@ -77,6 +77,9 @@ fun SubjectListScreen(
     onMoveSubject  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubject: (old: String, new: String) -> Unit = { _, _ -> },
     onDeleteSubject: (name: String) -> Unit = {},
+    // ── Review System (Admin-only) — subjectId ধরে {total, reviewed} % — খালি map হলে
+    // কোনো badge দেখাবে না (non-admin/non-lazy স্ক্রিনে এটা পাস করা হয় না) ──
+    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
     // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + নাম-সার্চ ──
     // Quiz/Study মোডে showQBankFilterBar=false থাকে বলে কিছুই render হয় না (আগের আচরণ অপরিবর্তিত)।
     showQBankFilterBar     : Boolean               = false,
@@ -236,6 +239,7 @@ fun SubjectListScreen(
                             isLast  = idx == displaySubjects.lastIndex,
                             onMoveUp   = { onMoveSubject(idx, idx - 1) },
                             onMoveDown = { onMoveSubject(idx, idx + 1) },
+                            reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
@@ -255,7 +259,8 @@ fun SubjectListScreen(
                     isFirst = idx == 0,
                     isLast  = idx == displaySubjects.lastIndex,
                     onMoveUp   = { onMoveSubject(idx, idx - 1) },
-                    onMoveDown = { onMoveSubject(idx, idx + 1) }
+                    onMoveDown = { onMoveSubject(idx, idx + 1) },
+                    reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null
                 )
             }
         }
@@ -607,7 +612,9 @@ private fun SubjectCard(
     isFirst : Boolean = false,
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
-    onMoveDown : () -> Unit = {}
+    onMoveDown : () -> Unit = {},
+    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না (student/non-review স্ক্রিনে) ──
+    reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -651,6 +658,23 @@ private fun SubjectCard(
                 Spacer(Modifier.height(2.dp))
                 Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
+                // ── Review System (Admin-only) — আলাদা রঙের ছোট বার, student progressPct
+                // বার থেকে আলাদা করে চেনার জন্য ──
+                if (reviewPct != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        Modifier.fillMaxWidth().height(5.dp)
+                            .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
+                                .background(Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                }
             }
 
             if (reorderEnabled) {
@@ -676,7 +700,9 @@ private fun QBankSubjectCard(
     onMoveDown : () -> Unit = {},
     // ── প্রতিষ্ঠান/সাল ফিল্টার লিস্টে ডিফল্ট "X টি অধ্যায়"-এর বদলে অর্থপূর্ণ টেক্সট
     // (যেমন "X টি পদবী" / "X টি প্রশ্ন") দেখাতে — null থাকলে আগের ডিফল্ট আচরণই থাকে ──
-    subLabelOverride: String? = null
+    subLabelOverride: String? = null,
+    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
+    reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -726,6 +752,21 @@ private fun QBankSubjectCard(
             }
             Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                 fontFamily = NotoSansBengali)
+
+            // ── Review System (Admin-only) ──
+            if (reviewPct != null) {
+                Box(
+                    Modifier.fillMaxWidth().height(5.dp)
+                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
+                            .background(Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
+                    )
+                }
+                Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+            }
 
             if (reorderEnabled) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -820,7 +861,9 @@ fun SubTopicListScreen(
     onToggleReorder : () -> Unit   = {},
     onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubTopic: (old: String, new: String) -> Unit = { _, _ -> },
-    onDeleteSubTopic: (name: String) -> Unit = {}
+    onDeleteSubTopic: (name: String) -> Unit = {},
+    // ── Review System (Admin-only) — topicId ধরে {total, reviewed} % ──
+    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap()
 ) {
     val isQBank = mode == StudyMode.QBANK
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -886,7 +929,8 @@ fun SubTopicListScreen(
                             isFirst = idx == 0,
                             isLast  = idx == subTopics.lastIndex,
                             onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
-                            onMoveDown = { onMoveSubTopic(idx, idx + 1) }
+                            onMoveDown = { onMoveSubTopic(idx, idx + 1) },
+                            reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
                         )
                     }
                 }
@@ -900,7 +944,8 @@ fun SubTopicListScreen(
                     isFirst = idx == 0,
                     isLast  = idx == subTopics.lastIndex,
                     onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
-                    onMoveDown = { onMoveSubTopic(idx, idx + 1) }
+                    onMoveDown = { onMoveSubTopic(idx, idx + 1) },
+                    reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
                 )
             }
         }
@@ -932,7 +977,9 @@ private fun SubTopicCard(
     isFirst : Boolean = false,
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
-    onMoveDown : () -> Unit = {}
+    onMoveDown : () -> Unit = {},
+    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
+    reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -994,6 +1041,21 @@ private fun SubTopicCard(
                             .background(Color(0xFF22C55E))
                     )
                 }
+                // ── Review System (Admin-only) ──
+                if (reviewPct != null) {
+                    Spacer(Modifier.height(5.dp))
+                    Box(
+                        Modifier.fillMaxWidth().height(4.dp)
+                            .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
+                                .background(Color(0xFFF59E0B))
+                        )
+                    }
+                    Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                }
             }
             if (reorderEnabled) {
                 ReorderUpDownButtons(isFirst = isFirst, isLast = isLast, onMoveUp = onMoveUp, onMoveDown = onMoveDown)
@@ -1013,7 +1075,9 @@ private fun QBankTopicCard(
     isFirst : Boolean = false,
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
-    onMoveDown : () -> Unit = {}
+    onMoveDown : () -> Unit = {},
+    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
+    reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -1084,6 +1148,11 @@ private fun QBankTopicCard(
                 Text(typeIcon, fontSize = 10.sp)
                 Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
                     color = accent, fontFamily = NotoSansBengali)
+            }
+            // ── Review System (Admin-only) — কমপ্যাক্ট টেক্সট ব্যাজ (গ্রিড কার্ডে জায়গা কম) ──
+            if (reviewPct != null) {
+                Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
             }
             Box(
                 Modifier.fillMaxWidth().height(4.dp)
