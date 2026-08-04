@@ -25,9 +25,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -173,7 +176,13 @@ fun QuestionListScreen(
     highlightQuestionId : String? = null,
     onHighlightConsumed : () -> Unit = {},
     onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
-    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
+    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── "প্রশ্ন" এডিটের সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে অপশন/উত্তর আবার
+    // জেনারেট করা — ডিফল্টভাবেই এই স্ক্রিনের নিজের viewModel (উপরের প্যারামিটার)
+    // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
+    // করতে হবে না — এমনিতেই কাজ করবে। ইচ্ছা করলে override করাও যায় ──
+    onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? =
+        { q -> viewModel.regenerateMcqOptions(q) }
 ) {
     val pageSize = QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
@@ -292,6 +301,28 @@ fun QuestionListScreen(
     val vmState by viewModel.state.collectAsState()
     val isModelTest = vmState.activeModelTest != null
 
+    // ── Phase 6: Infinite-scroll wiring — পাতার শেষ কয়েকটা প্রশ্নের কাছাকাছি স্ক্রল
+    // করলে "পরবর্তী ➜" বাটনে ট্যাপ না করেই অটোমেটিক পরের পাতা লোড হয়ে যায়।
+    // ⚠️ ইচ্ছাকৃতভাবে ভেতরের pageOffset/goToPage()-ভিত্তিক আর্কিটেকচার অপরিবর্তিত
+    // রাখা হলো (highlight/scroll-to-item/voice-AI ইনডেক্সিং, admin edit/delete —
+    // সবকিছু এই page-based ইনডেক্সিং-এর ওপর নির্ভরশীল, পুরো ফাইল জুড়ে ছড়ানো, তাই
+    // continuous-append এ রিরাইট করা এই ধাপে ঝুঁকিপূর্ণ) — শুধু পরের-পাতা-লোডের
+    // ট্রিগারটা ম্যানুয়াল বাটন-ট্যাপ থেকে স্ক্রল-পজিশনে সরানো হলো। বাটনও রয়ে গেছে
+    // (এক লাফে/অ্যাক্সেসিবিলিটির জন্য) — দুটোই একই goToPage() কল করে, দুবার একসাথে
+    // ট্রিগার হলেও goToPage()-এর নিজের "safePage == currentPage হলে no-op" গার্ড
+    // ডাবল-লোড আটকায়।
+    val isNearListEnd by remember {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            pagedQuestions.isNotEmpty() && lastVisible >= pagedQuestions.lastIndex - 3
+        }
+    }
+    LaunchedEffect(isNearListEnd, safeCurrentPage, isLastPage, vmState.questionsLoading) {
+        if (isNearListEnd && !isLastPage && !vmState.questionsLoading) {
+            viewModel.goToPage(safeCurrentPage + 1)
+        }
+    }
+
     // ── QBank: 👁️/⌨️ আইকন দুটো টপবারে শুধু তখনই দেখা যাবে যখন এই পাতায় (page)
     // কমপক্ষে একটা Written প্রশ্ন আছে — MCQ-ভিত্তিক subtopic-এ এই আইকন দুটোর
     // কোনো effect নেই, তাই দেখানোরও দরকার নেই। Study mode-এ আগের মতোই সবসময় দেখা যায়। ──
@@ -318,7 +349,10 @@ fun QuestionListScreen(
                     onToggleStudyRevealMode = onToggleStudyRevealMode,
                     studyRecallMode = studyRecallMode,
                     onToggleStudyRecallMode = onToggleStudyRecallMode,
-                    hasWrittenQuestions = hasWrittenOnPage
+                    hasWrittenQuestions = hasWrittenOnPage,
+                    isAdmin = vmState.isAdmin,
+                    isReviewMode = vmState.isReviewMode,
+                    onToggleReviewMode = { viewModel.toggleReviewMode() }
                 )
             }
         ) { padding ->
@@ -399,11 +433,52 @@ fun QuestionListScreen(
                         //    animateItemPlacement() দিয়ে এই পজিশন-চেঞ্জটা হালকা স্মূথ এনিমেশনে
                         //    হয়, পুরো স্ক্রিন/স্ক্রল জাম্প করে না, বাকি আইটেমগুলো নিজ জায়গায়
                         //    স্মূথভাবে সরে আসে আর পরের প্রশ্নটা এমনিতেই ভেসে ওঠে ──
-                        Box(
+                        // ── Phase 6: group_id-aware রেন্ডারিং — multi-part প্রশ্নের (একই
+                        // instruction থেকে আসা কয়েকটা sub-question, Admin App-এর 🔗 Group Mode
+                        // দিয়ে যোগ করা, যেমন "কারক নির্ণয় কর" এর ৫টা sub-question) প্রথম
+                        // sub-question এর ঠিক আগে একটা connector-header, আর প্রতিটা grouped
+                        // আইটেমেই একটা "সেট x/y" ব্যাজ দেখায় — শুধুই display, স্কোরিং/উত্তর
+                        // এখনো প্রতিটা প্রশ্নে সম্পূর্ণ আলাদাভাবেই হয় (নিচের viewModel.answerMcq/
+                        // answerWritten কল globalIdx/q.id ধরেই কাজ করে, তাতে কিছু বদলায়নি)।
+                        // ⚠️ groupSize/position এই পাতায় (pagedQuestions, বর্তমানে loaded ৫০টা)
+                        // যতগুলো আছে তা দিয়েই হিসাব হয় — কোনো group পেজ-বাউন্ডারিতে ভেঙে গেলে
+                        // (পাতার একদম শেষ প্রশ্ন থেকে গ্রুপ শুরু হলে) সংখ্যাটা ভুল দেখাতে পারে,
+                        // এটা গ্রহণযোগ্য edge case (Admin App-এর ModelTestGenerator-এর মতো এখানে
+                        // group কখনো "ভাঙা" হয় না, শুধু বড় গ্রুপের count কখনো আন্ডার-কাউন্ট হতে পারে)।
+                        Column(
                             modifier = Modifier.animateItemPlacement(
                                 animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
                             )
                         ) {
+                        // ── Review System (Admin-only) — বড় ✓ বাটন, টাচ করলেই reviewed
+                        // মার্ক/আনমার্ক হয়ে যায় (GAS + Room-এ লেখা হয়), আর নতুন-মার্ক করলে
+                        // পরের প্রশ্ন কার্ডটা স্মুথলি স্ক্রল হয়ে ওপরে উঠে আসে — ঠিক Study
+                        // mode-এর "পড়া হয়েছে" টিকের মতোই আচরণ (কার্ড হাইড হয় না)। student-
+                        // দের কাছে সম্পূর্ণ অদৃশ্য (isReviewMode শুধু admin-এর জন্যই true হয়)।
+                        if (vmState.isReviewMode) {
+                            ReviewTickButton(
+                                reviewed = q.reviewed,
+                                onClick = {
+                                    val nowMarking = !q.reviewed
+                                    viewModel.markReviewed(q.id, nowMarking)
+                                    if (nowMarking) {
+                                        scrollScope.launch {
+                                            val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                                            listState.animateScrollToItem(nextLocalIdx)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        if (q.isGrouped()) {
+                            val groupItems = pagedQuestions.filter { it.groupId == q.groupId }
+                            val position   = groupItems.indexOfFirst { it.id == q.id } + 1
+                            val groupSize  = groupItems.size
+                            if (localIdx == 0 || pagedQuestions[localIdx - 1].groupId != q.groupId) {
+                                GroupConnectorHeader(groupSize = groupSize)
+                            }
+                            GroupPositionBadge(position = position, groupSize = groupSize)
+                        }
                         if (isHighlighted) {
                             // ── Report-resolved glow highlight ─────────────────
                             val hlTransition = rememberInfiniteTransition(label = "reportResolvedHL")
@@ -447,7 +522,7 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
-                                    studyRevealMode = studyRevealMode,
+                                    onRegenerateOptions = onRegenerateOptions,
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
                                     onRecallGraded = onRecallGradedAdvance,
@@ -476,6 +551,7 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
+                            onRegenerateOptions = onRegenerateOptions,
                             studyRevealMode = studyRevealMode,
                             studyRecallMode = studyRecallMode,
                             answerFocusRequester = recallFocusRequesterFor(q.id),
@@ -901,6 +977,85 @@ fun QuestionListScreen(
     }
 }
 
+/**
+ * Review System (Admin-only) — বড়, স্পষ্ট ✓ বাটন। রিভিউ করা হয়ে গেলে সবুজ+ভরাট,
+ * না হলে ধূসর+ফাঁকা আউটলাইন — এক নজরে বোঝা যায় কোনটা বাকি।
+ */
+@Composable
+private fun ReviewTickButton(reviewed: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (reviewed) Color(0xFF16A34A).copy(alpha = 0.12f) else Color(0xFFF59E0B).copy(alpha = 0.10f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            if (reviewed) Icons.Default.CheckCircle else Icons.Outlined.CheckCircle,
+            contentDescription = null,
+            tint = if (reviewed) Color(0xFF16A34A) else Color(0xFFF59E0B),
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            if (reviewed) "রিভিউ করা হয়েছে ✓" else "রিভিউ করুন",
+            fontFamily = NotoSansBengali,
+            fontSize   = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color      = if (reviewed) Color(0xFF16A34A) else Color(0xFFF59E0B)
+        )
+    }
+}
+
+/**
+ * Phase 6 — group_id-aware রেন্ডারিং: multi-part প্রশ্নের (একই instruction থেকে আসা কয়েকটা
+ * sub-question) প্রথম sub-question এর ঠিক আগে এই connector-header দেখা যায়, বাকিগুলোতে
+ * না — যাতে ইউজার বুঝতে পারে নিচের কয়েকটা প্রশ্ন একই সেট থেকে এসেছে।
+ */
+@Composable
+private fun GroupConnectorHeader(groupSize: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("🔗", fontSize = 13.sp)
+        Text(
+            "নিচের ${groupSize}টি প্রশ্ন একই সেট থেকে (একসাথে এসেছে)",
+            fontFamily = NotoSansBengali,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color      = Color(0xFF7C3AED)
+        )
+    }
+}
+
+/** প্রতিটা grouped প্রশ্নের কার্ডের ঠিক ওপরে ছোট্ট "🔗 সেট ২/৫" ব্যাজ — স্কোরিং প্রতিটা প্রশ্নে সম্পূর্ণ আলাদাই থাকে */
+@Composable
+private fun GroupPositionBadge(position: Int, groupSize: Int) {
+    Box(modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF7C3AED).copy(alpha = 0.12f))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                "🔗 সেট $position/$groupSize",
+                fontFamily = NotoSansBengali,
+                fontSize   = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color      = Color(0xFF7C3AED)
+            )
+        }
+    }
+}
+
 @Composable
 private fun SubmitStatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Column(
@@ -950,7 +1105,11 @@ private fun QuestionTopBar(
     onToggleStudyRecallMode : (() -> Unit)? = null,
     // ── QBank-এ 👁️/⌨️ আইকন দুটো শুধু তখনই দেখাতে হবে যখন এই পাতায় Written
     // প্রশ্ন আছে। Study mode-এ এই ফ্ল্যাগের কোনো effect নেই (আগের মতোই সবসময় দেখা যায়)। ──
-    hasWrittenQuestions     : Boolean = false
+    hasWrittenQuestions     : Boolean = false,
+    // ── Review System (Admin-only) — student-দের কাছে এই আইকনটা সম্পূর্ণ অদৃশ্য ──
+    isAdmin                 : Boolean = false,
+    isReviewMode            : Boolean = false,
+    onToggleReviewMode      : (() -> Unit)? = null
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -976,6 +1135,17 @@ private fun QuestionTopBar(
             }
         },
         actions = {
+            // ── Review System (Admin-only) — শুধু Admin দেখে, student-দের কাছে অদৃশ্য।
+            // ইতিমধ্যে থাকা 👁️/⌨️ আইকনের পাশেই বসে, একই স্টাইলে ──
+            if (isAdmin && onToggleReviewMode != null) {
+                IconButton(onClick = onToggleReviewMode) {
+                    Icon(
+                        Icons.Default.FactCheck,
+                        contentDescription = if (isReviewMode) "রিভিউ মোড: চালু" else "রিভিউ মোড: বন্ধ",
+                        tint = if (isReviewMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             if (onSubmit != null) {
                 TextButton(onClick = onSubmit) {
                     Text("সাবমিট", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,

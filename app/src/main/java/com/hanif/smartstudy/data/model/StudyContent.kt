@@ -27,7 +27,17 @@ data class StudyItem(
     @SerializedName("VisualURL")     val visualUrl    : String? = null,
     // এডমিন এই row টা সর্বশেষ কবে এডিট/এড করেছে (device epoch millis) — delta/incremental
     // sync এর জন্য: এই ভ্যালু না বাড়লে row টা আবার ডাউনলোড করার দরকার নেই।
-    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null,
+    // ── Phase 5/6 নতুন schema fields (Admin App migration v2) — খালি হতে পারে
+    // পুরনো row-এ যেগুলো এখনো reference-টেবিলে link হয়নি ──
+    @SerializedName("subject_id")    val subjectId    : String? = null,
+    @SerializedName("topic_id")      val topicId      : String? = null,
+    @SerializedName("group_id")      val groupId      : String? = null,
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 data class QuizItem(
@@ -51,7 +61,18 @@ data class QuizItem(
     // Model Test সিলেকশন অ্যালগরিদমের জন্য — এডমিন ম্যানুয়ালি "গুরুত্বপূর্ণ" ফ্ল্যাগ বসাতে পারবে
     @SerializedName("important")     val important    : Boolean? = null,
     // delta/incremental sync এর জন্য — দেখুন StudyItem.updatedAt এর নোট
-    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null,
+    // ── Phase 5/6 নতুন schema fields (Admin App migration v2) ──
+    @SerializedName("subject_id")    val subjectId    : String? = null,
+    @SerializedName("topic_id")      val topicId      : String? = null,
+    // multi-part প্রশ্ন (একই instruction-এর কয়েকটা sub-question, "🔗 Group Mode" দিয়ে
+    // Admin App-এ যোগ করা) — একই group_id শেয়ার করে, sub_index দিয়ে ক্রম ঠিক থাকে
+    @SerializedName("group_id")      val groupId      : String? = null,
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 data class QBankItem(
@@ -80,7 +101,17 @@ data class QBankItem(
     // তবে এডমিন চাইলে ম্যানুয়ালিও ফ্ল্যাগ বসাতে পারবে — এই ফিল্ড সেটার জন্য
     @SerializedName("important")     val important    : Boolean? = null,
     // delta/incremental sync এর জন্য — দেখুন StudyItem.updatedAt এর নোট
-    @SerializedName("updatedAt")     val updatedAt    : Long?   = null
+    @SerializedName("updatedAt")     val updatedAt    : Long?   = null,
+    // ── Phase 5/6 নতুন schema fields (Admin App migration v2) ──
+    @SerializedName("subject_id")    val subjectId    : String? = null,
+    @SerializedName("topic_id")      val topicId      : String? = null,
+    @SerializedName("subtopic_id")   val subtopicId   : String? = null,
+    @SerializedName("group_id")      val groupId      : String? = null,
+    @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
+    @SerializedName("reviewed")      val reviewed     : String? = null,
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 // ── Gson case-insensitive + multi-alias adapter ──
@@ -204,6 +235,16 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             k == "id"                               -> "id"
             // delta sync টাইমস্ট্যাম্প
             k == "updatedat" || k == "updated_at"    -> "updatedAt"
+            // ── Review System (Admin-only) — দেখো QuizItem/QBankItem/StudyItem-এর কমেন্ট ──
+            k == "reviewed"                          -> "reviewed"
+            k == "reviewedat" || k == "reviewed_at"  -> "reviewedAt"
+            // ── Phase 5/6 নতুন schema (Admin App migration v2) — Subjects/Topics/SubTopics
+            // reference-টেবিলের সাথে link করার id, আর multi-part প্রশ্নের group_id/sub_index ──
+            k == "subject_id" || k == "subjectid"    -> "subject_id"
+            k == "topic_id" || k == "topicid"        -> "topic_id"
+            k == "subtopic_id" || k == "subtopicid"  -> "subtopic_id"
+            k == "group_id" || k == "groupid"        -> "group_id"
+            k == "sub_index" || k == "subindex"      -> "sub_index"
             else                                    -> key
         }
     }

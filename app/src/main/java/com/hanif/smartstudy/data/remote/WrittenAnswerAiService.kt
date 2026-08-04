@@ -21,6 +21,19 @@ data class VivaVerdict(val verdict: String, val feedback: String) {
 }
 
 /**
+ * ── প্রশ্ন এডিট করার পর "🔄 Regenerate" বাটনে ব্যবহারের জন্য — নতুন লেখা প্রশ্ন
+ * থেকে ৪টা অপশন ও সঠিক উত্তর আবার তৈরি করে দেয় (SharedComponents.kt-এর
+ * AdminFieldEditDialog)। correctAnswer অবশ্যই optionA-D-এর একটার সাথে হুবহু মিলবে।
+ */
+data class RegeneratedMcq(
+    val optionA: String,
+    val optionB: String,
+    val optionC: String,
+    val optionD: String,
+    val correctAnswer: String
+)
+
+/**
  * ── Written উত্তর AI দিয়ে অটো-চেক (স্টাডির ⌨️ রিকল-টাইপিং মোড) + Viva Mode গ্রেডিং ──
  *
  * ইউজার টাইপ-বক্সে নিজের উত্তর লিখে জমা দিলে, Settings-এ সেভ করা API key
@@ -152,6 +165,161 @@ object WrittenAnswerAiService {
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
         }
         null
+    }
+
+    /**
+     * ── "প্রশ্ন এডিট করুন" ডায়ালগে "🔄 Regenerate" বাটনে ব্যবহারের জন্য — নতুন লেখা
+     * প্রশ্ন থেকে ৪টা অপশন ও সঠিক উত্তর AI দিয়ে তৈরি করে দেয় (বাল্ক-আপলোড করা প্রশ্নে
+     * প্রশ্ন এডিট করলে সাথে সাথে অপশন/উত্তরও মিলিয়ে নেওয়া যায়, ম্যানুয়ালি না লিখে)।
+     * gradeWrittenAnswer-এর মতোই Groq → Mistral → Cerebras → Gemini ক্রমে চেষ্টা করে,
+     * সব ব্যর্থ হলে বা JSON parse করা না গেলে null রিটার্ন করে। */
+    suspend fun regenerateMcqOptions(
+        question: String,
+        keys    : AiApiKeys
+    ): RegeneratedMcq? = withContext(Dispatchers.IO) {
+        if (question.isBlank() || !keys.hasAnyKey()) return@withContext null
+        val prompt = buildMcqPrompt(question)
+
+        if (keys.groq.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleJson(
+                    url = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Groq regenerate failed: ${it.message}") }
+                .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
+        }
+        if (keys.mistral.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleJson(
+                    url = "https://api.mistral.ai/v1/chat/completions",
+                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Mistral regenerate failed: ${it.message}") }
+                .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
+        }
+        if (keys.cerebras.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleJson(
+                    url = "https://api.cerebras.ai/v1/chat/completions",
+                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Cerebras regenerate failed: ${it.message}") }
+                .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
+        }
+        if (keys.gemini.isNotBlank()) {
+            runCatching { callGeminiJson(keys.gemini, prompt) }
+                .onFailure { Log.w(TAG, "Gemini regenerate failed: ${it.message}") }
+                .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
+        }
+        null
+    }
+
+    private fun buildMcqPrompt(question: String): String = """
+তুমি একজন MCQ (বহুনির্বাচনী প্রশ্ন) তৈরির বিশেষজ্ঞ। নিচের প্রশ্নের জন্য ৪টা অপশন ও সঠিক উত্তর তৈরি করো।
+
+প্রশ্ন: $question
+
+নিয়ম (সবগুলো মেনে চলো):
+১. ৪টা অপশনই প্রাসঙ্গিক, বিশ্বাসযোগ্য ও একে অপরের কাছাকাছি মানের হতে হবে (কোনো অপশন যেন স্পষ্টভাবে বাতিল/হাস্যকর না লাগে)।
+২. ঠিক একটা অপশনই সম্পূর্ণ সঠিক হবে, বাকি তিনটা ভুল/বিভ্রান্তিকর (distractor) হবে।
+৩. "correct" ফিল্ডের মান অবশ্যই optionA/B/C/D-এর একটার সাথে অক্ষরে-অক্ষরে (word-for-word, হুবহু) মিলতে হবে।
+৪. প্রশ্নের ভাষা যেই ভাষায় (বাংলা/ইংরেজি), অপশনও সেই একই ভাষায় লিখবে।
+৫. প্রতিটা অপশন সংক্ষিপ্ত রাখবে (এক লাইনের মধ্যে)।
+
+শুধু নিচের JSON ফরম্যাটে উত্তর দাও — কোনো ভূমিকা, ব্যাখ্যা, বা ```markdown code fence ছাড়া, শুধু কাঁচা JSON:
+{"optionA":"...","optionB":"...","optionC":"...","optionD":"...","correct":"এখানে সঠিক অপশনের হুবহু টেক্সট"}
+""".trimIndent()
+
+    /** AI মাঝেমধ্যে ```json ... ``` fence দিয়ে মুড়িয়ে দেয় (নিষেধ করা সত্ত্বেও) —
+     *  parse করার আগে সেটা ছেঁটে ফেলা হয়, আর JSON-এর বাইরের কোনো বাড়তি টেক্সট থাকলে
+     *  প্রথম {..} ব্লকটুকু বের করে নেওয়া হয়। */
+    private fun parseRegeneratedMcq(raw: String): RegeneratedMcq? {
+        return try {
+            val cleaned = raw.trim()
+                .removePrefix("```json").removePrefix("```")
+                .removeSuffix("```").trim()
+            val jsonStart = cleaned.indexOf('{')
+            val jsonEnd = cleaned.lastIndexOf('}')
+            if (jsonStart == -1 || jsonEnd == -1 || jsonEnd < jsonStart) return null
+            val obj = JSONObject(cleaned.substring(jsonStart, jsonEnd + 1))
+            val a = obj.optString("optionA").trim()
+            val b = obj.optString("optionB").trim()
+            val c = obj.optString("optionC").trim()
+            val d = obj.optString("optionD").trim()
+            val correct = obj.optString("correct").trim()
+            if (a.isBlank() || b.isBlank() || c.isBlank() || d.isBlank() || correct.isBlank()) return null
+            // ── "correct"-এর মান ৪টা অপশনের একটার সাথে মিলছে কিনা যাচাই — না মিললে
+            // এই রেজাল্টটা অবিশ্বস্ত (AI নিয়ম ভেঙেছে), null রিটার্ন করে fallback provider-এ যাওয়া ──
+            if (correct !in listOf(a, b, c, d)) return null
+            RegeneratedMcq(a, b, c, d, correct)
+        } catch (e: Exception) {
+            Log.w(TAG, "parseRegeneratedMcq failed: ${e.message}")
+            null
+        }
+    }
+
+    // ── MCQ regenerate-এর জন্য বড় max_tokens লাগে (৪টা অপশন + JSON স্ট্রাকচার),
+    // তাই grading/explain-এর callOpenAiCompatibleText/callGeminiText (max_tokens=120)
+    // পুনরায় ব্যবহার না করে আলাদা ফাংশন — যাতে বিদ্যমান grading ফিচার অপরিবর্তিত থাকে ──
+    private fun callOpenAiCompatibleJson(url: String, apiKey: String, model: String, prompt: String): String? {
+        val messages = JSONArray().apply {
+            put(JSONObject().apply { put("role", "user"); put("content", prompt) })
+        }
+        val payload = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.3)
+            put("max_tokens", 500)
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.trim()
+        }
+    }
+
+    private fun callGeminiJson(apiKey: String, prompt: String): String? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
+        val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
+        val payload = JSONObject().apply {
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.3)
+                put("maxOutputTokens", 500)
+            })
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("candidates")
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+                ?.optJSONObject(0)
+                ?.optString("text")
+                ?.trim()
+        }
     }
 
     private fun buildExplainPrompt(question: String, correctAnswer: String, userAnswer: String): String = """

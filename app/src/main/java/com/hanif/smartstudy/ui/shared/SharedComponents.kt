@@ -237,6 +237,10 @@ fun QuestionCard(
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete  : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── "প্রশ্ন" এডিট করার সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে ৪টা অপশন + সঠিক
+    // উত্তর আবার জেনারেট করা — শুধু AdminFieldEditDialog-এ পাস-থ্রু হয়, null থাকলে
+    // বাটনটাই দেখা যাবে না (আগের আচরণ অপরিবর্তিত থাকে) ──
+    onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? = null,
     // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট বাটন — Quiz/QBank/Study তিনটাতেই দেখা যায়।
     // null থাকলে বাটনটাই রেন্ডার হয় না (যেমন ChallengeExamScreen-এ এখনো ব্যবহার হয়নি)। ──
     onAskAi        : (() -> Unit)? = null,
@@ -425,23 +429,21 @@ fun QuestionCard(
                     McqOptions(item = item, onAnswer = onMcqAnswer)
                 }
                 item.isWritten() && mode == StudyMode.QBANK && !isModelTest -> {
-                    // ── QBank-এর Written প্রশ্নে ডিফল্টে (👁️/⌨️ দুটোই বন্ধ) প্রশ্ন+উত্তর+
-                    // ব্যাখ্যা সরাসরি খোলা (open) থাকে — কোনো ট্যাপ/টাইপ ছাড়াই রেফারেন্সের
-                    // মতো পড়া যায়, শুধু নিচে ঠিক/ভুল বাটন থাকে (ইচ্ছা করলে গ্রেড করার জন্য)।
-                    // ── ⌨️ কীবোর্ড আইকন চালু থাকলে — আগের মতোই টাইপ-বক্স + AI-চেক ফ্লো।
-                    // ── 👁️ চোখ আইকন চালু (কীবোর্ড বন্ধ) থাকলে — উত্তর প্রথমে লুকানো
-                    // থাকবে, "উত্তর দেখুন" ট্যাপ করলে তবেই দেখা যাবে (Study-র 👁️-এর
-                    // অর্থের সাথেই সামঞ্জস্যপূর্ণ — "শুধু প্রশ্ন দেখ")। দুটোই চালু থাকলে
-                    // কীবোর্ড (টাইপ-বক্স) অগ্রাধিকার পায়। ──
-                    when {
-                        studyRecallMode -> WrittenAiRecallCheck(
+                    // ── QBank-এর Written প্রশ্নে ডিফল্টে সরাসরি টাইপ-বক্স দেখা যায় —
+                    // উত্তর লেখার পর AI দিয়ে অটো-চেক হয় (Study রিকল-টাইপিং মোডের একই
+                    // নিয়মে), AI ব্যর্থ হলে সাথে সাথেই ম্যানুয়াল ঠিক/ভুল বাটনে ফলব্যাক করে।
+                    // ── এখন Study-র মতো টপবারের 👁️ (eye) আইকন QBank-এও পাওয়া যায় —
+                    // eye চালু আর ⌨️ keyboard বন্ধ থাকলে টাইপ না করেই সরাসরি "উত্তর দেখুন"
+                    // + নিজে ঠিক/ভুল বিচার করার সহজ ফ্লো (WrittenRevealSelfGrade) দেখাবে।
+                    // ডিফল্ট (দুটো টগলই বন্ধ) বা ⌨️ চালু থাকলে — আগের টাইপ-করে-AI-চেক
+                    // ফ্লো-ই থাকবে, তাই বিদ্যমান ব্যবহারকারীর আচরণ অপরিবর্তিত থাকে। ──
+                    if (studyRevealMode && !studyRecallMode) {
+                        WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
+                    } else {
+                        WrittenAiRecallCheck(
                             item             = item,
                             onGrade          = onWrittenSelfGrade,
                             onAiGradeWritten = onAiGradeWritten
-                        )
-                        studyRevealMode -> WrittenRevealSelfGrade(item = item, onGrade = onWrittenSelfGrade)
-                        else            -> WrittenRevealSelfGrade(
-                            item = item, onGrade = onWrittenSelfGrade, initiallyRevealed = true
                         )
                     }
                 }
@@ -553,24 +555,12 @@ fun QuestionCard(
                 }
             }
 
-            // ── QBank Written ডিফল্ট (👁️/⌨️ দুটোই বন্ধ) — প্রশ্ন+উত্তর+ব্যাখ্যা সরাসরি
-            // খোলা থাকবে, গ্রেড করার জন্য অপেক্ষা করতে হবে না ──
-            val qbankWrittenOpenDefault = mode == StudyMode.QBANK && item.isWritten() &&
-                !isModelTest && !studyRecallMode && !studyRevealMode
-            val showAnswerBox = when {
-                mode == StudyMode.STUDY -> true
-                qbankWrittenOpenDefault -> true
+            val showAnswerBox = when (mode) {
+                StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
             }
-            // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই।
-            // qbankWrittenOpenDefault-এ গ্রেড হওয়ার আগ পর্যন্ত WrittenRevealSelfGrade
-            // (initiallyRevealed=true) নিজেই উত্তরটা ইনলাইনে দেখিয়ে দেয়, তাই তখন এখানে
-            // আবার দেখালে ডুপ্লিকেট হয়ে যেত — শুধু সেই সময়টুকু (Unanswered থাকা অবস্থায়)
-            // এই AnswerBox স্কিপ করা হলো। গ্রেড হয়ে গেলে (✅/❌ চাপার পর) WrittenRevealSelfGrade
-            // নিজে আর উত্তর দেখায় না (শুধু ফলাফল-ব্যানার), তখন এই AnswerBox-ই উত্তরটা দেখাবে
-            // যাতে গ্রেড করার পরও উত্তর হারিয়ে না যায়।
-            val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy()) &&
-                !(qbankWrittenOpenDefault && item.answerState is AnswerState.Unanswered)
+            // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
+            val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy())
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
             if (showAnswerText && item.answer.isNotBlank() && !studyNoQ) {
                 Spacer(Modifier.height(8.dp))
@@ -765,7 +755,8 @@ fun QuestionCard(
                 onAdminRefresh?.invoke()
             },
             onAdminEdit   = onAdminEdit,
-            onAdminDelete = onAdminDelete
+            onAdminDelete = onAdminDelete,
+            onRegenerateOptions = onRegenerateOptions
         )
     }
 }
@@ -1146,16 +1137,9 @@ fun WrittenInput(item: QuestionItem, onSubmit: (String) -> Int, onDraftChange: (
 // দিলেও রেজাল্ট সঠিকভাবে হিসাব করা যায়।
 // ────────────────────────────────────────────────────────────────
 @Composable
-fun WrittenRevealSelfGrade(
-    item: QuestionItem,
-    onGrade: (Boolean) -> Unit,
-    // ── QBank Written ডিফল্ট মোডে সরাসরি "খোলা" (open) অবস্থায় শুরু হয় — উত্তর/
-    // গ্রেড-বাটন দেখতে আলাদা "উত্তর দেখুন" ট্যাপ লাগে না। Model Test/Quiz-এ ও
-    // QBank-এর 👁️ (eye) মোডে ডিফল্ট false-ই থাকে (আগের মতো লুকানো-প্রথমে আচরণ)। ──
-    initiallyRevealed: Boolean = false
-) {
+fun WrittenRevealSelfGrade(item: QuestionItem, onGrade: (Boolean) -> Unit) {
     val submitted = item.answerState as? AnswerState.WrittenSubmitted
-    var isRevealed by remember(item.id) { mutableStateOf(initiallyRevealed) }
+    var isRevealed by remember(item.id) { mutableStateOf(false) }
     val isDark = LocalDarkMode.current.value
 
     when {
@@ -2372,13 +2356,29 @@ fun AdminFieldEditDialog(
     initialValue: String,
     onDismiss   : () -> Unit,
     onAdminEdit   : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
-    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null
+    onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── "🔄 Regenerate" বাটন — শুধু fieldId=="question" হলে দেখাবে। এই কম্পোজেবল
+    // (SharedComponents.kt) নিজে থেকে API key/AI service ছুঁয়ে দেখে না (pure UI
+    // থাকার জন্য) — caller (QuizViewModel-চালিত স্ক্রিন) নিজের viewModel.regenerateMcqOptions()
+    // এখানে পাস করে দেয়। null থাকলে বাটনটাই দেখাবে না (পুরনো ব্যবহারও ভাঙবে না)। ──
+    onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? = null
 ) {
-    val sheet = when {
-        item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
-        item.isStudy() -> "Study"
-        item.isMcq()   -> "Quiz"
-        else           -> "Study"
+    // ── আগে এখানে item.year/item.examName-এর উপস্থিতি দিয়ে sheet অনুমান করা হতো —
+    // কিন্তু QBank sheet-এ "year" কলামই নেই এবং "Exam_Name" ফিল্ডও সবসময় populate
+    // হয় না (GAS-এর প্রকৃত কলাম নাম আলাদা হতে পারে) — ফলে বেশিরভাগ QBank প্রশ্ন
+    // ভুলভাবে "Quiz" (MCQ হলে) বা "Study" (written হলে) হিসেবে শনাক্ত হতো, আর
+    // এডিট/ডিলিট ভুল sheet-এ পাঠানো হতো (তাই "instant update" স্ক্রিনে দেখা যেত
+    // না, sync-ও silently fail করতো)। item.sourceSheet — যেটা fromQuizItem/
+    // fromQBankItem/fromStudyItem তৈরির সময়ই সঠিকভাবে বসানো হয় — এখন সরাসরি
+    // ব্যবহার করা হচ্ছে; পুরনো heuristic শুধু fallback হিসেবে থাকলো (যদি কখনো
+    // sourceSheet খালি আসে, যেমন খুব পুরনো cached/serialized item)। ──
+    val sheet = item.sourceSheet.ifBlank {
+        when {
+            item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
+            item.isStudy() -> "Study"
+            item.isMcq()   -> "Quiz"
+            else           -> "Study"
+        }
     }
     val fieldLabel = ADMIN_FIELD_LABELS[fieldId] ?: fieldId
     val adminIndigo = Color(0xFF4F46E5)
@@ -2390,7 +2390,33 @@ fun AdminFieldEditDialog(
     // আলাদা রেড ওয়ার্নিং ডায়ালগ দেখানো হয় ──
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var isDeleting        by remember { mutableStateOf(false) }
+    // ── "🔄 Regenerate" — নতুন লেখা প্রশ্ন (text) থেকে AI দিয়ে ৪টা অপশন + সঠিক
+    // উত্তর তৈরি হলে এখানে জমা থাকে, প্রিভিউ হিসেবে দেখানো হয়, "Update" চাপলে
+    // প্রশ্নের সাথে এই ফিল্ডগুলোও একসাথে সেভ হয় (দেখো doSave() নিচে) ──
+    var regenerated     by remember { mutableStateOf<com.hanif.smartstudy.data.remote.RegeneratedMcq?>(null) }
+    var isRegenerating  by remember { mutableStateOf(false) }
+    var regenerateError by remember { mutableStateOf<String?>(null) }
     val scope       = rememberCoroutineScope()
+
+    val doRegenerate: () -> Unit = {
+        if (onRegenerateOptions != null && text.isNotBlank() && !isRegenerating) {
+            scope.launch {
+                isRegenerating = true
+                regenerateError = null
+                try {
+                    val result = onRegenerateOptions(text.trim())
+                    if (result != null) {
+                        regenerated = result
+                    } else {
+                        regenerateError = "AI দিয়ে অপশন তৈরি করা যায়নি — Settings-এ API key যোগ করা আছে কিনা চেক করো, অথবা আবার চেষ্টা করো।"
+                    }
+                } catch (e: Exception) {
+                    regenerateError = "একটা সমস্যা হয়েছে, আবার চেষ্টা করো।"
+                }
+                isRegenerating = false
+            }
+        }
+    }
 
     val doSave: () -> Unit = {
         scope.launch {
@@ -2398,7 +2424,18 @@ fun AdminFieldEditDialog(
             val value = text.trim()
             val fields = mutableMapOf<String, String>()
             when (fieldId) {
-                "question"    -> fields["question"] = value
+                "question"    -> {
+                    fields["question"] = value
+                    // ── Regenerate করা থাকলে প্রশ্নের সাথে নতুন অপশন/উত্তরও একসাথে সেভ হয় ──
+                    regenerated?.let { r ->
+                        fields["option1"] = r.optionA
+                        fields["option2"] = r.optionB
+                        fields["option3"] = r.optionC
+                        fields["option4"] = r.optionD
+                        fields["correct"] = r.correctAnswer
+                        fields["answer"]  = r.correctAnswer
+                    }
+                }
                 "optA"        -> fields["option1"] = value
                 "optB"        -> fields["option2"] = value
                 "optC"        -> fields["option3"] = value
@@ -2520,6 +2557,76 @@ fun AdminFieldEditDialog(
                         unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 )
+
+                // ── "🔄 Regenerate" — শুধু "প্রশ্ন" ফিল্ড এডিটে দেখাবে, আর caller
+                // onRegenerateOptions দিয়ে থাকলেই (নাহলে বাটনটাই থাকবে না) ──
+                if (fieldId == "question" && onRegenerateOptions != null) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick  = doRegenerate,
+                        enabled  = !isRegenerating && text.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape    = RoundedCornerShape(12.dp)
+                    ) {
+                        if (isRegenerating) {
+                            CircularProgressIndicator(Modifier.size(18.dp), adminIndigo, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("অপশন তৈরি হচ্ছে...", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("🔄 Regenerate অপশন ও উত্তর", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        "এখানে প্রশ্ন এডিট করে এই বাটনে চাপলে নতুন প্রশ্ন অনুযায়ী ৪টা অপশন ও সঠিক উত্তর AI দিয়ে আবার তৈরি হবে।",
+                        fontSize = 10.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                    regenerateError?.let {
+                        Text(it, fontSize = 11.sp, fontFamily = NotoSansBengali, color = RedWrong,
+                            modifier = Modifier.padding(top = 6.dp))
+                    }
+                    regenerated?.let { r ->
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = adminIndigo.copy(alpha = 0.06f)
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("নতুন প্রিভিউ (Update চাপলে সেভ হবে)", fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold, color = adminIndigo, fontFamily = NotoSansBengali)
+                                    Surface(
+                                        onClick = { regenerated = null },
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Text("✕ বাতিল", fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                listOf("ক" to r.optionA, "খ" to r.optionB, "গ" to r.optionC, "ঘ" to r.optionD)
+                                    .forEach { (label, opt) ->
+                                        val isCorrect = opt == r.correctAnswer
+                                        Text(
+                                            "$label) $opt${if (isCorrect) "  ✓" else ""}",
+                                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                            fontWeight = if (isCorrect) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isCorrect) GreenOk else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        )
+                                    }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
