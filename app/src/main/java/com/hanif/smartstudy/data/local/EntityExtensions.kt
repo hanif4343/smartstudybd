@@ -36,6 +36,8 @@ fun QuizItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEnt
     topicId      = topicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    reviewed     = reviewed?.lowercase()?.trim() == "true",
+    reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
 )
 
@@ -65,6 +67,8 @@ fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     subtopicId   = subtopicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    reviewed     = reviewed?.lowercase()?.trim() == "true",
+    reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
 )
 
@@ -85,6 +89,8 @@ fun StudyItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     topicId      = topicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    reviewed     = reviewed?.lowercase()?.trim() == "true",
+    reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
 )
 
@@ -160,6 +166,8 @@ fun QuestionEntity.toQuestionItem() = QuestionItem(
     subtopicId   = subtopicId,
     groupId      = groupId,
     subIndex     = subIndex,
+    reviewed     = reviewed,
+    reviewedAt   = reviewedAt,
     // ── FIX: আগে এখানে sourceSheet সেট করা হতো না, তাই Room-first fast-path
     // (navigateToSubTopic → loadQuestionsFromRoom) থেকে লোড হওয়া প্রতিটি
     // QuestionItem-এর sourceSheet খালি ("") থেকে যেত। AdminFieldEditDialog তখন
