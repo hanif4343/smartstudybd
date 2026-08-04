@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -25,7 +25,12 @@ import androidx.room.RoomDatabase
     // যোগ হলো, আর TypingKeyPairStatEntity নতুন টেবিল হিসেবে যোগ হলো — Key Analysis
     // ফিচার (দ্বিধা/স্থিরতা/ধীর জুটি), দেখো ui/typing/TypingPracticeScreen.kt-এর KeyAnalysisSection
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version = 11,
+    // v11 → v12: SubjectEntity/TopicEntity/SubTopicEntity/TagEntity/PostEntity/
+    // InstitutionEntity/ExamAppearanceEntity + TopicSyncEntity যোগ হলো — Phase ৬
+    // reference-ডেটা (ContentRepository.kt-এর referenceDao()/topicSyncDao())।
+    // এই টেবিলগুলোর DAO/Entity ফাইল আগে থেকেই ছিল, শুধু এখানে রেজিস্টার করা হয়নি
+    // ছিল — সেটাই compileDebugKotlin-এর "Unresolved reference" এর কারণ ছিল।
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,6 +45,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun typingKeyStatDao(): TypingKeyStatDao
     abstract fun curriculumProgressDao(): CurriculumProgressDao
     abstract fun typingKeyPairStatDao(): TypingKeyPairStatDao
+    abstract fun referenceDao(): ReferenceDao
+    abstract fun topicSyncDao(): TopicSyncDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
