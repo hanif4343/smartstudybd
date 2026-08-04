@@ -77,7 +77,11 @@ data class QuestionItem(
     val topicId      : String     = "",
     val subtopicId   : String     = "",     // QBank only
     val groupId      : String     = "",     // multi-part প্রশ্নের সব sub-question একই groupId শেয়ার করে
-    val subIndex     : Int        = 0       // group-এর ভেতর ক্রম (১,২,৩...) — sourceKey দিয়ে unique না বলে আলাদা
+    val subIndex     : Int        = 0,      // group-এর ভেতর ক্রম (১,২,৩...) — sourceKey দিয়ে unique না বলে আলাদা
+    // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, কোনো UI/behavior
+    // প্রভাব নেই। শুধু Admin-এর Review Mode-এ দেখানো/আপডেট করা হয়। ──
+    val reviewed     : Boolean    = false,
+    val reviewedAt   : Long       = 0L
 ) {
     fun isWritten() = questionType.lowercase().trim() == "written"
     fun isStudy()   = questionType.lowercase().trim() == "study"
@@ -113,7 +117,9 @@ data class QuestionItem(
             subjectId    = s.subjectId ?: "",
             topicId      = s.topicId ?: "",
             groupId      = s.groupId ?: "",
-            subIndex     = s.subIndex?.toIntOrNull() ?: 0
+            subIndex     = s.subIndex?.toIntOrNull() ?: 0,
+            reviewed     = s.reviewed?.lowercase()?.trim() == "true",
+            reviewedAt   = s.reviewedAt?.toLongOrNull() ?: 0L
         )
         fun fromQuizItem(q: QuizItem) = QuestionItem(
             id           = q.id ?: "",
@@ -136,7 +142,9 @@ data class QuestionItem(
             subjectId    = q.subjectId ?: "",
             topicId      = q.topicId ?: "",
             groupId      = q.groupId ?: "",
-            subIndex     = q.subIndex?.toIntOrNull() ?: 0
+            subIndex     = q.subIndex?.toIntOrNull() ?: 0,
+            reviewed     = q.reviewed?.lowercase()?.trim() == "true",
+            reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
         fun fromQBankItem(q: QBankItem) = QuestionItem(
             id           = q.id ?: "",
@@ -163,7 +171,9 @@ data class QuestionItem(
             topicId      = q.topicId ?: "",
             subtopicId   = q.subtopicId ?: "",
             groupId      = q.groupId ?: "",
-            subIndex     = q.subIndex?.toIntOrNull() ?: 0
+            subIndex     = q.subIndex?.toIntOrNull() ?: 0,
+            reviewed     = q.reviewed?.lowercase()?.trim() == "true",
+            reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
 
         // NOTE: আগে এখানে fromStudyMcqCandidate() নামে একটা ফাংশন ছিল যেটা
