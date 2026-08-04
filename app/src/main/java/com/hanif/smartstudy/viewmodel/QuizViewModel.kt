@@ -95,6 +95,11 @@ data class QuizUiState(
     val qbankPosts : List<SubjectEntry> = emptyList(),
     val qbankSelectedPost : String? = null,
     val qbankInstitutionsUnderPost : List<SubTopicEntry> = emptyList(),
+    // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, isAdmin==true
+    // ছাড়া toggleReviewMode()/markReviewed() কিছুই করে না। ──
+    val isReviewMode          : Boolean = false,
+    val reviewProgressSubjects: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    val reviewProgressTopics  : Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
     // QBank-only সার্চ — শুধু depth0-এর নাম-লিস্ট (Designation/Institution/Year)
     // ক্লায়েন্ট-সাইড ফিল্টার করে, প্রশ্নের কনটেন্টে সার্চ করে না
     val qbankSearchQuery : String = ""
@@ -215,6 +220,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(subjects = subjects, contentLoaded = true, error = if (subjects.isEmpty()) "কোনো Subject পাওয়া যায়নি" else null)
         }
+        // ⚠️ FIX: আগে এখানে "if (isAdmin) loadReviewProgress()" ছিল — প্রতিবার Subject
+        // লিস্ট লোড হওয়ার সময় এটা GAS-এ getReviewProgress কল করতো, যেটা পুরো sheet
+        // স্ক্যান করে (ঠিক যেই ভারী-fetch সমস্যা এড়াতে চেয়েছিলাম, সেটাই আবার তৈরি করছিল,
+        // Review Mode ব্যবহার না করলেও!)। এখন loadReviewProgress() শুধু toggleReviewMode()
+        // থেকেই চলে — যখন Admin সত্যিই Review Mode অন করে, তখনই একবার।
     }
 
     /**
@@ -248,14 +258,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Phase 6 — Topic-এ ঢুকলে প্রথম ৫০টা প্রশ্ন সরাসরি GAS `getQuestionsPage` থেকে
-     * (topic_id দিয়ে, Topics ট্যাবের row-range index ব্যবহার করে — পুরো sheet স্ক্যান
-     * করে না)। topicId রিজলভ হয় state.subTopics থেকে (নাম মিলিয়ে)।
+     * Phase 6 — Topic-এ ঢুকলে প্রশ্ন Room-cache (progressive-fill) থেকে, নতুন ব্যাচ
+     * অগ্রাধিকার সহ। topicId রিজলভ হয় state.subTopics থেকে (নাম মিলিয়ে)।
      *
-     * ⚠️ সীমাবদ্ধতা: এই মুহূর্তে শুধু প্রথম ৫০টা প্রশ্নই দেখানো হয় (totalQuestions =
-     * loaded আইটেম সংখ্যা, GAS-এর hasMore/nextCursor আপাতত ব্যবহার হয় না) — কোনো
-     * টপিকে ৫০-এর বেশি প্রশ্ন থাকলে বাকিগুলো এখন দেখা যাবে না। "আরও লোড করো" বাটন/
-     * cursor-ভিত্তিক pagination আলাদা ফলো-আপ হিসেবে যোগ করা যাবে প্রয়োজন হলে।
+     * আচরণ:
+     * - অনলাইন + এই Topic এখনো সম্পূর্ণ লোকালে আসেনি → GAS `getQuestionsPage` থেকে
+     *   পরের **নতুন** ৫০-ব্যাচ (আগের cursor থেকে, কখনো একই ব্যাচ দুইবার না) Room-এ
+     *   যোগ হয়, তারপর Room-এ যা যা জমেছে (পুরনো+নতুন) সব একসাথে দেখানো হয়।
+     * - অনলাইন + Topic সম্পূর্ণ লোকালে (hasMore=false) → নেটওয়ার্ক কল-ই হয় না, সরাসরি
+     *   Room থেকে instant।
+     * - অফলাইন (নেটওয়ার্ক এক্সসেপশন) → চুপচাপ ধরে Room-এ যা আছে তাই দেখানো হয়।
      */
     fun navigateToSubTopicLazy(topicName: String) {
         val subject = _state.value.navPath.subject ?: return
@@ -272,39 +284,111 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 StudyMode.QBANK -> "QBank"
                 StudyMode.STUDY -> "Study"
             }
-            when (val result = repo.getQuestionsPage(sheet, topicId, null, null, 50)) {
-                is DataState.Success -> {
-                    val bookmarks = _state.value.bookmarkedIds
-                    val items = result.data.items.map { q ->
-                        q.copy(
-                            isBookmarked = bookmarks.contains(q.id),
-                            isWeakTopic  = isWeak(q.subTopic),
-                            isStudyDone  = isStudyDone(q.id)
-                        )
-                    }
-                    Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) items=${items.size} hasMore=${result.data.hasMore}")
-                    _state.update {
-                        it.copy(
-                            questions      = items,
-                            totalQuestions = items.size,
-                            currentPage    = 0,
-                            isQuizActive   = true,
-                            showResult     = false,
-                            result         = null,
-                            answeredCount  = 0,
-                            timerSec       = 0,
-                            isLoading      = false
-                        )
-                    }
-                    startTimer(items.size)
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+
+            // অনলাইন + অসম্পূর্ণ হলে নতুন ব্যাচ যোগ করার চেষ্টা — ব্যর্থ হলে (অফলাইন/নেটওয়ার্ক
+            // এরর) চুপচাপ ধরে নিয়ে Room-এ যা আছে তাই দেখানো হবে, ক্র্যাশ করবে না
+            try {
+                repo.cacheNextTopicBatch(sheet, topicId)
+            } catch (e: Exception) {
+                Log.w("QuizVM", "cacheNextTopicBatch failed (offline?): ${e.message}")
+            }
+
+            val bookmarks = _state.value.bookmarkedIds
+            val items = repo.getRoomQuestionsForTopic(sheet, topicId, tag).map { q ->
+                q.copy(
+                    isBookmarked = bookmarks.contains(q.id),
+                    isWeakTopic  = isWeak(q.subTopic),
+                    isStudyDone  = isStudyDone(q.id)
+                )
+            }
+            Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=${items.size}")
+
+            if (items.isEmpty()) {
+                _state.update { it.copy(isLoading = false, error = "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো") }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    questions      = items,
+                    totalQuestions = items.size,
+                    currentPage    = 0,
+                    isQuizActive   = true,
+                    showResult     = false,
+                    result         = null,
+                    answeredCount  = 0,
+                    timerSec       = 0,
+                    isLoading      = false
+                )
+            }
+            startTimer(items.size)
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // Review System (Admin-only) — student-দের UI/behavior-এ কোনো প্রভাব নেই, সব
+    // ফাংশন শুরুতেই isAdmin চেক করে চুপচাপ রিটার্ন করে যদি admin না হয়।
+    // ═════════════════════════════════════════════════════════
+
+    /** Review Mode টগল — চালু থাকলে QuestionListScreen-এ প্রতিটা প্রশ্নে বড় ✓ বাটন দেখা যায়। */
+    fun toggleReviewMode() {
+        if (!_state.value.isAdmin) return
+        _state.update { it.copy(isReviewMode = !it.isReviewMode) }
+        if (_state.value.isReviewMode) loadReviewProgress()
+    }
+
+    /**
+     * একটা প্রশ্নকে reviewed মার্ক/আনমার্ক করে — GAS-এ লেখে (source of truth) + Room +
+     * local state সব সিঙ্ক রাখে। Optimistic update: UI সাথে সাথে বদলায়, নেটওয়ার্ক ব্যর্থ
+     * হলে চুপচাপ রিভার্ট হয়ে যায়।
+     */
+    fun markReviewed(questionId: String, reviewed: Boolean = true) {
+        if (!_state.value.isAdmin) return
+        val q = _state.value.questions.find { it.id == questionId } ?: return
+        val sheet = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        val nowMs = System.currentTimeMillis()
+        _state.update {
+            it.copy(questions = it.questions.map { item ->
+                if (item.id == questionId) item.copy(reviewed = reviewed, reviewedAt = if (reviewed) nowMs else 0L) else item
+            })
+        }
+        viewModelScope.launch {
+            val ok = repo.markQuestionReviewed(sheet, q.id, reviewed)
+            if (!ok) {
+                _state.update {
+                    it.copy(
+                        questions = it.questions.map { item ->
+                            if (item.id == questionId) item.copy(reviewed = !reviewed, reviewedAt = 0L) else item
+                        },
+                        error = "রিভিউ মার্ক করা যায়নি — নেটওয়ার্ক চেক করো"
+                    )
                 }
-                is DataState.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
-                else -> _state.update { it.copy(isLoading = false, error = "অজানা ত্রুটি ঘটেছে") }
+            } else {
+                loadReviewProgress()
             }
         }
     }
 
-    // ── পুরনো, পুরো-কনটেন্ট-নির্ভর ফাংশন — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
+    /** Review progress (subject+topic %) রিফ্রেশ — হালকা GAS কল, পুরো প্রশ্ন ডাউনলোড হয় না। */
+    fun loadReviewProgress() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            val sheet = when (_state.value.mode) {
+                StudyMode.QUIZ  -> "Quiz"
+                StudyMode.QBANK -> "QBank"
+                StudyMode.STUDY -> "Study"
+            }
+            val progress = repo.getReviewProgress(sheet)
+            _state.update { it.copy(reviewProgressSubjects = progress.subjects, reviewProgressTopics = progress.topics) }
+        }
+    } — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
     // deep-link/focus-navigation (নোটিফিকেশন থেকে বা search থেকে এসে সরাসরি একটা
     // subject/subTopic-এ ঢোকা) এই ঠিক এই নামেই কল করে। CoreScreen.kt-এর সাধারণ
     // ব্রাউজিং ফ্লো এখন ওপরের navigateToSubjectLazy()/navigateToSubTopicLazy()
@@ -382,7 +466,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * এখন: in-memory content (যেটা ইতিমধ্যে ViewModel এর সাথে patch হয়ে গেছে)
      * থেকে navPath অপরিবর্তিত রেখেই শুধু বর্তমান স্ক্রিনের ডাটা rebuild করা হয়।
      * Admin ঠিক যেখানে ছিল সেখানেই থাকে, আর edit করা কনটেন্ট সাথে সাথে
-     * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
+     * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
      */
     fun adminRefreshContent() {
         viewModelScope.launch {
@@ -392,7 +476,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // rename করার পরপরই একটা transient network/Sheet ব্যর্থতায় পুরো
             // subject/QBank/Study list "উধাও" হয়ে যেত, যদিও আসল ডেটা অক্ষত ছিল।
             // এখন fetch ব্যর্থ হলে screen-এর বিদ্যমান state-ই অক্ষত থাকবে,
-            // পরের successful refresh না আসা পর্যন্ত কিছু বদলাবে না। ──
+            // পরের successful refresh না আসা পর্যন্ত কিছু bদলাবে না। ──
             val content = (repo.getContent() as? DataState.Success)?.data
             if (content == null) {
                 Log.w("QuizVM", "adminRefreshContent: fetch failed, বিদ্যমান content অক্ষত রাখা হলো")
@@ -990,7 +1074,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 is AnswerState.McqSelected      -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenSubmitted -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenRecorded  -> { recorded++ }   // Model Test written — গ্রেডিং হয়নি, শুধু জমা হয়েছে
-                else                            -> skipped++
+                else -> skipped++
             }
             val subj = q.subject.ifBlank { "অন্যান্য" }
             val prev = subjectMap[subj] ?: SubjectScore(subj, 0, 0)
