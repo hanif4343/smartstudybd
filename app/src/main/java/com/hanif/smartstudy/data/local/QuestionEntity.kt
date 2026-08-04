@@ -22,7 +22,9 @@ import androidx.room.Index
         // ── Phase 6: নতুন schema (subject_id/topic_id) — future getQuestionsPage-স্টাইল
         // ক্যোয়ারির জন্য, আর groupId দিয়ে multi-part প্রশ্নের sub-question একসাথে বের করতে ──
         Index(value = ["sheet", "subjectId", "topicId"]),
-        Index(value = ["sheet", "groupId"])
+        Index(value = ["sheet", "groupId"]),
+        // ── Review System: টপিক-ভিত্তিক reviewed/unreviewed গোনা+ফিল্টার করার জন্য ──
+        Index(value = ["sheet", "topicId", "reviewed"])
     ]
 )
 data class QuestionEntity(
@@ -58,5 +60,9 @@ data class QuestionEntity(
     // একই groupId শেয়ার করে — খালি groupId মানে standalone প্রশ্ন
     val groupId     : String = "",
     val subIndex    : Int    = 0,
+    // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
+    // করার জন্য (Only-Admin ফিচার, student-দের UI/behavior-এ প্রভাব নেই)। ──
+    val reviewed    : Boolean = false,
+    val reviewedAt  : Long    = 0L,
     val syncedAt    : Long   = 0L    // Firebase থেকে কখন এসেছে — delta sync এর জন্য
 )
