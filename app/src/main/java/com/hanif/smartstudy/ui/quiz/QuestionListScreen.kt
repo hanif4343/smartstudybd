@@ -25,9 +25,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -346,7 +349,10 @@ fun QuestionListScreen(
                     onToggleStudyRevealMode = onToggleStudyRevealMode,
                     studyRecallMode = studyRecallMode,
                     onToggleStudyRecallMode = onToggleStudyRecallMode,
-                    hasWrittenQuestions = hasWrittenOnPage
+                    hasWrittenQuestions = hasWrittenOnPage,
+                    isAdmin = vmState.isAdmin,
+                    isReviewMode = vmState.isReviewMode,
+                    onToggleReviewMode = { viewModel.toggleReviewMode() }
                 )
             }
         ) { padding ->
@@ -444,6 +450,26 @@ fun QuestionListScreen(
                                 animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
                             )
                         ) {
+                        // ── Review System (Admin-only) — বড় ✓ বাটন, টাচ করলেই reviewed
+                        // মার্ক/আনমার্ক হয়ে যায় (GAS + Room-এ লেখা হয়), আর নতুন-মার্ক করলে
+                        // পরের প্রশ্ন কার্ডটা স্মুথলি স্ক্রল হয়ে ওপরে উঠে আসে — ঠিক Study
+                        // mode-এর "পড়া হয়েছে" টিকের মতোই আচরণ (কার্ড হাইড হয় না)। student-
+                        // দের কাছে সম্পূর্ণ অদৃশ্য (isReviewMode শুধু admin-এর জন্যই true হয়)।
+                        if (vmState.isReviewMode) {
+                            ReviewTickButton(
+                                reviewed = q.reviewed,
+                                onClick = {
+                                    val nowMarking = !q.reviewed
+                                    viewModel.markReviewed(q.id, nowMarking)
+                                    if (nowMarking) {
+                                        scrollScope.launch {
+                                            val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                                            listState.animateScrollToItem(nextLocalIdx)
+                                        }
+                                    }
+                                }
+                            )
+                        }
                         if (q.isGrouped()) {
                             val groupItems = pagedQuestions.filter { it.groupId == q.groupId }
                             val position   = groupItems.indexOfFirst { it.id == q.id } + 1
@@ -952,6 +978,39 @@ fun QuestionListScreen(
 }
 
 /**
+ * Review System (Admin-only) — বড়, স্পষ্ট ✓ বাটন। রিভিউ করা হয়ে গেলে সবুজ+ভরাট,
+ * না হলে ধূসর+ফাঁকা আউটলাইন — এক নজরে বোঝা যায় কোনটা বাকি।
+ */
+@Composable
+private fun ReviewTickButton(reviewed: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (reviewed) Color(0xFF16A34A).copy(alpha = 0.12f) else Color(0xFFF59E0B).copy(alpha = 0.10f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            if (reviewed) Icons.Default.CheckCircle else Icons.Outlined.CheckCircle,
+            contentDescription = null,
+            tint = if (reviewed) Color(0xFF16A34A) else Color(0xFFF59E0B),
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            if (reviewed) "রিভিউ করা হয়েছে ✓" else "রিভিউ করুন",
+            fontFamily = NotoSansBengali,
+            fontSize   = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color      = if (reviewed) Color(0xFF16A34A) else Color(0xFFF59E0B)
+        )
+    }
+}
+
+/**
  * Phase 6 — group_id-aware রেন্ডারিং: multi-part প্রশ্নের (একই instruction থেকে আসা কয়েকটা
  * sub-question) প্রথম sub-question এর ঠিক আগে এই connector-header দেখা যায়, বাকিগুলোতে
  * না — যাতে ইউজার বুঝতে পারে নিচের কয়েকটা প্রশ্ন একই সেট থেকে এসেছে।
@@ -1046,7 +1105,11 @@ private fun QuestionTopBar(
     onToggleStudyRecallMode : (() -> Unit)? = null,
     // ── QBank-এ 👁️/⌨️ আইকন দুটো শুধু তখনই দেখাতে হবে যখন এই পাতায় Written
     // প্রশ্ন আছে। Study mode-এ এই ফ্ল্যাগের কোনো effect নেই (আগের মতোই সবসময় দেখা যায়)। ──
-    hasWrittenQuestions     : Boolean = false
+    hasWrittenQuestions     : Boolean = false,
+    // ── Review System (Admin-only) — student-দের কাছে এই আইকনটা সম্পূর্ণ অদৃশ্য ──
+    isAdmin                 : Boolean = false,
+    isReviewMode            : Boolean = false,
+    onToggleReviewMode      : (() -> Unit)? = null
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -1072,6 +1135,17 @@ private fun QuestionTopBar(
             }
         },
         actions = {
+            // ── Review System (Admin-only) — শুধু Admin দেখে, student-দের কাছে অদৃশ্য।
+            // ইতিমধ্যে থাকা 👁️/⌨️ আইকনের পাশেই বসে, একই স্টাইলে ──
+            if (isAdmin && onToggleReviewMode != null) {
+                IconButton(onClick = onToggleReviewMode) {
+                    Icon(
+                        Icons.Default.FactCheck,
+                        contentDescription = if (isReviewMode) "রিভিউ মোড: চালু" else "রিভিউ মোড: বন্ধ",
+                        tint = if (isReviewMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             if (onSubmit != null) {
                 TextButton(onClick = onSubmit) {
                     Text("সাবমিট", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
