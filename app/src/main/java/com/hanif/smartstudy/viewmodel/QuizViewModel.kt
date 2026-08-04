@@ -88,6 +88,18 @@ data class QuizUiState(
     // সাল-মোড: depth0-এ সালের লিস্ট, একটা সাল বাছাই করলে flat প্রশ্ন-লিস্ট (Room-first pagination)
     val qbankYears : List<SubjectEntry> = emptyList(),
     val qbankSelectedYear : String? = null,
+    // পদ-মোড (Phase 6, নতুন schema — Posts/Institutions/Exam_Appearances reference-টেবিল
+    // থেকে): depth0-এ পদের লিস্ট, একটা পদ বাছাই করলে ওই পদের আন্ডারে যত প্রতিষ্ঠান আছে তার
+    // লিস্ট (qbankInstitutionsUnderPost), প্রতিষ্ঠান বাছাই করলে flat প্রশ্ন-লিস্ট —
+    // appearance-linked questionId দিয়ে সরাসরি Room থেকে (দেখো SubTopicEntry.linkedQuestionIds)।
+    val qbankPosts : List<SubjectEntry> = emptyList(),
+    val qbankSelectedPost : String? = null,
+    val qbankInstitutionsUnderPost : List<SubTopicEntry> = emptyList(),
+    // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, isAdmin==true
+    // ছাড়া toggleReviewMode()/markReviewed() কিছুই করে না। ──
+    val isReviewMode          : Boolean = false,
+    val reviewProgressSubjects: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    val reviewProgressTopics  : Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
     // QBank-only সার্চ — শুধু depth0-এর নাম-লিস্ট (Designation/Institution/Year)
     // ক্লায়েন্ট-সাইড ফিল্টার করে, প্রশ্নের কনটেন্টে সার্চ করে না
     val qbankSearchQuery : String = ""
@@ -160,6 +172,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 qbankDesignationsUnderInstitution = emptyList(),
                 qbankYears = emptyList(),
                 qbankSelectedYear = null,
+                qbankPosts = emptyList(),
+                qbankSelectedPost = null,
+                qbankInstitutionsUnderPost = emptyList(),
                 qbankSearchQuery = ""
             )
         }
@@ -170,38 +185,216 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
-            // ── Stale-While-Revalidate ────────────────────────────────────────
-            // Cache থাকলে → instant subjects দেখাও
-            // Background এ → Firebase check করো, নতুন data এলে silently update করো
-            val result = withTimeoutOrNull(30_000L) {
-                repo.getContent(
-                    onBackgroundUpdate = { freshData ->
-                        // Background এ নতুন data এলে subjects silently update হবে
-                        viewModelScope.launch {
-                            Log.d("QuizVM", "Background update received: quiz=${freshData.quiz.size}")
-                            rebuildSubjects(freshData, newMode)
-                        }
-                    }
-                )
-            } ?: DataState.Error("টাইমআউট — ৩০ সেকেন্ডে data আসেনি।")
-
-            val content = (result as? DataState.Success)?.data ?: AppContent()
-            val errMsg  = (result as? DataState.Error)?.message
-            val hasContent = !content.isEmpty()
-
-            Log.d("QuizVM", "setMode done: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
-
-            _state.update {
-                it.copy(
-                    contentLoaded = hasContent,
-                    isLoading     = false,
-                    error         = if (!hasContent) (errMsg ?: "Data empty") else null
-                )
-            }
-            if (hasContent) rebuildSubjects(content, newMode)
+            // ── Phase 6 লেজি-লোডিং ফিক্স (db-migration-v2) ────────────────────
+            // আগে এখানে repo.getContent() দিয়ে পুরো ~১৪,০০০ row Quiz+QBank+Study
+            // একসাথে টেনে তারপর subject বের করা হতো — Subject লিস্ট দেখানোর আগেই
+            // পুরো fetch শেষ হওয়া লাগতো (৩০/৯০ সেকেন্ড টাইমআউট)। এখন Subject লিস্ট
+            // সরাসরি Room-এর reference-টেবিল (Subjects, GAS getReferenceData দিয়ে
+            // populate) থেকে আসে — ছোট, দ্রুত, প্রশ্ন ডাউনলোড করা লাগে না। Topic লিস্ট
+            // ও প্রশ্ন — নিচে navigateToSubjectLazy()/navigateToSubTopicLazy() দেখো।
+            rebuildSubjectsLazy(newMode)
+            _state.update { it.copy(isLoading = false) }
         }
     }
 
+    /**
+     * Phase 6 — Subject লিস্ট Room-এর reference-টেবিল (Subjects, GAS getReferenceData
+     * দিয়ে populate) থেকে সরাসরি লোড করে — কোনো প্রশ্ন ডাউনলোড করা লাগে না, তাই
+     * তাৎক্ষণিক। পুরনো rebuildSubjects(content, mode) (পুরো sheet স্ক্যান করে) এখনো
+     * আছে (search/model-test-generation ইত্যাদির জন্য), শুধু এখানে আর ব্যবহার হয় না।
+     */
+    private suspend fun rebuildSubjectsLazy(mode: StudyMode) {
+        val sheet = when (mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        repo.syncReferenceData()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে
+        val subjectRows = repo.getRoomSubjectsRefBySheet(sheet)
+        val subjects = subjectRows.map { s ->
+            // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
+            // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
+            SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
+        }.sortedBy { it.name }
+        Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${subjects.size}")
+        _state.update {
+            it.copy(subjects = subjects, contentLoaded = true, error = if (subjects.isEmpty()) "কোনো Subject পাওয়া যায়নি" else null)
+        }
+        // ⚠️ FIX: আগে এখানে "if (isAdmin) loadReviewProgress()" ছিল — প্রতিবার Subject
+        // লিস্ট লোড হওয়ার সময় এটা GAS-এ getReviewProgress কল করতো, যেটা পুরো sheet
+        // স্ক্যান করে (ঠিক যেই ভারী-fetch সমস্যা এড়াতে চেয়েছিলাম, সেটাই আবার তৈরি করছিল,
+        // Review Mode ব্যবহার না করলেও!)। এখন loadReviewProgress() শুধু toggleReviewMode()
+        // থেকেই চলে — যখন Admin সত্যিই Review Mode অন করে, তখনই একবার।
+    }
+
+    /**
+     * Phase 6 — Subject-এ ঢুকলে Topic লিস্ট Room-এর reference-টেবিল (Topics) থেকে
+     * সরাসরি (fast, প্রশ্ন ডাউনলোড ছাড়াই)। subjectId রিজলভ হয় ইতিমধ্যে-লোড হওয়া
+     * state.subjects থেকে (নাম মিলিয়ে) — SubjectListScreen-এর onSubject callback
+     * এখনো নাম-ভিত্তিক (String) বলে callback-signature বদলাতে হয়নি।
+     */
+    fun navigateToSubjectLazy(subjectName: String) {
+        _state.update { it.copy(navPath = NavPath(subjectName), subTopics = emptyList(), isLoading = true) }
+        val subjectId = _state.value.subjects.find { it.name == subjectName }?.subjectId.orEmpty()
+        if (subjectId.isBlank()) {
+            _state.update { it.copy(isLoading = false, error = "এই Subject-এর ID পাওয়া যায়নি — Admin App-এ Reference ঠিক আছে কিনা দেখো") }
+            return
+        }
+        viewModelScope.launch {
+            val topicRows = repo.getRoomTopicsForSubject(subjectId)
+            val subTopics = topicRows.map { t ->
+                SubTopicEntry(
+                    name      = t.name,
+                    subject   = subjectName,
+                    totalQ    = t.rowCount,   // Topics reference-টেবিলে indexed count (থাকলে), নাহলে ০
+                    doneQ     = 0,
+                    subjectId = t.subjectId,
+                    topicId   = t.topicId
+                )
+            }.sortedBy { it.name }
+            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
+            _state.update { it.copy(subTopics = subTopics, isLoading = false) }
+        }
+    }
+
+    /**
+     * Phase 6 — Topic-এ ঢুকলে প্রশ্ন Room-cache (progressive-fill) থেকে, নতুন ব্যাচ
+     * অগ্রাধিকার সহ। topicId রিজলভ হয় state.subTopics থেকে (নাম মিলিয়ে)।
+     *
+     * আচরণ:
+     * - অনলাইন + এই Topic এখনো সম্পূর্ণ লোকালে আসেনি → GAS `getQuestionsPage` থেকে
+     *   পরের **নতুন** ৫০-ব্যাচ (আগের cursor থেকে, কখনো একই ব্যাচ দুইবার না) Room-এ
+     *   যোগ হয়, তারপর Room-এ যা যা জমেছে (পুরনো+নতুন) সব একসাথে দেখানো হয়।
+     * - অনলাইন + Topic সম্পূর্ণ লোকালে (hasMore=false) → নেটওয়ার্ক কল-ই হয় না, সরাসরি
+     *   Room থেকে instant।
+     * - অফলাইন (নেটওয়ার্ক এক্সসেপশন) → চুপচাপ ধরে Room-এ যা আছে তাই দেখানো হয়।
+     */
+    fun navigateToSubTopicLazy(topicName: String) {
+        val subject = _state.value.navPath.subject ?: return
+        val topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
+        timerJob?.cancel()
+        _state.update { it.copy(navPath = NavPath(subject, topicName), currentPage = 0, isLoading = true) }
+        if (topicId.isBlank()) {
+            _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি") }
+            return
+        }
+        viewModelScope.launch {
+            val sheet = when (_state.value.mode) {
+                StudyMode.QUIZ  -> "Quiz"
+                StudyMode.QBANK -> "QBank"
+                StudyMode.STUDY -> "Study"
+            }
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+
+            // অনলাইন + অসম্পূর্ণ হলে নতুন ব্যাচ যোগ করার চেষ্টা — ব্যর্থ হলে (অফলাইন/নেটওয়ার্ক
+            // এরর) চুপচাপ ধরে নিয়ে Room-এ যা আছে তাই দেখানো হবে, ক্র্যাশ করবে না
+            try {
+                repo.cacheNextTopicBatch(sheet, topicId)
+            } catch (e: Exception) {
+                Log.w("QuizVM", "cacheNextTopicBatch failed (offline?): ${e.message}")
+            }
+
+            val bookmarks = _state.value.bookmarkedIds
+            val items = repo.getRoomQuestionsForTopic(sheet, topicId, tag).map { q ->
+                q.copy(
+                    isBookmarked = bookmarks.contains(q.id),
+                    isWeakTopic  = isWeak(q.subTopic),
+                    isStudyDone  = isStudyDone(q.id)
+                )
+            }
+            Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=${items.size}")
+
+            if (items.isEmpty()) {
+                _state.update { it.copy(isLoading = false, error = "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো") }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    questions      = items,
+                    totalQuestions = items.size,
+                    currentPage    = 0,
+                    isQuizActive   = true,
+                    showResult     = false,
+                    result         = null,
+                    answeredCount  = 0,
+                    timerSec       = 0,
+                    isLoading      = false
+                )
+            }
+            startTimer(items.size)
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // Review System (Admin-only) — student-দের UI/behavior-এ কোনো প্রভাব নেই, সব
+    // ফাংশন শুরুতেই isAdmin চেক করে চুপচাপ রিটার্ন করে যদি admin না হয়।
+    // ═════════════════════════════════════════════════════════
+
+    /** Review Mode টগল — চালু থাকলে QuestionListScreen-এ প্রতিটা প্রশ্নে বড় ✓ বাটন দেখা যায়। */
+    fun toggleReviewMode() {
+        if (!_state.value.isAdmin) return
+        _state.update { it.copy(isReviewMode = !it.isReviewMode) }
+        if (_state.value.isReviewMode) loadReviewProgress()
+    }
+
+    /**
+     * একটা প্রশ্নকে reviewed মার্ক/আনমার্ক করে — GAS-এ লেখে (source of truth) + Room +
+     * local state সব সিঙ্ক রাখে। Optimistic update: UI সাথে সাথে বদলায়, নেটওয়ার্ক ব্যর্থ
+     * হলে চুপচাপ রিভার্ট হয়ে যায়।
+     */
+    fun markReviewed(questionId: String, reviewed: Boolean = true) {
+        if (!_state.value.isAdmin) return
+        val q = _state.value.questions.find { it.id == questionId } ?: return
+        val sheet = when (_state.value.mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        val nowMs = System.currentTimeMillis()
+        _state.update {
+            it.copy(questions = it.questions.map { item ->
+                if (item.id == questionId) item.copy(reviewed = reviewed, reviewedAt = if (reviewed) nowMs else 0L) else item
+            })
+        }
+        viewModelScope.launch {
+            val ok = repo.markQuestionReviewed(sheet, q.id, reviewed)
+            if (!ok) {
+                _state.update {
+                    it.copy(
+                        questions = it.questions.map { item ->
+                            if (item.id == questionId) item.copy(reviewed = !reviewed, reviewedAt = 0L) else item
+                        },
+                        error = "রিভিউ মার্ক করা যায়নি — নেটওয়ার্ক চেক করো"
+                    )
+                }
+            } else {
+                loadReviewProgress()
+            }
+        }
+    }
+
+    /** Review progress (subject+topic %) রিফ্রেশ — হালকা GAS কল, পুরো প্রশ্ন ডাউনলোড হয় না। */
+    fun loadReviewProgress() {
+        if (!_state.value.isAdmin) return
+        viewModelScope.launch {
+            val sheet = when (_state.value.mode) {
+                StudyMode.QUIZ  -> "Quiz"
+                StudyMode.QBANK -> "QBank"
+                StudyMode.STUDY -> "Study"
+            }
+            val progress = repo.getReviewProgress(sheet)
+            _state.update { it.copy(reviewProgressSubjects = progress.subjects, reviewProgressTopics = progress.topics) }
+        }
+    }
+
+    // ── navigateToSubject/navigateToSubTopic — এখনো রাখা হয়েছে কারণ MainScreen.kt-এর
+    // deep-link/focus-navigation (নোটিফিকেশন থেকে বা search থেকে এসে সরাসরি একটা
+    // subject/subTopic-এ ঢোকা) এই ঠিক এই নামেই কল করে। CoreScreen.kt-এর সাধারণ
+    // ব্রাউজিং ফ্লো এখন ওপরের navigateToSubjectLazy()/navigateToSubTopicLazy()
+    // ব্যবহার করে — এই দুটো এখন শুধু deep-link/legacy call site গুলোর জন্য। ──
     fun navigateToSubject(subject: String) {
         _state.update { it.copy(navPath = NavPath(subject)) }
         viewModelScope.launch {
@@ -1176,6 +1369,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 qbankSelectedInstitution = null,
                 qbankDesignationsUnderInstitution = emptyList(),
                 qbankSelectedYear = null,
+                qbankSelectedPost = null,
+                qbankInstitutionsUnderPost = emptyList(),
                 qbankSearchQuery = "",
                 isQuizActive = false,
                 questions = emptyList(),
@@ -1190,6 +1385,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 QBankFilterMode.DESIGNATION -> rebuildSubjects(content, StudyMode.QBANK)
                 QBankFilterMode.INSTITUTION -> rebuildQBankInstitutions(content)
                 QBankFilterMode.YEAR        -> rebuildQBankYears(content)
+                QBankFilterMode.POST        -> rebuildQBankPosts()
             }
         }
     }
@@ -1387,6 +1583,121 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         startTimer(items.size)
     }
 
+    // ═════════════════════════════════════════════════════════
+    // Phase 6 (db-migration-v2): "পদ অনুযায়ী ব্রাউজ" — নতুন Posts/Institutions/
+    // Exam_Appearances reference-টেবিল থেকে (Room, দেখো data/local/ReferenceDao.kt)।
+    // DESIGNATION/INSTITUTION মোডের মতো raw sheet subject/sub_topic টেক্সট থেকে না —
+    // এখানে একই প্রশ্ন একাধিক পরীক্ষায় (ভিন্ন Institution/Year) আলাদা appearance-row
+    // হিসেবে থাকতে পারে, তাই একই প্রশ্ন একাধিক Post/Institution-এ দেখা যেতে পারে।
+    //
+    // ⚠️ GAS-সাইডে (`code_updated.gs`) এখনো `getAllExamAppearances` action নেই (দেখো
+    // GasContentService.fetchAllExamAppearances-এর কমেন্ট) — সেটা যোগ না হওয়া পর্যন্ত
+    // Room-এর exam_appearances টেবিল খালিই থাকবে আর এই মোডে "কোনো পদ নেই" দেখাবে,
+    // কিন্তু অ্যাপ ভাঙবে না।
+    // ═════════════════════════════════════════════════════════
+
+    /** পদ-মোড: Room-এর exam_appearances (Post+Institution ধরে group করা) থেকে তালিকা —
+     *  প্রতিটা পদের ভিতরে (subTopics ফিল্ডে) সেই পদের আন্ডারে যত প্রতিষ্ঠান আছে তার নেস্টেড
+     *  লিস্ট, ঠিক rebuildQBankInstitutions()-এর প্যাটার্নেই। */
+    private suspend fun rebuildQBankPosts() {
+        repo.syncExamAppearances()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে, exception ছোঁড়ে না
+        val posts        = repo.getRoomPosts()
+        val institutions = repo.getRoomInstitutions().associateBy { it.institutionId }
+        val progressMap  = loadProgressMap()
+        val mode = StudyMode.QBANK
+
+        val entries = posts.map { post ->
+            val appearances   = repo.getRoomAppearancesForPost(post.postId)
+            val byInstitution = appearances.groupBy { it.institutionId }
+            val subTopics = byInstitution.mapNotNull { (instId, apps) ->
+                val instName = institutions[instId]?.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val qIds = apps.map { it.questionId }.distinct()
+                SubTopicEntry(
+                    name              = instName,
+                    subject           = post.name,
+                    totalQ            = qIds.size,
+                    doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
+                    subjectId         = post.postId,
+                    topicId           = instId,
+                    linkedQuestionIds = qIds
+                )
+            }.sortedBy { it.name }
+            SubjectEntry(
+                name      = post.name,
+                totalQ    = subTopics.sumOf { it.totalQ },
+                doneQ     = subTopics.sumOf { it.doneQ },
+                subTopics = subTopics,
+                subjectId = post.postId
+            )
+        }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
+
+        Log.d("QuizVM", "rebuildQBankPosts: ${entries.size}")
+        _state.update { it.copy(qbankPosts = entries, isLoading = false) }
+    }
+
+    /** পদ-মোডের depth0 → একটা পদ বাছাই — নেস্টেড ডেটা আগে থেকেই qbankPosts-এ আছে,
+     *  তাই selectQBankInstitution()-এর মতোই নতুন করে fetch লাগে না। */
+    fun selectQBankPost(postName: String) {
+        val entry = _state.value.qbankPosts.find { it.name == postName }
+        _state.update {
+            it.copy(
+                qbankSelectedPost = postName,
+                qbankInstitutionsUnderPost = entry?.subTopics ?: emptyList(),
+                qbankSearchQuery = ""
+            )
+        }
+    }
+
+    /** পদ-মোডের depth1 → একটা প্রতিষ্ঠান বাছাই — appearance-linked questionId গুলো দিয়ে
+     *  সরাসরি Room থেকে ফ্ল্যাট প্রশ্ন-লিস্ট। navigateToSubTopic() রিইউজ করা যায়নি কারণ
+     *  এই ডেটার জন্য কোনো raw subject/sub_topic টেক্সট ম্যাচ নেই, শুধু Exam_Appearances-এর
+     *  questionId লিংক আছে — ঠিক selectQBankYear()-এর মতোই সরাসরি ফ্ল্যাট-লোড প্যাটার্ন। */
+    fun selectQBankInstitutionUnderPost(institutionName: String) {
+        val entry = _state.value.qbankInstitutionsUnderPost.find { it.name == institutionName } ?: return
+        timerJob?.cancel()
+        _state.update {
+            it.copy(
+                // শুধু ডেপথ/ডিসপ্লে প্লেসহোল্ডার (YEAR মোডের "সাল" প্যাটার্নেই) — আসল
+                // subject/subTopic pair না, তাই এখান থেকে কোনো raw Room subject/subTopic
+                // query হয় না (নিচে entry.linkedQuestionIds দিয়েই সরাসরি হয়)
+                navPath = NavPath("পদ", institutionName),
+                currentPage = 0,
+                qbankSearchQuery = ""
+            )
+        }
+        viewModelScope.launch {
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val bookmarks = _state.value.bookmarkedIds
+
+            val items = repo.getRoomQuestionsByIds(StudyMode.QBANK.name, entry.linkedQuestionIds, tag)
+                .map { q ->
+                    q.copy(
+                        isBookmarked = bookmarks.contains(q.id),
+                        isWeakTopic  = isWeak(q.subTopic),
+                        isStudyDone  = isStudyDone(q.id)
+                    )
+                }.sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+
+            _state.update {
+                it.copy(
+                    questions      = items,
+                    totalQuestions = items.size,
+                    currentPage    = 0,
+                    isQuizActive   = true,
+                    showResult     = false,
+                    result         = null,
+                    answeredCount  = 0,
+                    timerSec       = 0,
+                    isLoading      = false
+                )
+            }
+            startTimer(items.size)
+        }
+    }
+
     /**
      * প্রতিষ্ঠান/সাল ফিল্টার মোডে থাকা অবস্থায় CoreScreen এই ফাংশন কল করে (generic
      * navigateBack()-এর বদলে) — কারণ generic navigateBack() শুধু পদবী(Designation)-মোডের
@@ -1426,6 +1737,29 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         questions = emptyList(), timerSec = 0, showResult = false, result = null
                     )
                 }
+            }
+            QBankFilterMode.POST -> when {
+                _state.value.navPath.depth() == 2 -> {
+                    // প্রশ্ন-লিস্ট থেকে এই পদের আন্ডারে প্রতিষ্ঠান-লিস্টে ফিরে যাও
+                    timerJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            navPath = NavPath(), isQuizActive = false, questions = emptyList(),
+                            timerSec = 0, showResult = false, result = null
+                        )
+                    }
+                }
+                _state.value.qbankSelectedPost != null -> {
+                    // প্রতিষ্ঠান-লিস্ট থেকে পদ-লিস্টে ফিরে যাও
+                    _state.update {
+                        it.copy(
+                            qbankSelectedPost = null,
+                            qbankInstitutionsUnderPost = emptyList(),
+                            qbankSearchQuery = ""
+                        )
+                    }
+                }
+                else -> {}
             }
             else -> {}
         }
@@ -1586,6 +1920,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             viewModelScope.launch { loadQBankYearQuestionsFromRoom(year, tag, safePage) }
+            return
+        }
+
+        // ── Phase 6: QBank পদ-মোড — navPath = NavPath("পদ", institutionName) একটা
+        // placeholder (দেখো selectQBankInstitutionUnderPost), আসল subject/subTopic pair
+        // না। এই লিস্ট Exam_Appearances-লিংকড questionId দিয়ে একবারেই সম্পূর্ণ লোড হয়
+        // (Room subject/subTopic pagination না), তাই এখানে goToPage() করার কিছু নেই —
+        // এটা ছাড়া নিচের কোড ভুল subject="পদ" দিয়ে Room query চালিয়ে ফেলত (খালি ফল দিত)।
+        if (_state.value.qbankFilterMode == QBankFilterMode.POST && _state.value.navPath.subject == "পদ") {
             return
         }
 

@@ -192,62 +192,41 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     // শুধু "কোথা থেকে পড়বে" ঠিক করে, "কোথায় লিখবে" না। ──
 
     /** Firebase অ্যাকশন-টাকে try/catch এ মুড়ে দেয় — exception হলেও ApiResult.Error রিটার্ন করে, throw করে না */
-    private suspend fun <T> fbBestEffort(
-        block: suspend () -> com.hanif.smartstudy.data.remote.ApiResult<T>
-    ): com.hanif.smartstudy.data.remote.ApiResult<T> =
-        try { block() } catch (e: Exception) {
-            com.hanif.smartstudy.data.remote.ApiResult.Error(e.message ?: "Firebase error")
-        }
+    // ── Phase 6 পূর্ণ কাটওভার (single-user account) — আগে এখানে Firebase RTDB-তেও
+    // "best-effort mirror" হিসেবে একসাথে লেখা হতো (dual-write), Sheet primary + Firebase
+    // backup। যেহেতু RTDB-র Quiz/QBank/Study node ডিলিটের পরিকল্পনা করা হচ্ছে, এখন থেকে
+    // এই তিনটে ফাংশন শুধুই Google Sheet/GAS-এ লেখে — fbBestEffort/Firebase mirror সরানো
+    // হয়েছে। GAS কনফিগার করা না থাকলে এখন সরাসরি error রিটার্ন করে (Firebase fallback নেই)।
 
     private suspend fun adminUpdateField(
         sheet: String, rowKey: String, fields: Map<String, String>
     ): com.hanif.smartstudy.data.remote.ApiResult<Unit> {
-        val fbResult = fbBestEffort {
-            com.hanif.smartstudy.data.remote.FirebaseDataService.adminUpdateQuestionField(sheet, rowKey, fields)
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) {
+            return com.hanif.smartstudy.data.remote.ApiResult.Error("Google Sheet কনফিগার করা নেই")
         }
-        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
         return when (val sheetResult = com.hanif.smartstudy.data.remote.GasContentService.updateFields(sheet, rowKey, fields)) {
             is com.hanif.smartstudy.data.remote.ApiResult.Success -> com.hanif.smartstudy.data.remote.ApiResult.Success(Unit)
-            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
-                else com.hanif.smartstudy.data.remote.ApiResult.Error(
-                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
-                )
+            is com.hanif.smartstudy.data.remote.ApiResult.Error -> com.hanif.smartstudy.data.remote.ApiResult.Error("Sheet: ${sheetResult.message}")
         }
     }
 
     private suspend fun adminDeleteRow(sheet: String, rowKey: String): com.hanif.smartstudy.data.remote.ApiResult<Unit> {
-        val fbResult = fbBestEffort {
-            com.hanif.smartstudy.data.remote.FirebaseDataService.adminDeleteQuestion(sheet, rowKey)
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) {
+            return com.hanif.smartstudy.data.remote.ApiResult.Error("Google Sheet কনফিগার করা নেই")
         }
-        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
         return when (val sheetResult = com.hanif.smartstudy.data.remote.GasContentService.deleteQuestion(sheet, rowKey)) {
             is com.hanif.smartstudy.data.remote.ApiResult.Success -> com.hanif.smartstudy.data.remote.ApiResult.Success(Unit)
-            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
-                else com.hanif.smartstudy.data.remote.ApiResult.Error(
-                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
-                )
+            is com.hanif.smartstudy.data.remote.ApiResult.Error -> com.hanif.smartstudy.data.remote.ApiResult.Error("Sheet: ${sheetResult.message}")
         }
     }
 
     private suspend fun adminAddRow(sheet: String, fields: Map<String, String>): com.hanif.smartstudy.data.remote.ApiResult<String> {
-        val fbResult = fbBestEffort {
-            com.hanif.smartstudy.data.remote.FirebaseDataService.adminAddQuestion(sheet, fields)
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) {
+            return com.hanif.smartstudy.data.remote.ApiResult.Error("Google Sheet কনফিগার করা নেই")
         }
-        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
-        val sheetResult = com.hanif.smartstudy.data.remote.GasContentService.addQuestion(sheet, fields)
-        return when (sheetResult) {
-            is com.hanif.smartstudy.data.remote.ApiResult.Success ->
-                // ── rowKey হিসেবে Firebase push-key-ই caller (repo.replaceLocalIdAndPersist ইত্যাদি)
-                // expect করে যদি Firebase mode সচল থাকে — Firebase সফল হলে সেই id-ই ব্যবহার করা হয়,
-                // নাহলে Sheet-এর দেওয়া sequential id (GAS নিজে বানায়) ব্যবহার হয়। ──
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult else sheetResult
-            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
-                else com.hanif.smartstudy.data.remote.ApiResult.Error(
-                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
-                )
+        return when (val sheetResult = com.hanif.smartstudy.data.remote.GasContentService.addQuestion(sheet, fields)) {
+            is com.hanif.smartstudy.data.remote.ApiResult.Success -> sheetResult
+            is com.hanif.smartstudy.data.remote.ApiResult.Error -> com.hanif.smartstudy.data.remote.ApiResult.Error("Sheet: ${sheetResult.message}")
         }
     }
 
@@ -804,6 +783,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: load list of phones that have debug logs ──
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 📋 Logs ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin Web
+    // App-এ ডুপ্লিকেট ছিল), তাই এই ফাংশনের এখন কোনো caller নেই। ডিলিট না করে শুধু
+    // @Deprecated রাখা হলো (safe cleanup পরে, MenuUiState.debugLogPhones/debugLogs field
+    // দুটোও একইসাথে সরানো যাবে যখন নিশ্চিত হওয়া যাবে অন্য কোথাও লাগছে না)।
+    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadDebugLogPhones() {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -817,6 +801,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: load logs for a phone (or "" = own phone) ──
+    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadDebugLogs(phone: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -1180,6 +1165,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     fun clearEditMsg() { _state.update { it.copy(editSuccessMsg = null) } }
 
     // ── Admin: Report Queue ───────────────────────────────────
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🚩 Reports ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
+    // Web App-এ ডুপ্লিকেট ছিল), তাই এই দুটো ফাংশনের এখন কোনো caller নেই। ডিলিট না করে
+    // শুধু @Deprecated রাখা হলো।
+    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun loadPendingReports() {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -1194,6 +1183,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Report resolve + reporter কে notification পাঠাও */
+    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun resolveReport(
         reportKey      : String,
         status         : String,
@@ -1437,6 +1427,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: Bulk Audience Update ───────────────────────────
+    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
+    // Web App-এ ডুপ্লিকেট + পুরনো raw-text subject/sub_topic matching-এর ওপর নির্ভরশীল
+    // ছিল, দেখো FirebaseDataService.adminBulkAudienceUpdate-এর @Deprecated নোট) — তাই এই
+    // wrapper-এর এখন কোনো caller নেই।
+    @Deprecated("AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
     fun adminBulkAudienceUpdate(sheet: String, subject: String, subTopic: String, newTag: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
@@ -1461,24 +1456,18 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Rename-ও এখন adminUpdateField/adminDeleteRow/adminAddRow-এর মতোই dual-write:
     // Sheet কনফিগার থাকলে সেটাই প্রাইমারি ফলাফল, Firebase শুধু best-effort মিরর ──
+    // ── Phase 6 পূর্ণ কাটওভার — দেখো adminUpdateField-এর ওপরের নোট, একই কারণ প্রযোজ্য ──
     private suspend fun adminRenameBoth(
         sheets: List<String>, oldSubject: String, oldSubTopic: String,
         newName: String, renameSubTopic: Boolean
     ): com.hanif.smartstudy.data.remote.ApiResult<Int> {
-        val fbResult = fbBestEffort {
-            com.hanif.smartstudy.data.remote.FirebaseDataService
-                .adminRenameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) {
+            return com.hanif.smartstudy.data.remote.ApiResult.Error("Google Sheet কনফিগার করা নেই")
         }
-        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
-        val sheetResult = com.hanif.smartstudy.data.remote.GasContentService
-            .renameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)
-        return when (sheetResult) {
+        return when (val sheetResult = com.hanif.smartstudy.data.remote.GasContentService
+                .renameSubjectOrTopic(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
             is com.hanif.smartstudy.data.remote.ApiResult.Success -> sheetResult
-            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
-                else com.hanif.smartstudy.data.remote.ApiResult.Error(
-                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
-                )
+            is com.hanif.smartstudy.data.remote.ApiResult.Error -> com.hanif.smartstudy.data.remote.ApiResult.Error("Sheet: ${sheetResult.message}")
         }
     }
 
@@ -1513,23 +1502,17 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Delete-ও rename এর মতোই dual-write: Sheet কনফিগার থাকলে প্রাইমারি ফলাফল,
     // Firebase শুধু best-effort মিরর ──
+    // ── Phase 6 পূর্ণ কাটওভার — দেখো adminUpdateField-এর ওপরের নোট, একই কারণ প্রযোজ্য ──
     private suspend fun adminDeleteBySubjectBoth(
         sheets: List<String>, subject: String, subTopic: String, deleteSubTopic: Boolean
     ): com.hanif.smartstudy.data.remote.ApiResult<Int> {
-        val fbResult = fbBestEffort {
-            com.hanif.smartstudy.data.remote.FirebaseDataService
-                .adminDeleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) {
+            return com.hanif.smartstudy.data.remote.ApiResult.Error("Google Sheet কনফিগার করা নেই")
         }
-        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return fbResult
-        val sheetResult = com.hanif.smartstudy.data.remote.GasContentService
-            .deleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)
-        return when (sheetResult) {
+        return when (val sheetResult = com.hanif.smartstudy.data.remote.GasContentService
+                .deleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)) {
             is com.hanif.smartstudy.data.remote.ApiResult.Success -> sheetResult
-            is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                if (fbResult is com.hanif.smartstudy.data.remote.ApiResult.Success) fbResult
-                else com.hanif.smartstudy.data.remote.ApiResult.Error(
-                    "Sheet: ${sheetResult.message}" + (fbResult as? com.hanif.smartstudy.data.remote.ApiResult.Error)?.let { " | Firebase: ${it.message}" }.orEmpty()
-                )
+            is com.hanif.smartstudy.data.remote.ApiResult.Error -> com.hanif.smartstudy.data.remote.ApiResult.Error("Sheet: ${sheetResult.message}")
         }
     }
 

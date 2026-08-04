@@ -6,11 +6,9 @@ import com.google.gson.JsonObject
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.CaseInsensitiveGson
-import com.hanif.smartstudy.data.model.DataSourceMode
 import com.hanif.smartstudy.data.model.QBankItem
 import com.hanif.smartstudy.data.model.QuizItem
 import com.hanif.smartstudy.data.model.StudyItem
-import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -43,11 +41,14 @@ object ContentFetchService {
     // জরুরি প্রয়োজনে Settings-এ Data Source ড্রপডাউন থেকে ম্যানুয়ালি রিফ্রেশ করা যায়।
     private const val SHEET_META_SAFE_GAP_MS = 6 * 60 * 60_000L
 
-    // ── Settings-এ "Data Source" ড্রপডাউন থেকে "Google Sheet" সিলেক্ট করা থাকলে
-    // Firebase বাইপাস করে GasContentService (GAS Web App প্রক্সি) ব্যবহার হয়।
-    // দেখো GasContentService.kt-এর ডকুমেন্টেশন কমেন্ট — READ/WRITE উভয় পাশেই। ──
-    private fun isGoogleSheetMode(context: Context): Boolean =
-        SessionManager(context).getDataSourceMode() == DataSourceMode.GOOGLE_SHEET
+    // ── পূর্ণ কাটওভার (single-user account) — Quiz/QBank/Study এখন থেকে সবসময় Google
+    // Sheet/GAS থেকে আসবে, Firebase RTDB-র সেই node গুলো আর পড়া হয় না। আগে এটা
+    // Settings-এর "Data Source" ড্রপডাউন (DataStore-এ সেভ করা) দিয়ে ঠিক হতো — এখন
+    // hardcode করা হলো যাতে ডিভাইসে পুরনো/স্টেল "firebase" সেটিং থাকলেও ভুলবশত RTDB-তে
+    // ফিরে না যায় (RTDB-র Quiz/QBank/Study node শীঘ্রই ডিলিট হয়ে যাবে বলে)। SubjectOrder/
+    // SubTopicOrder/Typing/ModelTests — এই node গুলো আলাদা concern, এখনো Firebase-এই আছে,
+    // এই কাটওভার শুধু Quiz/QBank/Study content-এর জন্য।
+    private fun isGoogleSheetMode(context: Context): Boolean = true
 
     /** Firebase Auth ID Token দিয়ে secure auth param */
     private suspend fun authParam(): String {

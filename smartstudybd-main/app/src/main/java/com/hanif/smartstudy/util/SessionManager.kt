@@ -98,6 +98,11 @@ class SessionManager(private val context: Context) {
         // ── Typing Practice: বেস্ট WPM + সাম্প্রতিক সেশনগুলোর হিস্ট্রি ──
         val KEY_TYPING_BEST_WPM  = intPreferencesKey("typing_best_wpm")
         val KEY_TYPING_HISTORY   = stringPreferencesKey("typing_history")   // JSON: [{date,wpm,rawWpm,accuracy,timeSec}]
+        // ── ডিফল্ট (non-custom) Sheet-পুলে সর্বশেষ যেই প্যাসেজ ইনডেক্স দেখানো হয়েছিল, তা
+        // persist করে রাখা হয় — আগে persist না থাকায় অ্যাপ বন্ধ করে আবার Typing Practice
+        // খুললেই পুলের প্রথম (index 0) প্যাসেজটাই বারবার দেখা যেত। দেখো
+        // getTypingLastPassageIndex()/setTypingLastPassageIndex() ও TypingPracticeScreen.kt ──
+        val KEY_TYPING_LAST_PASSAGE_INDEX = intPreferencesKey("typing_last_passage_index")
 
         // ── Typing Practice: Daily Discipline Mode (optional, non-coercive) —
         // চালু থাকলে প্রতিদিনের টাইপিং-সময় ট্র্যাক হয় ও লক্ষ্যের সাপেক্ষে progress দেখানো হয়।
@@ -106,18 +111,6 @@ class SessionManager(private val context: Context) {
         val KEY_TYPING_DAILY_GOAL_MIN  = intPreferencesKey("typing_daily_goal_min")   // ডিফল্ট ৬০
         val KEY_TYPING_TODAY_SECONDS   = intPreferencesKey("typing_today_seconds")
         val KEY_TYPING_TODAY_DATE      = stringPreferencesKey("typing_today_date")
-        // ── পর্ব ২.৩ ফিচার #৬: স্ট্রিক-ক্যালেন্ডার হিটম্যাপের ডেটা-সোর্স — date -> seconds
-        // (JSON ম্যাপ, ছোট থাকে বলে ইচ্ছাকৃতভাবে trim করা হয়নি — বছরে ~৩৬৫ এন্ট্রি, নগণ্য সাইজ) ──
-        val KEY_TYPING_DAILY_MAP       = stringPreferencesKey("typing_daily_minutes_map")
-        // ── প্যাসেজ-পুনরাবৃত্তি এড়ানো (অ্যাপ-রিস্টার্ট/স্ক্রিন-পুনঃপ্রবেশের পরও) — শেষ কয়েকটা
-        // দেখানো প্যাসেজের hash — Normal Typing স্ক্রিনে ঢোকার সময় এগুলো বাদ দিয়ে বাছাই হয় ──
-        val KEY_TYPING_RECENT_PASSAGES = stringPreferencesKey("typing_recent_passage_hashes")
-        // ── পর্ব-১ #১৫ (মাল্টি-লেআউট সিলেক্টর) — ইউজার কোন কীবোর্ড-লেআউটে টাইপ করছে তা
-        // মনে রাখা (bijoy/national/phonetic/probhat/unibijoy/software) — শুধু UI প্রেফারেন্স,
-        // কোর টাইপিং-ইঞ্জিনে কোনো প্রভাব নেই (আউটপুট-ক্যারেক্টার-ভিত্তিক ট্র্যাকিং, তাই
-        // ফলাফল যেকোনো লেআউটেই সঠিক) — শুধু Live Key Highlight ভিজ্যুয়াল ফিচার এটার ওপর
-        // নির্ভর করে (দেখো TypingPracticeScreen.kt) ──
-        val KEY_TYPING_KEYBOARD_LAYOUT = stringPreferencesKey("typing_keyboard_layout")
         
         val KEY_NIGHT_ON         = booleanPreferencesKey("night_on")
         val KEY_NIGHT_HOUR       = intPreferencesKey("night_hour")
@@ -557,6 +550,18 @@ class SessionManager(private val context: Context) {
         }
     }
 
+    /** সর্বশেষ persist করা ডিফল্ট-পুল প্যাসেজ ইনডেক্স — কখনো সেট না হয়ে থাকলে -1
+     *  (যাতে caller-এর lastIdx+1 হিসাব প্রথমবার স্বাভাবিকভাবেই 0 থেকে শুরু হয়)। */
+    fun getTypingLastPassageIndex(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_LAST_PASSAGE_INDEX] ?: -1
+    }
+
+    /** একটা ডিফল্ট-পুল প্যাসেজ দেখানো/শেষ হওয়ার পর কল করো — পরের বার স্ক্রিন খুললে
+     *  এই ইনডেক্সের পরেরটা থেকে রোটেশন শুরু হবে (দেখো TypingPracticeScreen.kt)। */
+    suspend fun setTypingLastPassageIndex(index: Int) {
+        context.dataStore.edit { it[KEY_TYPING_LAST_PASSAGE_INDEX] = index }
+    }
+
     fun getTypingHistory(): List<TypingHistoryEntry> = runBlocking {
         val json = context.dataStore.data.first()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
         return@runBlocking try {
@@ -643,58 +648,6 @@ class SessionManager(private val context: Context) {
             it[KEY_TYPING_TODAY_DATE]    = today
             it[KEY_TYPING_TODAY_SECONDS] = base + seconds
         }
-        addTypingSecondsToDailyMap(seconds)
-    }
-
-    /** পর্ব ২.৩ ফিচার #৬: প্রতিদিনের মোট টাইপিং-সেকেন্ড আলাদাভাবে জমা রাখে (date -> seconds),
-     *  স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — addTypingSecondsToday()-এর ভেতর থেকেই কল হয়,
-     *  আলাদা করে কল করার দরকার নেই। */
-    private suspend fun addTypingSecondsToDailyMap(seconds: Int) {
-        val prefs = context.dataStore.data.first()
-        val json  = prefs[KEY_TYPING_DAILY_MAP] ?: "{}"
-        val type  = object : TypeToken<MutableMap<String, Double>>() {}.type
-        val map: MutableMap<String, Double> = try { gson.fromJson(json, type) ?: mutableMapOf() } catch (e: Exception) { mutableMapOf() }
-        val today = todayString()
-        map[today] = (map[today] ?: 0.0) + seconds
-        context.dataStore.edit { it[KEY_TYPING_DAILY_MAP] = gson.toJson(map) }
-    }
-
-    /** স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — date string ("YYYY-M-D") -> মিনিট */
-    fun getDailyPracticeMinutes(): Map<String, Int> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_DAILY_MAP] ?: "{}"
-        val type = object : TypeToken<Map<String, Double>>() {}.type
-        val map: Map<String, Double> = try { gson.fromJson(json, type) ?: emptyMap() } catch (e: Exception) { emptyMap() }
-        map.mapValues { (it.value / 60).toInt() }
-    }
-
-    /** প্যাসেজ-পুনরাবৃত্তি এড়ানো — Normal Typing-এ কোনো প্যাসেজ ইউজারকে দেখানো হলেই (সম্পূর্ণ
-     *  করুক বা না করুক) এটা কল করে জমা রাখা হয়, যাতে অ্যাপ রিস্টার্ট করলেও ঠিক ওই একই
-     *  প্যাসেজটাই আবার প্রথমে ফিরে না আসে (শেষ ৮টার hash জমা থাকে, most-recent-last)। */
-    suspend fun recordShownPassage(text: String) {
-        val prefs = context.dataStore.data.first()
-        val json  = prefs[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
-        val type  = object : TypeToken<MutableList<Int>>() {}.type
-        val list: MutableList<Int> = try { gson.fromJson(json, type) ?: mutableListOf() } catch (e: Exception) { mutableListOf() }
-        val h = text.hashCode()
-        list.remove(h)   // ডুপ্লিকেট থাকলে সরিয়ে শেষে যোগ (most-recent-last অর্ডার বজায় রাখতে)
-        list.add(h)
-        val trimmed = if (list.size > 8) list.takeLast(8) else list
-        context.dataStore.edit { it[KEY_TYPING_RECENT_PASSAGES] = gson.toJson(trimmed) }
-    }
-
-    /** getRecentPassageHashes() — এই hash-গুলো বাদ দিয়ে পরের প্যাসেজ বাছাই করা উচিত */
-    fun getRecentPassageHashes(): Set<Int> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
-        val type = object : TypeToken<List<Int>>() {}.type
-        try { (gson.fromJson(json, type) ?: emptyList<Int>()).toSet() } catch (e: Exception) { emptySet() }
-    }
-
-    /** পর্ব-১ #১৫: ইউজারের বেছে নেওয়া কীবোর্ড-লেআউট — ডিফল্ট "bijoy" */
-    fun getKeyboardLayout(): String = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_KEYBOARD_LAYOUT] ?: "bijoy"
-    }
-    suspend fun setKeyboardLayout(layout: String) {
-        context.dataStore.edit { it[KEY_TYPING_KEYBOARD_LAYOUT] = layout }
     }
 
 
