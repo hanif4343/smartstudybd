@@ -204,6 +204,22 @@ interface QuestionDao {
     """)
     suspend fun getByFbKeysFiltered(sheet: String, ids: List<String>, tag: String): List<QuestionEntity>
 
+    // ── Review System (Admin-only): লোকাল Room cache-এ reviewed status আপডেট —
+    // GAS-এ লেখার পর Room-ও সাথে সাথে sync রাখার জন্য (fresh fetch ছাড়াই cache নির্ভুল থাকে) ──
+    @Query("UPDATE questions SET reviewed = :reviewed, reviewedAt = :reviewedAt WHERE sheet = :sheet AND fbKey = :fbKey")
+    suspend fun updateReviewed(sheet: String, fbKey: String, reviewed: Boolean, reviewedAt: Long)
+
+    // ── Progressive topic-fill: এই topicId-এর জন্য এখন পর্যন্ত Room-এ যতটুকু cache
+    // হয়েছে সব — audience-filtered। GAS getQuestionsPage থেকে ব্যাচ-ব্যাচ করে এখানে জমা
+    // হয় (দেখো ContentRepository.cacheNextTopicBatch) ──
+    @Query("""
+        SELECT * FROM questions
+        WHERE sheet = :sheet AND topicId = :topicId
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+        ORDER BY fbKey
+    """)
+    suspend fun getByTopicId(sheet: String, topicId: String, tag: String): List<QuestionEntity>
+
     // ── Global search — Room cache (offline/persistent) থেকে সব ফিল্ড মিলিয়ে খোঁজে।
     // ⚠️ Phase 6 ফিক্স: আগে এখানে audience-tag ফিল্টার ছিলই না — যেকোনো ইউজারের সার্চে
     // অন্য audience group-এর (ভিন্ন চাকরি/ক্লাসের) প্রশ্নও চলে আসতো, আর LIMIT 50-এর
