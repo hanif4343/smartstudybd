@@ -61,12 +61,34 @@ object ContentFetchService {
      * এই দুটো ছোট node, খুব দ্রুত আসে।
      * Subject list + SubTopic list দেখাতে এটুকুই যথেষ্ট।
      * Questions এর জন্য fetchAllContent() আলাদাভাবে background-এ চলবে।
+     *
+     * ⚠️ কল করা হয় না — বর্তমানে কোনো ViewModel এই ফাংশন ব্যবহার করে না। আসল Subject-list
+     * flow এখন QuizViewModel.rebuildSubjectsLazy() → ContentRepository.syncReferenceData()
+     * → GasContentService.fetchReferenceData() → Room (দেখো ContentRepository.kt, Phase 6),
+     * যেটা ইনস্ট্যান্ট (প্রশ্ন ডাউনলোড ছাড়াই)। এই ফাংশনটা আগে GAS মোডে সরাসরি
+     * GasContentService.fetchAllContent() কল করত — অর্থাৎ পুরো ~১৪,০০০ row টেনে নিত শুধু
+     * subject লিস্টের জন্য, যেটাই স্লো-নেটওয়ার্কে "কোনো Subject পাওয়া যায়নি" স্পিনার/টাইমআউটের
+     * মূল কারণ ছিল। ভবিষ্যতে কোথাও আবার কল হলে যাতে সেই একই ভারী-fetch landmine ফিরে না
+     * আসে, তাই এখানেও একই lightweight getReferenceData path ব্যবহার করা হলো — subject
+     * তালিকা Room-এ populate হয়ে যায়, questions=empty/fetchedAt=0L (আগের Firebase FAST
+     * PATH-এর কনভেনশন মেনে) রিটার্ন হয়, caller প্রয়োজনে আলাদাভাবে fetchAllContent() চালাবে।
      */
     suspend fun fetchSubjectsOnly(context: Context): ContentResult<AppContent> = withContext(Dispatchers.IO) {
-        // Google Sheet মোডে subjects-only দ্রুত fetch করার আলাদা GAS action নেই
-        // (SubjectOrder/SubTopicOrder Firebase-only node) — পুরো content-ই আনা হয়,
-        // subject list সেখান থেকেই বের করা যাবে (item.subject ফিল্ড থেকে)।
-        if (isGoogleSheetMode(context)) return@withContext GasContentService.fetchAllContent()
+        if (isGoogleSheetMode(context)) {
+            Log.d(TAG, "=== FAST FETCH (Sheet mode): getReferenceData only, NOT fetchAllContent ===")
+            val ref = GasContentService.fetchReferenceData()
+            return@withContext if (ref == null) {
+                ContentResult.Error("Google Sheet থেকে subject তালিকা আনা যায়নি")
+            } else {
+                Log.d(TAG, "FAST FETCH (Sheet) done: subjects=${ref.subjects.size} topics=${ref.topics.size}")
+                ContentResult.Success(
+                    AppContent(
+                        quiz = emptyList(), qbank = emptyList(), study = emptyList(),
+                        fetchedAt = 0L   // 0L মানে questions এখনো আসেনি — fetchAllContent() আলাদাভাবে লাগবে
+                    )
+                )
+            }
+        }
         Log.d(TAG, "=== FAST FETCH: SubjectOrder + SubTopicOrder only ===")
         try {
             coroutineScope {
