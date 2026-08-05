@@ -140,6 +140,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private var timerJob: Job? = null
     private var loadJob: Job? = null   // cancellable load job
+
+    // ── FIX: টপিক পরিবর্তনের রেস-কন্ডিশন বাগ — আগে দ্রুত একের পর এক টপিক পাল্টালে
+    // ধীরগতির আগের টপিকের রেসপন্স পরে এসে নতুন টপিকের প্রশ্ন ওভাররাইট করে ফেলতো।
+    // এখন (ক) আগের টপিক-লোড job সবসময় cancel করা হয়, এবং (খ) প্রতিটা রিকোয়েস্টের
+    // নিজস্ব token থাকে — রেসপন্স ফিরলে token না মিললে (মানে ততক্ষণে অন্য টপিকে
+    // চলে যাওয়া হয়েছে) সেই stale রেসপন্স চুপচাপ ফেলে দেওয়া হয়, state আপডেট হয় না। ──
+    private var subTopicLoadJob: Job? = null
+    private var subTopicLoadToken: Long = 0L
     private val prefs = app.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
 
     // init এ কিছু করি না — setMode() call আসার জন্য অপেক্ষা
@@ -305,12 +313,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val subject = _state.value.navPath.subject ?: return
         val topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
         timerJob?.cancel()
+
+        // আগের টপিকের জন্য চলমান লোড থাকলে সাথে সাথে বাতিল করো, আর এই রিকোয়েস্টের
+        // নিজস্ব token নাও — নিচে রেসপন্স ফেরার পর এই token দিয়ে স্টেল-চেক হবে।
+        subTopicLoadJob?.cancel()
+        val myToken = ++subTopicLoadToken
+
         _state.update { it.copy(navPath = NavPath(subject, topicName), currentPage = 0, isLoading = true) }
         if (topicId.isBlank()) {
             _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি") }
             return
         }
-        viewModelScope.launch {
+        subTopicLoadJob = viewModelScope.launch {
             val sheet = when (_state.value.mode) {
                 StudyMode.QUIZ  -> "Quiz"
                 StudyMode.QBANK -> "QBank"
@@ -329,6 +343,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 Log.w("QuizVM", "cacheNextTopicBatch failed (offline?): ${e.message}")
             }
 
+            // ── FIX: নেটওয়ার্ক কল চলাকালীন ইউজার অন্য টপিকে চলে গেলে (myToken আর
+            // বর্তমান subTopicLoadToken এক থাকবে না) — এই stale রেসপন্স দিয়ে state
+            // update করা চলবে না, নাহলে এটাই ছিল বাগ: পুরনো টপিকের প্রশ্ন পরে এসে
+            // নতুন টপিকের প্রশ্ন ওভাররাইট করে ফেলতো। ──
+            if (myToken != subTopicLoadToken) {
+                Log.d("QuizVM", "navigateToSubTopicLazy: stale response for $topicName ($topicId) ignored")
+                return@launch
+            }
+
             val bookmarks = _state.value.bookmarkedIds
             val items = repo.getRoomQuestionsForTopic(sheet, topicId, tag).map { q ->
                 q.copy(
@@ -338,6 +361,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=${items.size}")
+
+            // দ্বিতীয়বার চেক — Room থেকে items বের করতেও কিছুটা সময় লাগে, ততক্ষণে
+            // আবার টপিক পাল্টে যেতে পারে, তাই state বসানোর ঠিক আগে আবার token যাচাই
+            if (myToken != subTopicLoadToken) {
+                Log.d("QuizVM", "navigateToSubTopicLazy: stale response (post-fetch) for $topicName ($topicId) ignored")
+                return@launch
+            }
 
             if (items.isEmpty()) {
                 _state.update { it.copy(isLoading = false, error = "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো") }
