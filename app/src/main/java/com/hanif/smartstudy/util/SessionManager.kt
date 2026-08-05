@@ -160,13 +160,6 @@ class SessionManager(private val context: Context) {
         // "app opening slow" মনে হওয়ার একটা বড় কারণ ছিল।
         val KEY_ASKED_EXACT_ALARM  = booleanPreferencesKey("asked_exact_alarm")
         val KEY_ASKED_BATTERY_OPT  = booleanPreferencesKey("asked_battery_opt")
-
-        // ── Phase 6 (db-migration-v2): Admin App-এর Sheet schema মাইগ্রেশনে (Phase 5)
-        // সব প্রশ্নের ID রিজেনারেট হয়েছে — পুরনো bookmarks/wrong-answer/progress/
-        // study-done ডেটা (নিচের clearStaleContentIdCacheIfNeeded() দেখো) পুরনো ID দিয়ে
-        // সেভ ছিল, নতুন ID-র সাথে আর মিলবে না। এই ফ্ল্যাগ দিয়ে per-install একবারই সেই
-        // পুরনো cache ক্লিয়ার করা হয়।
-        val KEY_CONTENT_SCHEMA_V2_MIGRATED = booleanPreferencesKey("content_schema_v2_migrated")
     }
 
     // ── User ──────────────────────────────────────────────────
@@ -791,37 +784,5 @@ class SessionManager(private val context: Context) {
     }
     suspend fun setAdminAudienceTag(tag: String) {
         context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
-    }
-
-    // ── Phase 6 (db-migration-v2): পুরনো content-ID cache ক্লিয়ার ──
-    //
-    // QuizViewModel-এ bookmarks/wrong-answer/progress/study-done সবকিছুই একটা প্লেইন
-    // SharedPreferences ফাইলে ("quiz_prefs", SessionManager-এর DataStore থেকে আলাদা)
-    // প্রশ্নের sourceKey() (উদাহরণ: "QUIZ:-Nx7abc...") দিয়ে সেভ থাকে। Admin App-এর Sheet
-    // schema মাইগ্রেশনে (Phase 5) সব প্রশ্নের ID রিজেনারেট হয়েছে — তাই এই পুরনো ID-গুলো
-    // এখন orphaned: নতুন প্রশ্নের সাথে আর কখনো মিলবে না। এতে crash হয় না, কিন্তু —
-    //   ১) bookmark/progress/wrong-answer ইউজারের কাছে "হারিয়ে গেছে" মনে হবে
-    //   ২) মৃত এন্ট্রিগুলো SharedPreferences-এ চিরকাল জমে থাকবে
-    // ম্যানুয়ালি app data clear করতে বলার বদলে এই ফাংশন per-install একবারই (DataStore
-    // ফ্ল্যাগ KEY_CONTENT_SCHEMA_V2_MIGRATED দিয়ে গার্ড করা) সেই পুরনো কী-গুলো মুছে দেয়।
-    // MainActivity.onCreate()-এ একবার কল হয়।
-    //
-    // "weak_<subTopic>" কী-গুলো ইচ্ছাকৃতভাবে বাদ রাখা হয়েছে — এগুলো subTopic নামের ওপর
-    // (ID-র ওপর না) নির্ভর করে, আর মাইগ্রেশনে subTopic-এর টেক্সট নাম বদলায়নি (শুধু নতুন
-    // subject_id/topic_id কলাম যোগ হয়েছে) — তাই এগুলো নিরাপদ, মুছে দেওয়ার দরকার নেই।
-    fun clearStaleContentIdCacheIfNeeded() = runBlocking {
-        val already = context.dataStore.data.first()[KEY_CONTENT_SCHEMA_V2_MIGRATED] ?: false
-        if (already) return@runBlocking
-
-        val quizPrefs = context.getSharedPreferences("quiz_prefs", Context.MODE_PRIVATE)
-        quizPrefs.edit()
-            .remove("bookmarks")
-            .remove("study_done_ids")
-            .remove("progress")
-            .remove("wrong_q_ids")
-            .remove("wrong_q_count")
-            .apply()
-
-        context.dataStore.edit { it[KEY_CONTENT_SCHEMA_V2_MIGRATED] = true }
     }
 }
