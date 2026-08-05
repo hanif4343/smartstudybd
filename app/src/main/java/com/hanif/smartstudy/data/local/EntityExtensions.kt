@@ -106,8 +106,11 @@ fun TopicRef.toEntity() = TopicEntity(
     topicId   = topicId ?: "",
     subjectId = subjectId ?: "",
     name      = name ?: "",
-    rowStart  = rowStart ?: 0,
-    rowCount  = rowCount ?: 0
+    // rowStart/rowCount এখন String? (দেখো ReferenceModels.kt-এর কমেন্ট) — "" বা অন্য
+    // অ-সংখ্যা মান এলে toIntOrNull() null দেয়, তখন ডিফল্ট 0 (মানে "এই topic-এ এখনো
+    // index/প্রশ্ন নেই", crash না করে)
+    rowStart  = rowStart?.toIntOrNull() ?: 0,
+    rowCount  = rowCount?.toIntOrNull() ?: 0
 )
 
 fun SubTopicRef.toEntity() = SubTopicEntity(
