@@ -33,11 +33,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.model.BijoyCurriculum
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.CurriculumProvider
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.TypingAdaptiveContentProvider
+import com.hanif.smartstudy.util.TypingErrorAnalyzer
 import com.hanif.smartstudy.util.TypingKeyStatStore
+import com.hanif.smartstudy.util.TypingMistakeLogger
+import com.hanif.smartstudy.util.TypingPassageProvider
+import com.hanif.smartstudy.util.TtsManager
 import com.hanif.smartstudy.viewmodel.TypingSessionViewModel
 import kotlinx.coroutines.launch
 
@@ -78,6 +84,19 @@ fun SmartTypingScreen(
     var blindMode by remember { mutableStateOf(false) }
     var showKeyAnalysis by remember { mutableStateOf(false) }
     var keyAnalysisList by remember { mutableStateOf(listOf<TypingKeyStatStore.KeyAnalysis>()) }
+    // ── পর্ব ৩/৫.৩ ধাপ ২: দুর্বল-শব্দ ড্যাশবোর্ড + এই-সেশনের ভুল-শব্দ ট্র্যাকিং ──
+    var weakWordDashboard by remember { mutableStateOf(listOf<String>()) }
+    var sessionMistakeWords by remember { mutableStateOf(listOf<String>()) }
+    // ── পর্ব ৩/৫.৩ ধাপ ২ (বাকি অংশ): AI Adaptive Session — দুই-ফেজ, ফেজ ১ (৩ মিনিট,
+    // pool-প্যাসেজ) চলাকালীন ব্যাকগ্রাউন্ডে ফেজ-২-এর AI-blended (দুর্বল-শব্দ-ভিত্তিক)
+    // প্যাসেজ ফেচ হয় ──
+    var allPassages by remember { mutableStateOf(listOf<PassageInfo>()) }
+    var adaptivePhase by remember { mutableStateOf(1) }
+    var phase2Passage by remember { mutableStateOf<String?>(null) }
+    var phase2Source by remember { mutableStateOf<String?>(null) }
+    var phase2Fetching by remember { mutableStateOf(false) }
+    var showAdaptiveTransition by remember { mutableStateOf(false) }
+    var adaptivePhase1Result by remember { mutableStateOf<TypingResult?>(null) }
 
     val allUnlockedKeys = remember(curriculumTrack, curriculumStage) {
         BijoyCurriculum.stagesFor(curriculumTrack).take(curriculumStage).flatten()
@@ -134,7 +153,81 @@ fun SmartTypingScreen(
         }
     }
 
-    LaunchedEffect(Unit) { startCurriculumSession("bn") }
+    /** "🎯 AI Adaptive Session" বাটনে ট্যাপ করলে কল হয় — ফেজ ১ (৩ মিনিট, সাধারণ পুল-
+     *  প্যাসেজ) দিয়ে শুরু, ব্যাকগ্রাউন্ডে ফেজ-২-এর AI-blended প্যাসেজ তৈরি হতে থাকে। */
+    fun startAdaptiveSession(language: String) {
+        adaptivePhase = 1
+        phase2Passage = null; phase2Source = null; phase2Fetching = false
+        showAdaptiveTransition = false; adaptivePhase1Result = null
+        sessionMistakeWords = emptyList()
+        val pool = allPassages.filter { TypingErrorAnalyzer.detectLanguage(it.text) == language }.ifEmpty { allPassages }
+        vm.startSession("adaptive", pool, budgetSec = ADAPTIVE_PHASE1_SECONDS, language = language)
+    }
+
+    fun startAdaptivePhase2() {
+        adaptivePhase = 2; showAdaptiveTransition = false
+        val text = phase2Passage ?: return
+        vm.startSession("adaptive", listOf(PassageInfo(text, "ai")), budgetSec = ADAPTIVE_PHASE1_SECONDS, language = curriculumTrack)
+    }
+
+    // ── ফেজ ১ চলাকালীন — নির্দিষ্ট সময়ে (৩ মিনিটের ১ মিনিট আগে) ব্যাকগ্রাউন্ডে
+    // ফেজ-২-এর AI-blended প্যাসেজ ফেচ শুরু হয় (এই সেশনের ভুল-শব্দ, না থাকলে DB-র
+    // পুরনো দুর্বল-শব্দ ব্যবহার করে) ──
+    LaunchedEffect(state.elapsedSec, state.sessionMode, adaptivePhase, state.isStarted, state.isFinished) {
+        if (state.sessionMode != "adaptive" || adaptivePhase != 1 || !state.isStarted || state.isFinished) return@LaunchedEffect
+        if (state.elapsedSec < ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS || phase2Passage != null || phase2Fetching) return@LaunchedEffect
+        phase2Fetching = true
+        val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+        val weak = sessionMistakeWords.distinct().take(10).ifEmpty {
+            AppDatabase.getInstance(ctx).typingMistakeDao().getTopWeakWords(userId, curriculumTrack, limit = 10).map { it.targetWord }
+        }
+        val res = TypingAdaptiveContentProvider.getBlendedPassage(ctx, weak, curriculumTrack, "medium", null)
+        phase2Passage = res.passage
+        phase2Source = when (res.source) {
+            TypingAdaptiveContentProvider.Source.Cache -> "cache"
+            TypingAdaptiveContentProvider.Source.LiveAi -> "live_ai"
+            TypingAdaptiveContentProvider.Source.Fallback -> "fallback"
+        }
+        phase2Fetching = false
+    }
+
+    // ── ফেজ ১ শেষ হলে (সময়/প্যাসেজ-সম্পূর্ণ, দুটোতেই) — ফলাফল জমা রেখে ট্রানজিশন
+    // কার্ড দেখানো (ফেজ-২ প্যাসেজ রেডি থাকলে "শুরু করো" বাটন সক্রিয় থাকবে) ──
+    LaunchedEffect(state.isFinished, state.result) {
+        val r = state.result ?: return@LaunchedEffect
+        if (!state.isFinished || state.sessionMode != "adaptive") return@LaunchedEffect
+        if (adaptivePhase == 1 && adaptivePhase1Result == null) {
+            adaptivePhase1Result = r
+            showAdaptiveTransition = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        vm.syncFromCloud()
+        val userId = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest"
+        weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
+            .getTopWeakWords(userId, "bn", limit = 10).map { it.targetWord } +
+            AppDatabase.getInstance(ctx).typingMistakeDao()
+                .getTopWeakWords(userId, "en", limit = 5).map { it.targetWord }
+        startCurriculumSession("bn")
+        allPassages = TypingPassageProvider.getPassages(ctx)
+    }
+
+    // ── পর্ব ৩/৫.৩ ধাপ ২: প্রতিটা "লক" হওয়া শব্দ TypingMistakeLogger-এ লগ হয় (spaced-
+    // repetition দুর্বল-শব্দ ট্র্যাকিং), আর এই সেশনের ভুল শব্দগুলো লোকাল লিস্টে জমা হয় ──
+    LaunchedEffect(state.lastLockedWordIndex) {
+        if (state.lastLockedWordIndex < 0) return@LaunchedEffect
+        val target = state.lastLockedWordTarget
+        val typed = state.lastLockedWordTyped
+        if (target.isBlank()) return@LaunchedEffect
+        val lang = TypingErrorAnalyzer.detectLanguage(target)
+        if (state.lastLockedWordCorrect) {
+            TypingMistakeLogger.logCorrect(ctx, target, lang)
+        } else {
+            TypingMistakeLogger.logMistake(ctx, target, typed, lang)
+            sessionMistakeWords = (sessionMistakeWords + target).distinct().takeLast(10)
+        }
+    }
 
     // ── সেশন শেষ হলে: curriculum unlock-চেক + key-stat স্ন্যাপশট রিফ্রেশ + onResult কল ──
     LaunchedEffect(state.isFinished, state.result) {
@@ -149,6 +242,18 @@ fun SmartTypingScreen(
         }
         keyStatSnapshot = loadKeyStatSnapshot(ctx, curriculumTrack)
         keyAnalysisList = TypingKeyStatStore.getKeyAnalysis(ctx, curriculumTrack)
+        weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
+            .getTopWeakWords(session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest", "bn", limit = 10)
+            .map { it.targetWord }
+        // ── পর্ব ৩/৫.৩ ধাপ ২ (শেষ অংশ): sync-loss (স্পেস-মিস অটো-রিসিঙ্ক) হয়ে থাকলে
+        // সেশন-শেষে ছোট ভয়েস-টিপ — মাঝপথে না দেওয়ার কারণ মূল ফাইলেও একই ছিল
+        // (তখন ভয়েস মনোযোগ আরও ভাঙতে পারে) ──
+        if (r.syncLossCount > 0) {
+            TtsManager.speak(
+                "তুমি এই সেশনে ${r.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ। ধীরে টাইপ করো, একবারে কয়েকটা শব্দ পড়ে তারপর টাইপ করো।",
+                key = "typing_sync_tip"
+            )
+        }
     }
 
     val passageWords = remember(state.passage) { state.passage.split(' ') }
@@ -212,10 +317,34 @@ fun SmartTypingScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
                 }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (state.sessionMode == "adaptive") Color(0xFF0D9488) else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.clickable { startAdaptiveSession(curriculumTrack) }
+                ) {
+                    Text("🎯 AI Adaptive", fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = if (state.sessionMode == "adaptive") Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                }
             }
 
             Text("স্টেজ $curriculumStage / ${BijoyCurriculum.totalStages(curriculumTrack)}",
                 fontSize = 11.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // ── পর্ব ৩/৫.৩ ধাপ ২: দুর্বল-শব্দ ড্যাশবোর্ড — পুরনো সেশনগুলো থেকে যেসব
+            // শব্দে বারবার ভুল হয়েছে, সেগুলো এক নজরে (spaced-repetition সচেতনতা) ──
+            if (weakWordDashboard.isNotEmpty() && !state.isStarted) {
+                Card(
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFB45309).copy(alpha = 0.1f))
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("📌 তোমার দুর্বল শব্দগুলো (আগের সেশন থেকে)", fontSize = 11.sp,
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        Text(weakWordDashboard.joinToString("   "), fontSize = 13.sp, fontFamily = NotoSansBengali)
+                    }
+                }
+            }
 
             // ── লাইভ স্ট্যাটস (Accuracy% সহ) ──
             val resolvedCount = remember(state.userInput, state.passage) {
@@ -237,6 +366,33 @@ fun SmartTypingScreen(
             if (allUnlockedKeys.isNotEmpty()) {
                 CurrentKeyAndAllKeysBox(allKeys = allUnlockedKeys, currentKey = currentKeyForBox, statSnapshot = keyStatSnapshot)
             }
+
+            // ── AI Adaptive Session — ফেজ ১ শেষে ট্রানজিশন কার্ড ──
+            if (showAdaptiveTransition) {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("✅ ফেজ ১ সম্পন্ন!", fontSize = 16.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                        adaptivePhase1Result?.let { r ->
+                            Text("${r.wpm} WPM · ${r.accuracy}% নির্ভুলতা", fontSize = 13.sp, fontFamily = NotoSansBengali)
+                        }
+                        if (phase2Passage == null) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text("তোমার দুর্বল শব্দ দিয়ে AI প্যাসেজ তৈরি হচ্ছে...", fontSize = 12.sp, fontFamily = NotoSansBengali)
+                            }
+                        } else {
+                            Text(
+                                "ফেজ ২: তোমার দুর্বল শব্দ দিয়ে বানানো প্যাসেজ" +
+                                    (if (phase2Source == "live_ai") " (AI-জেনারেটেড)" else ""),
+                                fontSize = 12.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(onClick = { startAdaptivePhase2() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("ফেজ ২ শুরু করো →", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                    }
+                }
+            } else {
 
             // ── প্যাসেজ প্রদর্শন ──
             val onSurfaceColor = MaterialTheme.colorScheme.onSurface
@@ -324,6 +480,7 @@ fun SmartTypingScreen(
                     Text("📤 Submit Now", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                 }
             }
+            }   // ← showAdaptiveTransition-এর else ব্লক শেষ
 
             // ── Key Analysis (সেশন শেষে) ──
             if (state.isFinished && keyAnalysisList.isNotEmpty()) {
@@ -339,7 +496,11 @@ fun SmartTypingScreen(
     }
 
     // ── ফুল-স্ক্রিন রেজাল্ট পপ-আপ ──
-    if (state.isFinished && state.result != null) {
+    // ── AI Adaptive Session ফেজ ১ শেষ হলে ফুল-স্ক্রিন পপ-আপ না দেখিয়ে শুধু ট্রানজিশন
+    // কার্ড দেখানো হয় (ওপরে) — ফেজ ২ শেষ হলেই (বা curriculum/keydrill/অন্যান্য মোডে)
+    // এই সাধারণ পপ-আপ দেখানো হবে ──
+    val suppressResultPopup = state.sessionMode == "adaptive" && adaptivePhase == 1
+    if (state.isFinished && state.result != null && !suppressResultPopup) {
         var bestWpm by remember { mutableStateOf(0) }
         LaunchedEffect(Unit) { bestWpm = session.getTypingBestWpm() }
         Dialog(
@@ -354,11 +515,14 @@ fun SmartTypingScreen(
                     state.result?.let { r ->
                         ResultCard(
                             result = r, bestWpm = bestWpm, showSmartFeatures = true,
+                            sessionMistakeWords = sessionMistakeWords,
                             onRetry = { vm.restartCurrentPassage() },
                             onNextPassage = {
+                                sessionMistakeWords = emptyList()
                                 when (state.sessionMode) {
                                     "curriculum" -> startCurriculumSession(curriculumTrack)
                                     "keydrill" -> startKeyDrillSession()
+                                    "adaptive" -> startAdaptiveSession(curriculumTrack)
                                     else -> startCurriculumSession(curriculumTrack)
                                 }
                             }
