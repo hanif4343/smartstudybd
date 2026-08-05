@@ -49,6 +49,16 @@ class ContentRepository(private val context: Context) {
         private const val BG_REFRESH_MIN_GAP_MS = 15 * 60_000L // ১৫ মিনিটে একবারের বেশি Firebase hit না করার জন্য (আগে 60_000L ছিল, এবং callback থাকলে এই গ্যাপটাই বাইপাস হয়ে যেত — এটাই মূল bandwidth সমস্যা ছিল)
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
+
+        // ⚠️ BUG FIX ("subject list ashte onek slow"): syncReferenceData() আগে
+        // rebuildSubjectsLazy() (মানে setMode()/প্রতিবার Quiz-QBank-Study খোলার সময়)
+        // থেকে unconditionally কল হতো — মানে প্রতিটা visit-এই GAS-এর getReferenceData
+        // action-এ একটা লাইভ নেটওয়ার্ক রাউন্ড-ট্রিপ হতো, Room-এ আগে থেকেই ডেটা থাকলেও।
+        // Apps Script Web App-এর নিজস্ব ল্যাটেন্সি (cold start ইত্যাদি) থাকায় এটাই
+        // "সাবজেক্ট লিস্ট প্রতিবার স্লো" সমস্যার মূল কারণ ছিল — content sync-এর জন্য
+        // আগে থেকেই থাকা BG_REFRESH_MIN_GAP_MS প্যাটার্নটাই এখানে প্রয়োগ করা হলো।
+        @Volatile private var _lastRefSyncAt: Long = 0L
+        private const val REF_SYNC_MIN_GAP_MS = 10 * 60_000L // ১০ মিনিটে একবারের বেশি না
     }
 
     /**
@@ -183,9 +193,25 @@ class ContentRepository(private val context: Context) {
      * ব্যর্থ হলে চুপচাপ (Room-এর পুরনো ডেটা অপরিবর্তিত থাকে) — non-critical background sync,
      * এখনো কোনো ViewModel থেকে auto-call হয় না, প্রয়োজনমতো explicitly call করতে হবে।
      */
-    suspend fun syncReferenceData(): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * force=false (ডিফল্ট) হলে — Room-এ ইতিমধ্যে subjects/topics ডেটা থাকলে ও শেষ সফল
+     * sync REF_SYNC_MIN_GAP_MS-এর মধ্যে হয়ে থাকলে নতুন GAS কল স্কিপ করে সরাসরি true
+     * রিটার্ন করে (Room-এর ডেটাই "যথেষ্ট ফ্রেশ" ধরা হয়) — এটাই মূল ফিক্স যেটা প্রতিটা
+     * Subject-list visit-কে ব্লকিং নেটওয়ার্ক কল থেকে বাঁচায়। force=true দিলে (যেমন
+     * pull-to-refresh) গ্যাপ উপেক্ষা করে সবসময় GAS থেকে টাটকা ডেটা আনবে।
+     */
+    suspend fun syncReferenceData(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
             return@withContext false
+        }
+        val now = System.currentTimeMillis()
+        if (!force && (now - _lastRefSyncAt) < REF_SYNC_MIN_GAP_MS) {
+            val hasCached = refDao.getAllSubjects().isNotEmpty()
+            if (hasCached) {
+                Log.d("Repo", "syncReferenceData: skip (fresh within ${REF_SYNC_MIN_GAP_MS}ms), using Room cache")
+                return@withContext true
+            }
+            // Room এখনো খালি — গ্যাপের মধ্যে থাকলেও প্রথমবারের জন্য fetch করতেই হবে
         }
         val data = com.hanif.smartstudy.data.remote.GasContentService.fetchReferenceData()
             ?: return@withContext false
@@ -198,6 +224,7 @@ class ContentRepository(private val context: Context) {
             posts        = data.posts.map { it.toEntity() },
             institutions = data.institutions.map { it.toEntity() }
         )
+        _lastRefSyncAt = now
         Log.d("Repo", "syncReferenceData: subjects=${data.subjects.size} topics=${data.topics.size} subtopics=${data.subtopics.size}")
         true
     }
