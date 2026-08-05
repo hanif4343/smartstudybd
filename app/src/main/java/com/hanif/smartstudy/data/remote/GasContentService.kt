@@ -248,8 +248,27 @@ object GasContentService {
             }
         }
 
-    /** getQuestionsPage-এর রেসপন্স — এই page-এর rows + পরের page-এর cursor (null হলে আর পেজ নেই) */
-    data class QuestionsPageResult<T>(val items: List<T>, val nextCursor: String?, val hasMore: Boolean)
+    /**
+     * getQuestionsPage-এর রেসপন্স — এই page-এর rows + পরের page-এর cursor (null হলে আর পেজ নেই)।
+     *
+     * ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না, permanently ফাঁকা থেকে যাচ্ছে"):
+     * `ok` ফিল্ডটা নতুন যোগ হলো। আগে নেটওয়ার্ক এরর/টাইমআউট/খারাপ JSON/non-success
+     * status — সবগুলোই একই খালি রেজাল্ট (items=[], hasMore=false) ফেরত দিত, ঠিক
+     * যেমনটা GAS থেকে "সত্যিই এই topic-এ আর কোনো প্রশ্ন নেই" রেসপন্স এলে হতো। ফলে
+     * ContentRepository.cacheNextTopicBatch() একটা সাময়িক নেটওয়ার্ক/GAS ব্যর্থতাকেও
+     * TopicSyncEntity-তে hasMore=false লিখে "সম্পূর্ণ সিঙ্ক" হিসেবে সেভ করে ফেলত —
+     * সেই topic-টা তখন থেকে চিরস্থায়ীভাবে "০ প্রশ্ন, আর ফেচ করার কিছু নেই" ধরে
+     * নিত, নেটওয়ার্ক ঠিক হয়ে গেলেও আর কখনো রিট্রাই হতো না (টপিকে ক্লিক করলেই ফাঁকা)।
+     * এখন `ok=true` শুধু তখনই সেট হয় যখন GAS থেকে সত্যিকারের status=success পার্স
+     * করা রেসপন্স এসেছে — ব্যর্থতায় `ok=false`, আর caller (cacheNextTopicBatch)
+     * `ok=false` হলে TopicSyncEntity লিখবে না, তাই পরের চেষ্টায় আবার ফেচ হবে।
+     */
+    data class QuestionsPageResult<T>(
+        val items      : List<T>,
+        val nextCursor : String?,
+        val hasMore    : Boolean,
+        val ok         : Boolean = false
+    )
 
     /**
      * GAS action=getQuestionsPage — topicId (+ ঐচ্ছিক subtopicId, QBank-এ) + cursor + limit
@@ -292,10 +311,10 @@ object GasContentService {
             }
             val nextCursor = obj.get("nextCursor")?.takeIf { !it.isJsonNull }?.asString
             val hasMore = obj.get("hasMore")?.takeIf { !it.isJsonNull }?.asBoolean ?: (rows.size() >= limit)
-            QuestionsPageResult(items, nextCursor, hasMore)
+            QuestionsPageResult(items, nextCursor, hasMore, ok = true)
         } catch (e: Exception) {
             Log.e(TAG, "getQuestionsPage<$sheet> error: ${e.message}")
-            QuestionsPageResult(emptyList(), null, false)
+            QuestionsPageResult(emptyList(), null, false, ok = false)
         }
     }
 
