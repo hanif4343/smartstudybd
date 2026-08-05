@@ -620,21 +620,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(navPath = NavPath(), isQuizActive = false, questions = emptyList(), timerSec = 0)
                 }
             }
+            // ⚠️ ফিক্স ("টপিকে ক্লিক করলে ফাঁকা দেখাচ্ছে, Back চাপলে টপিক লিস্টও হারিয়ে
+            // যাচ্ছে"): আগে এখানে পুরনো rebuildSubTopics(repo.getContent(), ...) কল হতো —
+            // কিন্তু Phase 6 লেজি-লোডিং আর্কিটেকচারে (দেখো rebuildSubjectsLazy/
+            // navigateToSubjectLazy-এর ওপরের কমেন্ট) repo.getContent()-এর পুরনো
+            // full-content cache আর সরাসরি populate হয় না, তাই সেটা প্রায়ই খালি
+            // AppContent() ফেরত দিত আর subTopics খালি হয়ে যেত। এখন forward-navigation-এর
+            // মতোই navigateToSubjectLazy() ব্যবহার করছি (Room-এর Topics reference-টেবিল
+            // থেকে, দ্রুত) — যাতে Back-এ ঠিক একই টপিক লিস্ট আবার দেখা যায়।
             path.subTopic != null -> {
-                _state.update { it.copy(navPath = NavPath(path.subject)) }
                 if (path.subject != null) {
-                    viewModelScope.launch {
-                        val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                        rebuildSubTopics(content, path.subject, _state.value.mode)
-                    }
+                    navigateToSubjectLazy(path.subject)
+                } else {
+                    _state.update { it.copy(navPath = NavPath()) }
                 }
             }
             path.subject  != null -> {
                 _state.update { it.copy(navPath = NavPath()) }
-                viewModelScope.launch {
-                    val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                    rebuildSubjects(content, _state.value.mode)
-                }
+                viewModelScope.launch { rebuildSubjectsLazy(_state.value.mode) }
             }
             else -> {}
         }
