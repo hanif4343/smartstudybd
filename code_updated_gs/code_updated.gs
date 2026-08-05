@@ -181,6 +181,10 @@ function isDuplicate(sheet, subject, questionText, sub_topic) {
   var hdr=data[0].map(function(h){return h.toString().toLowerCase().trim();});
   var qIdx=hdr.indexOf("question"),subIdx=hdr.indexOf("subject"),stIdx=hdr.indexOf("sub_topic");
   if(stIdx===-1)stIdx=hdr.indexOf("subtopic");
+  // ⚠️ Study ট্যাবের আসল হেডার "sub_topic" না, "topic" (দেখো Study_Database CSV) —
+  // ওপরের দুটো মিস হলে এটাও ট্রাই করা হচ্ছে, নইলে Study-তে duplicate-check কখনো
+  // sub-topic মেলাতে পারত না (সব সময় ফাঁকা স্ট্রিং ধরে নিত)
+  if(stIdx===-1)stIdx=hdr.indexOf("topic");
   if(qIdx===-1)return false;
   var norm=function(s){return s.toString().toLowerCase().replace(/\s+/g,' ').trim().substring(0,100);};
   var nq=norm(questionText),nst=norm(sub_topic||''),nsub=norm(subject||'');
@@ -433,6 +437,12 @@ function doGet(e) {
       }
     }
     if(fldC===-1){for(var fc=0;fc<uHdr.length;fc++){if(uHdr[fc].includes(fld)){fldC=fc;break;}}}
+    // ⚠️ Study ট্যাবের আসল হেডার "sub_topic"/"subtopic" না, "topic" — ওপরের এক্সাক্ট/
+    // সাবস্ট্রিং ম্যাচ কোনোটাই সেটা ধরতে পারে না (কারণ "topic".includes("sub_topic")
+    // false)। fld যদি sub_topic/subtopic-জাতীয় কিছু হয় আর কলাম না পাওয়া যায়, "topic"
+    // কলাম ট্রাই করা হচ্ছে — নইলে Admin App থেকে Study-র sub-topic এডিট করলে
+    // "Column not found" এরর দিত।
+    if(fldC===-1 && (fld==="sub_topic"||fld==="subtopic")) fldC=uHdr.indexOf("topic");
     if(idC===-1||fldC===-1)return json({result:"error",error:"Column not found: "+fld});
     var targetId=(e.parameter.id||"").toString().trim();
     var content=(e.parameter.content||"");
@@ -534,6 +544,14 @@ function doGet(e) {
     var fIdx=-1;
     for(var fi=0;fi<h3.length;fi++){
       if(h3[fi].toString().toLowerCase().trim()===field.toLowerCase().trim()){fIdx=fi;break;}
+    }
+    // ⚠️ Study ট্যাবের আসল হেডার "sub_topic" না, "topic" — field==="sub_topic" পাঠানো
+    // হলে (renameSubjectOrTopic থেকে) সরাসরি ম্যাচ না পেলে "topic" কলাম ট্রাই করা হয়,
+    // নইলে Study sub-topic rename সবসময় "field not found: sub_topic" দিত।
+    if(fIdx<0 && field.toLowerCase().trim()==="sub_topic"){
+      for(var fi2=0;fi2<h3.length;fi2++){
+        if(h3[fi2].toString().toLowerCase().trim()==="topic"){fIdx=fi2;break;}
+      }
     }
     if(fIdx<0)return json({result:"error",error:"field not found: "+field});
 
@@ -1691,11 +1709,103 @@ function doPost(e) {
     if(eId){for(var ei=1;ei<mData.length;ei++){if(mData[ei][mIdCol].toString()===eId.toString()){rIdx=ei+1;break;}}}
     if(!eId&&["Quiz","Study","QBank","Typing"].indexOf(tTab)>-1)finalId=getNextId(tTab);
 
-    var rData=[];
     var nowMs=Date.now();
-    if(tTab==="Quiz")      rData=[finalId,params.question,params.opt1,params.opt2,params.opt3,params.opt4,params.correct,params.subject,params.sub_topic,params.explanation,params.technique,params.prevExam||"",params.qType,params.timestamp,params.audienceTags||"",nowMs];
-    else if(tTab==="QBank")rData=[finalId,params.question,params.opt1,params.opt2,params.opt3,params.opt4,params.correct,params.subject,params.topic,params.sub_topic,params.explanation,params.technique,params.qType,params.mainQpaper||"",params.timestamp,params.audienceTags||"",nowMs];
-    else if(tTab==="Study")rData=[finalId,params.subject,params.sub_topic,params.question||"",params.correct||"",params.explanation,params.technique,params.timestamp,params.audienceTags||"",params.visualUrl||"",nowMs];
+
+    // ── FIX (bug: নতুন প্রশ্নের subject_id/topic_id ফাঁকা থেকে যাচ্ছিল) ──────────
+    // আগে এখানে Quiz/QBank/Study-এর জন্য rData একটা হার্ডকোডেড, ফিক্সড-লেংথ
+    // পজিশনাল array ছিল (যেমন Study-তে মাত্র ১১টা ভ্যালু, অথচ Sheet-এ ১৮টা কলাম —
+    // subject_id/topic_id/group_id/sub_index/AudienceTags_ids বাদ পড়ে যেত)।
+    // rIdx===-1 (নতুন row) হলে mSh.appendRow(rData) সেই বাদ-পড়া কলামগুলো একদম
+    // ফাঁকা রেখে দিত — ফলে নতুন যোগ করা প্রতিটা প্রশ্নের topic_id ফাঁকা থাকত, আর
+    // যেহেতু Topic লিস্ট/getQuestionsPage সম্পূর্ণ topic_id-নির্ভর (রো row_start/
+    // row_count দিয়ে ইনডেক্সড), সেই প্রশ্ন কোনো Topic-এর আন্ডারেই আর দেখাত না —
+    // এটাই bulk_save_rows-এ আগে যেই একই বাগ ফিক্স হয়েছিল (দেখো ওপরের কমেন্ট),
+    // কিন্তু এই single-row add/edit path-এ তখন মিস হয়ে গিয়েছিল। এখন এখানেও
+    // header-name দিয়ে কলাম মেলানো হচ্ছে (mHdr থেকে), যেই কলামই থাকুক আর যেই
+    // পজিশনেই থাকুক — সঠিক জায়গায় বসবে, এবং subject_id/topic_id/group_id/
+    // sub_index-ও (Android app পাঠালে) ঠিকঠাক লেখা হবে।
+    //
+    // অ্যালিয়াস: "sub_topic" ↔ "topic" — বাস্তবে Study ট্যাবের আসল কলাম-হেডার
+    // "sub_topic" না, "topic" (দেখো Study_Database CSV-র হেডার সারি), অথচ বাকি
+    // সব জায়গায় (StudyItem model, isDuplicate, updateField) "sub_topic" নামে
+    // কলাম খোঁজা হয়। এখানে দুটো নামই সমান হিসেবে ট্রাই করা হচ্ছে, যেই সাইড থেকেই
+    // মিলুক (এটাই আসল/স্থায়ী ফিক্স — Sheet-এর হেডার সেল "topic" থেকে "sub_topic"
+    // এ রিনেম করে দিলে এই অ্যালিয়াসটাও আর লাগবে না, কিন্তু ততদিন এটা ছাড়া
+    // Study-র sub-topic ফিল্ড write/duplicate-check ভাঙা থাকবে) ──
+    var addKeyNorm=function(s){return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");};
+    var ADD_FIELD_ALIASES={
+      subtopic: ["sub_topic","subtopic","topic"],
+      option1:  ["option1","opt1"], option2: ["option2","opt2"],
+      option3:  ["option3","opt3"], option4: ["option4","opt4"]
+    };
+    function addResolveCol(hdrArr, key){
+      var hdrNorm=hdrArr.map(addKeyNorm);
+      var nk=addKeyNorm(key);
+      var idx=hdrNorm.indexOf(nk);
+      if(idx!==-1) return idx;
+      var aliases=ADD_FIELD_ALIASES[nk];
+      if(aliases){
+        for(var ai=0;ai<aliases.length;ai++){
+          idx=hdrNorm.indexOf(addKeyNorm(aliases[ai]));
+          if(idx!==-1) return idx;
+        }
+      }
+      return -1;
+    }
+    // fieldMap → header-name-matched row array (rIdx!==-1 হলে বাকি/না-পাঠানো
+    // কলামগুলো existing row-এর ভ্যালু ধরে রাখে, যাতে partial edit বাকি কলাম
+    // ফাঁকা করে না দেয়; নতুন row হলে না-মেলা কলাম ফাঁকাই থাকবে)
+    function addBuildRow(fieldMap){
+      var arr=new Array(mHdr.length).fill("");
+      if(rIdx!==-1){
+        var existing=mData[rIdx-1]||[];
+        for(var ci=0;ci<mHdr.length;ci++) arr[ci]=(existing[ci]!==undefined?existing[ci]:"");
+      }
+      for(var fk in fieldMap){
+        var col=addResolveCol(mHdr, fk);
+        if(col!==-1) arr[col]=fieldMap[fk];
+      }
+      return arr;
+    }
+
+    var fieldMap=null;
+    if(tTab==="Quiz"){
+      fieldMap={
+        id: finalId, question: params.question,
+        option1: params.opt1, option2: params.opt2, option3: params.opt3, option4: params.opt4,
+        correct: params.correct, subject: params.subject, sub_topic: params.sub_topic,
+        explanation: params.explanation, technique: params.technique,
+        prevExam: params.prevExam||"", qType: params.qType, timestamp: params.timestamp,
+        audienceTags: params.audienceTags||"", updatedAt: nowMs,
+        subject_id: params.subject_id||"", topic_id: params.topic_id||"",
+        group_id: params.group_id||"", sub_index: params.sub_index||""
+      };
+    } else if(tTab==="QBank"){
+      fieldMap={
+        id: finalId, question: params.question,
+        option1: params.opt1, option2: params.opt2, option3: params.opt3, option4: params.opt4,
+        correct: params.correct, subject: params.subject, topic: params.topic,
+        sub_topic: params.sub_topic, explanation: params.explanation, technique: params.technique,
+        qType: params.qType, mainQpaper: params.mainQpaper||"", timestamp: params.timestamp,
+        audienceTags: params.audienceTags||"", updatedAt: nowMs,
+        subject_id: params.subject_id||"", topic_id: params.topic_id||"",
+        subtopic_id: params.subtopic_id||"", group_id: params.group_id||"", sub_index: params.sub_index||""
+      };
+    } else if(tTab==="Study"){
+      fieldMap={
+        id: finalId, subject: params.subject, sub_topic: params.sub_topic,
+        question: params.question||"", correct: params.correct||"",
+        explanation: params.explanation, technique: params.technique, timestamp: params.timestamp,
+        audienceTags: params.audienceTags||"", visualUrl: params.visualUrl||"", updatedAt: nowMs,
+        subject_id: params.subject_id||"", topic_id: params.topic_id||"",
+        group_id: params.group_id||"", sub_index: params.sub_index||""
+      };
+    }
+
+    var rData=[];
+    if (fieldMap) {
+      rData=addBuildRow(fieldMap);
+    }
     // ── Typing ট্যাব-এর headers এখন সহজ: id, language, content, updatedAt —
     //    আগে title/level কলামও ছিল, সেগুলো বাদ দেওয়া হলো (Admin App ও এখন এই
     //    ৪টা ফিল্ডই পাঠাবে)। language: "bn" | "en" ──
