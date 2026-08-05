@@ -72,7 +72,10 @@ fun ExamTypingScreen(
     var showPhaseTransition by remember { mutableStateOf(false) }
     var govtMockMinutes by remember { mutableStateOf(10) }
 
-    LaunchedEffect(Unit) { allPassages = TypingPassageProvider.getPassages(ctx) }
+    LaunchedEffect(Unit) {
+        vm.syncFromCloud()
+        allPassages = TypingPassageProvider.getPassages(ctx)
+    }
 
     fun startExamSimulation() {
         examMode = "exam"; examPhase = "en"; examEnglishResult = null; examBanglaResult = null; showPhaseTransition = false
