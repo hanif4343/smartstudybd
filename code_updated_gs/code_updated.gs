@@ -882,6 +882,39 @@ function doGet(e) {
     return json({status:"success",result:"success",appearances:geaOut});
   }
 
+  // ── getReviewProgress — Admin App-এর "রিভিউ মোড"-এর জন্য: প্রতিটা subject_id ও
+  // topic_id-এ মোট কত প্রশ্ন আর তার কতগুলো reviewed — শুধু ২টা কলাম (topic_id, reviewed)
+  // পড়ে অ্যাগ্রিগেট করে, পুরো রো/সব কলাম রিটার্ন করে না (হালকা, দ্রুত)। sheet প্যারামিটার
+  // (Quiz/QBank/Study) দিয়ে scope করা — একবারে একটা sheet-এর progress আসে।
+  if (action==="getReviewProgress") {
+    var grpSheet=(e.parameter.sheet||"Quiz").toString().trim();
+    var grpSs=SpreadsheetApp.getActiveSpreadsheet(), grpSh=grpSs.getSheetByName(grpSheet);
+    if (!grpSh || grpSh.getLastRow()<2) return json({status:"success",result:"success",subjects:{},topics:{}});
+    var grpData=grpSh.getDataRange().getValues(), grpHdr=grpData[0];
+    var grpSubjCol=grpHdr.indexOf("subject_id");
+    var grpTopicCol=grpHdr.indexOf("topic_id");
+    var grpRevCol=grpHdr.indexOf("reviewed");
+    var grpIdCol=grpHdr.indexOf("id"); if (grpIdCol<0) grpIdCol=0;
+    var grpSubjects={}, grpTopics={};
+    for (var gr=1;gr<grpData.length;gr++){
+      if (!grpData[gr][grpIdCol]) continue; // খালি রো স্কিপ
+      var grpSubjId=grpSubjCol>=0 ? (grpData[gr][grpSubjCol]||"").toString().trim() : "";
+      var grpTopicId=grpTopicCol>=0 ? (grpData[gr][grpTopicCol]||"").toString().trim() : "";
+      var grpIsReviewed=grpRevCol>=0 && (grpData[gr][grpRevCol]===true || grpData[gr][grpRevCol]==="true" || grpData[gr][grpRevCol]==="TRUE");
+      if (grpSubjId) {
+        if (!grpSubjects[grpSubjId]) grpSubjects[grpSubjId]={total:0,reviewed:0};
+        grpSubjects[grpSubjId].total++;
+        if (grpIsReviewed) grpSubjects[grpSubjId].reviewed++;
+      }
+      if (grpTopicId) {
+        if (!grpTopics[grpTopicId]) grpTopics[grpTopicId]={total:0,reviewed:0};
+        grpTopics[grpTopicId].total++;
+        if (grpIsReviewed) grpTopics[grpTopicId].reviewed++;
+      }
+    }
+    return json({status:"success",result:"success",subjects:grpSubjects,topics:grpTopics});
+  }
+
   // ── addExamAppearance — একটা প্রশ্নের নতুন appearance (post+institution+year)
   // যোগ করে — মূল প্রশ্নের রো একটুও touch হয় না, শুধু এই ছোট ট্যাবে ১টা নতুন রো ──
   if (action==="addExamAppearance") {
