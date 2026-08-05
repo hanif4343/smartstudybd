@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
@@ -377,6 +378,37 @@ fun QuestionListScreen(
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
 
+                // ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না — সম্পূর্ণ ফাঁকা
+                // স্ক্রিন"): আগে pagedQuestions খালি থাকলে LazyColumn-ও খালি থাকত —
+                // স্ক্রিনে না কোনো লোডিং ইন্ডিকেটর, না এরর মেসেজ, না রিট্রাই বাটন —
+                // দেখতে মনে হতো অ্যাপ ভেঙে গেছে। এখন লোডিং/এরর/খালি — তিনটা অবস্থাই
+                // স্পষ্ট মেসেজ + "🔄 আবার চেষ্টা করুন" বাটন সহ দেখানো হয় (সাময়িক
+                // নেটওয়ার্ক/GAS ব্যর্থতার পর সরাসরি এখান থেকেই রিট্রাই করা যায়,
+                // Back চেপে আবার টপিকে ঢোকা লাগবে না)।
+                if (pagedQuestions.isEmpty()) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (vmState.isLoading) {
+                                CircularProgressIndicator()
+                                Spacer(Modifier.height(12.dp))
+                                Text("লোড হচ্ছে...", fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                Text(
+                                    vmState.error ?: "কোনো প্রশ্ন পাওয়া যায়নি",
+                                    fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 24.dp)
+                                )
+                                Spacer(Modifier.height(14.dp))
+                                Button(onClick = { viewModel.navigateToSubTopicLazy(subTopic) }) {
+                                    Text("🔄 আবার চেষ্টা করুন", fontFamily = NotoSansBengali)
+                                }
+                            }
+                        }
+                    }
+                } else {
                 // Question list
                 LazyColumn(
                     state               = listState,
@@ -565,6 +597,7 @@ fun QuestionListScreen(
                         }
                         }
                     }
+                }
                 }
             }
         }
