@@ -220,6 +220,13 @@ interface QuestionDao {
     """)
     suspend fun getByTopicId(sheet: String, topicId: String, tag: String): List<QuestionEntity>
 
+    // ── এই topicId-এর জন্য Room-এ (audience-filter ছাড়াই) কতগুলো প্রশ্ন cache হয়ে
+    // আছে তার শুধু COUNT — cacheNextTopicBatch()-এ ব্যবহৃত হয় "sync.hasMore==false
+    // অথচ আসলে ০ প্রশ্ন cache আছে" (আগের কোনো ব্যর্থ ফেচকে ভুল করে 'সম্পূর্ণ' ধরে
+    // ফেলা) অবস্থা শনাক্ত করে স্বয়ংক্রিয়ভাবে আবার ফেচ করার চেষ্টা করার জন্য ──
+    @Query("SELECT COUNT(*) FROM questions WHERE sheet = :sheet AND topicId = :topicId")
+    suspend fun countByTopicId(sheet: String, topicId: String): Int
+
     // ── Global search — Room cache (offline/persistent) থেকে সব ফিল্ড মিলিয়ে খোঁজে।
     // ⚠️ Phase 6 ফিক্স: আগে এখানে audience-tag ফিল্টার ছিলই না — যেকোনো ইউজারের সার্চে
     // অন্য audience group-এর (ভিন্ন চাকরি/ক্লাসের) প্রশ্নও চলে আসতো, আর LIMIT 50-এর
