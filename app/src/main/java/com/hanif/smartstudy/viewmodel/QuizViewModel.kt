@@ -209,14 +209,46 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.QBANK -> "QBank"
             StudyMode.STUDY -> "Study"
         }
+
+        fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
+            rows.map { s ->
+                // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
+                // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
+                SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
+            }.sortedBy { it.name }
+
+        // ⚠️ BUG FIX ("subject list ashte onek slow"): আগে এখানে repo.syncReferenceData()
+        // কে সবসময় await করা হতো, তারপরই Room থেকে subjects পড়ে দেখানো হতো — মানে
+        // Subject list দেখা যাওয়ার আগেই প্রতিবার একটা GAS নেটওয়ার্ক রাউন্ড-ট্রিপ শেষ
+        // হওয়া লাগতো (Apps Script cold-start সহ কয়েক সেকেন্ড)। এখন Room-এ যা আগে থেকেই
+        // আছে সেটা প্রথমে সাথে সাথে দেখানো হয় (instant, ননব্লকিং), তারপর ব্যাকগ্রাউন্ডে
+        // syncReferenceData() (নিজের ১০-মিনিট cache-gate সহ) চলে ও নতুন ডেটা এলে আবার
+        // আপডেট করে — প্রথমবার/Room খালি থাকলে এখনো ব্লকিং fetch হবে (কিছু দেখানোর
+        // মতো ডেটাই নেই বলে), কিন্তু বারবার ভিজিটে আর অপেক্ষা করা লাগবে না।
+        val cachedRows = repo.getRoomSubjectsRefBySheet(sheet)
+        if (cachedRows.isNotEmpty()) {
+            val cachedSubjects = toSubjects(cachedRows)
+            Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${cachedSubjects.size} (from Room cache, instant)")
+            _state.update { it.copy(subjects = cachedSubjects, contentLoaded = true, error = null) }
+            // ব্যাকগ্রাউন্ডে ফ্রেশ করো — cache-gate-এর কারণে বেশিরভাগ সময় এটা নেটওয়ার্ক
+            // কলই করবে না, gap পার হয়ে গেলে চুপচাপ রিফ্রেশ করবে
+            viewModelScope.launch {
+                if (repo.syncReferenceData()) {
+                    val freshRows = repo.getRoomSubjectsRefBySheet(sheet)
+                    if (freshRows.isNotEmpty()) {
+                        val freshSubjects = toSubjects(freshRows)
+                        _state.update { it.copy(subjects = freshSubjects) }
+                    }
+                }
+            }
+            return
+        }
+
+        // Room-এ এখনো কিছু নেই (প্রথমবার/ফ্রেশ ইনস্টল) — এবারই একমাত্র সময় যখন
+        // Subject list দেখানোর আগে সত্যিই GAS fetch শেষ হওয়া লাগবে
         repo.syncReferenceData()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে
-        val subjectRows = repo.getRoomSubjectsRefBySheet(sheet)
-        val subjects = subjectRows.map { s ->
-            // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
-            // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
-            SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
-        }.sortedBy { it.name }
-        Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${subjects.size}")
+        val subjects = toSubjects(repo.getRoomSubjectsRefBySheet(sheet))
+        Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${subjects.size} (first load)")
         _state.update {
             it.copy(subjects = subjects, contentLoaded = true, error = if (subjects.isEmpty()) "কোনো Subject পাওয়া যায়নি" else null)
         }
