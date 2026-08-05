@@ -83,8 +83,9 @@ fun NormalTypingScreen(
     fun currentPool(): List<PassageInfo> =
         allPassages.filter { (difficulty == "all" || it.difficulty == difficulty) }
 
-    // ── প্রথমবার স্ক্রিন খোলার সময় প্যাসেজ-পুল লোড করে সেশন শুরু ──
+    // ── প্রথমবার স্ক্রিন খোলার সময় প্যাসেজ-পুল লোড করে সেশন শুরু + cloud sync পুল ──
     LaunchedEffect(Unit) {
+        vm.syncFromCloud()
         allPassages = TypingPassageProvider.getPassages(ctx)
         val pool = allPassages.filter { difficulty == "all" || it.difficulty == difficulty }
         vm.startSession("free", pool, budgetSec = 300)
