@@ -21,10 +21,17 @@ data class TopicRef(
     @SerializedName("topic_id")   val topicId   : String? = null,
     @SerializedName("subject_id") val subjectId : String? = null,
     @SerializedName("topic_name") val name      : String? = null,
-    // GAS `rebuildIndex` action এই দুটো বসায় — Quiz/QBank/Study sheet-এ এই topic_id-এর
-    // row-range, future `getQuestionsPage` pagination-এর ভিত্তি
-    @SerializedName("row_start")  val rowStart  : Int?    = null,
-    @SerializedName("row_count")  val rowCount  : Int?    = null
+    // ⚠️ FIX: আগে এই দুটো Int? ছিল — কিন্তু যেই topic-এ এখনো কোনো প্রশ্ন ট্যাগ হয়নি
+    // (rebuildIndex-এর পরে নতুন যোগ হওয়া topic), GAS সেই সেলের জন্য খালি স্ট্রিং "" পাঠায়
+    // (null না)। Gson "" কে Int-এ পার্স করতে গেলে crash করত (NumberFormatException) —
+    // আর যেহেতু পুরো getReferenceData রেসপন্স একটাই fromJson() কলে পার্স হয়, এই একটা
+    // topic-এর crash-ই পুরো Subjects+Topics sync ব্যর্থ করে দিত (দেখো GasContentService.
+    // fetchReferenceData-এর catch ব্লক — silently null রিটার্ন করত)। এখন String? রাখা
+    // হলো (Gson সংখ্যা/স্ট্রিং দুটোই String-এ নিরাপদে পড়তে পারে), আসল Int কনভার্শন
+    // EntityExtensions.kt-এর toEntity()-তে toIntOrNull() দিয়ে ডিফেন্সিভলি হয় —
+    // এই একই প্যাটার্ন এই ফাইলেরই অন্য জায়গায় (QuestionEntity.subIndex) আগে থেকেই আছে।
+    @SerializedName("row_start")  val rowStart  : String? = null,
+    @SerializedName("row_count")  val rowCount  : String? = null
 )
 
 data class SubTopicRef(
