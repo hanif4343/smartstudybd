@@ -320,26 +320,38 @@ class ContentRepository(private val context: Context) {
      */
     suspend fun cacheNextTopicBatch(sheet: String, topicId: String): Boolean = withContext(Dispatchers.IO) {
         val sync = topicSyncDao.get(topicId)
-        if (sync != null && !sync.hasMore) return@withContext false   // ইতিমধ্যে সম্পূর্ণ — নেটওয়ার্ক লাগবে না
-        val cursor = sync?.nextCursor
+        // ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না, স্থায়ীভাবে ফাঁকা"):
+        // আগে শুধু sync.hasMore==false দেখেই "ইতিমধ্যে সম্পূর্ণ" ধরে নিয়ে নেটওয়ার্ক কল
+        // স্কিপ করা হতো — কিন্তু সাময়িক ব্যর্থতাতেও (দেখো GasContentService.
+        // QuestionsPageResult.ok-এর কমেন্ট) আগে hasMore=false লিখে ফেলা হতো, ফলে সেই
+        // topic Room-এ ০ প্রশ্ন নিয়েই "সম্পূর্ণ" আটকে থাকত। এখন hasMore=false হলেও
+        // যদি Room-এ আসলে এই topicId-এর কোনো প্রশ্নই cache না থাকে (সন্দেহজনক —
+        // "সম্পূর্ণ" অথচ "০ প্রশ্ন" একসাথে অস্বাভাবিক), তাহলে সেটাকে আগের কোনো ব্যর্থ
+        // ফেচের stale/corrupt state ধরে আবার ফেচ করার চেষ্টা করা হয় (self-heal —
+        // আগে থেকেই এই বাগে আটকে থাকা ডিভাইসেও কাজ করবে, শুধু নতুন ইনস্টলে না)।
+        val cachedCount = dao.countByTopicId(sheet.uppercase(), topicId)
+        if (sync != null && !sync.hasMore && cachedCount > 0) return@withContext false
+        val cursor = if (cachedCount > 0) sync?.nextCursor else null
         val now = System.currentTimeMillis()
         when (sheet) {
             "Quiz" -> {
                 val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQuizPage(topicId, cursor, 50)
                 if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                // ⚠️ শুধু genuine সফল (ok=true) রেসপন্সেই sync-state লিখি — নাহলে
+                // নেটওয়ার্ক/GAS ব্যর্থতাও "সম্পূর্ণ, ০ প্রশ্ন" হিসেবে স্থায়ী হয়ে যেত।
+                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
                 page.items.isNotEmpty()
             }
             "QBank" -> {
                 val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, null, cursor, 50)
                 if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
                 page.items.isNotEmpty()
             }
             "Study" -> {
                 val page = com.hanif.smartstudy.data.remote.GasContentService.fetchStudyPage(topicId, cursor, 50)
                 if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
+                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
                 page.items.isNotEmpty()
             }
             else -> false
