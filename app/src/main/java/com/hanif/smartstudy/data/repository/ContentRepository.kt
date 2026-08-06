@@ -809,6 +809,35 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
+    // ── FIX ("QBank-এ এডিট করলে সাথে সাথে স্ক্রিনে দেখা যায় না" বাগ):
+    // patchContentAndPersist() উপরের পুরনো bulk "_memCache"/disk-cache প্যাচ করে —
+    // কিন্তু টপিক-স্ক্রিনে যা দেখানো হয় তা আসে Room-এর QuestionEntity টেবিল থেকে
+    // (cacheNextTopicBatch/getRoomQuestionsForTopic, Phase 6 lazy topic system)।
+    // এই দুটো আলাদা ক্যাশ — তাই পুরনোটা প্যাচ করলেও Room অস্পর্শিত থেকে যেত।
+    // QBank-এ তো plain "subject"/"subTopic" টেক্সট কলামই নেই, তাই ওই পুরনো
+    // নাম-ভিত্তিক refresh (refreshQuestionsInPlace) QBank-এ কখনোই কিছু মেলাতে
+    // পারতো না — ফলে QBank এডিট GAS-এ সেভ হতো ঠিকই, কিন্তু স্ক্রিনে কখনো
+    // সাথে সাথে দেখা যেত না। এই ফাংশন এখন সরাসরি Room-এর row-টা (fbKey দিয়ে,
+    // নাম না) প্যাচ করে দেয় — Quiz/QBank/Study সবগুলোতেই নির্ভরযোগ্যভাবে কাজ করে। ──
+    suspend fun patchRoomQuestion(sheet: String, rowKey: String, fields: Map<String, String>) =
+        withContext(Dispatchers.IO) {
+            val roomSheet = sheet.uppercase()
+            val existing  = dao.getById(roomSheet, rowKey) ?: return@withContext
+            val updated = existing.copy(
+                question    = fields["question"]    ?: existing.question,
+                optionA     = fields["option1"]      ?: existing.optionA,
+                optionB     = fields["option2"]      ?: existing.optionB,
+                optionC     = fields["option3"]      ?: existing.optionC,
+                optionD     = fields["option4"]      ?: existing.optionD,
+                // ── GAS-এ "correct" আর অ্যাপে "answer" — এডিট ডায়ালগ দুটোই পাঠায়,
+                // তাই যেকোনো একটা এলেই যথেষ্ট (correct-কে অগ্রাধিকার, GAS-এর সোর্স-অফ-ট্রুথ) ──
+                answer      = fields["correct"] ?: fields["answer"] ?: existing.answer,
+                explanation = fields["explanation"] ?: existing.explanation,
+                technique   = fields["technique"]    ?: existing.technique
+            )
+            dao.upsert(updated)
+        }
+
     // ── Admin নতুন প্রশ্ন যোগ করার পর (বা offline/fail হলেও) in-memory +
     //    disk cache এ সরাসরি নতুন item যোগ করে দেয় — patchContentAndPersist এর
     //    মতোই, কিন্তু existing row খোঁজার বদলে সম্পূর্ণ নতুন row append করে।
