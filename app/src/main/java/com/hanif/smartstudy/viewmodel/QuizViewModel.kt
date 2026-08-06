@@ -319,7 +319,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         subTopicLoadJob?.cancel()
         val myToken = ++subTopicLoadToken
 
-        _state.update { it.copy(navPath = NavPath(subject, topicName), currentPage = 0, isLoading = true) }
+        // ── FIX: টাইটেল/হেডার সাথে সাথে নতুন টপিকের নাম দেখায়, কিন্তু questions লিস্ট
+        // খালি না করলে যতক্ষণ নতুন ডেটা না আসে ততক্ষণ পুরনো টপিকের প্রশ্নই নিচে দেখা
+        // যেত (title=নতুন টপিক, content=পুরনো টপিক — এটাই বিভ্রান্তির আসল কারণ)।
+        // এখন টপিক পাল্টানোর মুহূর্তেই লিস্ট খালি করে দেওয়া হচ্ছে, তাই নতুন ডেটা না
+        // আসা পর্যন্ত স্ক্রিন লোডিং/খালি দেখাবে, কখনো ভুল টপিকের প্রশ্ন দেখাবে না। ──
+        _state.update {
+            it.copy(
+                navPath        = NavPath(subject, topicName),
+                currentPage    = 0,
+                isLoading      = true,
+                questions      = emptyList(),
+                totalQuestions = 0,
+                answeredCount  = 0,
+                showResult     = false,
+                result         = null,
+                error          = null
+            )
+        }
         if (topicId.isBlank()) {
             _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি") }
             return
@@ -534,6 +551,29 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun adminRefreshContent() {
         viewModelScope.launch {
+            val path = _state.value.navPath
+
+            // ── FIX: টপিক-প্রশ্ন-স্ক্রিনে থাকা অবস্থায় (path.subTopic সেট) Room-এর
+            // topicId দিয়ে রিফ্রেশ করো — এটাই আসলে স্ক্রিনে যা দেখানো হয় তার
+            // উৎস (cacheNextTopicBatch/getRoomQuestionsForTopic, Phase 6)। আগে এখানে
+            // পুরনো subject/subTopic নাম-ভিত্তিক bulk content ব্যবহার হতো, যেটা
+            // QBank-এ কখনো মেলেনি (QBank শীটে subject/subTopic নামের কলামই নেই,
+            // শুধু subject_id/topic_id) — ফলে QBank-এ এডিট করলে GAS-এ সেভ হতো
+            // ঠিকই, স্ক্রিনে সাথে সাথে দেখা যেত না। ──
+            if (path.subTopic != null && path.subject != null) {
+                val topicId = _state.value.subTopics.find { it.name == path.subTopic }?.topicId
+                if (!topicId.isNullOrBlank()) {
+                    val sheet = when (_state.value.mode) {
+                        StudyMode.QUIZ  -> "Quiz"
+                        StudyMode.QBANK -> "QBank"
+                        StudyMode.STUDY -> "Study"
+                    }
+                    refreshQuestionsInPlaceFromRoom(sheet, topicId)
+                    return@launch
+                }
+                // topicId পাওয়া না গেলে (পুরনো/legacy টপিক) নিচের পুরনো path-এ fallback
+            }
+
             // ── আগে fetch ব্যর্থ হলে খালি AppContent() দিয়ে বিদ্যমান লিস্ট
             // replace হয়ে যেত (কারণ ঠিক এর আগে cache.clearCache()/clearMemCache()
             // চলে বলে fallback করার মতো কোনো cache-ও থাকতো না) — ফলে edit/delete/
@@ -546,7 +586,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 Log.w("QuizVM", "adminRefreshContent: fetch failed, বিদ্যমান content অক্ষত রাখা হলো")
                 return@launch
             }
-            val path    = _state.value.navPath
             when {
                 path.subTopic != null && path.subject != null ->
                     refreshQuestionsInPlace(content, path.subject, path.subTopic, _state.value.mode)
@@ -555,6 +594,30 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 else ->
                     rebuildSubjects(content, _state.value.mode)
             }
+        }
+    }
+
+    /**
+     * Room থেকে বর্তমান টপিকের সদ্য-আপডেট প্রশ্নগুলো এনে in-place বসিয়ে দেয় —
+     * refreshQuestionsInPlace()-এর মতোই (timer/answered/result কিছু ছোঁয় না),
+     * শুধু matching নাম দিয়ে না, topicId দিয়ে — তাই QBank-সহ সব মোডেই নির্ভরযোগ্য।
+     */
+    private suspend fun refreshQuestionsInPlaceFromRoom(sheet: String, topicId: String) {
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val fresh = repo.getRoomQuestionsForTopic(sheet, topicId, tag).associateBy { it.id }
+
+        _state.update { st ->
+            st.copy(questions = st.questions.map { existing ->
+                fresh[existing.id]?.copy(
+                    answerState  = existing.answerState,
+                    isBookmarked = existing.isBookmarked,
+                    isWeakTopic  = existing.isWeakTopic,
+                    isStudyDone  = existing.isStudyDone
+                ) ?: existing
+            })
         }
     }
 
