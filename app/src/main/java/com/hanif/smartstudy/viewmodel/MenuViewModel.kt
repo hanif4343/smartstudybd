@@ -935,8 +935,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             // চলতে থাকে — ব্যর্থ হলে pending queue-তে auto ঢুকে যায়, UI আবার ছোঁয়া
             // লাগে না (যেহেতু ইউজার এমনিতেই edited ভ্যালুটা দেখছে)। ──
             try {
-                com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-                    .patchContentAndPersist(sheet, rowKey, fields)
+                val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                contentRepo.patchContentAndPersist(sheet, rowKey, fields)
+                // ── FIX: Room-এর টপিক-ক্যাশও (আসল স্ক্রিন যেটা পড়ে) সাথে সাথেই প্যাচ করো ──
+                contentRepo.patchRoomQuestion(sheet, rowKey, fields)
                 _state.update { it.copy(isEditingQuestion = false,
                     editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
                     contentEditVersion = _state.value.contentEditVersion + 1) }
