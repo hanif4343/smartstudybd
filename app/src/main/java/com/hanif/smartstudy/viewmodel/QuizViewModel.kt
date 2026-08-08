@@ -224,8 +224,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> "Study"
         }
 
+        // ⚠️ নতুন: Subject-লেভেল tag_id ফিল্টারের জন্য দরকারি দুটো জিনিস — Tags
+        // রেফারেন্স-টেবিল (tag_id → tag_name lookup) আর বর্তমান ইউজার (audience
+        // group বের করার জন্য, admin হলে preview-override সহ)। দুটোই ছোট/Room-cached,
+        // তাই এখানে await করাটা subject-list লোডের speed-এ কোনো প্রভাব ফেলে না।
+        val tagsById = repo.getRoomTags().associate { it.tagId to it.name }
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+
         fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
-            rows.map { s ->
+            rows
+                // ⚠️ এখানেই একমাত্র জায়গা যেখানে subject-level tag_id ফিল্টার প্রযোজ্য
+                // হয় — Subject বাদ পড়লে তার ভিতরের সব Topic/প্রশ্নও এমনিতেই বাদ পড়ে
+                // যায় (ওগুলো এই subject-এর ভিতরেই lazy-load হয়), আলাদা করে টপিক/
+                // প্রশ্ন-লেভেলে আবার ফিল্টার করা লাগে না।
+                .filter { s ->
+                    com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
+                }
+                .map { s ->
                 // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
                 // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
                 SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
