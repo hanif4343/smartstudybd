@@ -14,5 +14,8 @@ import androidx.room.Entity
 data class SubjectEntity(
     val subjectId : String = "",
     val name      : String = "",
-    val sheet     : String = ""   // "Quiz" | "QBank" | "Study" — কোন sheet-এর subject
+    val sheet     : String = "",  // "Quiz" | "QBank" | "Study" — কোন sheet-এর subject
+    // ⚠️ নতুন: Subjects শিটের "tag_id" কলাম — Tags রেফারেন্স-টেবিলের tag_id পয়েন্ট করে
+    // (দেখো ReferenceModels.kt-এর SubjectRef, AudienceFilter.subjectVisibleForUser())
+    val tagId     : String = ""
 )
