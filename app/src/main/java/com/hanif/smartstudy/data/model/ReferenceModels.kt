@@ -14,7 +14,12 @@ import com.google.gson.annotations.SerializedName
 data class SubjectRef(
     @SerializedName("subject_id")   val subjectId : String? = null,
     @SerializedName("subject_name") val name      : String? = null,
-    @SerializedName("sheet")        val sheet     : String? = null
+    @SerializedName("sheet")        val sheet     : String? = null,
+    // ⚠️ নতুন: Subjects শিটে যোগ করা "tag_id" কলাম (যেমন "TAG01") — Tags
+    // রেফারেন্স-শিটের tag_id-কে পয়েন্ট করে (TAG01 → tag_name="Job")। খালি থাকলে
+    // এই subject-এ audience-ফিল্টার প্রযোজ্য না (সবাই দেখবে) — দেখো
+    // AudienceFilter.subjectVisibleForUser()।
+    @SerializedName("tag_id")       val tagId     : String? = null
 )
 
 data class TopicRef(
