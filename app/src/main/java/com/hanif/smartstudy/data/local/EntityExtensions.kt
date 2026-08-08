@@ -99,7 +99,8 @@ fun StudyItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
 fun SubjectRef.toEntity() = SubjectEntity(
     subjectId = subjectId ?: "",
     name      = name ?: "",
-    sheet     = sheet ?: ""
+    sheet     = sheet ?: "",
+    tagId     = tagId ?: ""
 )
 
 fun TopicRef.toEntity() = TopicEntity(
