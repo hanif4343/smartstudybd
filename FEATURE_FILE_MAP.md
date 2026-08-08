@@ -29,7 +29,8 @@
 | ফাইল | কাজ |
 |---|---|
 | `viewmodel/AiChatViewModel.kt` | সাধারণ প্রশ্নোত্তর চ্যাটের state |
-| `ui/aichat/AiChatScreen.kt` | UI (Home থেকে "AI Chat" কার্ড দিয়ে খোলে) |
+| `ui/aichat/AiChatScreen.kt` | UI (Home থেকে "AI Chat" কার্ড দিয়ে খোলে) — Study Buddy (মানুষ-বন্ধু) থেকে সম্পূর্ণ আলাদা ফিচার |
+| `data/model/AiChatModels.kt` | চ্যাট মেসেজ/সেশন মডেল |
 | `data/remote/AiChatService.kt` | (উপরেরটাই শেয়ার্ড ব্যাকএন্ড) |
 
 ## ✍️ Written উত্তর AI অটো-চেক (Study রিকল মোড)
@@ -66,6 +67,7 @@
 | `data/local/QuestionDao.kt` / `QuestionEntity.kt` | Room DB — অফলাইন প্রশ্ন স্টোরেজ, `SubjectCount`/`SubTopicCount` কোয়েরি |
 | `data/repository/ContentRepository.kt` | Firebase/GAS/Room — কনটেন্ট রিড/রাইটের কেন্দ্রীয় লজিক, XP award, streak |
 | `data/remote/ContentFetchService.kt` | Firebase থেকে raw কনটেন্ট ফেচ |
+| `data/model/StudyContent.kt` | Firebase RTDB-এর raw ফিল্ড নাম হ্যান্ডলিং (subject/sub_topic/correct/technique ইত্যাদি, কেসিং ভ্যারিয়েন্ট) |
 | `util/ModelTestGenerator.kt` | Mock Test-এর জন্য র‍্যান্ডম প্রশ্ন বাছাই লজিক |
 
 ---
@@ -87,20 +89,52 @@
 
 ---
 
-## ⌨️ Typing Practice
+## ⌨️ Typing Practice (Bijoy কী-বোর্ড কারিকুলাম সহ — সবচেয়ে বড় ও দ্রুত বাড়া সেকশন)
 | ফাইল | কাজ |
 |---|---|
-| `ui/typing/TypingPracticeScreen.kt` | মূল টাইপিং প্র্যাকটিস UI |
+| `ui/typing/TypingPracticeScreen.kt` | হাব/এন্ট্রি স্ক্রিন — এখান থেকে Normal/Smart/Exam মোড বাছাই হয় |
+| `ui/typing/NormalTypingScreen.kt` | সাধারণ ফ্রি-প্র্যাকটিস টাইপিং মোড |
+| `ui/typing/SmartTypingScreen.kt` | দুর্বলতা-ভিত্তিক adaptive টাইপিং মোড (ভুল হওয়া কী/অক্ষর বেশি আসে) |
+| `ui/typing/ExamTypingScreen.kt` | নির্দিষ্ট সময়ের পরীক্ষা-স্টাইল টাইপিং টেস্ট মোড |
+| `ui/typing/RoadmapWizard.kt` | Key-unlock প্রগ্রেসিভ কারিকুলামের স্টেজ/রোডম্যাপ UI |
+| `ui/typing/FingerKeyboardDiagram.kt` | ভার্চুয়াল কীবোর্ড ডায়াগ্রাম + `LiveKeyHighlightKeyboard` (পরের কী লাইভ হাইলাইট) |
+| `ui/typing/TypingProfileDialog.kt` | ইউজারের টাইপিং প্রোফাইল/প্রগ্রেস সামারি ডায়ালগ |
 | `ui/typing/TypingRaceScreen.kt` | Typing Race (মাল্টিপ্লেয়ার-স্টাইল) মোড |
+| `viewmodel/TypingSessionViewModel.kt` | একটা টাইপিং সেশনের কেন্দ্রীয় state — ইনপুট ম্যাচিং, WPM/accuracy হিসাব, হাত-ভিত্তিক ভুল ট্র্যাকিং |
 | `util/TypingPassageProvider.kt` | প্যাসেজ সোর্সিং (Sheet fallback সহ) |
 | `util/TypingAdaptiveContentProvider.kt` | দুর্বলতা-ভিত্তিক adaptive প্যাসেজ জেনারেশন |
 | `util/TypingErrorAnalyzer.kt` | ভুল টাইপ বিশ্লেষণ |
 | `util/TypingMistakeLogger.kt` | ভুলের লগ রাখা (Room-এ) |
 | `util/HandKeyMap.kt` | বিজয় কীবোর্ডে কোন অক্ষর কোন হাতে (বাম/ডান) |
+| `util/BijoyKeyMap.kt` | বাংলা ক্যারেক্টার → বিজয় লেআউটে ফিজিক্যাল কী (+Shift কিনা) ম্যাপ, লাইভ কী-হাইলাইটের জন্য |
+| `util/CurriculumProvider.kt` | Key-unlock কারিকুলাম লজিক — কোন স্টেজে আছে, স্টেজের প্র্যাকটিস-টেক্সট বানানো, unlock-শর্ত চেক |
+| `data/model/BijoyCurriculum.kt` | কারিকুলামের static ডেটা (ক্যারেক্টার-ভিত্তিক স্টেজ, ফিজিক্যাল-কী না) |
+| `util/PassageRepeatGuard.kt` | "শাফল-ব্যাগ" পদ্ধতিতে একই প্যাসেজ বারবার না আসা নিশ্চিত করে |
+| `util/SpeedRankUtil.kt` | WPM-রেঞ্জ অনুযায়ী "বাহন" র‍্যাংক (গ্যামিফিকেশন) |
+| `util/TypingKeySound.kt` | প্রতি কী-প্রেসে ছোট ক্লিক-সাউন্ড (ToneGenerator দিয়ে, কোনো asset লাগে না) |
+| `util/TypingKeyStatStore.kt` | প্রতিটা কী/কী-পেয়ারের সঠিক-ভুল কীপ্রেস গণনা persist ও query |
 | `data/remote/TypingAiService.kt` | AI দিয়ে টাইপিং প্যাসেজ জেনারেট |
+| `data/remote/TypingCloudSyncService.kt` | টাইপিং প্রগ্রেস/স্ট্যাটস ক্লাউডে সিঙ্ক |
 | `data/model/TypingRaceModels.kt` / `TypingSheetPassage.kt` | ডেটা মডেল |
-| `data/local/TypingMistakeDao/Entity.kt`, `TypingHandStatsDao/Entity.kt`, `StudyTypingProgressDao/Entity.kt`, `TypingSheetPassageDao/Entity.kt`, `GeneratedPassageCacheDao/Entity.kt` | Room টেবিল (প্রগ্রেস, মিসটেক স্ট্যাটস, ক্যাশড প্যাসেজ) |
+| `data/local/TypingMistakeDao.kt`/`Entity.kt` | ভুল-কী লগ (Room) |
+| `data/local/TypingHandStatsDao.kt`/`Entity.kt` | হাত-ভিত্তিক (বাম/ডান) স্ট্যাটস |
+| `data/local/TypingKeyStatDao.kt`/`Entity.kt`, `TypingKeyPairStatDao.kt`/`Entity.kt` | প্রতি-কী ও কী-পেয়ার স্ট্যাটস (TypingKeyStatStore ব্যবহার করে) |
+| `data/local/StudyTypingProgressDao.kt`/`Entity.kt` | Study-মোডে টাইপিং প্রগ্রেস |
+| `data/local/CurriculumProgressDao.kt`/`Entity.kt` | Key-unlock কারিকুলামের কোন স্টেজ পর্যন্ত সম্পন্ন সেই ট্র্যাকিং |
+| `data/local/TypingSheetPassageDao.kt`/`Entity.kt`, `GeneratedPassageCacheDao.kt`/`Entity.kt` | Sheet থেকে আনা ও AI-জেনারেটেড প্যাসেজ ক্যাশ |
+| `data/local/CustomPassageDao.kt`/`Entity.kt` | ইউজার নিজে বানানো কাস্টম প্যাসেজ |
 | `data/repository/TypingRaceRepository.kt` | Typing Race-এর Firebase লজিক |
+
+## 📖 Reference ডেটা (Subject/Topic/SubTopic/Tag/Post/Institution — QBank "পদ অনুযায়ী ব্রাউজ")
+| ফাইল | কাজ |
+|---|---|
+| `data/model/ReferenceModels.kt` | `SubjectRef` ইত্যাদি — Subjects/Topics/SubTopics/Tags/Posts/Institutions/Exam_Appearances রেফারেন্স-টেবিলের মডেল |
+| `data/local/ReferenceDao.kt` | উপরের ৭টা ছোট reference-টেবিলের Room DAO |
+| `data/local/SubjectEntity.kt`, `TopicEntity.kt`, `SubTopicEntity.kt`, `TagEntity.kt` | রেফারেন্স-টেবিলের Room entity |
+| `data/local/PostEntity.kt` | "পদ" (Posts) লোকাল ক্যাশ — QBank-এর পদ অনুযায়ী ব্রাউজ ফ্লো |
+| `data/local/InstitutionEntity.kt` | "প্রতিষ্ঠান" (Institutions) লোকাল ক্যাশ |
+| `data/local/ExamAppearanceEntity.kt` | একই প্রশ্ন একাধিক পরীক্ষায় (ভিন্ন Post/Institution/Year) এলে সেটার আলাদা appearance-row (মূল প্রশ্ন ডুপ্লিকেট হয় না) |
+| `data/local/TopicSyncDao.kt`/`TopicSyncEntity.kt` | প্রতি Topic-এ GAS পেজিনেটেড fetch কতদূর হয়েছে তার ট্র্যাকিং (batch দুইবার আনা এড়ায়) |
 
 ---
 
@@ -210,7 +244,6 @@
 | `data/remote/GeminiService.kt` | সরাসরি Gemini API কল (আলাদা ইউজ-কেসে) |
 | `data/remote/ImgBbService.kt` | ছবি আপলোড API |
 | `util/AudienceFilter.kt` | Bulk notification-এর জন্য audience ফিল্টারিং |
-| `util/RemoteLogger.kt` | দূরবর্তী ডিবাগ লগ |
 | `util/ConnectivityObserver.kt` | নেটওয়ার্ক কানেক্টিভিটি চেক |
 | `util/DeepLinkHandler.kt` | ডিপলিংক পার্সিং |
 | `util/SoundManager.kt` | সাউন্ড এফেক্ট (সঠিক/ভুল বিপ ইত্যাদি) |
@@ -219,13 +252,25 @@
 | `ui/search/GlobalSearchScreen.kt` | সার্চ ফিচার |
 | `ui/components/MediaViewer.kt` | ইমেজ/মিডিয়া ফুলস্ক্রিন ভিউয়ার |
 | `ui/navigation/SmartStudyNavGraph.kt` | Nav graph (যদি ব্যবহৃত হয়) |
+| `ui/splash/SplashScreen.kt` | অ্যাপ চালু হওয়ার সময় Splash/লোডিং অ্যানিমেশন স্ক্রিন |
 | `ui/theme/Theme.kt`, `Typography.kt` | রঙ/ফন্ট (NotoSansBengali, Indigo600 ইত্যাদি এখানে ডিফাইন্ড) |
 | `MainActivity.kt` | Entry point activity |
 | `SmartStudyApp.kt` | Application ক্লাস |
+
+> ⚠️ পুরনো নোট: এই ম্যাপে আগে `util/RemoteLogger.kt` লেখা ছিল — ফাইলটা এখন কোডবেসে নেই (মুছে ফেলা হয়েছে), তাই এন্ট্রিটা বাদ দেওয়া হলো।
+
+## 🧩 শেয়ার্ড UI Components (একাধিক ফিচারে রিইউজ হয়)
+| ফাইল | কাজ |
+|---|---|
+| `ui/shared/SharedComponents.kt` | `QuestionCard` (MCQ/Written/Study সব ধরনের প্রশ্নের UI) — সবচেয়ে বেশি জায়গায় ব্যবহৃত |
+| `ui/shared/SmartTextToolbar.kt` | কাস্টম সিলেকশন টুলবার (Copy/Share/Search/Read Aloud) |
+| `ui/shared/Phase6Components.kt` | `OfflineBanner`, `AchievementPopup`, `StreakPopup`, `ReminderBanner`, `ImageZoomOverlay`, `PendingSyncBadge` |
+| `ui/shared/Phase7Components.kt` | `ToastHost`/`rememberToastState` (টোস্ট), skeleton loaders (`SubjectListSkeleton`, `QuestionCardSkeleton`, `HomeCardSkeleton`), `ErrorState`, `EmptyState` |
 
 ---
 
 ## 🧭 কীভাবে ব্যবহার করবেন
 - নতুন ফিচার শুরু করার আগে এই ফাইলটা দেখে নিন — একই রকম existing ফিচারের ফাইলগুলো প্যাটার্ন হিসেবে কাজে লাগবে।
 - `QuestionCard` (SharedComponents.kt), `TtsManager`, `SessionManager`, `ContentRepository` — এই ৪টা প্রায় সব ফিচারেই কোনো না কোনোভাবে ব্যবহৃত হয়, তাই এগুলো বদলালে সাবধানে সব caller চেক করা দরকার।
-- এই ডকুমেন্টে নতুন ফিচার যোগ হলে (যেমন Viva Mode আজ যোগ হলো) এই ফাইলটাও আপডেট করে রাখা ভালো।
+- এই ডকুমেন্টে নতুন ফিচার যোগ হলে (যেমন Viva Mode, বা সাম্প্রতিক Typing Practice-এর Key-unlock কারিকুলাম) এই ফাইলটাও আপডেট করে রাখা ভালো।
+- সর্বশেষ আপডেট: Typing Practice সেকশন সম্পূর্ণ নতুন করে লেখা হয়েছে (Normal/Smart/Exam মোড, Key-unlock কারিকুলাম, key-level stats), নতুন "Reference ডেটা" ও "শেয়ার্ড UI Components" সেকশন যোগ হয়েছে, এবং বাদ পড়া `util/RemoteLogger.kt` এন্ট্রি সরানো হয়েছে (ফাইলটা কোডবেসে আর নেই)।
