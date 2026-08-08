@@ -12,6 +12,10 @@ import com.hanif.smartstudy.BuildConfig
 
 data class StudyItem(
     @SerializedName("id")            val id           : String? = null,
+    // ── FIX ("Exam_Appearances-এর question_id মেলে না" বাগ): Exam_Appearances শীট
+    // এই sheet-এর "new_id" কলাম দিয়ে প্রশ্ন রেফার করে (plain "id" না) — তাই new_id-ও
+    // আলাদা রাখা হলো, যাতে ensureRoomQuestionsByIds() সঠিক key দিয়ে ক্যাশ করতে পারে ──
+    @SerializedName("new_id")        val newId        : String? = null,
     @SerializedName("subject")       val subject      : String? = null,
     @SerializedName("sub_topic")     val subTopic     : String? = null,
     @SerializedName("question")      val question     : String? = null,
@@ -42,6 +46,10 @@ data class StudyItem(
 
 data class QuizItem(
     @SerializedName("id")            val id           : String? = null,
+    // ── FIX ("Exam_Appearances-এর question_id মেলে না" বাগ): Exam_Appearances শীট
+    // এই sheet-এর "new_id" কলাম দিয়ে প্রশ্ন রেফার করে (plain "id" না) — তাই new_id-ও
+    // আলাদা রাখা হলো, যাতে ensureRoomQuestionsByIds() সঠিক key দিয়ে ক্যাশ করতে পারে ──
+    @SerializedName("new_id")        val newId        : String? = null,
     @SerializedName("subject")       val subject      : String? = null,
     @SerializedName("sub_topic")     val subTopic     : String? = null,
     @SerializedName("question")      val question     : String? = null,
@@ -77,6 +85,10 @@ data class QuizItem(
 
 data class QBankItem(
     @SerializedName("id")            val id           : String? = null,
+    // ── FIX ("Exam_Appearances-এর question_id মেলে না" বাগ): Exam_Appearances শীট
+    // এই sheet-এর "new_id" কলাম দিয়ে প্রশ্ন রেফার করে (plain "id" না) — তাই new_id-ও
+    // আলাদা রাখা হলো, যাতে ensureRoomQuestionsByIds() সঠিক key দিয়ে ক্যাশ করতে পারে ──
+    @SerializedName("new_id")        val newId        : String? = null,
     @SerializedName("subject")       val subject      : String? = null,
     @SerializedName("sub_topic")     val subTopic     : String? = null,
     @SerializedName("question")      val question     : String? = null,
