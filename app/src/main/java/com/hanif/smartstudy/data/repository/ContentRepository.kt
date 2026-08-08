@@ -303,7 +303,7 @@ class ContentRepository(private val context: Context) {
                 // এখন যেই key (id বা new_id) দিয়ে আসলে রিকোয়েস্ট করা হয়েছিল (missing
                 // লিস্টে যা ছিল), ঠিক সেই ভ্যালুটাকেই fbKey হিসেবে বসানো হচ্ছে — তাই
                 // পরের read ঠিক একই key দিয়ে মিলে যাবে। ──
-                fun <T> upsertMatched(list: List<T>?, idOf: (T) -> String?, newIdOf: (T) -> String?, toEnt: (T) -> com.hanif.smartstudy.data.local.QuestionEntity) {
+                suspend fun <T> upsertMatched(list: List<T>?, idOf: (T) -> String?, newIdOf: (T) -> String?, toEnt: (T) -> com.hanif.smartstudy.data.local.QuestionEntity) {
                     if (list.isNullOrEmpty()) return
                     val entities = list.mapNotNull { item ->
                         val requestedKey = missing.firstOrNull { it == idOf(item) || it == newIdOf(item) }
