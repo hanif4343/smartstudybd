@@ -30,7 +30,12 @@ import androidx.room.RoomDatabase
     // reference-ডেটা (ContentRepository.kt-এর referenceDao()/topicSyncDao())।
     // এই টেবিলগুলোর DAO/Entity ফাইল আগে থেকেই ছিল, শুধু এখানে রেজিস্টার করা হয়নি
     // ছিল — সেটাই compileDebugKotlin-এর "Unresolved reference" এর কারণ ছিল।
-    version = 12,
+    // v12 → v13: SubjectEntity-তে tagId কলাম যোগ হলো — Subjects রেফারেন্স-শিটের নতুন
+    // "tag_id" কলাম (Tags শিট lookup করে audience-ফিল্টার, দেখো AudienceFilter.
+    // subjectVisibleForUser() ও QuizViewModel.rebuildSubjectsLazy())।
+    // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না — শুধু cache
+    // রিফ্রেশ হবে, পরের syncReferenceData()-এই আবার পপুলেট হয়ে যাবে।
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
