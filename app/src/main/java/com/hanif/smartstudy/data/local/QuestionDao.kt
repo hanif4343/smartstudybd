@@ -204,6 +204,15 @@ interface QuestionDao {
     """)
     suspend fun getByFbKeysFiltered(sheet: String, ids: List<String>, tag: String): List<QuestionEntity>
 
+    // ── FIX ("পদ/পদবী-মোডে প্রশ্ন ০/০ দেখানো" বাগ): দেওয়া id-লিস্টের মধ্যে যেগুলো Room-এ
+    // ইতিমধ্যে আছে সেগুলোই রিটার্ন করে — বাকিগুলো (Room-এ নেই) GAS থেকে এনে upsert করতে
+    // হবে (দেখো ContentRepository.ensureRoomQuestionsByIds)। আগে এই চেক-ধাপটাই ছিল না,
+    // getRoomQuestionsByIds() সরাসরি Room-এ যা আছে শুধু সেটাই ফেরত দিত — Exam_Appearances
+    // যেই প্রশ্নগুলোর লিংক দিত সেগুলো যদি কখনো স্বাভাবিক Subject→Topic পথে ব্রাউজ করে
+    // ডাউনলোড না হয়ে থাকতো, Room-এ তারা কখনোই থাকতো না, ফলে "০/০ প্রশ্ন" দেখাতো। ──
+    @Query("SELECT fbKey FROM questions WHERE sheet = :sheet AND fbKey IN (:ids)")
+    suspend fun getExistingFbKeys(sheet: String, ids: List<String>): List<String>
+
     // ── Review System (Admin-only): লোকাল Room cache-এ reviewed status আপডেট —
     // GAS-এ লেখার পর Room-ও সাথে সাথে sync রাখার জন্য (fresh fetch ছাড়াই cache নির্ভুল থাকে) ──
     @Query("UPDATE questions SET reviewed = :reviewed, reviewedAt = :reviewedAt WHERE sheet = :sheet AND fbKey = :fbKey")
