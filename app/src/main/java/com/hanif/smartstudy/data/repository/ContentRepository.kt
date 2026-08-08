@@ -274,6 +274,38 @@ class ContentRepository(private val context: Context) {
             entities.map { it.toQuestionItem() }
         }
 
+    /**
+     * ── FIX ("পদবী/প্রতিষ্ঠান-মোডে প্রশ্ন ০/০" বাগ) ──
+     * getRoomQuestionsByIds() শুধু Room-এ যা আছে তাই ফেরত দেয় — Exam_Appearances
+     * যেই questionId-গুলো লিংক করে সেগুলো যদি কখনো স্বাভাবিক Subject→Topic পথে
+     * ব্রাউজ করে ডাউনলোড না হয়ে থাকে, Room-এ তারা থাকেই না, ফলে "০/০ প্রশ্ন" দেখাতো।
+     * এই ফাংশন আগে চেক করে কোন id-গুলো Room-এ নেই, শুধু সেগুলো GAS-এর নতুন
+     * getQuestionsByIds action দিয়ে টার্গেটেড এনে upsert করে দেয় — তারপর
+     * getRoomQuestionsByIds() ঠিকঠাক সব প্রশ্ন খুঁজে পাবে। selectQBankInstitution
+     * UnderPost()/selectQBankDesignationUnderInstitution()-এর ঠিক আগে কল করা হয়।
+     */
+    suspend fun ensureRoomQuestionsByIds(sheet: String, ids: List<String>): Unit =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext
+            val roomSheet = sheet.uppercase()
+            val existing  = dao.getExistingFbKeys(roomSheet, ids).toSet()
+            val missing   = ids.filterNot { existing.contains(it) }
+            if (missing.isEmpty()) return@withContext
+            val now = System.currentTimeMillis()
+            try {
+                when (sheet) {
+                    "Quiz" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing)
+                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
+                    "QBank" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing)
+                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
+                    "Study" -> com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing)
+                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
+                }
+            } catch (e: Exception) {
+                Log.w("ContentRepository", "ensureRoomQuestionsByIds($sheet) failed: ${e.message}")
+            }
+        }
+
     // ── Review System (Admin-only) ────────────────────────────────────────
 
     /**
