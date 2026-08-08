@@ -83,6 +83,37 @@ object AudienceFilter {
         study  = study.filterNotNull()  .filter { userCanSee(it.audienceTags, user, adminOverrideTag) }
     )
 
+    /**
+     * ⚠️ নতুন: Subject-লেভেল audience ফিল্টার — Subjects রেফারেন্স-শিটের নতুন
+     * "tag_id" কলাম (যেমন "TAG01") ব্যবহার করে। এটা প্রশ্ন-লেভেল AudienceTags
+     * ফিল্টারের (userCanSee, উপরে) থেকে আলাদা মেকানিজম: content-এ ফ্রি-টেক্সট
+     * classLevel/Job লেখা থাকে, কিন্তু Subject-এ শুধু একটা Tags-শিট আইডি
+     * (tag_id) থাকে যেটা lookup করে আসল নাম বের করতে হয়।
+     *
+     * subjectTagId ফাঁকা হলে → সবাই দেখবে (unrestricted subject, ব্যাকওয়ার্ড
+     * কম্প্যাটিবল — পুরনো subject-গুলোয় এখনো tag_id সেট করা নেই)।
+     * subjectTagId থাকলে → tagsById দিয়ে আসল tag_name (যেমন "Job") বের করে,
+     * সেটাকে ইউজারের effective audience group-এর (adminOverrideTag বিবেচনা
+     * করে, admin App এ যেমন হয়) সাথে মিলিয়ে দেখে।
+     */
+    fun subjectVisibleForUser(
+        subjectTagId    : String?,
+        tagsById        : Map<String, String>,
+        user            : User?,
+        adminOverrideTag: String = ""
+    ): Boolean {
+        val tid = subjectTagId?.trim().orEmpty()
+        if (tid.isBlank()) return true   // tag_id সেট করা নেই — সব audience-এর জন্য visible
+
+        val tagName = tagsById[tid]?.trim().orEmpty()
+        if (tagName.isBlank()) return true   // অজানা/মুছে-ফেলা tag_id — নিরাপদে দেখিয়ে দাও, লুকিয়ে ফেলো না
+
+        val effectiveGroup = audienceGroupOf(user)
+            .let { if (user?.isAdmin() == true && adminOverrideTag.isNotBlank()) adminOverrideTag else it }
+
+        return tagName.equals(effectiveGroup, ignoreCase = true)
+    }
+
     // ── Challenge opponent compatibility ─────────────────────
     /**
      * দুটো ইউজার একই audience group-এ কিনা চেক করো।
