@@ -244,7 +244,10 @@ fun SubjectListScreen(
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
                                 QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
-                                QBankFilterMode.DESIGNATION  -> null
+                                // ── FIX: "পদবী" এখন পদ/প্রতিষ্ঠান-ভিত্তিক নতুন তালিকা
+                                // (আগের মতো আর প্লেইন Subject/অধ্যায় লিস্ট না) — তাই POST-এর
+                                // মতোই "X টি প্রতিষ্ঠান" লেবেল দেখানো হচ্ছে ──
+                                QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                             }
                         )
                     }
@@ -280,10 +283,14 @@ fun SubjectListScreen(
 
         // ── Model Test — শুধু QBank মোডে (এন্ট্রি পয়েন্ট এখানেই, প্রশ্ন আসে Quiz sheet থেকে) —
         // Job ইউজারের জন্য সরাসরি জেনারেট-ফর্ম, Student ইউজারের জন্য আগে subject picker ──
-        // শুধু পদবী(ডিফল্ট) ফিল্টার-মোডে দেখানো হয় — প্রতিষ্ঠান/সাল ফিল্টারে থাকা
-        // অবস্থায় এই বাটন থাকলে বিভ্রান্তিকর হতো (Model Test আসল Subject/SubTopic নেয়)
-        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty() &&
-            (!showQBankFilterBar || qbankFilterMode == QBankFilterMode.DESIGNATION)) {
+        // ── FIX: আগে শুধু "পদবী"(তখন প্লেইন Subject লিস্ট) মোডেই দেখানো হতো, কারণ
+        // openModelTestPicker() নিজের আলাদা subject picker খুলত বলে ভাবা হতো এটা
+        // qbankFilterMode-নির্ভর — আসলে openModelTestPicker() পুরোপুরি স্বাধীন (নিজের
+        // getContent() থেকে subject আনে, স্ক্রিনে দেখানো qbankPosts/qbankInstitutions
+        // লিস্টের ওপর নির্ভর করে না)। এখন "পদবী" নতুন Post/Institution তালিকা দেখায়
+        // (আসল Subject না) — তাই এই শর্ত তুলে দিয়ে সব QBank ফিল্টার-মোডেই বাটন দেখানো
+        // হচ্ছে, নাহলে Model Test-এ ঢোকারই কোনো পথ থাকতো না। ──
+        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
             item {
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(
@@ -533,8 +540,12 @@ private fun QBankFilterBar(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // ── ৪টা ফিল্টার চিপ — পদবী ডিফল্ট (Phase 6: "পদ" নতুন, Posts/Institutions/
-        // Exam_Appearances reference-টেবিল থেকে — দেখো QuizViewModel.rebuildQBankPosts) ──
+        // ── ৩টা ফিল্টার চিপ — পদবী ডিফল্ট। ── FIX: আগে ৪টা চিপ ছিল (পদবী/প্রতিষ্ঠান/
+        // সাল/পদ) — "পদবী" চিপ পুরনো ভাঙা subject/sub_topic টেক্সট-কলাম সিস্টেম
+        // ব্যবহার করতো (কলাম দুটোই এখন Sheet-এ নেই, তাই সবসময় "ডেটা আসেনি" দেখাতো)।
+        // এখন "পদবী" চিপ সঠিক Posts/Institutions/Exam_Appearances reference-টেবিল
+        // থেকে চলে (আগে যেটা আলাদা "পদ" চিপে ছিল — দেখো QuizViewModel.rebuildQBankPosts),
+        // তাই রিডান্ড্যান্ট "পদ" চিপ বাদ দেওয়া হলো ──
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -543,8 +554,8 @@ private fun QBankFilterBar(
             listOf(
                 ChipDef(QBankFilterMode.DESIGNATION, "পদবী", "🧑‍💼"),
                 ChipDef(QBankFilterMode.INSTITUTION, "প্রতিষ্ঠান", "🏢"),
-                ChipDef(QBankFilterMode.YEAR, "সাল", "📅"),
-                ChipDef(QBankFilterMode.POST, "পদ", "🎯")
+                ChipDef(QBankFilterMode.YEAR, "সাল", "📅")
+                // ── FIX: "পদ" চিপ বাদ — পদবী চিপই এখন সেই কাজ করে (উপরের কমেন্ট দেখো) ──
             ).forEach { chip ->
                 val selected = filterMode == chip.mode
                 Surface(
