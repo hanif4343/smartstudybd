@@ -832,8 +832,17 @@ function doGet(e) {
   }
 
   // ── getQuestionsPage — subject_id(+topic_id) অনুযায়ী ঠিক ৫০টা (বা limit)
-  // প্রশ্ন ফেরত দেয়, পুরো শিট স্ক্যান না করে — rebuildIndex-এ বানানো
-  // row_start/row_count ব্যবহার করে সরাসরি সেই row-range পড়ে। ──
+  // প্রশ্ন ফেরত দেয়। rebuildIndex-এ বানানো row_start/row_count থাকলে সরাসরি সেই
+  // row-range পড়ে (fast path, পুরো শিট স্ক্যান লাগে না)।
+  // ⚠️ FIX (bug: টপিকের ভিতর প্রশ্ন 0 দেখাতো): আগে row_start/row_count Topics
+  // ট্যাবে ফাঁকা/অনুপস্থিত থাকলে (rebuildIndex কখনো চালানো হয়নি, বা তারপর নতুন
+  // টপিক/প্রশ্ন যোগ হয়েছে, বা কোনো প্রশ্নের topic_id ভুল/ফাঁকা থাকায় rebuildIndex
+  // সেই topic_id-এর জন্য কোনো contiguous group-ই খুঁজে পায়নি) এই ফাংশন চুপচাপ
+  // rows:[] (০টা প্রশ্ন) রিটার্ন করে দিতো — অথচ Subjects/Topics লিস্ট আলাদা
+  // getReferenceData থেকে আসে বলে Subject/Topic নাম ঠিকই দেখাতো, শুধু ভিতরের
+  // প্রশ্নই আসতো না। এখন index না থাকলে/স্টেল হলে সরাসরি sheet-এ topic_id দিয়ে
+  // লাইভ স্ক্যান করে সঠিক প্রশ্নগুলো ফেরত দেয় (fallback path, একটু ধীর কিন্তু
+  // কখনো ভুলভাবে ০ দেখাবে না)। ──
   if (action==="getQuestionsPage") {
     var gqpSheet=(e.parameter.sheet||"Quiz");
     var gqpMap={quiz:"Quiz",qbank:"QBank",study:"Study"};
@@ -844,40 +853,80 @@ function doGet(e) {
     if (!gqpTopicId) return json({status:"error",result:"error",message:"topicId প্রয়োজন"});
 
     var gqpSs=SpreadsheetApp.getActiveSpreadsheet();
-    var gqpTopicsSh=gqpSs.getSheetByName("Topics");
-    if (!gqpTopicsSh) return json({status:"error",result:"error",message:"Topics sheet নেই"});
-    var gqpTData=gqpTopicsSh.getDataRange().getValues(), gqpTHdr=gqpTData[0];
-    var gqpTIdCol=gqpTHdr.indexOf("topic_id"), gqpRsCol=gqpTHdr.indexOf("row_start"), gqpRcCol=gqpTHdr.indexOf("row_count");
-    if (gqpRsCol<0||gqpRcCol<0) return json({status:"error",result:"error",message:"Index নেই — আগে action=rebuildIndex চালাও"});
-    var gqpEntry=null;
-    for (var g1=1;g1<gqpTData.length;g1++){
-      if ((gqpTData[g1][gqpTIdCol]||"").toString()===gqpTopicId){ gqpEntry={start:gqpTData[g1][gqpRsCol],count:gqpTData[g1][gqpRcCol]}; break; }
-    }
-    if (!gqpEntry || !gqpEntry.start) return json({status:"success",result:"success",rows:[],hasMore:false,total:0});
-
     var gqpSh=gqpSs.getSheetByName(gqpSheet);
     if (!gqpSh) return json({status:"error",result:"error",message:"Sheet not found: "+gqpSheet});
     var gqpHdr=gqpSh.getRange(1,1,1,gqpSh.getLastColumn()).getValues()[0];
+    var gqpHdrNorm=gqpHdr.map(function(h){return h.toString().trim().toLowerCase();});
 
-    var gqpReadStart=gqpEntry.start+gqpCursor;
-    var gqpRemaining=gqpEntry.count-gqpCursor;
-    if (gqpRemaining<=0) return json({status:"success",result:"success",rows:[],hasMore:false,total:gqpEntry.count});
-    var gqpReadCount=Math.min(gqpLimit, gqpRemaining);
-    var gqpVals=gqpSh.getRange(gqpReadStart,1,gqpReadCount,gqpSh.getLastColumn()).getValues();
-
-    var gqpRows=[];
-    for (var g2=0;g2<gqpVals.length;g2++){
-      var gqpRec={};
-      for (var g3=0;g3<gqpHdr.length;g3++){
-        var gqpKey=gqpHdr[g3].toString().trim();
-        if (!gqpKey) continue;
-        var gqpVal=gqpVals[g2][g3];
-        gqpRec[gqpKey]=(gqpVal instanceof Date)?Utilities.formatDate(gqpVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqpVal;
+    // ── index (row_start/row_count) খুঁজে দেখা — থাকলে ও বৈধ (start>0) হলে fast path ──
+    var gqpEntry=null;
+    var gqpTopicsSh=gqpSs.getSheetByName("Topics");
+    if (gqpTopicsSh) {
+      var gqpTData=gqpTopicsSh.getDataRange().getValues(), gqpTHdr=gqpTData[0]||[];
+      var gqpTIdCol=gqpTHdr.indexOf("topic_id"), gqpRsCol=gqpTHdr.indexOf("row_start"), gqpRcCol=gqpTHdr.indexOf("row_count");
+      if (gqpTIdCol>=0 && gqpRsCol>=0 && gqpRcCol>=0) {
+        for (var g1=1;g1<gqpTData.length;g1++){
+          if ((gqpTData[g1][gqpTIdCol]||"").toString()===gqpTopicId){
+            var gqpS=gqpTData[g1][gqpRsCol], gqpC=gqpTData[g1][gqpRcCol];
+            if (gqpS && gqpC) gqpEntry={start:gqpS,count:gqpC};
+            break;
+          }
+        }
       }
-      gqpRows.push(gqpRec);
     }
-    var gqpNextCursor=gqpCursor+gqpReadCount;
-    return json({status:"success",result:"success",rows:gqpRows,hasMore:gqpNextCursor<gqpEntry.count,nextCursor:gqpNextCursor,total:gqpEntry.count});
+
+    var gqpRows=[], gqpTotal=0, gqpNextCursor=gqpCursor, gqpHasMore=false;
+
+    if (gqpEntry) {
+      // ── FAST PATH: ইনডেক্স আছে ও বৈধ — সরাসরি row-range পড়ো ──
+      var gqpReadStart=gqpEntry.start+gqpCursor;
+      var gqpRemaining=gqpEntry.count-gqpCursor;
+      gqpTotal=gqpEntry.count;
+      if (gqpRemaining>0) {
+        var gqpReadCount=Math.min(gqpLimit, gqpRemaining);
+        var gqpVals=gqpSh.getRange(gqpReadStart,1,gqpReadCount,gqpSh.getLastColumn()).getValues();
+        for (var g2=0;g2<gqpVals.length;g2++){
+          var gqpRec={};
+          for (var g3=0;g3<gqpHdr.length;g3++){
+            var gqpKey=gqpHdr[g3].toString().trim();
+            if (!gqpKey) continue;
+            var gqpVal=gqpVals[g2][g3];
+            gqpRec[gqpKey]=(gqpVal instanceof Date)?Utilities.formatDate(gqpVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqpVal;
+          }
+          gqpRows.push(gqpRec);
+        }
+        gqpNextCursor=gqpCursor+gqpReadCount;
+      }
+      gqpHasMore=gqpNextCursor<gqpTotal;
+    } else {
+      // ── FALLBACK PATH: ইনডেক্স নেই/স্টেল/এই topic_id-এর জন্য অনুপস্থিত —
+      // sheet-এ topic_id কলাম দিয়ে সরাসরি লাইভ স্ক্যান করে ম্যাচিং রো বের করো ──
+      var gqpTopicColIdx=gqpHdrNorm.indexOf("topic_id");
+      if (gqpTopicColIdx<0) {
+        return json({status:"error",result:"error",message:"'topic_id' কলাম নেই sheet: "+gqpSheet});
+      }
+      var gqpAllData=gqpSh.getDataRange().getValues();
+      var gqpMatches=[];
+      for (var gm=1; gm<gqpAllData.length; gm++){
+        if ((gqpAllData[gm][gqpTopicColIdx]||"").toString().trim()===gqpTopicId) gqpMatches.push(gqpAllData[gm]);
+      }
+      gqpTotal=gqpMatches.length;
+      var gqpSlice=gqpMatches.slice(gqpCursor, gqpCursor+gqpLimit);
+      for (var g4=0;g4<gqpSlice.length;g4++){
+        var gqpRec2={};
+        for (var g5=0;g5<gqpHdr.length;g5++){
+          var gqpKey2=gqpHdr[g5].toString().trim();
+          if (!gqpKey2) continue;
+          var gqpVal2=gqpSlice[g4][g5];
+          gqpRec2[gqpKey2]=(gqpVal2 instanceof Date)?Utilities.formatDate(gqpVal2,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqpVal2;
+        }
+        gqpRows.push(gqpRec2);
+      }
+      gqpNextCursor=gqpCursor+gqpSlice.length;
+      gqpHasMore=gqpNextCursor<gqpTotal;
+    }
+
+    return json({status:"success",result:"success",rows:gqpRows,hasMore:gqpHasMore,nextCursor:gqpNextCursor,total:gqpTotal});
   }
 
   // ── getExamAppearances — একটা প্রশ্ন কোন কোন পদ/প্রতিষ্ঠান/সালে এসেছে
@@ -1342,6 +1391,44 @@ function doGet(e) {
       grRows.push(grRec);
     }
     return json({status:"success",tab:grTab,rows:grRows});
+  }
+
+  // ── FIX ("পদবী/প্রতিষ্ঠান-মোডে প্রশ্ন ০/০" বাগ): getQuestionsByIds — Exam_Appearances
+  // থেকে পাওয়া questionId-লিস্টের মধ্যে যেগুলো ফোনের Room-এ এখনো ক্যাশ হয়নি (কারণ
+  // ওই টপিক কখনো স্বাভাবিক Subject→Topic পথে ব্রাউজ করে ডাউনলোড হয়নি), সেগুলো
+  // সরাসরি id দিয়ে টার্গেটেড আনার জন্য — getSheetRows-এর মতো পুরো ট্যাব (হাজার হাজার
+  // রো) না এনে, শুধু চাওয়া কয়েকটা id-ই রিটার্ন করে (দ্রুত, কম ডেটা)। ──
+  if (action==="getQuestionsByIds") {
+    var gqiSheet=(e.parameter.sheet||"QBank").toString().trim();
+    var gqiMap={quiz:"Quiz",qbank:"QBank",study:"Study"};
+    gqiSheet=gqiMap[gqiSheet.toLowerCase()]||gqiSheet;
+    var gqiIdsRaw=(e.parameter.ids||"").toString().trim();
+    if (!gqiIdsRaw) return json({status:"error",result:"error",message:"ids প্রয়োজন"});
+    var gqiIdSet={};
+    gqiIdsRaw.split(",").forEach(function(id){ id=id.trim(); if(id) gqiIdSet[id]=true; });
+
+    var gqiSs=SpreadsheetApp.getActiveSpreadsheet(), gqiSh=gqiSs.getSheetByName(gqiSheet);
+    if (!gqiSh) return json({status:"error",result:"error",message:"Sheet not found: "+gqiSheet});
+    if (gqiSh.getLastRow()<2) return json({status:"success",rows:[]});
+    var gqiData=gqiSh.getDataRange().getValues();
+    var gqiHdr=gqiData[0];
+    var gqiIdCol=gqiHdr.indexOf("id");
+    if (gqiIdCol<0) return json({status:"error",result:"error",message:"'id' কলাম নেই sheet: "+gqiSheet});
+
+    var gqiRows=[];
+    for (var gqi=1; gqi<gqiData.length; gqi++){
+      var gqiRowId=(gqiData[gqi][gqiIdCol]||"").toString().trim();
+      if (!gqiRowId || !gqiIdSet[gqiRowId]) continue;
+      var gqiRec={};
+      for (var gqj=0; gqj<gqiHdr.length; gqj++){
+        var gqiKey=gqiHdr[gqj].toString().trim();
+        if (!gqiKey) continue;
+        var gqiVal=gqiData[gqi][gqj];
+        gqiRec[gqiKey]=(gqiVal instanceof Date)?Utilities.formatDate(gqiVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqiVal;
+      }
+      gqiRows.push(gqiRec);
+    }
+    return json({status:"success",result:"success",rows:gqiRows});
   }
 
   // ── getAI ──
