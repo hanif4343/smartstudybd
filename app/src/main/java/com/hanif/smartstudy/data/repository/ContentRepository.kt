@@ -293,12 +293,18 @@ class ContentRepository(private val context: Context) {
             if (missing.isEmpty()) return@withContext
             val now = System.currentTimeMillis()
             try {
-                when (sheet) {
-                    "Quiz" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing)
+                // ── FIX: কলার (QuizViewModel) সবসময় StudyMode.QBANK.name-এর মতো
+                // সব-ক্যাপিটাল sheet নাম পাঠায় ("QBANK"/"QUIZ"/"STUDY") — আগে এখানে
+                // মিশ্র-কেস "QBank"/"Quiz"/"Study" দিয়ে ম্যাচ করার চেষ্টা হতো, তাই
+                // কোনো branch-ই মেলেনি, GAS থেকে আনার কোডটা কখনো চলেইনি — এটাই ছিল
+                // "GAS ডিপ্লয় করেও QBank-এ প্রশ্ন ০" থেকে যাওয়ার আসল কারণ। এখন
+                // case-insensitive ম্যাচ করা হচ্ছে, যেভাবেই sheet নাম আসুক ঠিক কাজ করবে ──
+                when (sheet.uppercase()) {
+                    "QUIZ" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing)
                         ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
-                    "QBank" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing)
+                    "QBANK" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing)
                         ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
-                    "Study" -> com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing)
+                    "STUDY" -> com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing)
                         ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
                 }
             } catch (e: Exception) {
