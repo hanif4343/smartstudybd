@@ -201,6 +201,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // populate) থেকে আসে — ছোট, দ্রুত, প্রশ্ন ডাউনলোড করা লাগে না। Topic লিস্ট
             // ও প্রশ্ন — নিচে navigateToSubjectLazy()/navigateToSubTopicLazy() দেখো।
             rebuildSubjectsLazy(newMode)
+            // ── FIX: "পদবী" (Designation/Post) মোড এখন QBank-এর ডিফল্ট QBank-filter,
+            // আর এটা এখন Exam_Appearances-ভিত্তিক নতুন সিস্টেম (rebuildQBankPosts) দিয়ে
+            // চলে (subject/subTopic টেক্সট-কলাম-নির্ভর পুরনো ভাঙা সিস্টেম না) — তাই QBank
+            // মোডে ঢোকার সাথে সাথেই এটাও প্রি-লোড করে রাখা, নাহলে প্রথমবার "পদবী" চিপ
+            // দেখানোর সময় তালিকা খালি থাকতো যতক্ষণ না ইউজার চিপে আলাদাভাবে ট্যাপ করতো ──
+            if (newMode == StudyMode.QBANK) rebuildQBankPosts()
             _state.update { it.copy(isLoading = false) }
         }
     }
@@ -1508,11 +1514,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
             when (newMode) {
-                QBankFilterMode.DESIGNATION -> rebuildSubjects(content, StudyMode.QBANK)
-                QBankFilterMode.INSTITUTION -> rebuildQBankInstitutions(content)
-                QBankFilterMode.YEAR        -> rebuildQBankYears(content)
+                QBankFilterMode.DESIGNATION -> rebuildQBankPosts()
+                QBankFilterMode.INSTITUTION -> rebuildQBankInstitutions()
+                QBankFilterMode.YEAR        -> rebuildQBankYears((repo.getContent() as? DataState.Success)?.data ?: AppContent())
                 QBankFilterMode.POST        -> rebuildQBankPosts()
             }
         }
@@ -1523,43 +1528,50 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(qbankSearchQuery = query) }
     }
 
-    /** প্রতিষ্ঠান-মোড: subTopic (Institution) ধরে group করা তালিকা — প্রতিটার
-     *  ভিতরে (subTopics ফিল্ডে) সেই প্রতিষ্ঠানের আন্ডারে যত পদবী আছে তার নেস্টেড লিস্ট,
-     *  ঠিক rebuildSubjects()-এর প্যাটার্নেই, শুধু subject↔subTopic উল্টে। */
-    private suspend fun rebuildQBankInstitutions(content: AppContent) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-        val filtered = content.forUser(user, adminTag)
-        val items    = filtered.qbank.map { QuestionItem.fromQBankItem(it) }
-        val progressMap = loadProgressMap()
+    /**
+     * প্রতিষ্ঠান-মোড — Room-এর exam_appearances (Institution+Post ধরে group করা)
+     * থেকে তালিকা, ঠিক rebuildQBankPosts()-এর প্যাটার্নেই শুধু Institution↔Post উল্টে।
+     * ── FIX: আগে এই ফাংশন QuestionEntity-র পুরনো `subTopic` টেক্সট-কলাম (Institution
+     * নাম হিসেবে ব্যবহৃত হতো) ধরে group করতো (নিচে দেখো cite নিচে) — কিন্তু QBank
+     * শীটে এখন আর সেই plain subject/sub_topic কলামই নেই (subject_id/topic_id দিয়ে
+     * রিপ্লেস হয়েছে), তাই এই তালিকা সবসময় ফাঁকা আসতো ("ডেটা আসেনি")। এখন এটা
+     * সঠিক Institutions/Exam_Appearances রেফারেন্স-টেবিল থেকে তৈরি হয়, ঠিক "পদ"-মোডের
+     * (এখন পদবী-তে merge হওয়া) মতোই নির্ভরযোগ্য। ──
+     */
+    private suspend fun rebuildQBankInstitutions() {
+        repo.syncExamAppearances()
+        val institutions = repo.getRoomInstitutions()
+        val posts        = repo.getRoomPosts().associateBy { it.postId }
+        val progressMap  = loadProgressMap()
         val mode = StudyMode.QBANK
 
-        val institutions = items
-            .filter { it.subTopic.isNotBlank() }
-            .groupBy { it.subTopic }
-            .map { (inst, qs) ->
-                SubjectEntry(
-                    name      = inst,
-                    totalQ    = qs.size,
-                    doneQ     = qs.count { progressMap.contains("${mode.name}:${it.id}") },
-                    subTopics = qs.filter { it.subject.isNotBlank() }
-                        .groupBy { it.subject }
-                        .map { (desg, dQs) ->
-                            SubTopicEntry(
-                                name         = desg,
-                                subject      = inst,
-                                totalQ       = dQs.size,
-                                doneQ        = dQs.count { progressMap.contains("${mode.name}:${it.id}") },
-                                mcqCount     = dQs.count { it.isMcq() },
-                                writtenCount = dQs.count { it.isWritten() }
-                            )
-                        }
-                        .sortedBy { it.name }
+        val entries = institutions.map { inst ->
+            val appearances = repo.getRoomAppearancesForInstitution(inst.institutionId)
+            val byPost = appearances.groupBy { it.postId }
+            val subTopics = byPost.mapNotNull { (postId, apps) ->
+                val postName = posts[postId]?.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val qIds = apps.map { it.questionId }.distinct()
+                SubTopicEntry(
+                    name              = postName,
+                    subject           = inst.name,
+                    totalQ            = qIds.size,
+                    doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
+                    subjectId         = inst.institutionId,
+                    topicId           = postId,
+                    linkedQuestionIds = qIds
                 )
-            }
-            .sortedBy { it.name }
-        Log.d("QuizVM", "rebuildQBankInstitutions: ${institutions.size}")
-        _state.update { it.copy(qbankInstitutions = institutions, isLoading = false) }
+            }.sortedBy { it.name }
+            SubjectEntry(
+                name      = inst.name,
+                totalQ    = subTopics.sumOf { it.totalQ },
+                doneQ     = subTopics.sumOf { it.doneQ },
+                subTopics = subTopics,
+                subjectId = inst.institutionId
+            )
+        }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
+
+        Log.d("QuizVM", "rebuildQBankInstitutions: ${entries.size}")
+        _state.update { it.copy(qbankInstitutions = entries, isLoading = false) }
     }
 
     /** প্রতিষ্ঠান-মোডের depth0 → একটা প্রতিষ্ঠান বাছাই — নেস্টেড ডেটা আগে থেকেই
@@ -1576,13 +1588,58 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** প্রতিষ্ঠান-মোডের depth1 → একটা পদবী বাছাই — আসল subject=designation,
-     *  subTopic=institution পেয়ার দিয়ে বিদ্যমান navigateToSubTopic()-ই কল করা হয়,
-     *  তাই Room-first pagination/report/admin-edit সব আগের মতোই কাজ করবে। */
+    /**
+     * প্রতিষ্ঠান-মোডের depth1 → একটা পদবী বাছাই — appearance-linked questionId
+     * দিয়ে সরাসরি ফ্ল্যাট প্রশ্ন-লিস্ট (ঠিক selectQBankInstitutionUnderPost()-এর
+     * প্যাটার্নেই)। আগে এখানে raw subject/subTopic টেক্সট-ম্যাচ (navigateToSubTopic)
+     * রিইউজ হতো, যেটা এখন আর সেই কলামগুলো না থাকায় কখনো মেলে না — তাই "প্রশ্ন ০"।
+     */
     fun selectQBankDesignationUnderInstitution(designation: String) {
+        val entry = _state.value.qbankDesignationsUnderInstitution.find { it.name == designation } ?: return
         val institution = _state.value.qbankSelectedInstitution ?: return
-        _state.update { it.copy(navPath = NavPath(designation)) }
-        navigateToSubTopic(institution)
+        timerJob?.cancel()
+        _state.update {
+            it.copy(
+                navPath = NavPath(institution, designation),
+                currentPage = 0,
+                qbankSearchQuery = ""
+            )
+        }
+        viewModelScope.launch {
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val bookmarks = _state.value.bookmarkedIds
+
+            // ── FIX ("০/০ প্রশ্ন" বাগ): Room-এ না-থাকা linkedQuestionId গুলো
+            // আগে GAS থেকে টার্গেটেড এনে ক্যাশ করে নাও, তারপর Room থেকে পড়ো ──
+            repo.ensureRoomQuestionsByIds(StudyMode.QBANK.name, entry.linkedQuestionIds)
+
+            val items = repo.getRoomQuestionsByIds(StudyMode.QBANK.name, entry.linkedQuestionIds, tag)
+                .map { q ->
+                    q.copy(
+                        isBookmarked = bookmarks.contains(q.id),
+                        isWeakTopic  = isWeak(q.subTopic),
+                        isStudyDone  = isStudyDone(q.id)
+                    )
+                }.sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+
+            _state.update {
+                it.copy(
+                    questions      = items,
+                    totalQuestions = items.size,
+                    currentPage    = 0,
+                    isQuizActive   = true,
+                    showResult     = false,
+                    result         = null,
+                    answeredCount  = 0,
+                    timerSec       = 0,
+                    isLoading      = false
+                )
+            }
+            startTimer(items.size)
+        }
     }
 
     /** সাল-মোড: year কলাম ধরে group করা তালিকা — subject/subTopic নির্বিশেষে */
@@ -1800,6 +1857,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             val bookmarks = _state.value.bookmarkedIds
 
+            // ── FIX ("০/০ প্রশ্ন" বাগ): Room-এ না-থাকা linkedQuestionId গুলো আগে
+            // GAS থেকে টার্গেটেড এনে ক্যাশ করে নাও, তারপর Room থেকে পড়ো ──
+            repo.ensureRoomQuestionsByIds(StudyMode.QBANK.name, entry.linkedQuestionIds)
+
             val items = repo.getRoomQuestionsByIds(StudyMode.QBANK.name, entry.linkedQuestionIds, tag)
                 .map { q ->
                     q.copy(
@@ -1833,6 +1894,31 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun qbankFilterBack() {
         when (_state.value.qbankFilterMode) {
+            // ── FIX: "পদ" রিপ্লেস হয়ে "পদবী" হয়েছে, একই qbankPosts/qbankSelectedPost
+            // state পুনর্ব্যবহার করে — তাই back-লজিকও POST-এর মতোই হবে ──
+            QBankFilterMode.DESIGNATION -> when {
+                _state.value.navPath.depth() == 2 -> {
+                    // প্রশ্ন-লিস্ট থেকে এই পদবীর আন্ডারে প্রতিষ্ঠান-লিস্টে ফিরে যাও
+                    timerJob?.cancel()
+                    _state.update {
+                        it.copy(
+                            navPath = NavPath(), isQuizActive = false, questions = emptyList(),
+                            timerSec = 0, showResult = false, result = null
+                        )
+                    }
+                }
+                _state.value.qbankSelectedPost != null -> {
+                    // প্রতিষ্ঠান-লিস্ট থেকে পদবী-লিস্টে ফিরে যাও
+                    _state.update {
+                        it.copy(
+                            qbankSelectedPost = null,
+                            qbankInstitutionsUnderPost = emptyList(),
+                            qbankSearchQuery = ""
+                        )
+                    }
+                }
+                else -> {}
+            }
             QBankFilterMode.INSTITUTION -> when {
                 _state.value.navPath.depth() == 2 -> {
                     // প্রশ্ন-লিস্ট থেকে এই প্রতিষ্ঠানের আন্ডারে পদবী-লিস্টে ফিরে যাও
