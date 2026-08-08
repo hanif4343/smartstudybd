@@ -331,6 +331,58 @@ object GasContentService {
         fetchQuestionsPage<com.hanif.smartstudy.data.model.StudyItem>("Study", topicId, null, cursor, limit)
 
     /**
+     * ── FIX ("পদবী/প্রতিষ্ঠান-মোডে প্রশ্ন ০/০" বাগ) — GAS action=getQuestionsByIds:
+     * Exam_Appearances থেকে পাওয়া questionId-লিস্টের মধ্যে যেগুলো Room-এ এখনো নেই,
+     * সেগুলো সরাসরি id দিয়ে GAS থেকে টার্গেটেড আনার জন্য (পুরো sheet স্ক্যান/ডাউনলোড
+     * করা লাগে না — getSheetRows-এর মতো পুরো ট্যাব না এনে, ঠিক এই কয়েকটা id-ই আনে)।
+     * দেখো ContentRepository.ensureRoomQuestionsByIds ও code_updated.gs-এর নতুন action।
+     */
+    private suspend inline fun <reified T> fetchQuestionsByIdsGeneric(sheet: String, ids: List<String>): List<T>? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured() || ids.isEmpty()) return@withContext null
+            try {
+                val idsParam = ids.joinToString(",") { enc(it) }
+                val url = "$BASE_URL?action=getQuestionsByIds&sheet=$sheet&ids=$idsParam&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (!resp.isSuccessful || body.isBlank()) return@withContext null
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("status")?.asString != "success") {
+                    Log.w(TAG, "getQuestionsByIds non-success: ${body.take(150)}")
+                    return@withContext null
+                }
+                val rows = obj.getAsJsonArray("rows") ?: return@withContext emptyList()
+                rows.mapNotNull { el ->
+                    try {
+                        if (!el.isJsonObject) return@mapNotNull null
+                        val o = el.asJsonObject.deepCopy()
+                        val idVal = o.get("id")
+                        if (idVal == null || idVal.isJsonNull || idVal.asString.isBlank()) {
+                            o.get("_fbKey")?.takeIf { !it.isJsonNull }?.let { o.addProperty("id", it.asString) }
+                        }
+                        gson.fromJson(o, T::class.java)
+                    } catch (e: Exception) { null }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "getQuestionsByIds<$sheet> error: ${e.message}")
+                null
+            }
+        }
+
+    /** Quiz sheet-এর জন্য id দিয়ে টার্গেটেড ফেচ */
+    suspend fun fetchQuizByIds(ids: List<String>) =
+        fetchQuestionsByIdsGeneric<com.hanif.smartstudy.data.model.QuizItem>("Quiz", ids)
+
+    /** QBank sheet-এর জন্য id দিয়ে টার্গেটেড ফেচ */
+    suspend fun fetchQBankByIds(ids: List<String>) =
+        fetchQuestionsByIdsGeneric<com.hanif.smartstudy.data.model.QBankItem>("QBank", ids)
+
+    /** Study sheet-এর জন্য id দিয়ে টার্গেটেড ফেচ */
+    suspend fun fetchStudyByIds(ids: List<String>) =
+        fetchQuestionsByIdsGeneric<com.hanif.smartstudy.data.model.StudyItem>("Study", ids)
+
+    /**
      * Phase 6 — GAS action=getAllExamAppearances (code_updated.gs-এ যোগ করা হয়েছে, getReferenceData-এর
      * বাল্ক-ফেচ প্যাটার্নেই) পুরো Exam_Appearances টেবিল একবারে ফেচ করে। Admin App-এর
      * `getExamAppearances` action-এর থেকে আলাদা — সেটা একটা নির্দিষ্ট questionId-scoped
