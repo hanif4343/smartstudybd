@@ -126,12 +126,56 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
 
+      # ── Rename Debug APK (unique filename so it always downloads fresh, never a stale cached copy) ──
+      - name: Rename Debug APK
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -n "$APK" ]; then
+            mv "$APK" "app/build/outputs/apk/debug/SmartStudy-debug-b${{ github.run_number }}.apk"
+            echo "✅ Renamed debug apk"
+          else
+            echo "No debug APK found!"
+            exit 1
+          fi
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: SmartStudy-Debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # ── Debug build কেও সরাসরি (zip ছাড়া) install-যোগ্য apk হিসেবে Release এ দাও ──
+      # কারণ: GitHub Actions Artifacts সবসময় .zip এ wrap হয়ে ডাউনলোড হয় (GitHub এর নিজস্ব
+      # আচরণ, workflow দিয়ে বদলানো যায় না)। .zip ফাইলকে সরাসরি "install" করলে
+      # ফোন "App not installed" দেখায় কারণ ওটা আসলে .apk না, একটা .zip। Extract না করে
+      # install করাটাই মূল কারণ ছিল। তাই যেকোনো branch এ push করলেই এখানে একটা সরাসরি
+      # .apk লিংক (prerelease) পাওয়া যাবে যেটা extract করা লাগবে না।
+      - name: Get debug version info
+        id: dver
+        run: |
+          VN=$(grep 'versionName' app/build.gradle | sed 's/.*"\(.*\)".*/\1/' | tr -d ' ')
+          SAFE_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          echo "tag=debug-${SAFE_BRANCH}-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "title=Smart Study DEBUG v${VN} (${{ github.ref_name }} · Build ${{ github.run_number }})" >> $GITHUB_OUTPUT
+
+      - name: Publish Debug APK as direct-download Release (all branches)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.dver.outputs.tag }}
+          name:     ${{ steps.dver.outputs.title }}
+          prerelease: true
+          make_latest: false
+          body: |
+            ## 🧪 Debug Build (auto)
+
+            এটা প্রতি push এ auto-generate হওয়া debug build। সরাসরি নিচের .apk
+            ডাউনলোড করে install করো (Actions ট্যাবের zip artifact দরকার নেই)।
+
+            🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ── Release APK (শুধু main/master branch এ) ──
       - name: Build Signed Release APK
@@ -143,13 +187,19 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
+      # ── ফাইলের নাম প্রতিটি build এ unique রাখা হচ্ছে (SmartStudy.apk নয়) ──
+      # আগে সবসময় একই নাম "SmartStudy.apk" থাকায় ফোনের browser/download manager
+      # পুরনো downloaded ফাইলটাকেই cache থেকে দেখাচ্ছিল/install করছিল, নতুন করে
+      # download না করেই — এই কারণে কোড পাল্টানোর পরও পুরনো ভার্সন install হচ্ছিল।
+      # Unique filename দিলে প্রতিবার নতুন URL/ফাইল হয়, তাই কখনো stale copy install হবে না।
       - name: Rename Release APK
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          VN=$(grep 'versionName' app/build.gradle | sed 's/.*"\(.*\)".*/\1/' | tr -d ' ')
           if [ -n "$APK" ]; then
-            mv "$APK" app/build/outputs/apk/release/SmartStudy.apk
-            echo "✅ Renamed: SmartStudy.apk"
+            mv "$APK" "app/build/outputs/apk/release/SmartStudy-v${VN}-b${{ github.run_number }}.apk"
+            echo "✅ Renamed: SmartStudy-v${VN}-b${{ github.run_number }}.apk"
           else
             echo "No release APK found!"
             exit 1
@@ -160,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SmartStudy-Release-${{ github.run_number }}
-          path: app/build/outputs/apk/release/SmartStudy.apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       # ── GitHub Release (শুধু main/master) ──
@@ -181,11 +231,12 @@ jobs:
           body: |
             ## 📚 Smart Study
 
-            নিচের **SmartStudy.apk** ডাউনলোড করো।
+            নিচের .apk ফাইলটা ডাউনলোড করো (ফাইলের নামের শেষে build নম্বর দেখে
+            নিশ্চিত হও এটাই লেটেস্ট build)।
             > Settings → Unknown sources চালু করে install করো।
 
             🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
-          files: app/build/outputs/apk/release/SmartStudy.apk
+          files: app/build/outputs/apk/release/*.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
