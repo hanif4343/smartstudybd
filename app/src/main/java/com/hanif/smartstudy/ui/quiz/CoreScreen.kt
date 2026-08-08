@@ -68,11 +68,11 @@ fun CoreScreen(
     val isInsideQBankInstitutionPicker = mode == StudyMode.QBANK &&
         state.qbankFilterMode == QBankFilterMode.INSTITUTION &&
         state.qbankSelectedInstitution != null
-    // ── Phase 6: পদ-মোডেও ঠিক একই কারণে (navPath এখনো depth0-ই থাকে যখন পদ বাছাই
-    // করা হয়েছে কিন্তু প্রতিষ্ঠান এখনো না, দেখো selectQBankPost()) — নইলে সিস্টেম ব্যাক
-    // সরাসরি HOME এ চলে যেত ──
+    // ── Phase 6: পদবী-মোডেও (আগে "পদ") ঠিক একই কারণে (navPath এখনো depth0-ই থাকে যখন
+    // পদবী বাছাই করা হয়েছে কিন্তু প্রতিষ্ঠান এখনো না, দেখো selectQBankPost()) — নইলে
+    // সিস্টেম ব্যাক সরাসরি HOME এ চলে যেত ──
     val isInsideQBankPostPicker = mode == StudyMode.QBANK &&
-        state.qbankFilterMode == QBankFilterMode.POST &&
+        (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
         state.qbankSelectedPost != null
     val isInsideNav = state.isMockZone ||
                       state.isModelTestZone ||
@@ -82,11 +82,11 @@ fun CoreScreen(
                       isInsideQBankInstitutionPicker ||
                       isInsideQBankPostPicker
     BackHandler(enabled = isInsideNav) {
-        // ── QBank প্রতিষ্ঠান/সাল ফিল্টার-মোডে থাকা অবস্থায় কাস্টম back — generic
-        // navigateBack() এই দুই মোডের উল্টানো/flat হায়ারার্কি বোঝে না। পদবী(ডিফল্ট)
-        // মোডে ও Mock/Model Test/Result-এ আগের মতোই generic navigateBack() ব্যবহার হয়। ──
+        // ── QBank-এর সবকটা ফিল্টার-মোডেই (পদবী/প্রতিষ্ঠান/সাল) এখন কাস্টম back লাগে —
+        // generic navigateBack() শুধু plain Subject→SubTopic হায়ারার্কি বোঝে, এই
+        // মোডগুলোর উল্টানো/flat হায়ারার্কি বোঝে না। Mock/Model Test/Result-এ আগের
+        // মতোই generic navigateBack() ব্যবহার হয়। ──
         val useQBankFilterBack = mode == StudyMode.QBANK &&
-            state.qbankFilterMode != QBankFilterMode.DESIGNATION &&
             !state.isMockZone && !state.isModelTestZone &&
             !state.isModelTestSubjectPicker && !state.showResult
         if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
@@ -177,30 +177,31 @@ fun CoreScreen(
                         // QBank সাল-মোড: navPath আসল কোনো subject/subTopic pair না (শুধু
                         // ডেপথ ঠিক রাখতে বসানো placeholder), তাই সরাসরি ওই সালটাই আবার লোড করি।
                         viewModel.selectQBankYear(state.qbankSelectedYear!!)
-                    } else if (mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+                    } else if (mode == StudyMode.QBANK &&
+                               (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
                                state.navPath.subject == "পদ") {
-                        // Phase 6: পদ-মোড — navPath("পদ", institutionName) placeholder, আসল
+                        // পদবী-মোড (আগে "পদ") — navPath("পদ", institutionName) placeholder, আসল
                         // subject/subTopic pair না, তাই সরাসরি সেই institution আবার লোড করি
                         val institutionName = state.navPath.subTopic
                         viewModel.navigateBack()
                         if (institutionName != null) viewModel.selectQBankInstitutionUnderPost(institutionName)
+                    } else if (mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.INSTITUTION) {
+                        // প্রতিষ্ঠান-মোড — navPath(institution, designation) আসল pair, কিন্তু এখন
+                        // ID-ভিত্তিক ফ্ল্যাট-ফেচ (selectQBankDesignationUnderInstitution) —
+                        // পুরনো raw navigateToSubTopic() আর কাজ করে না (সেই টেক্সট-কলাম নেই)
+                        val designationName = state.navPath.subTopic
+                        viewModel.navigateBack()
+                        if (designationName != null) viewModel.selectQBankDesignationUnderInstitution(designationName)
                     } else {
-                        // Same topic reload — QBank প্রতিষ্ঠান-মোডে navPath আসল (designation,
-                        // institution) pair (পুরনো Room/raw-text scheme) — সেখানে পুরনো
-                        // navigateToSubTopic() ঠিক আছে। বাকি সব জায়গায় (ডিফল্ট Quiz/Study/
-                        // QBank-পদবী) navPath এখন Phase 6-এর লেজি টপিক-নাম, তাই
-                        // navigateToSubTopicLazy() ব্যবহার করতে হবে (topicId নাম দিয়ে
-                        // state.subTopics থেকে resolve করে) — নাহলে পুরনো path Room-এ কিছু
-                        // না পেয়ে আবার পুরো sheet fetch করতে যেত।
+                        // Same topic reload — বাকি সব জায়গায় (ডিফল্ট Quiz/Study) navPath এখন
+                        // Phase 6-এর লেজি টপিক-নাম, তাই navigateToSubTopicLazy() ব্যবহার করতে
+                        // হবে (topicId নাম দিয়ে state.subTopics থেকে resolve করে) — নাহলে পুরনো
+                        // path Room-এ কিছু না পেয়ে আবার পুরো sheet fetch করতে যেত।
                         val subj = state.navPath.subject
                         val st   = state.navPath.subTopic
                         if (subj != null && st != null) {
                             viewModel.navigateBack()
-                            if (mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.INSTITUTION) {
-                                viewModel.navigateToSubTopic(st)
-                            } else {
-                                viewModel.navigateToSubTopicLazy(st)
-                            }
+                            viewModel.navigateToSubTopicLazy(st)
                         }
                     }
                 },
@@ -318,10 +319,12 @@ fun CoreScreen(
             )
         }
 
-        // ── Phase 6: QBank পদ-মোড, depth0, পদ এখনো বাছাই করা হয়নি — পদের তালিকা।
-        // নতুন schema-র Posts/Institutions/Exam_Appearances reference-টেবিল থেকে
-        // (দেখো QuizViewModel.rebuildQBankPosts) — INSTITUTION মোডের প্যাটার্নেই ──
-        mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+        // ── QBank পদবী-মোড (আগে নাম ছিল "পদ"), depth0, পদবী এখনো বাছাই করা হয়নি —
+        // পদবীর তালিকা। নতুন schema-র Posts/Institutions/Exam_Appearances
+        // reference-টেবিল থেকে (দেখো QuizViewModel.rebuildQBankPosts) —
+        // INSTITUTION মোডের প্যাটার্নেই ──
+        mode == StudyMode.QBANK &&
+            (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
             state.navPath.depth() == 0 && state.qbankSelectedPost == null -> {
             SubjectListScreen(
                 mode       = state.mode,
@@ -332,7 +335,7 @@ fun CoreScreen(
                 onSubject  = { viewModel.selectQBankPost(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
-                // ── পদ/প্রতিষ্ঠান লিস্ট synthetic (Subject/SubTopic নয়) — তাই Admin
+                // ── পদবী/প্রতিষ্ঠান লিস্ট synthetic (Subject/SubTopic নয়) — তাই Admin
                 // rename/delete/reorder বন্ধ, ভুল ডেটার ওপর কাজ করে ফেলার ঝুঁকি এড়াতে ──
                 isAdmin         = false,
                 showQBankFilterBar      = true,
@@ -343,9 +346,10 @@ fun CoreScreen(
             )
         }
 
-        // ── Phase 6: QBank পদ-মোড, পদ বাছাই করা হয়েছে — এর আন্ডারে প্রতিষ্ঠানের তালিকা
+        // ── QBank পদবী-মোড, পদবী বাছাই করা হয়েছে — এর আন্ডারে প্রতিষ্ঠানের তালিকা
         // (navPath এখনো depth0-ই, ইচ্ছাকৃতভাবে — দেখো selectQBankPost()) ──
-        mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.POST &&
+        mode == StudyMode.QBANK &&
+            (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
             state.navPath.depth() == 0 && state.qbankSelectedPost != null -> {
             SubTopicListScreen(
                 subject     = state.qbankSelectedPost ?: "",
@@ -358,7 +362,8 @@ fun CoreScreen(
             )
         }
 
-        // ── Subject List (depth 0, root) — পদবী(ডিফল্ট) ফিল্টার-মোড, Quiz, Study —
+        // ── Subject List (depth 0, root) — Quiz, Study (QBank-এর ৩টা ফিল্টার-মোডই
+        // (পদবী/প্রতিষ্ঠান/সাল) উপরের কেসগুলোতে ধরা পড়ে, তাই QBank এখানে আসে না) —
         // Phase 6: এখন লেজি (Subjects reference-টেবিল থেকে) ──
         else -> {
             SubjectListScreen(
