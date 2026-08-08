@@ -205,7 +205,19 @@ fun CoreScreen(
                         }
                     }
                 },
-                onHome  = { viewModel.navigateBack() }
+                onHome  = {
+                    // ── FIX ("অ্যাড বন্ধ হওয়ার পর সাদা স্ক্রিন, ব্যাক বাটনও কাজ করে না"):
+                    // QBank পদবী/প্রতিষ্ঠান/সাল-মোডে navPath একটা synthetic/placeholder
+                    // path (আসল Subject→SubTopic হায়ারার্কি না) — generic navigateBack()
+                    // এটা বুঝতে পারে না, ফলে state এমন এক অবস্থায় চলে যেত যেটা CoreScreen-এর
+                    // কোনো when-branch-ই ম্যাচ করতো না (স্ক্রিন সাদা), আর BackHandler-ও
+                    // ইতিমধ্যে ভাঙা navPath নিয়ে বিভ্রান্ত হয়ে যেত। এখন BackHandler-এর মতোই
+                    // এখানেও চেক করে সঠিক ফাংশন কল হচ্ছে। ──
+                    val useQBankFilterBack = mode == StudyMode.QBANK &&
+                        !state.isMockZone && !state.isModelTestZone &&
+                        !state.isModelTestSubjectPicker
+                    if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
+                }
             )
         }
 
