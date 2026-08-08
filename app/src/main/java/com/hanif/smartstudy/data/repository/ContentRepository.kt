@@ -293,19 +293,38 @@ class ContentRepository(private val context: Context) {
             if (missing.isEmpty()) return@withContext
             val now = System.currentTimeMillis()
             try {
-                // ── FIX: কলার (QuizViewModel) সবসময় StudyMode.QBANK.name-এর মতো
-                // সব-ক্যাপিটাল sheet নাম পাঠায় ("QBANK"/"QUIZ"/"STUDY") — আগে এখানে
-                // মিশ্র-কেস "QBank"/"Quiz"/"Study" দিয়ে ম্যাচ করার চেষ্টা হতো, তাই
-                // কোনো branch-ই মেলেনি, GAS থেকে আনার কোডটা কখনো চলেইনি — এটাই ছিল
-                // "GAS ডিপ্লয় করেও QBank-এ প্রশ্ন ০" থেকে যাওয়ার আসল কারণ। এখন
-                // case-insensitive ম্যাচ করা হচ্ছে, যেভাবেই sheet নাম আসুক ঠিক কাজ করবে ──
+                // ── FIX ("Exam_Appearances-এর question_id মেলে না" বাগ, root cause):
+                // Exam_Appearances শীটের question_id আসলে "new_id" ফরম্যাট (QB-00002),
+                // কিন্তু .toEntity() সবসময় fbKey = plain "id" (যেমন "2") বসায়। ফলে
+                // GAS থেকে সঠিক প্রশ্ন এনে upsert হলেও, Room-এ সেটা fbKey="2" দিয়ে সেভ
+                // হতো — অথচ পরের getRoomQuestionsByIds() কল করা হতো fbKey="QB-00002"
+                // দিয়ে খুঁজতে (linkedQuestionIds যা Exam_Appearances থেকে এসেছে) —
+                // কখনো মেলেনি, তাই "কোনো প্রশ্ন পাওয়া যায়নি" + খালি রেজাল্ট-কার্ড।
+                // এখন যেই key (id বা new_id) দিয়ে আসলে রিকোয়েস্ট করা হয়েছিল (missing
+                // লিস্টে যা ছিল), ঠিক সেই ভ্যালুটাকেই fbKey হিসেবে বসানো হচ্ছে — তাই
+                // পরের read ঠিক একই key দিয়ে মিলে যাবে। ──
+                fun <T> upsertMatched(list: List<T>?, idOf: (T) -> String?, newIdOf: (T) -> String?, toEnt: (T) -> com.hanif.smartstudy.data.local.QuestionEntity) {
+                    if (list.isNullOrEmpty()) return
+                    val entities = list.mapNotNull { item ->
+                        val requestedKey = missing.firstOrNull { it == idOf(item) || it == newIdOf(item) }
+                            ?: idOf(item) ?: return@mapNotNull null
+                        toEnt(item).copy(fbKey = requestedKey)
+                    }
+                    if (entities.isNotEmpty()) dao.upsertAll(entities)
+                }
                 when (sheet.uppercase()) {
-                    "QUIZ" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing)
-                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
-                    "QBANK" -> com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing)
-                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
-                    "STUDY" -> com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing)
-                        ?.let { if (it.isNotEmpty()) dao.upsertAll(it.map { qi -> qi.toEntity(now) }) }
+                    "QUIZ" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
+                    "QBANK" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
+                    "STUDY" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
                 }
             } catch (e: Exception) {
                 Log.w("ContentRepository", "ensureRoomQuestionsByIds($sheet) failed: ${e.message}")
