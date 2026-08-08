@@ -197,16 +197,7 @@ function isDuplicate(sheet, subject, questionText, sub_topic) {
 }
 
 /* ══ FIREBASE SYNC ══ */
-// ⛔ HARD NO-FIREBASE LIST — Quiz/QBank/Study এখন সম্পূর্ণভাবে Google Sheet-only।
-// User App (student-facing app)-ও এখন Sheet থেকেই ডেটা পড়ে, তাই এই ৩ ট্যাবের জন্য
-// আর কোনো Firebase mirror-sync দরকার নেই। syncToFirebase/forceFullRekeySync/syncNFRows
-// — এই তিনটা ফাংশনই এই লিস্টের sheet পেলে সাথে সাথে no-op হয়ে {ok:true} রিটার্ন করে,
-// কোনো UrlFetchApp কল হয় না। Users/Reports/Notice/Typing-এর মতো ছোট ডেটার জন্য
-// Firebase sync আগের মতোই চলবে (এই লিস্টে নেই)।
-var NO_FIREBASE_SHEETS = ["Quiz", "QBank", "Study"];
-
 function syncToFirebase(sheetName, folderName) {
-  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return true; // ⛔ Sheet-only, mirror-sync বন্ধ
   try {
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), fbSh=ss.getSheetByName(sheetName);
     if(!fbSh)return true;
@@ -296,7 +287,6 @@ function syncToFirebase(sheetName, folderName) {
    User App সরাসরি REST দিয়ে পড়ে (live listener না), তাই এই এক-বারের write কোনো
    ডিভাইসেই বাড়তি download ট্রিগার করে না। ── */
 function forceFullRekeySync(sheetName, folderName){
-  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return {ok:true, msg:"⛔ "+sheetName+" এখন Sheet-only — Firebase rekey স্কিপ করা হলো"};
   try{
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), fbSh=ss.getSheetByName(sheetName);
     if(!fbSh) return {ok:false,msg:"Sheet not found: "+sheetName};
@@ -331,7 +321,6 @@ function forceFullRekeySync(sheetName, folderName){
    এটা force_full_rekey_sync-এর ছোট, নিরাপদ, targeted বিকল্প — যখন শুধু নির্দিষ্ট
    কিছু row-ই নতুন (পুরো sheet না), তখন এটাই ব্যবহার করা ভালো। ── */
 function syncNFRows(sheetName, folderName){
-  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return {ok:true, msg:"⛔ "+sheetName+" এখন Sheet-only — Firebase NF-sync স্কিপ করা হলো", count:0};
   try{
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), sh=ss.getSheetByName(sheetName);
     if(!sh) return {ok:false,msg:"Sheet not found: "+sheetName,count:0};
@@ -1424,12 +1413,20 @@ function doGet(e) {
     var gqiData=gqiSh.getDataRange().getValues();
     var gqiHdr=gqiData[0];
     var gqiIdCol=gqiHdr.indexOf("id");
-    if (gqiIdCol<0) return json({status:"error",result:"error",message:"'id' কলাম নেই sheet: "+gqiSheet});
+    // ── FIX ("পদবী/প্রতিষ্ঠান-মোডে প্রশ্ন ০/০" বাগ, আসল কারণ): Exam_Appearances শীটের
+    // question_id আসলে "new_id" ফরম্যাট (QB-00002) — plain "id" (2) না। আগে শুধু "id"
+    // কলাম ধরে ম্যাচ করা হতো, তাই Exam_Appearances থেকে আসা কোনো id-ই কখনো মেলেনি।
+    // এখন "id" আর "new_id" — দুটো কলামের সাথেই ম্যাচ করা হচ্ছে, যেই ফরম্যাটেই id
+    // আসুক (plain "id" বা "new_id") ঠিক কাজ করবে। ──
+    var gqiNewIdCol=gqiHdr.indexOf("new_id");
+    if (gqiIdCol<0 && gqiNewIdCol<0) return json({status:"error",result:"error",message:"'id'/'new_id' কলাম নেই sheet: "+gqiSheet});
 
     var gqiRows=[];
     for (var gqi=1; gqi<gqiData.length; gqi++){
-      var gqiRowId=(gqiData[gqi][gqiIdCol]||"").toString().trim();
-      if (!gqiRowId || !gqiIdSet[gqiRowId]) continue;
+      var gqiRowId=gqiIdCol>=0?(gqiData[gqi][gqiIdCol]||"").toString().trim():"";
+      var gqiRowNewId=gqiNewIdCol>=0?(gqiData[gqi][gqiNewIdCol]||"").toString().trim():"";
+      var gqiMatched=(gqiRowId && gqiIdSet[gqiRowId]) || (gqiRowNewId && gqiIdSet[gqiRowNewId]);
+      if (!gqiMatched) continue;
       var gqiRec={};
       for (var gqj=0; gqj<gqiHdr.length; gqj++){
         var gqiKey=gqiHdr[gqj].toString().trim();
@@ -1976,17 +1973,14 @@ function json(o){return ContentService.createTextOutput(JSON.stringify(o)).setMi
    কোনো automatic trigger নেই — Apps Script এডিটরে ফাংশন বেছে ▶ Run চেপে
    ম্যানুয়ালি চালাতে হবে।
 ══════════════════════════════════════════════════════════ */
-// ⛔ Quiz/QBank/Study এখন Sheet-only (source of truth = Sheet, Firebase-এ এই ডেটা
-// আর মিরর হয় না) — তাই Firebase → Sheet pull করাটা এখন উল্টো ক্ষতিকর (পুরনো/খালি
-// Firebase ডেটা দিয়ে Sheet ওভাররাইট করে দিতে পারে)। তাই এই ৪টা ফাংশন এখন সচেতনভাবে
-// no-op, শুধু Logger-এ কারণ জানায়। দরকার হলে (নতুন ফিচার হিসেবে) সরাসরি pullFirebaseToSheet_()
-// ম্যানুয়ালি কল করা যাবে, কিন্তু এখন থেকে এটা কখনো Quiz/QBank/Study-এর জন্য অটো-চলবে না।
-function backupFirebaseToSheet_Quiz()  { Logger.log("⛔ স্কিপড: Quiz এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
-function backupFirebaseToSheet_QBank() { Logger.log("⛔ স্কিপড: QBank এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
-function backupFirebaseToSheet_Study() { Logger.log("⛔ স্কিপড: Study এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
+function backupFirebaseToSheet_Quiz()  { pullFirebaseToSheet_("Quiz"); }
+function backupFirebaseToSheet_QBank() { pullFirebaseToSheet_("QBank"); }
+function backupFirebaseToSheet_Study() { pullFirebaseToSheet_("Study"); }
 
 function backupFirebaseToSheet_All() {
-  Logger.log("⛔ স্কিপড: Quiz/QBank/Study এখন Sheet-only, Firebase-এ ডেটা নেই। pullFirebaseToSheet_() এখন কোনো auto/named ফাংশন থেকে কল হয় না।");
+  pullFirebaseToSheet_("Quiz");
+  pullFirebaseToSheet_("QBank");
+  pullFirebaseToSheet_("Study");
 }
 
 function pullFirebaseToSheet_(sheetName) {
