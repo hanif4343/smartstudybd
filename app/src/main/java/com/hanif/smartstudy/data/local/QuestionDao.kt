@@ -229,6 +229,37 @@ interface QuestionDao {
     """)
     suspend fun getByTopicId(sheet: String, topicId: String, tag: String): List<QuestionEntity>
 
+    // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন, ব্যাক বাটন কাজ করে না" বাগ, root cause):
+    // আগে টপিক প্রথমবার খুললে topicId দিয়ে (getByTopicId, উপরে) Room থেকে সব ক্যাশড
+    // প্রশ্ন একসাথে দেখানো হতো, কিন্তু "পরবর্তী" পেজে গেলে (goToPage/loadQuestionsFromRoom)
+    // পুরনো subject/subTopic টেক্সট-কলাম দিয়ে আলাদা query চলতো — এই দুটো সম্পূর্ণ
+    // ভিন্ন ডেটা-পাথ, subject/subTopic টেক্সট অনেক সময় ফাঁকা/অমিল থাকায় ২য় পেজ থেকে
+    // কিছুই মিলতো না, স্ক্রিন সাদা হয়ে যেত। এখন topicId দিয়েই paginate করার query
+    // যোগ হলো, যাতে ১ম পেজ আর পরের পেজ একই (নির্ভরযোগ্য) ডেটা-পাথ ব্যবহার করে। ──
+    @Query("""
+        SELECT * FROM questions
+        WHERE sheet = :sheet AND topicId = :topicId
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+        ORDER BY fbKey
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getByTopicIdPaged(
+        sheet   : String,
+        topicId : String,
+        tag     : String,
+        limit   : Int,
+        offset  : Int
+    ): List<QuestionEntity>
+
+    // ── উপরের getByTopicIdPaged()-এর সাথে ব্যবহারের জন্য — audience-filtered মোট সংখ্যা
+    // (countByTopicId উপরে filter ছাড়া, cache-completeness চেক করতে ব্যবহৃত, এটা আলাদা) ──
+    @Query("""
+        SELECT COUNT(*) FROM questions
+        WHERE sheet = :sheet AND topicId = :topicId
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+    """)
+    suspend fun countByTopicIdFiltered(sheet: String, topicId: String, tag: String): Int
+
     // ── এই topicId-এর জন্য Room-এ (audience-filter ছাড়াই) কতগুলো প্রশ্ন cache হয়ে
     // আছে তার শুধু COUNT — cacheNextTopicBatch()-এ ব্যবহৃত হয় "sync.hasMore==false
     // অথচ আসলে ০ প্রশ্ন cache আছে" (আগের কোনো ব্যর্থ ফেচকে ভুল করে 'সম্পূর্ণ' ধরে
