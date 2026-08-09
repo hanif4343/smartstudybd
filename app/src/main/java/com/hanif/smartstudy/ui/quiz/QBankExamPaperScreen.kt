@@ -17,13 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanif.smartstudy.data.model.QuestionItem
-import com.hanif.smartstudy.data.model.SubjectEntry
 import com.hanif.smartstudy.ui.shared.ReportDialog
 import com.hanif.smartstudy.util.TtsManager
 
@@ -35,9 +35,11 @@ import com.hanif.smartstudy.util.TtsManager
 // একই groupId-এর multi-part প্রশ্ন (ক/খ/গ/ঘ/ঙ) একটা কার্ডে একসাথে দেখানো হয়। ──
 
 private val PaperBg      = Color(0xFFF7F3E9)
-private val HeaderBg     = Color(0xFF221F1A)
+private val HeaderTop    = Color(0xFF0891B2)   // অ্যাপের QBank থিম-রঙ (SubjectListScreen-এর গ্র্যাডিয়েন্টের সাথে ম্যাচ)
+private val HeaderBottom = Color(0xFF0E7490)
+private val HeaderBg     = HeaderTop           // solid fallback যেখানে gradient দরকার নেই
 private val HeaderCream  = Color(0xFFF7F3E9)
-private val HeaderSub    = Color(0xFFC9C4B4)
+private val HeaderSub    = Color(0xFFCFEBF0)
 private val GoldAccent   = Color(0xFFC9A24B)
 private val TabInactiveBg= Color(0xFFEFE9D8)
 private val TabBorder    = Color(0xFFD8D0B8)
@@ -49,30 +51,50 @@ private val DashedLine   = Color(0xFFCFC6AC)
 private val ExplainPanel = Color(0xFFEFE9D8)
 private val TechPanel    = Color(0xFFEAF1E4)
 
+// ── FIX ("সাবজেক্ট ঠিকমতো Define না থাকা" সমস্যা): written প্রশ্নে subject_id
+// এখনো ৯টা QBank সাবজেক্টের (English Grammar, English Literature, আন্তর্জাতিক,
+// কম্পিউটার, গণিত, বাংলা ব্যাকরণ, বাংলা সাহিত্য, বাংলাদেশ বিষয়াবলী, সাধারণ বিজ্ঞান)
+// যেকোনো একটা ধরে আসে (Sheet-এ ওগুলোই আছে) — কিন্তু written অংশে ঠিক ৪টা সাবজেক্টে
+// (বাংলা/ইংরেজি/গণিত/সাধারণ জ্ঞান) কনসোলিডেট করে দেখানো দরকার। Sheet-এর subject_id
+// সরাসরি বদলানো (হাজারো রো এডিট) ঝুঁকিপূর্ণ ও কষ্টসাধ্য — তাই এখানে subjectId-ভিত্তিক
+// একটা কনসোলিডেশন ম্যাপ রাখা হলো, ডেটা অপরিবর্তিত থেকেও ঠিক ৪টা ট্যাবে ভাগ হয়ে যাবে।
+// যেই subjectId এই ম্যাপে নেই (বা ফাঁকা) সেটাই আসল ডেটা-গ্যাপ — "অন্যান্য"-তে থেকে যাবে,
+// ওগুলোর subject_id Sheet-এ বসানো দরকার। ──
+private val WRITTEN_SUBJECT_BUCKET = mapOf(
+    "QB01" to "ইংরেজি",       // English Grammar
+    "QB02" to "ইংরেজি",       // English Literature
+    "QB03" to "সাধারণ জ্ঞান", // আন্তর্জাতিক
+    "QB04" to "সাধারণ জ্ঞান", // কম্পিউটার
+    "QB05" to "গণিত",         // গণিত
+    "QB06" to "বাংলা",        // বাংলা ব্যাকরণ
+    "QB07" to "বাংলা",        // বাংলা সাহিত্য
+    "QB08" to "সাধারণ জ্ঞান", // বাংলাদেশ বিষয়াবলী
+    "QB09" to "সাধারণ জ্ঞান"  // সাধারণ বিজ্ঞান
+)
+private val WRITTEN_SUBJECT_ORDER = listOf("বাংলা", "ইংরেজি", "গণিত", "সাধারণ জ্ঞান")
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QBankExamPaperScreen(
     institutionName : String,
     postName        : String,
     questions       : List<QuestionItem>,
-    subjects        : List<SubjectEntry>,   // subjectId → subject নাম resolve করতে
     onBack          : () -> Unit,
     onBookmark      : (String) -> Unit,
     onReport        : (globalIndex: Int, issue: String) -> Unit
 ) {
-    // ── subjectId → display-নাম ম্যাপ (state.subjects Room-reference থেকে, ইতিমধ্যে লোড করা) ──
-    val subjectNameById = remember(subjects) { subjects.associateBy({ it.subjectId }, { it.name }) }
-
+    // ── FIX: এখন subjectId-কে সরাসরি (Room reference-নাম না) ৪-বাকেট কনসোলিডেশন
+    // ম্যাপ দিয়ে রেজল্ভ করা হয় — written অংশে সবসময় ঠিক ৪টা সাবজেক্ট-ট্যাবই দেখাবে ──
     fun subjectLabel(q: QuestionItem): String =
-        subjectNameById[q.subjectId]?.takeIf { it.isNotBlank() }
-            ?: q.subject.takeIf { it.isNotBlank() }
-            ?: "অন্যান্য"
+        WRITTEN_SUBJECT_BUCKET[q.subjectId] ?: "অন্যান্য"
 
-    // ── সাবজেক্ট অনুযায়ী গ্রুপ — ক্রম প্রথম উপস্থিতি অনুযায়ী (predictable, স্থিতিশীল ট্যাব-অর্ডার) ──
+    // ── সাবজেক্ট ট্যাবের ক্রম — সবসময় বাংলা→ইংরেজি→গণিত→সাধারণ জ্ঞান (যেগুলোর
+    // প্রশ্ন আছে শুধু সেগুলোই দেখাবে), "অন্যান্য" থাকলে সবার শেষে (ডেটা-গ্যাপ নির্দেশক) ──
     val subjectOrder = remember(questions) {
-        val seen = LinkedHashSet<String>()
-        questions.forEach { seen.add(subjectLabel(it)) }
-        seen.toList()
+        val present = questions.map { subjectLabel(it) }.toSet()
+        WRITTEN_SUBJECT_ORDER.filter { it in present } +
+            (if ("অন্যান্য" in present) listOf("অন্যান্য") else emptyList())
     }
     var selectedSubject by remember(subjectOrder) { mutableStateOf(subjectOrder.firstOrNull().orEmpty()) }
 
@@ -103,9 +125,12 @@ fun QBankExamPaperScreen(
     var reportTarget by remember { mutableStateOf<QuestionItem?>(null) }
 
     Column(Modifier.fillMaxSize().background(PaperBg)) {
-        // ── হেডার: প্রতিষ্ঠান (eyebrow) + পদবী (title) + মোট প্রশ্ন ──
+        // ── হেডার: প্রতিষ্ঠান (eyebrow) + পদবী (title) + মোট প্রশ্ন — অ্যাপের QBank
+        // থিম-গ্র্যাডিয়েন্ট (#0891B2 → #0E7490), আগের কালো ব্যাকগ্রাউন্ডের বদলে ──
         Column(
-            Modifier.fillMaxWidth().background(HeaderBg).padding(start = 8.dp, end = 18.dp, top = 10.dp, bottom = 14.dp)
+            Modifier.fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(HeaderTop, HeaderBottom)))
+                .padding(start = 8.dp, end = 18.dp, top = 10.dp, bottom = 14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
@@ -114,7 +139,7 @@ fun QBankExamPaperScreen(
                 Column {
                     Text(
                         text = institutionName,
-                        color = GoldAccent,
+                        color = Color(0xFFFFE9A8),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.2.sp
