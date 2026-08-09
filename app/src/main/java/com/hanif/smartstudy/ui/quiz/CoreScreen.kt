@@ -223,11 +223,15 @@ fun CoreScreen(
 
         // ── QBank পদবী/প্রতিষ্ঠান-মোডের ৩য় লেয়ার (প্রশ্নপত্র) — এক্সাম-পেপার স্টাইল
         // রিভিউ স্ক্রিন (উত্তর সরাসরি দেখানো, MCQ বাটন/টাইমার/সাবমিট নেই) — ব্যবহারকারীর
-        // দেওয়া ডিজাইন অনুযায়ী। বাকি সব QBank/Quiz/Study ফ্লো আগের মতোই অপরিবর্তিত। ──
+        // দেওয়া ডিজাইন অনুযায়ী। ── FIX: এই স্টাইল শুধু "written" প্রশ্নের জন্য — MCQ
+        // প্রশ্ন থাকলে (এই institution/post-এর exam paper MCQ হলে) সাধারণ ইন্টারেক্টিভ
+        // কুইজ স্ক্রিনই (নিচের depth==2 branch) দেখাবে, আগের মতোই। বাকি সব QBank/Quiz/
+        // Study ফ্লো আগের মতোই অপরিবর্তিত। ──
         mode == StudyMode.QBANK &&
             (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION ||
              state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
-            state.navPath.depth() == 2 -> {
+            state.navPath.depth() == 2 &&
+            state.questions.any { it.questionType.equals("written", ignoreCase = true) } -> {
             val institutionOrSubject = when (state.qbankFilterMode) {
                 QBankFilterMode.INSTITUTION -> state.navPath.subject ?: ""   // প্রতিষ্ঠান-মোডে navPath = (institution, designation)
                 else -> state.navPath.subTopic ?: ""                        // পদবী-মোডে navPath = ("পদ", institution) placeholder
@@ -239,8 +243,11 @@ fun CoreScreen(
             QBankExamPaperScreen(
                 institutionName = institutionOrSubject,
                 postName        = postOrDesignation,
-                questions       = state.questions,
-                subjects        = state.subjects,
+                // ── শুধু written অংশ — এই institution-এ MCQ+written মিশে থাকলেও
+                // MCQ গুলো এই এক্সাম-পেপার ভিউতে দেখাবে না (কুইজ-স্ক্রিনে আলাদা দেখা যাবে না
+                // এখানে যেহেতু একটাই স্ক্রিন-স্লট — বর্তমানে প্রতি institution সাধারণত
+                // এক টাইপেরই হয়, তবে ভবিষ্যতে মিশ্র হলে MCQ অংশও এখানেই যোগ করা যাবে) ──
+                questions       = state.questions.filter { it.questionType.equals("written", ignoreCase = true) },
                 onBack          = {
                     val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
