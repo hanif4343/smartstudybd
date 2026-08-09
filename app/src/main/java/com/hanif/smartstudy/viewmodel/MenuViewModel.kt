@@ -937,8 +937,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
                 contentRepo.patchContentAndPersist(sheet, rowKey, fields)
-                // ── FIX: Room-এর টপিক-ক্যাশও (আসল স্ক্রিন যেটা পড়ে) সাথে সাথেই প্যাচ করো ──
-                contentRepo.patchRoomQuestion(sheet, rowKey, fields)
                 _state.update { it.copy(isEditingQuestion = false,
                     editSuccessMsg = "✅ আপডেট হয়েছে!", toast = "✅ প্রশ্ন সংরক্ষিত",
                     contentEditVersion = _state.value.contentEditVersion + 1) }
@@ -948,6 +946,21 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(isEditingQuestion = false,
                     error = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
                 return@launch
+            }
+
+            // ── FIX ("এডিট/ডিলিট সব জায়গায় বন্ধ" বাগ, root cause): Room-এর টপিক-ক্যাশ
+            // প্যাচ (patchRoomQuestion) আগে উপরের try ব্লকেই ছিল — এখানে কোনো কারণে exception
+            // হলে (যেমন কোনো id Room-এ এখনো cache-ই হয়নি) পুরো catch ব্লক ট্রিগার হয়ে
+            // `return@launch` চলে যেত, ফলে নিচের আসল ব্যাকগ্রাউন্ড GAS sync (যেটা সত্যিকারের
+            // Sheet-এ লেখে) কখনোই রান হতো না — এডিট শুধু কখনো instant-ও দেখাতো না, আবার
+            // Sheet-এও সেভ হতো না। এখন এটা সম্পূর্ণ আলাদা, নিজের try/catch-এ — ব্যর্থ হলেও
+            // (শুধু ক্যাশ-প্যাচ মিস হবে, সেটা পরের রিফ্রেশে এমনিতেই ঠিক হয়ে যায়) নিচের
+            // ব্যাকগ্রাউন্ড sync সবসময় চলবে। ──
+            try {
+                com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                    .patchRoomQuestion(sheet, rowKey, fields)
+            } catch (e: Exception) {
+                android.util.Log.w("AdminEdit", "Room cache patch failed (non-fatal, sync continues): ${e.message}")
             }
 
             // ── Background sync (silent) — UI ইতিমধ্যে আপডেট দেখিয়ে দিয়েছে, তাই
@@ -1010,6 +1023,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 // প্রশ্নের জন্য আগে থেকে থাকা কোনো pending edit/add থাকলে সেটাও বাতিল করো
                 repo.removeContentAndPersist(sheet, rowKey)
                 q.removePendingForQuestion(rowKey)
+
+                // ── FIX ("ডিলিট করলে অ্যাপে সাথে সাথে হারিয়ে যায় না" বাগ, ঠিক এডিটের
+                // মতোই root cause): Room-এর topicId-ভিত্তিক ক্যাশও (আসল টপিক-স্ক্রিন
+                // যেটা পড়ে) সাথে সাথে মুছে ফেলা দরকার — removeContentAndPersist() শুধু
+                // পুরনো bulk cache প্যাচ করে, Room অস্পর্শিত থাকতো, তাই Sheet থেকে
+                // সত্যিই ডিলিট হয়ে গেলেও অ্যাপে প্রশ্নটা দেখা যেতেই থাকতো। এই কল
+                // ব্যর্থ হলেও (নিজস্ব try-catch, নিচের catch-এ পড়বে না) যেন pending-queue/
+                // background sync থেমে না যায়, তাই এখানেই আলাদা try-catch দিয়ে সামলানো। ──
+                try {
+                    repo.removeRoomQuestion(sheet, rowKey)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminDelete", "Room cache delete failed (non-fatal): ${e.message}")
+                }
 
                 if (isLocalOnly) {
                     // এই প্রশ্নটা কখনো Firebase-এ পাঠানোই হয়নি, তাই ডিলিট sync করারও দরকার নেই
