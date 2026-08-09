@@ -176,6 +176,14 @@ interface QuestionDao {
     @Query("DELETE FROM questions WHERE sheet = :sheet")
     suspend fun deleteSheet(sheet: String)
 
+    // ── FIX ("ডিলিট করলে অ্যাপে সাথে সাথে হারিয়ে যায় না" বাগ): Admin ডিলিট করলে
+    // আগে শুধু পুরনো bulk cache-এ patch হতো, Room-এর topicId-ভিত্তিক ক্যাশ (আসল
+    // টপিক-স্ক্রিন যেটা পড়ে) অস্পর্শিত থেকে যেত — Sheet থেকে সত্যিই ডিলিট হয়ে গেলেও
+    // অ্যাপে প্রশ্নটা দেখা যেতেই থাকতো যতক্ষণ না পুরো টপিক আবার রিফ্রেশ হয়। এই query
+    // দিয়ে এখন Room থেকেও একই সাথে সরাসরি ডিলিট হয়ে যায়। ──
+    @Query("DELETE FROM questions WHERE sheet = :sheet AND fbKey = :fbKey")
+    suspend fun deleteByFbKey(sheet: String, fbKey: String)
+
     // ── সব data মুছো ──────────────────────────────────────────────────────────
     @Query("DELETE FROM questions")
     suspend fun deleteAll()
