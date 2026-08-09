@@ -224,24 +224,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> "Study"
         }
 
-        // ⚠️ নতুন: Subject-লেভেল tag_id ফিল্টারের জন্য দরকারি দুটো জিনিস — Tags
-        // রেফারেন্স-টেবিল (tag_id → tag_name lookup) আর বর্তমান ইউজার (audience
-        // group বের করার জন্য, admin হলে preview-override সহ)। দুটোই ছোট/Room-cached,
-        // তাই এখানে await করাটা subject-list লোডের speed-এ কোনো প্রভাব ফেলে না।
-        val tagsById = repo.getRoomTags().associate { it.tagId to it.name }
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-
         fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
-            rows
-                // ⚠️ এখানেই একমাত্র জায়গা যেখানে subject-level tag_id ফিল্টার প্রযোজ্য
-                // হয় — Subject বাদ পড়লে তার ভিতরের সব Topic/প্রশ্নও এমনিতেই বাদ পড়ে
-                // যায় (ওগুলো এই subject-এর ভিতরেই lazy-load হয়), আলাদা করে টপিক/
-                // প্রশ্ন-লেভেলে আবার ফিল্টার করা লাগে না।
-                .filter { s ->
-                    com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
-                }
-                .map { s ->
+            rows.map { s ->
                 // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
                 // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
                 SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
@@ -392,14 +376,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val bookmarks = _state.value.bookmarkedIds
-            val items = repo.getRoomQuestionsForTopic(sheet, topicId, tag).map { q ->
+            // ── FIX ("এক পেজে ৫০ না, সব একসাথে আসছে" সমস্যা): আগে এখানে
+            // getRoomQuestionsForTopic() দিয়ে Room-এ ক্যাশ হওয়া টপিকের ALL প্রশ্ন
+            // একসাথে state.questions-এ বসানো হতো (পেজিনেশন ছাড়াই) — তাই ১ম পাতাতেই
+            // সব দেখা যেত, আর "পরবর্তী" চাপলে (goToPage) সম্পূর্ণ ভিন্ন subject/subTopic
+            // টেক্সট-ভিত্তিক query চলতো যেটা কিছুই খুঁজে পেত না (ফাঁকা স্ক্রিন)। এখন
+            // শুরুতেই শুধু প্রথম ৫০টা (PAGE_SIZE) topicId দিয়ে paginate করে আনা হয়,
+            // goToPage()-ও এখন একই topicId-ভিত্তিক পাথ ব্যবহার করে (দেখো
+            // loadQuestionsFromRoomByTopic) — দুটো ধাপ একই, সামঞ্জস্যপূর্ণ ডেটা-পাথ। ──
+            val total = repo.getRoomTotalCountByTopic(sheet, topicId, tag)
+            val items = repo.getRoomPagedQuestionsByTopic(sheet, topicId, tag, 0, PAGE_SIZE).map { q ->
                 q.copy(
                     isBookmarked = bookmarks.contains(q.id),
                     isWeakTopic  = isWeak(q.subTopic),
                     isStudyDone  = isStudyDone(q.id)
                 )
             }
-            Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=${items.size}")
+            Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=$total loaded_page1=${items.size}")
 
             // দ্বিতীয়বার চেক — Room থেকে items বের করতেও কিছুটা সময় লাগে, ততক্ষণে
             // আবার টপিক পাল্টে যেতে পারে, তাই state বসানোর ঠিক আগে আবার token যাচাই
@@ -408,14 +401,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            if (items.isEmpty()) {
+            if (total == 0) {
                 _state.update { it.copy(isLoading = false, error = "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো") }
                 return@launch
             }
             _state.update {
                 it.copy(
                     questions      = items,
-                    totalQuestions = items.size,
+                    totalQuestions = total,
                     currentPage    = 0,
                     isQuizActive   = true,
                     showResult     = false,
@@ -425,7 +418,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     isLoading      = false
                 )
             }
-            startTimer(items.size)
+            startTimer(total)
         }
     }
 
@@ -1280,7 +1273,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // session.updateStreak() shared streak_last_date দেখে "already today" ভেবে increment করে না,
             // তাই সরাসরি cache থেকে পড়ো
             val streak = cache.getStreak()
-            _pendingStreak.value = streak
+            // ── FIX: আগে প্রতিটা সাবমিটেই Streak popup দেখাতো (বিরক্তিকর) — এখন
+            // দিনে একবারই দেখাবে ──
+            if (session.shouldShowStreakPopupToday()) {
+                _pendingStreak.value = streak
+                session.markStreakPopupShownToday()
+            }
 
             checkAndUnlock("first_quiz")
             if (result.wrong == 0 && result.skipped == 0 && result.total > 0) checkAndUnlock("perfect_score")
@@ -2171,9 +2169,65 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
 
+        // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন" বাগ, root cause): এই টপিক Phase 6-এর
+        // লেজি topicId সিস্টেম দিয়ে খোলা হয়েছিল কিনা (navigateToSubTopicLazy) চেক করো —
+        // থাকলে topicId দিয়েই paginate করো (getRoomQuestionsForTopic-এর মতো একই
+        // ডেটা-পাথ), নাহলে আগের subject/subTopic টেক্সট-ভিত্তিক পাথে fallback করো
+        // (QBank প্রতিষ্ঠান-মোডের মতো টেক্সট-pair-নির্ভর পুরনো flow-এর জন্য, যদি কোথাও
+        // এখনো ব্যবহৃত হয়)। আগে সবসময় টেক্সট-ভিত্তিক পাথ ব্যবহার হতো, যেটা topicId-based
+        // ক্যাশের সাথে বেমানান হওয়ায় ২য় পাতা থেকে সবসময় ফাঁকা ফলাফল দিত। ──
+        val topicId = _state.value.subTopics.find { it.name == subTopic }?.topicId
+
         viewModelScope.launch {
-            loadQuestionsFromRoom(sheet, subject, subTopic, tag, safePage)
+            if (!topicId.isNullOrBlank()) {
+                loadQuestionsFromRoomByTopic(sheet, topicId, tag, safePage)
+            } else {
+                loadQuestionsFromRoom(sheet, subject, subTopic, tag, safePage)
+            }
         }
+    }
+
+    /**
+     * Room DB থেকে topicId দিয়ে paginated questions load করো — navigateToSubTopicLazy()-এর
+     * প্রথম-পেজ-লোডের মতোই একই ডেটা-পাথ, শুধু এখানে LIMIT/OFFSET দিয়ে একটা page-ই আনা হয়।
+     */
+    private suspend fun loadQuestionsFromRoomByTopic(
+        sheet   : String,
+        topicId : String,
+        tag     : String,
+        page    : Int
+    ) {
+        _state.update { it.copy(questionsLoading = true) }
+
+        val total     = repo.getRoomTotalCountByTopic(sheet, topicId, tag)
+        val items     = repo.getRoomPagedQuestionsByTopic(sheet, topicId, tag, page, PAGE_SIZE)
+        val bookmarks = _state.value.bookmarkedIds
+
+        val questions = items.map { q ->
+            q.copy(
+                isBookmarked = bookmarks.contains(q.id),
+                isWeakTopic  = isWeak(q.subTopic),
+                isStudyDone  = isStudyDone(q.id)
+            )
+        }.sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+
+        Log.d("QuizVM", "loadQuestionsFromRoomByTopic: page=$page total=$total loaded=${questions.size}")
+
+        val mode = _state.value.mode
+        _state.update {
+            it.copy(
+                questions       = questions,
+                totalQuestions  = total,
+                currentPage     = page,
+                questionsLoading = false,
+                isQuizActive    = mode != StudyMode.STUDY,
+                showResult      = false,
+                result          = null,
+                answeredCount   = 0,
+                timerSec        = 0
+            )
+        }
+        if (mode != StudyMode.STUDY) startTimer(total)  // timer total প্রশ্ন দিয়ে
     }
 
     /**
