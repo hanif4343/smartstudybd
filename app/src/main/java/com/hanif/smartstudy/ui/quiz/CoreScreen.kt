@@ -221,6 +221,35 @@ fun CoreScreen(
             )
         }
 
+        // ── QBank পদবী/প্রতিষ্ঠান-মোডের ৩য় লেয়ার (প্রশ্নপত্র) — এক্সাম-পেপার স্টাইল
+        // রিভিউ স্ক্রিন (উত্তর সরাসরি দেখানো, MCQ বাটন/টাইমার/সাবমিট নেই) — ব্যবহারকারীর
+        // দেওয়া ডিজাইন অনুযায়ী। বাকি সব QBank/Quiz/Study ফ্লো আগের মতোই অপরিবর্তিত। ──
+        mode == StudyMode.QBANK &&
+            (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION ||
+             state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
+            state.navPath.depth() == 2 -> {
+            val institutionOrSubject = when (state.qbankFilterMode) {
+                QBankFilterMode.INSTITUTION -> state.navPath.subject ?: ""   // প্রতিষ্ঠান-মোডে navPath = (institution, designation)
+                else -> state.navPath.subTopic ?: ""                        // পদবী-মোডে navPath = ("পদ", institution) placeholder
+            }
+            val postOrDesignation = when (state.qbankFilterMode) {
+                QBankFilterMode.INSTITUTION -> state.navPath.subTopic ?: ""
+                else -> state.qbankSelectedPost ?: ""
+            }
+            QBankExamPaperScreen(
+                institutionName = institutionOrSubject,
+                postName        = postOrDesignation,
+                questions       = state.questions,
+                subjects        = state.subjects,
+                onBack          = {
+                    val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker
+                    if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
+                },
+                onBookmark      = { qid -> viewModel.toggleBookmark(qid) },
+                onReport        = { idx, issue -> viewModel.reportQuestion(idx, issue) }
+            )
+        }
+
         // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
             QuestionListScreen(
