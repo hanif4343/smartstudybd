@@ -68,6 +68,9 @@ class SessionManager(private val context: Context) {
         val KEY_DATA_SOURCE_MODE = stringPreferencesKey("data_source_mode")
         val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
+        // ── FIX: Streak popup আগে প্রতিবার সাবমিটেই দেখাতো, বিরক্তিকর লাগছিল —
+        // এখন দিনে একবারই দেখাবে, শেষ কবে দেখানো হয়েছিল সেই তারিখ এখানে রাখা হয় ──
+        val KEY_LAST_STREAK_POPUP_DATE = stringPreferencesKey("last_streak_popup_date")
         val KEY_USER_NAME        = stringPreferencesKey("home_user_name")
         val KEY_USER_PIC         = stringPreferencesKey("home_user_pic")
         // ── Phase ১ (Neonlipi-স্টাইল কাস্টমাইজেশন): Typing Settings ──
@@ -385,6 +388,20 @@ class SessionManager(private val context: Context) {
 
     suspend fun setDailyGoal(goal: Int) {
         context.dataStore.edit { it[KEY_DAILY_GOAL] = goal }
+    }
+
+    // ── Streak popup — দিনে একবারই দেখানোর জন্য ──
+    /** আজকে (ডিভাইসের লোকাল তারিখ অনুযায়ী) Streak popup এখনো দেখানো হয়নি কিনা */
+    fun shouldShowStreakPopupToday(): Boolean = runBlocking {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val last  = context.dataStore.data.first()[KEY_LAST_STREAK_POPUP_DATE]
+        last != today
+    }
+
+    /** Streak popup দেখানোর পর আজকের তারিখ সেভ করে রাখো — আবার দেখাবে না */
+    suspend fun markStreakPopupShownToday() {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        context.dataStore.edit { it[KEY_LAST_STREAK_POPUP_DATE] = today }
     }
 
     // ── Reminder ─────────────────────────────────────────────
