@@ -953,6 +953,13 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
+    // ── FIX ("ডিলিট করলে অ্যাপে সাথে সাথে হারিয়ে যায় না" বাগ): Room-এর topicId-ভিত্তিক
+    // ক্যাশ থেকেও (আসল টপিক-স্ক্রিন যেটা পড়ে) সরাসরি মুছে দেয় — removeContentAndPersist()
+    // শুধু পুরনো bulk cache প্যাচ করে, এটা আলাদা এবং দুটোই দরকার। ──
+    suspend fun removeRoomQuestion(sheet: String, rowKey: String) = withContext(Dispatchers.IO) {
+        dao.deleteByFbKey(sheet.uppercase(), rowKey)
+    }
+
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
     //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
     suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
