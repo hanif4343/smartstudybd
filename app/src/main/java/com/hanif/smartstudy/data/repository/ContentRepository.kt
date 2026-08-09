@@ -170,6 +170,23 @@ class ContentRepository(private val context: Context) {
         dao.countFiltered(sheet, subject, subTopic, tag)
     }
 
+    // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন" বাগ) — Phase 6 লেজি টপিক সিস্টেমের সাথে
+    // সামঞ্জস্যপূর্ণ পেজিনেশন: topicId দিয়ে (subject/subTopic টেক্সট না) ──
+    suspend fun getRoomPagedQuestionsByTopic(
+        sheet    : String,
+        topicId  : String,
+        tag      : String,
+        page     : Int,
+        pageSize : Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return dao.getByTopicIdPaged(sheet, topicId, tag, pageSize, offset).map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা topicId-এর (audience-filtered) মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomTotalCountByTopic(sheet: String, topicId: String, tag: String): Int =
+        dao.countByTopicIdFiltered(sheet, topicId, tag)
+
     /**
      * Firebase থেকে fetch করে Room-এ save করো।
      * Online sync — background-এ চলে।
