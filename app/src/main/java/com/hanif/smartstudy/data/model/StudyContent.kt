@@ -144,11 +144,16 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
         // @SerializedName("sub_topic") আশা করে। এই মিসম্যাচে Study-এর প্রতিটা row-এর
         // subTopic সবসময় null হয়ে যাচ্ছিল (getSheetRows/getQuestionsPage থেকে আসা
         // raw key literally "topic", normalizeKey() সেটা "sub_topic"-এ ম্যাপ করত না)।
-        // এটা শুধু StudyItem-এর জন্যই true করা হচ্ছে — QuizItem/QBankItem-এ ছেড়ে দিলে
-        // ভুল হতো, কারণ QBank sheet-এ "topic" আসলেই আলাদা একটা কলাম (পদ/designation-জাতীয়,
-        // sub_topic থেকে ভিন্ন), সেটাকে sub_topic-এর সাথে মার্জ করলে QBank-এর আসল
-        // sub_topic ভ্যালু হারিয়ে/ওভাররাইট হয়ে যেত।
+        // ── FIX (ব্যবহারকারীর দেওয়া তাজা Headings CSV দিয়ে নিশ্চিত হলো): Quiz sheet-এরও
+        // ঠিক একই সমস্যা — Quiz-এর আসল হেডারও "topic" (sub_topic না), অথচ আগে এই ফিক্স
+        // শুধু StudyItem-এর জন্য প্রয়োগ হতো, QuizItem-এর জন্য না — তাই QuizItem.subTopic-ও
+        // সবসময় null থেকে যাচ্ছিল (isWeak(q.subTopic) ইত্যাদি সব জায়গায় চুপচাপ ভুল ফলাফল
+        // দিচ্ছিল)। আগে ভাবা হয়েছিল QBank-এর "topic" কলাম আলাদা কিছু বোঝায় (পদ/designation-
+        // জাতীয়) বলে এই ম্যাপিং QBank-এ প্রয়োগ করা হয়নি — কিন্তু তাজা Headings CSV নিশ্চিত
+        // করে QBank-এ আসলে "topic" নামের কোনো প্লেইন কলামই নেই (শুধু topic_id), তাই সেই
+        // পুরনো আশঙ্কাটা এখন অপ্রাসঙ্গিক — QuizItem-এর জন্য নিরাপদে একই ফিক্স যোগ করা গেল। ──
         val isStudyType = type.rawType == StudyItem::class.java
+        val isQuizType  = type.rawType == QuizItem::class.java
         return object : com.google.gson.TypeAdapter<T>() {
             override fun write(out: com.google.gson.stream.JsonWriter, value: T) = delegate.write(out, value)
             override fun read(`in`: com.google.gson.stream.JsonReader): T {
@@ -156,7 +161,7 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
                 return if (jsonElement.isJsonObject) {
                     val normalized = com.google.gson.JsonObject()
                     jsonElement.asJsonObject.entrySet().forEach { (k, v) ->
-                        val nk = normalizeKey(k, isStudyType)
+                        val nk = normalizeKey(k, isStudyType || isQuizType)
                         val existing = normalized.get(nk)
                         // FIX: Firebase-এ একই ফিল্ডের capital ও lowercase দুই ভ্যারিয়েন্ট একসাথে
                         // থাকতে পারে (যেমন "Explanation" আসল কনটেন্ট নিয়ে, আর পাশাপাশি খালি
@@ -202,9 +207,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
     }
 
     // Firebase field names → @SerializedName canonical keys
-    // isStudyType=true হলে (শুধু StudyItem parse করার সময়) খালি "topic" কলামকেও
-    // "sub_topic"-এর alias হিসেবে ধরা হয় — দেখো create()-এর ওপরের কমেন্ট।
-    private fun normalizeKey(key: String, isStudyType: Boolean = false): String {
+    // topicTextAsSubTopic=true হলে (StudyItem/QuizItem parse করার সময়) খালি "topic"
+    // কলামকেও "sub_topic"-এর alias হিসেবে ধরা হয় — দেখো create()-এর ওপরের কমেন্ট।
+    private fun normalizeKey(key: String, topicTextAsSubTopic: Boolean = false): String {
         val k = key.lowercase().trim()
         return when {
             // subject
@@ -212,8 +217,8 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             // sub_topic — many variants
             k == "sub_topic" || k == "subtopic"
                 || k == "sub topic"                 -> "sub_topic"
-            // ⚠️ শুধু StudyItem-এর জন্য: আসল Study sheet-এর হেডার "topic" (না "sub_topic")
-            isStudyType && k == "topic"             -> "sub_topic"
+            // ⚠️ Study ও Quiz-এর জন্য: আসল sheet-এর হেডার "topic" (না "sub_topic")
+            topicTextAsSubTopic && k == "topic"     -> "sub_topic"
             // question
             k == "question"                         -> "question"
             // options — option1/opt1 variants
