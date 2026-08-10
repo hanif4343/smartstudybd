@@ -172,6 +172,14 @@ class ContentRepository(private val context: Context) {
 
     // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন" বাগ) — Phase 6 লেজি টপিক সিস্টেমের সাথে
     // সামঞ্জস্যপূর্ণ পেজিনেশন: topicId দিয়ে (subject/subTopic টেক্সট না) ──
+    // ⚠️⚠️ CRITICAL FIX ("প্রশ্নই পাওয়া যাচ্ছে না" — সব টপিকে হঠাৎ ০ প্রশ্ন হয়ে যাওয়ার
+    // আসল কারণ): এখানে sheet প্যারামিটার ".uppercase()" ছাড়াই সরাসরি dao-তে পাঠানো
+    // হচ্ছিল ("Quiz"/"QBank"/"Study" — মিশ্র-কেস), কিন্তু Room-এ প্রতিটা রো সবসময়
+    // uppercase sheet ("QUIZ"/"QBANK"/"STUDY") দিয়ে সেভ হয় (দেখো cacheNextTopicBatch,
+    // getRoomQuestionsForTopic — ওখানে ঠিকই .uppercase() করা হয়)। SQLite-এর টেক্সট
+    // তুলনা case-sensitive, তাই "QBank" ≠ "QBANK" — ফলে এই দুটো নতুন ফাংশন *সবসময়*
+    // ০ রো রিটার্ন করছিল, যেকোনো tag/audience-নির্বিশেষে। এটাই ছিল সেই ভয়াবহ
+    // রিগ্রেশন যেখানে হঠাৎ কোনো টপিকেই প্রশ্ন পাওয়া যাচ্ছিল না। এখন ঠিক হলো। ──
     suspend fun getRoomPagedQuestionsByTopic(
         sheet    : String,
         topicId  : String,
@@ -180,12 +188,12 @@ class ContentRepository(private val context: Context) {
         pageSize : Int
     ): List<com.hanif.smartstudy.data.model.QuestionItem> {
         val offset = page * pageSize
-        return dao.getByTopicIdPaged(sheet, topicId, tag, pageSize, offset).map { it.toQuestionItem() }
+        return dao.getByTopicIdPaged(sheet.uppercase(), topicId, tag, pageSize, offset).map { it.toQuestionItem() }
     }
 
     /** Room থেকে একটা topicId-এর (audience-filtered) মোট প্রশ্ন সংখ্যা */
     suspend fun getRoomTotalCountByTopic(sheet: String, topicId: String, tag: String): Int =
-        dao.countByTopicIdFiltered(sheet, topicId, tag)
+        dao.countByTopicIdFiltered(sheet.uppercase(), topicId, tag)
 
     /**
      * Firebase থেকে fetch করে Room-এ save করো।
