@@ -224,12 +224,30 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             StudyMode.STUDY -> "Study"
         }
 
+        // ── FIX ("সাবজেক্ট/টপিক ঠিকমতো দেখালেও প্রশ্ন দেখাচ্ছে না" মূল সমস্যা):
+        // Subjects রেফারেন্স-টেবিলের "tag_id" কলাম (SubjectEntity.tagId) আর
+        // AudienceFilter.subjectVisibleForUser() — দুটোই আগে থেকেই কোডে ছিল, কিন্তু
+        // এখানে কখনো ব্যবহারই হতো না! ফলে সব সাবজেক্ট/টপিক সব ইউজারকে দেখানো হতো
+        // (audience-নিরপেক্ষ), আর তারপর টপিক খুলে আসল প্রশ্ন আনার সময় সেটা সঠিকভাবে
+        // audience অনুযায়ী ফিল্টার হতো — এই দুই ধাপের অসামঞ্জস্যেই "সাবজেক্ট/টপিক
+        // দেখাচ্ছে, প্রশ্ন দেখাচ্ছে না" বিভ্রান্তি তৈরি হতো। এখন বর্তমান ইউজারের
+        // audience-এর সাথে না মেলা tag_id-ওয়ালা সাবজেক্ট শুরুতেই বাদ পড়বে (এবং তার
+        // আন্ডারের টপিকও, যেহেতু সাবজেক্টই "মাদার")। tag_id ফাঁকা থাকা সাবজেক্ট
+        // (পুরনো/আনরেস্ট্রিক্টেড) সবার জন্যই দেখাবে, ব্যাকওয়ার্ড-কম্প্যাটিবল। ──
+        val user     = session.getCurrentUser()
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val tagsById = repo.getRoomTags().associateBy({ it.tagId }, { it.name })
+
         fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
-            rows.map { s ->
-                // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
-                // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
-                SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
-            }.sortedBy { it.name }
+            rows
+                .filter { s ->
+                    com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
+                }
+                .map { s ->
+                    // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
+                    // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
+                    SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
+                }.sortedBy { it.name }
 
         // ⚠️ BUG FIX ("subject list ashte onek slow"): আগে এখানে repo.syncReferenceData()
         // কে সবসময় await করা হতো, তারপরই Room থেকে subjects পড়ে দেখানো হতো — মানে
