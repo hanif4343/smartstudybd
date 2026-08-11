@@ -828,12 +828,28 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                         ?: (payload["sheets"] as? List<*>)?.joinToString("+") ?: "?"
                     val preview = payload["questionPreview"]?.toString()?.ifBlank { null }
                         ?: run {
-                            val subj = payload["subject"]?.toString().orEmpty()
-                            val subT = payload["subTopic"]?.toString().orEmpty()
-                            val delSub = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
-                            if (subj.isNotBlank()) {
-                                if (delSub && subT.isNotBlank()) "\"$subj\" › \"$subT\" (পুরো অধ্যায়)" else "\"$subj\" (পুরো বিষয়)"
-                            } else ""
+                            when (action.type) {
+                                "admin_move_questions" -> {
+                                    val ids = (payload["ids"] as? List<*>)?.size ?: 0
+                                    val ns = payload["newSubject"]?.toString().orEmpty()
+                                    val nst = payload["newSubTopic"]?.toString().orEmpty()
+                                    "${ids}টি প্রশ্ন → \"$ns\" › \"$nst\""
+                                }
+                                "admin_move_topic" -> {
+                                    val nst = payload["newSubTopicName"]?.toString().orEmpty()
+                                    val ns = payload["newSubjectName"]?.toString().orEmpty()
+                                    val merge = payload["mergeTopicId"]?.toString()?.isNotBlank() == true
+                                    "\"$nst\" অধ্যায় → \"$ns\"" + (if (merge) " (merge)" else "")
+                                }
+                                else -> {
+                                    val subj = payload["subject"]?.toString().orEmpty()
+                                    val subT = payload["subTopic"]?.toString().orEmpty()
+                                    val delSub = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
+                                    if (subj.isNotBlank()) {
+                                        if (delSub && subT.isNotBlank()) "\"$subj\" › \"$subT\" (পুরো অধ্যায়)" else "\"$subj\" (পুরো বিষয়)"
+                                    } else ""
+                                }
+                            }
                         }
                     val retry    = action.retryCount
 
@@ -870,6 +886,8 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                         "admin_add_question"         -> "➕ নতুন" to Color(0xFF16A34A)
                                         "admin_delete_question"      -> "🗑️ ডিলিট" to Color(0xFFDC2626)
                                         "admin_delete_subject_topic" -> "🗑️ বিষয়/অধ্যায় ডিলিট" to Color(0xFFDC2626)
+                                        "admin_move_questions"       -> "📦 প্রশ্ন Move" to Color(0xFF0EA5E9)
+                                        "admin_move_topic"           -> "📦 অধ্যায় Move" to Color(0xFF0EA5E9)
                                         else                          -> "✏️ এডিট" to Color(0xFF4F46E5)
                                     }
                                     Surface(shape = RoundedCornerShape(6.dp),
