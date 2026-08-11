@@ -183,6 +183,7 @@ class SyncWorker(
             "admin_delete_question" -> syncAdminDelete(payload)
             "admin_reorder_subject" -> syncAdminReorderSubject(payload)
             "admin_reorder_subtopic" -> syncAdminReorderSubTopic(payload)
+            "admin_delete_subject_topic" -> syncAdminDeleteSubjectTopic(payload)
             else -> false
         }
     }
@@ -396,6 +397,50 @@ class SyncWorker(
             ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminDelete error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/ব্যর্থ হওয়া Subject/SubTopic bulk delete — net আসলে ব্যাকগ্রাউন্ডে
+    //    Google Sheet-এ সেই subject/subTopic-এর সব প্রশ্ন (দেখো
+    //    GasContentService.deleteBySubjectOrTopic — deleteByIds-ভিত্তিক, তাই stale
+    //    row-index এর ঝুঁকি নেই) এবং সম্ভব হলে (referenceIds রিজলভ করা থাকলে) Subjects/
+    //    Topics reference ট্যাব থেকেও (deleteReferenceItem, id-ম্যাচ, নিরাপদ) মুছে দেয়।
+    //    এই action-টা MenuViewModel.adminDeleteSubjectOrTopic-এর মতোই সরাসরি Sheet/GAS-এ
+    //    লেখে (Firebase-এ না — এই অ্যাপ এখন Quiz/QBank/Study-এর জন্য Sheet-primary,
+    //    দেখো MenuViewModel-এর "Phase 6 পূর্ণ কাটওভার" নোট) — অন্য syncAdmin*() ফাংশনগুলো
+    //    (edit/add/delete single question) এখনো পুরনো Firebase পাথ ব্যবহার করে, এটা
+    //    ইচ্ছাকৃতভাবে আলাদা রাখা হলো যাতে আসল লাইভ (অনলাইন) পাথের সাথে সামঞ্জস্যপূর্ণ থাকে। ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminDeleteSubjectTopic(payload: Map<*, *>): Boolean {
+        return try {
+            val sheets = (payload["sheets"] as? List<*>)?.map { it.toString() } ?: return false
+            val subject = payload["subject"]?.toString() ?: return false
+            val subTopic = payload["subTopic"]?.toString() ?: ""
+            val deleteSubTopic = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
+            val referenceIds = (payload["referenceIds"] as? Map<*, *>)
+                ?.entries?.associate { (k, v) -> k.toString() to v.toString() } ?: emptyMap()
+            if (sheets.isEmpty() || subject.isBlank() || (deleteSubTopic && subTopic.isBlank())) return false
+
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .deleteBySubjectOrTopic(sheets, subject, subTopic, deleteSubTopic)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val refType = if (deleteSubTopic) "topics" else "subjects"
+                    referenceIds.values.toSet().forEach { rid ->
+                        if (rid.isNotBlank()) {
+                            com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem(refType, rid)
+                        }
+                    }
+                    Log.i(TAG, "syncAdminDeleteSubjectTopic $sheets/$subject/$subTopic → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminDeleteSubjectTopic failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminDeleteSubjectTopic error: ${e.message}")
             false
         }
     }
