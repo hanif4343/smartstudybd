@@ -178,6 +178,10 @@ fun QuestionListScreen(
     onHighlightConsumed : () -> Unit = {},
     onAdminEdit : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — এক/একাধিক সিলেক্ট করা প্রশ্ন অন্য
+    // Subject/Topic-এ move করে। sheet ঠিক onAdminDelete/onAdminEdit-এর মতোই ("Quiz"/
+    // "QBank"/"Study")। null দিলে (student view) সিলেক্ট-মোড টগলটাই দেখানো হয় না। ──
+    onAdminMoveQuestions: ((sheet: String, ids: List<String>, newSubject: String, newSubTopic: String) -> Unit)? = null,
     // ── "প্রশ্ন" এডিটের সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে অপশন/উত্তর আবার
     // জেনারেট করা — ডিফল্টভাবেই এই স্ক্রিনের নিজের viewModel (উপরের প্যারামিটার)
     // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
@@ -244,6 +248,20 @@ fun QuestionListScreen(
     var studySubmitProgress by remember { mutableStateOf(0 to 0) } // (checked, total)
     var studySubmitResults by remember { mutableStateOf<List<StudyBulkItem>?>(null) }
     var studySubmitShowDetails by remember { mutableStateOf(false) }
+
+    // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — এক/একাধিক প্রশ্ন সিলেক্ট করে অন্য
+    // Subject/Topic-এ move করার জন্য। onAdminMoveQuestions না দিলে (student view) এই
+    // টগলটাই দেখানো হয় না। ──
+    var isSelectMode by remember { mutableStateOf(false) }
+    val selectedQuestionIds = remember { mutableStateListOf<String>() }
+    var showMoveQuestionsDialog by remember { mutableStateOf(false) }
+    // ── onAdminEdit/onAdminDelete-এর মতোই "sheet" string — CoreScreen.kt-এর sheetKey
+    // হিসাবের সাথে হুবহু মিলিয়ে (GAS/Room-এ এই ক্যাপিটালাইজড ফর্মটাই ব্যবহার হয়) ──
+    val moveSheetKey = when (mode) {
+        StudyMode.QUIZ  -> "Quiz"
+        StudyMode.QBANK -> "QBank"
+        StudyMode.STUDY -> "Study"
+    }
 
     // ── বিস্তারিত লিস্টে কোনো ভুল প্রশ্নে ট্যাপ করলে ডায়ালগ বন্ধ করে সরাসরি
     // সেই প্রশ্নের কার্ডে স্ক্রল করে ২.৫ সেকেন্ড হাইলাইট করে দেখায় (রিপোর্ট
@@ -353,7 +371,14 @@ fun QuestionListScreen(
                     hasWrittenQuestions = hasWrittenOnPage,
                     isAdmin = vmState.isAdmin,
                     isReviewMode = vmState.isReviewMode,
-                    onToggleReviewMode = { viewModel.toggleReviewMode() }
+                    onToggleReviewMode = { viewModel.toggleReviewMode() },
+                    isSelectMode = isSelectMode,
+                    onToggleSelectMode = if (onAdminMoveQuestions != null) {
+                        {
+                            isSelectMode = !isSelectMode
+                            if (!isSelectMode) selectedQuestionIds.clear()
+                        }
+                    } else null
                 )
             }
         ) { padding ->
@@ -501,6 +526,33 @@ fun QuestionListScreen(
                                     }
                                 }
                             )
+                        }
+                        // ── Admin "Move" সিলেক্ট-মোড — চেকবক্স, ReviewTickButton-এর মতোই
+                        // student-দের কাছে অদৃশ্য (isSelectMode শুধু isAdmin হলেই চালু হয়) ──
+                        if (isSelectMode && vmState.isAdmin) {
+                            val checked = selectedQuestionIds.contains(q.id)
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (checked) selectedQuestionIds.remove(q.id) else selectedQuestionIds.add(q.id)
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        if (it) selectedQuestionIds.add(q.id) else selectedQuestionIds.remove(q.id)
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = Indigo600)
+                                )
+                                Text(
+                                    if (checked) "✅ Move করার জন্য সিলেক্টেড" else "সিলেক্ট করতে ট্যাপ করুন",
+                                    fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                    color = if (checked) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                         if (q.isGrouped()) {
                             val groupItems = pagedQuestions.filter { it.groupId == q.groupId }
@@ -789,6 +841,62 @@ fun QuestionListScreen(
                 }
             }
         }
+
+        // ── Admin "Move" সিলেক্ট-মোড — নিচে floating bar: কতগুলো সিলেক্ট হয়েছে + Move/বাতিল ──
+        if (isSelectMode && vmState.isAdmin) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .shadow(8.dp, RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF0F172A))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "${selectedQuestionIds.size}টি প্রশ্ন সিলেক্টেড",
+                        color = Color.White, fontFamily = NotoSansBengali,
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { isSelectMode = false; selectedQuestionIds.clear() }) {
+                            Text("বাতিল", color = Color.White.copy(alpha = 0.75f), fontFamily = NotoSansBengali)
+                        }
+                        Button(
+                            onClick = { showMoveQuestionsDialog = true },
+                            enabled = selectedQuestionIds.isNotEmpty(),
+                            colors  = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0EA5E9),
+                                disabledContainerColor = Color(0xFF0EA5E9).copy(alpha = 0.4f)
+                            )
+                        ) {
+                            Text("📦 Move", color = Color.White, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Admin "Move" — destination Subject/Topic ডায়ালগ ──
+    if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
+        AdminMoveQuestionsPickerDialog(
+            subjects  = vmState.subjects.map { it.name },
+            selectedCount = selectedQuestionIds.size,
+            onConfirm = { newSubject, newSubTopic ->
+                onAdminMoveQuestions(moveSheetKey, selectedQuestionIds.toList(), newSubject, newSubTopic)
+                isSelectMode = false
+                selectedQuestionIds.clear()
+            },
+            onDismiss = { showMoveQuestionsDialog = false }
+        )
     }
 
     // ── Submit confirmation dialog ──
@@ -1015,6 +1123,66 @@ fun QuestionListScreen(
  * না হলে ধূসর+ফাঁকা আউটলাইন — এক নজরে বোঝা যায় কোনটা বাকি।
  */
 @Composable
+// ── Admin "Move Question(s)" ডায়ালগ — সিলেক্ট করা এক/একাধিক প্রশ্ন কোন Subject ›
+// কোন Topic-এ যাবে বাছাই করে। destination Topic অবশ্যই আগে থেকে থাকতে হবে (টেক্সট
+// ফিল্ড — লিস্ট থেকে বাছাই না, কারণ এখানে অন্য Subject-এর Topic লিস্ট লাইভ আনতে
+// আলাদা Room কল লাগবে; না থাকলে ViewModel পরিষ্কার এরর দেখাবে)। ──
+@Composable
+private fun AdminMoveQuestionsPickerDialog(
+    subjects      : List<String>,
+    selectedCount : Int,
+    onConfirm     : (newSubject: String, newSubTopic: String) -> Unit,
+    onDismiss     : () -> Unit
+) {
+    var selectedSubject by remember { mutableStateOf(subjects.firstOrNull() ?: "") }
+    var newSubTopic by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (subjects.isEmpty()) {
+                    Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                subjects.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selectedSubject = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedSubject == name, onClick = { selectedSubject = name },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                OutlinedTextField(
+                    value = newSubTopic, onValueChange = { newSubTopic = it },
+                    label = { Text("Topic-এর নাম (আগে থেকেই থাকতে হবে)", fontFamily = NotoSansBengali) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "ℹ️ ওই বিষয়ে এই নামে Topic আগে থেকে না থাকলে move ব্যর্থ হবে — বানান ঠিকমতো লিখুন।",
+                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
+                )
+            }
+        },
+        confirmButton = {
+            val canConfirm = selectedSubject.isNotBlank() && newSubTopic.isNotBlank()
+            TextButton(
+                onClick = { if (canConfirm) { onConfirm(selectedSubject, newSubTopic); onDismiss() } },
+                enabled = canConfirm
+            ) { Text("📦 Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF0EA5E9)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+}
+
 private fun ReviewTickButton(reviewed: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
@@ -1142,7 +1310,10 @@ private fun QuestionTopBar(
     // ── Review System (Admin-only) — student-দের কাছে এই আইকনটা সম্পূর্ণ অদৃশ্য ──
     isAdmin                 : Boolean = false,
     isReviewMode            : Boolean = false,
-    onToggleReviewMode      : (() -> Unit)? = null
+    onToggleReviewMode      : (() -> Unit)? = null,
+    // ── Admin "Move" সিলেক্ট-মোড টগল — Review আইকনের পাশেই, একই স্টাইলে ──
+    isSelectMode            : Boolean = false,
+    onToggleSelectMode      : (() -> Unit)? = null
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -1176,6 +1347,17 @@ private fun QuestionTopBar(
                         Icons.Default.FactCheck,
                         contentDescription = if (isReviewMode) "রিভিউ মোড: চালু" else "রিভিউ মোড: বন্ধ",
                         tint = if (isReviewMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            // ── Admin "Move" সিলেক্ট-মোড টগল — চালু থাকলে প্রতিটা কার্ডের পাশে চেকবক্স
+            // দেখা যায়, এক/একাধিক প্রশ্ন সিলেক্ট করে নিচের floating bar দিয়ে move করা যায় ──
+            if (isAdmin && onToggleSelectMode != null) {
+                IconButton(onClick = onToggleSelectMode) {
+                    Text(
+                        if (isSelectMode) "☑️" else "⬜",
+                        fontSize = 16.sp,
+                        color = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
