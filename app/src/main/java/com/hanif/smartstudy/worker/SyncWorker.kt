@@ -184,6 +184,8 @@ class SyncWorker(
             "admin_reorder_subject" -> syncAdminReorderSubject(payload)
             "admin_reorder_subtopic" -> syncAdminReorderSubTopic(payload)
             "admin_delete_subject_topic" -> syncAdminDeleteSubjectTopic(payload)
+            "admin_move_questions" -> syncAdminMoveQuestions(payload)
+            "admin_move_topic" -> syncAdminMoveTopic(payload)
             else -> false
         }
     }
@@ -441,6 +443,67 @@ class SyncWorker(
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminDeleteSubjectTopic error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/ব্যর্থ হওয়া Question(s) Move ("Move to...", ফাইল ম্যানেজারের মতো) —
+    //    net আসলে ব্যাকগ্রাউন্ডে Google Sheet-এ ওই id-গুলোর subject/sub_topic/
+    //    subject_id/topic_id আপডেট করে দেয় (GAS action=moveQuestions, id/fbKey
+    //    অপরিবর্তিত থাকে বলে bookmark/quiz-history/Exam_Appearances ভাঙে না) ──
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun syncAdminMoveQuestions(payload: Map<*, *>): Boolean {
+        return try {
+            val sheet = payload["sheet"]?.toString() ?: return false
+            val ids = (payload["ids"] as? List<*>)?.map { it.toString() } ?: return false
+            val newSubject = payload["newSubject"]?.toString() ?: return false
+            val newSubjectId = payload["newSubjectId"]?.toString() ?: return false
+            val newSubTopic = payload["newSubTopic"]?.toString() ?: return false
+            val newTopicId = payload["newTopicId"]?.toString() ?: return false
+            if (ids.isEmpty()) return false
+
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .moveQuestions(sheet, ids, newSubject, newSubjectId, newSubTopic, newTopicId)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.i(TAG, "syncAdminMoveQuestions $sheet/${ids.size}টি → $newSubject/$newSubTopic success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminMoveQuestions failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminMoveQuestions error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/ব্যর্থ হওয়া Topic Move — net আসলে ব্যাকগ্রাউন্ডে Google Sheet-এ
+    //    (GAS action=moveTopic) Topic-এর reference-রো + তার আন্ডারের সব প্রশ্ন অন্য
+    //    Subject-এ move করে দেয় (mergeTopicId থাকলে destination-এর existing Topic-এর
+    //    সাথে merge) ──
+    private suspend fun syncAdminMoveTopic(payload: Map<*, *>): Boolean {
+        return try {
+            val topicId = payload["topicId"]?.toString() ?: return false
+            val newSubjectId = payload["newSubjectId"]?.toString() ?: return false
+            val newSubjectName = payload["newSubjectName"]?.toString() ?: return false
+            val newSubTopicName = payload["newSubTopicName"]?.toString() ?: return false
+            val mergeTopicId = payload["mergeTopicId"]?.toString()?.ifBlank { null }
+
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .moveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.i(TAG, "syncAdminMoveTopic $topicId → $newSubjectName success (${r.data}টি প্রশ্ন)")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminMoveTopic failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminMoveTopic error: ${e.message}")
             false
         }
     }
