@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.first
  * Internet আসলে WorkManager দিয়ে sync হয়।
  *
  * Supported actions: quiz_answer, study_progress, xp_update, admin_edit_question,
- * admin_add_question, admin_delete_question, admin_reorder_subject, admin_reorder_subtopic
+ * admin_add_question, admin_delete_question, admin_reorder_subject, admin_reorder_subtopic,
+ * admin_delete_subject_topic
  */
 data class PendingAction(
     val id         : String = java.util.UUID.randomUUID().toString(),
@@ -127,6 +128,29 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin: Subject/SubTopic bulk delete (অফলাইন/ব্যর্থ হলে queue এ রাখা হয়, net
+    //    আসলে Sheet থেকে (প্রশ্ন + Subjects/Topics reference এন্ট্রি) সরিয়ে দেবে) ──
+    // referenceIds: sheet -> subjectId/topicId (SharedFlow-এ instant-delete করার সময়
+    // যদি রিজলভ করা গিয়ে থাকে — পাওয়া গেলে Subjects/Topics ট্যাব থেকেও ডিলিট হবে) ──
+    suspend fun enqueueAdminDeleteSubjectTopic(
+        sheets         : List<String>,
+        subject        : String,
+        subTopic       : String,
+        deleteSubTopic : Boolean,
+        referenceIds   : Map<String, String> = emptyMap()
+    ) {
+        enqueue(PendingAction(
+            type    = "admin_delete_subject_topic",
+            payload = gson.toJson(mapOf(
+                "sheets"         to sheets,
+                "subject"        to subject,
+                "subTopic"       to subTopic,
+                "deleteSubTopic" to deleteSubTopic,
+                "referenceIds"   to referenceIds
+            ))
+        ))
+    }
+
     // ── Admin: offline/fail অবস্থায় Subject reorder — mode+tag এর জন্য পুরো
     //    order map টাই queue-তে রাখা হয় (PUT — সম্পূর্ণ node replace), তাই একই
     //    mode+tag-এ বারবার reorder করলে পুরনো pending entry গুলো আর দরকার নেই,
@@ -193,7 +217,7 @@ class PendingQueue(private val context: Context) {
         getAll().filter {
             it.type == "admin_edit_question" || it.type == "admin_add_question" ||
             it.type == "admin_delete_question" || it.type == "admin_reorder_subject" ||
-            it.type == "admin_reorder_subtopic"
+            it.type == "admin_reorder_subtopic" || it.type == "admin_delete_subject_topic"
         }
 
     // ── Pending admin edits আলাদা করে দেখাও ──
