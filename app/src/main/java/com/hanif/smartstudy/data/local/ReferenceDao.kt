@@ -24,8 +24,16 @@ interface ReferenceDao {
     @Query("SELECT * FROM subjects WHERE sheet = :sheet ORDER BY name")
     suspend fun getSubjectsBySheet(sheet: String): List<SubjectEntity>
 
+    // ── Admin Subject/Topic ডিলিট ইনস্ট্যান্ট দেখানোর জন্য — নাম দিয়ে subjectId
+    // রিজলভ করতে হয় (deleteByIds/deleteReferenceId-এর id-ভিত্তিক API নাম নেয় না) ──
+    @Query("SELECT * FROM subjects WHERE sheet = :sheet AND name = :name LIMIT 1")
+    suspend fun getSubjectByName(sheet: String, name: String): SubjectEntity?
+
     @Query("DELETE FROM subjects")
     suspend fun deleteAllSubjects()
+
+    @Query("DELETE FROM subjects WHERE subjectId = :subjectId")
+    suspend fun deleteSubjectById(subjectId: String)
 
     // ── Topics ────────────────────────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -34,11 +42,20 @@ interface ReferenceDao {
     @Query("SELECT * FROM topics WHERE subjectId = :subjectId ORDER BY name")
     suspend fun getTopicsForSubject(subjectId: String): List<TopicEntity>
 
+    @Query("SELECT * FROM topics WHERE subjectId = :subjectId AND name = :name LIMIT 1")
+    suspend fun getTopicByName(subjectId: String, name: String): TopicEntity?
+
     @Query("SELECT * FROM topics ORDER BY name")
     suspend fun getAllTopics(): List<TopicEntity>
 
     @Query("DELETE FROM topics")
     suspend fun deleteAllTopics()
+
+    @Query("DELETE FROM topics WHERE topicId = :topicId")
+    suspend fun deleteTopicById(topicId: String)
+
+    @Query("DELETE FROM topics WHERE subjectId = :subjectId")
+    suspend fun deleteTopicsBySubjectId(subjectId: String)
 
     // ── SubTopics ─────────────────────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -52,6 +69,31 @@ interface ReferenceDao {
 
     @Query("DELETE FROM subtopics")
     suspend fun deleteAllSubTopics()
+
+    @Query("DELETE FROM subtopics WHERE topicId = :topicId")
+    suspend fun deleteSubTopicsByTopicId(topicId: String)
+
+    @Query("DELETE FROM subtopics WHERE topicId IN (SELECT topicId FROM topics WHERE subjectId = :subjectId)")
+    suspend fun deleteSubTopicsBySubjectId(subjectId: String)
+
+    // ── FIX ("সাবজেক্ট/টপিক ডিলিট হচ্ছে না" বাগ, মূল কারণ): Subject/Topic-এর আন্ডারের সব
+    // প্রশ্ন ডিলিট হলেও SubjectListScreen/SubTopicListScreen যেই "subjects"/"topics"
+    // reference-টেবিল থেকে পড়ে, সেটা আগে কখনো ছোঁয়াই হতো না — তাই খালি Subject/Topic
+    // এন্ট্রিটা তালিকায় থেকেই যেত। এই দুটো cascade delete দিয়ে reference-টেবিল থেকেও
+    // (তার আন্ডারের topics/subtopics-সহ) সাথে সাথে সরিয়ে দেওয়া হয়, @Transaction দিয়ে
+    // atomic (মাঝপথে fail হলে আংশিক ডিলিট থেকে যাবে না) ──
+    @Transaction
+    suspend fun deleteSubjectCascade(subjectId: String) {
+        deleteSubTopicsBySubjectId(subjectId)
+        deleteTopicsBySubjectId(subjectId)
+        deleteSubjectById(subjectId)
+    }
+
+    @Transaction
+    suspend fun deleteTopicCascade(topicId: String) {
+        deleteSubTopicsByTopicId(topicId)
+        deleteTopicById(topicId)
+    }
 
     // ── Tags ──────────────────────────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
