@@ -95,6 +95,23 @@ interface ReferenceDao {
         deleteTopicById(topicId)
     }
 
+    // ── Admin "Move Topic" (ফাইল ম্যানেজারের মতো, অন্য Subject-এ) ──
+    @Query("UPDATE topics SET subjectId = :newSubjectId WHERE topicId = :topicId")
+    suspend fun reparentTopic(topicId: String, newSubjectId: String)
+
+    @Query("UPDATE subtopics SET topicId = :targetTopicId WHERE topicId = :sourceTopicId")
+    suspend fun reassignSubTopics(sourceTopicId: String, targetTopicId: String)
+
+    /** destination Subject-এ same নামের Topic আগে থেকে থাকলে merge — sourceTopicId-এর
+     *  subtopics/questions সব targetTopicId-তে চলে যায়, সোর্স Topic-এর reference-রো
+     *  ডিলিট হয়ে যায় (এখানে শুধু reference-টেবিল অংশ; questions টেবিল আলাদা করে
+     *  QuestionDao.moveQuestionsByTopicId দিয়ে আপডেট হয় — ContentRepository দেখো)। */
+    @Transaction
+    suspend fun mergeTopicCascade(sourceTopicId: String, targetTopicId: String) {
+        reassignSubTopics(sourceTopicId, targetTopicId)
+        deleteTopicById(sourceTopicId)
+    }
+
     // ── Tags ──────────────────────────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTags(items: List<TagEntity>)
