@@ -194,6 +194,29 @@ interface QuestionDao {
     @Query("DELETE FROM questions WHERE sheet = :sheet AND subject = :subject AND subTopic = :subTopic")
     suspend fun deleteBySubjectAndSubTopic(sheet: String, subject: String, subTopic: String)
 
+    // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list)
+    // অথবা একটা গোটা Topic (topicId দিয়ে) অন্য Subject/Topic-এ move করে। প্রশ্নের fbKey
+    // (নিজের id) অপরিবর্তিত থাকে — শুধু subject/subTopic/subjectId/topicId বদলায়। ──
+    @Query("""
+        UPDATE questions
+        SET subject = :newSubject, subTopic = :newSubTopic, subjectId = :newSubjectId, topicId = :newTopicId
+        WHERE sheet = :sheet AND fbKey IN (:ids)
+    """)
+    suspend fun moveQuestionsByIds(
+        sheet: String, ids: List<String>,
+        newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
+    )
+
+    @Query("""
+        UPDATE questions
+        SET subject = :newSubject, subTopic = :newSubTopic, subjectId = :newSubjectId, topicId = :newTopicId
+        WHERE sheet = :sheet AND topicId = :oldTopicId
+    """)
+    suspend fun moveQuestionsByTopicId(
+        sheet: String, oldTopicId: String,
+        newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
+    )
+
     // ── সব data মুছো ──────────────────────────────────────────────────────────
     @Query("DELETE FROM questions")
     suspend fun deleteAll()
