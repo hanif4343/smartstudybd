@@ -266,6 +266,14 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomAppearancesForPost(postId: String)          = refDao.getAppearancesForPost(postId)
     suspend fun getRoomAppearancesForInstitution(institutionId: String) = refDao.getAppearancesForInstitution(institutionId)
 
+    // ── Admin "Move" ডায়ালগে Subject/Topic নাম বেছে/টাইপ করলে, ব্যাকগ্রাউন্ড sync কলের
+    // আগে আসল id বের করতে লাগে (GAS action-গুলো id-ভিত্তিক, নাম-ভিত্তিক না) ──
+    suspend fun resolveSubjectId(sheet: String, subjectName: String): String? =
+        refDao.getSubjectByName(sheet, subjectName)?.subjectId
+
+    suspend fun resolveTopicId(subjectId: String, topicName: String): String? =
+        refDao.getTopicByName(subjectId, topicName)?.topicId
+
     /**
      * Phase 6 — "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: GAS `getAllExamAppearances` থেকে পুরো
      * Exam_Appearances টেবিল টেনে Room-এ replace করে। শুধু Google Sheet ডেটা-সোর্স মোডে
@@ -1034,6 +1042,91 @@ class ContentRepository(private val context: Context) {
             refDao.deleteTopicCascade(topicEntity.topicId)
             topicEntity.topicId
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin "Move" (ফাইল ম্যানেজারের মতো) — এক/একাধিক প্রশ্ন অথবা একটা গোটা Topic অন্য
+    // Subject/Topic-এ move করার instant-local helper। প্রশ্ন/টপিকের নিজের id
+    // (merge ছাড়া) অপরিবর্তিত থাকে — শুধু subject/subTopic/subjectId/topicId বদলায়,
+    // তাই bookmark/quiz-history/Exam_Appearances কিছুই ভাঙে না।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** নির্দিষ্ট কয়েকটা প্রশ্ন (id list) — bulk cache-এ একসাথে subject/subTopic বদলে দেয়
+     *  (patchContentAndPersist()-এর একই-fields-বহু-id সংস্করণ, single-pass)। */
+    suspend fun patchContentBulkAndPersist(sheet: String, rowKeys: Set<String>, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) !in rowKeys) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            fields.forEach { (k, v) -> obj.addProperty(k, v) }
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it) { q -> q.id } })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /** পুরো Topic-এর (subject+subTopic নাম মিলিয়ে) সব প্রশ্ন — bulk cache-এ
+     *  subject/subTopic বদলে দেয়। */
+    suspend fun moveContentByTopicAndPersist(
+        sheet: String, oldSubject: String, oldSubTopic: String, newSubject: String, newSubTopic: String
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        fun norm(s: String?) = s?.trim()?.lowercase().orEmpty()
+        val oSubjN = norm(oldSubject); val oSubTN = norm(oldSubTopic)
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, subjOf: (T) -> String?, subTOf: (T) -> String?): T {
+            if (norm(subjOf(item)) != oSubjN || norm(subTOf(item)) != oSubTN) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty("subject", newSubject)
+            obj.addProperty("sub_topic", newSubTopic)
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it, { s -> s.subject }, { s -> s.subTopic }) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /** removeRoomQuestionsBySubject()-এর মতোই — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list) Room-এ
+     *  move করে (subject/subTopic/subjectId/topicId আপডেট, fbKey/id অপরিবর্তিত)। */
+    suspend fun moveRoomQuestionsByIds(
+        sheet: String, ids: List<String>, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
+    ) = withContext(Dispatchers.IO) {
+        dao.moveQuestionsByIds(sheet.uppercase(), ids, newSubject, newSubTopic, newSubjectId, newTopicId)
+    }
+
+    /** পুরো Topic-এর (topicId মিলিয়ে) সব প্রশ্ন Room-এ move করে। */
+    suspend fun moveRoomQuestionsByTopic(
+        sheet: String, oldTopicId: String, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
+    ) = withContext(Dispatchers.IO) {
+        dao.moveQuestionsByTopicId(sheet.uppercase(), oldTopicId, newSubject, newSubTopic, newSubjectId, newTopicId)
+    }
+
+    /** Room reference-টেবিলে (Topics) Topic-টা reparent করে — mergeTopicId দেওয়া থাকলে
+     *  destination-এর existing Topic-এর সাথে merge (সোর্স Topic-রো ডিলিট), নাহলে শুধু
+     *  subjectId কলাম বদলে reparent। */
+    suspend fun moveRoomTopicReference(topicId: String, newSubjectId: String, mergeTopicId: String?) = withContext(Dispatchers.IO) {
+        if (!mergeTopicId.isNullOrBlank()) refDao.mergeTopicCascade(topicId, mergeTopicId)
+        else refDao.reparentTopic(topicId, newSubjectId)
     }
 
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
