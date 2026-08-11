@@ -486,6 +486,94 @@ object GasContentService {
     private fun gasFieldName(androidKey: String): String = ANDROID_TO_GAS_FIELD[androidKey] ?: androidKey
 
     /** সাধারণ GET-action কল (updateField/deleteByIds/renameField) — response {result:"success"|"error"} */
+    /** callGetAction()-এর মতোই, কিন্তু শুধু success/fail বুলিয়ানের বদলে পুরো response
+     *  JSON রিটার্ন করে — moveQuestions/moveTopic-এর মতো যেসব action-এর response থেকে
+     *  extra ডেটা (moved count, mergedInto ইত্যাদি) দরকার, তাদের জন্য। */
+    private fun callGetActionRaw(params: Map<String, String>): com.google.gson.JsonObject? {
+        val query = params.entries.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
+        val url = "$BASE_URL?secret=${enc(SECRET)}&$query"
+        return try {
+            val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+            val body = resp.body?.string() ?: ""
+            resp.close()
+            JsonParser.parseString(body).asJsonObject
+        } catch (e: Exception) {
+            Log.e(TAG, "callGetActionRaw error: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * adminMoveQuestions() এর জন্য — এক বা একাধিক প্রশ্ন (id দিয়ে) অন্য Subject/Topic-এ
+     * move করে (GAS action=moveQuestions)। প্রশ্নের নিজের id অপরিবর্তিত থাকে — শুধু
+     * subject/sub_topic/subject_id/topic_id ফিল্ড বদলায়, তাই bookmark/quiz-history/
+     * Exam_Appearances সব ঠিক থাকে।
+     */
+    suspend fun moveQuestions(
+        sheet        : String,
+        ids          : List<String>,
+        newSubject   : String,
+        newSubjectId : String,
+        newSubTopic  : String,
+        newTopicId   : String
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        if (ids.isEmpty()) return@withContext ApiResult.Error("কোনো প্রশ্ন সিলেক্ট করা হয়নি")
+        try {
+            val obj = callGetActionRaw(mapOf(
+                "action"       to "moveQuestions",
+                "sheet"        to sheet,
+                "ids"          to ids.joinToString(","),
+                "newSubject"   to newSubject,
+                "newSubjectId" to newSubjectId,
+                "newSubTopic"  to newSubTopic,
+                "newTopicId"   to newTopicId
+            )) ?: return@withContext ApiResult.Error("Network error")
+            if (obj.get("result")?.asString == "success") {
+                ApiResult.Success(obj.get("moved")?.asInt ?: ids.size)
+            } else {
+                ApiResult.Error(obj.get("message")?.asString ?: "Move ব্যর্থ হয়েছে")
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
+    /**
+     * adminMoveTopic() এর জন্য — একটা পুরো Topic (তার আন্ডারের সব প্রশ্নসহ) অন্য
+     * Subject-এ move করে (GAS action=moveTopic)। mergeTopicId দেওয়া থাকলে destination-এ
+     * same নামের existing Topic-এর সাথে merge হয় (topic_id-ও সেই existing id-তে বদলে
+     * যায়, তাই সোর্স Topic-এর reference-রো ডিলিট হয়ে যায়) — নাহলে topic_id অপরিবর্তিত
+     * রেখে শুধু তার subject_id reparent হয়।
+     */
+    suspend fun moveTopic(
+        topicId         : String,
+        newSubjectId    : String,
+        newSubjectName  : String,
+        newSubTopicName : String,
+        mergeTopicId    : String? = null
+    ): ApiResult<Int> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        try {
+            val params = mutableMapOf(
+                "action"          to "moveTopic",
+                "topicId"         to topicId,
+                "newSubjectId"    to newSubjectId,
+                "newSubjectName"  to newSubjectName,
+                "newSubTopicName" to newSubTopicName
+            )
+            if (!mergeTopicId.isNullOrBlank()) params["mergeTopicId"] = mergeTopicId
+            val obj = callGetActionRaw(params) ?: return@withContext ApiResult.Error("Network error")
+            if (obj.get("result")?.asString == "success") {
+                ApiResult.Success(obj.get("moved")?.asInt ?: 0)
+            } else {
+                ApiResult.Error(obj.get("message")?.asString ?: "Move ব্যর্থ হয়েছে")
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
     private fun callGetAction(params: Map<String, String>): Boolean {
         val query = params.entries.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
         val url = "$BASE_URL?secret=${enc(SECRET)}&$query"
