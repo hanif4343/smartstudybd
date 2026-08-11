@@ -410,6 +410,12 @@ fun MainScreen(
                     },
                     onAdminDeleteSubTopic = { sheet, subject, name ->
                         menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
+                    },
+                    onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
+                        menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
+                    },
+                    onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
                 BottomTab.QBANK -> CoreScreen(
@@ -434,6 +440,12 @@ fun MainScreen(
                     },
                     onAdminDeleteSubTopic = { sheet, subject, name ->
                         menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
+                    },
+                    onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
+                        menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
+                    },
+                    onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
                 BottomTab.STUDY -> CoreScreen(
@@ -458,6 +470,12 @@ fun MainScreen(
                     },
                     onAdminDeleteSubTopic = { sheet, subject, name ->
                         menuViewModel.adminDeleteSubjectOrTopic(listOf(sheet), subject, name, deleteSubTopic = true)
+                    },
+                    onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
+                        menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
+                    },
+                    onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
