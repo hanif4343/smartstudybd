@@ -1409,6 +1409,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startTimer(questionCount: Int) {
+        // ── FIX: "Study" পড়ার জায়গা — যতক্ষণ ইচ্ছা পড়া যাবে, তাই এখানে কোনো
+        // কাউন্টডাউন টাইমার/অটো-সাবমিট চলবে না। শুধু Quiz/QBank-এই টাইমার+অটো-সাবমিট
+        // প্রযোজ্য (প্রশ্ন-প্রতি ১ মিনিট হিসেবে)। ──
+        if (_state.value.mode == StudyMode.STUDY) {
+            timerJob?.cancel()
+            _state.update { it.copy(timerSec = 0, totalTimeSec = 0, isQuizActive = true) }
+            return
+        }
         val totalSec = questionCount * 60
         timerJob?.cancel()
         _state.update { it.copy(timerSec = totalSec, totalTimeSec = totalSec, isQuizActive = true) }
