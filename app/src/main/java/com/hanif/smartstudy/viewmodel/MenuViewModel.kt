@@ -149,6 +149,9 @@ data class MenuUiState(
     val renameMsg         : String?          = null,
     val isDeletingSubject : Boolean          = false,
     val deleteSubjectMsg  : String?          = null,
+    // Admin "Move" (ফাইল ম্যানেজারের মতো — প্রশ্ন/টপিক অন্য Subject/Topic-এ move)
+    val isMovingContent   : Boolean          = false,
+    val moveContentMsg    : String?          = null,
     // Model Test bulk-generate (Admin)
     // ── Subject/SubTopic taxonomy (dropdown suggestions এর জন্য) ──
     // key: sheet ("Quiz"/"QBank"/"Study") → distinct subject list
@@ -1657,6 +1660,196 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearDeleteSubjectMsg() { _state.update { it.copy(deleteSubjectMsg = null) } }
+
+    fun clearMoveContentMsg() { _state.update { it.copy(moveContentMsg = null) } }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin "Move" (ফাইল ম্যানেজারের মতো) — adminDeleteSubjectOrTopic-এর মতোই instant-
+    // then-background প্যাটার্ন: নেটওয়ার্কের আগেই লোকাল সব জায়গা (bulk cache + Room
+    // questions + Room reference টেবিল) থেকে move হয়ে যায়, আসল Sheet sync ব্যাকগ্রাউন্ডে
+    // চলে — ব্যর্থ/অফলাইন হলে pending queue-তে ঢুকে নেট ফিরলে auto sync হয়ে যাবে।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** এক বা একাধিক প্রশ্ন (ids) অন্য Subject/Topic-এ move করে। destination Topic
+     *  আগে থেকে থাকতেই হবে (নতুন Topic বানাতে হলে আগে সেটা বানাতে হবে)। প্রশ্নের
+     *  নিজের id অপরিবর্তিত থাকে (তাই bookmark/quiz-history/Exam_Appearances ভাঙে না)। */
+    fun adminMoveQuestions(
+        sheet          : String,
+        ids            : List<String>,
+        newSubjectName : String,
+        newSubTopicName: String
+    ) {
+        if (!_state.value.isAdmin) return
+        if (ids.isEmpty() || newSubjectName.isBlank() || newSubTopicName.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+
+            // ── destination নাম থেকে আসল subjectId/topicId রিজলভ (GAS action id-ভিত্তিক) ──
+            val newSubjectId = contentRepo.resolveSubjectId(sheet, newSubjectName)
+            if (newSubjectId == null) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ \"$newSubjectName\" নামে কোনো Subject পাওয়া যায়নি") }
+                return@launch
+            }
+            val newTopicId = contentRepo.resolveTopicId(newSubjectId, newSubTopicName)
+            if (newTopicId == null) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ \"$newSubjectName\"-এ \"$newSubTopicName\" নামে কোনো Topic পাওয়া যায়নি — আগে Topic বানান") }
+                return@launch
+            }
+
+            try {
+                contentRepo.patchContentBulkAndPersist(sheet, ids.toSet(), mapOf("subject" to newSubjectName, "sub_topic" to newSubTopicName))
+                try {
+                    contentRepo.moveRoomQuestionsByIds(sheet, ids, newSubjectName, newSubTopicName, newSubjectId, newTopicId)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminMove", "Room questions move failed (non-fatal): ${e.message}")
+                }
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "✅ ${ids.size}টি প্রশ্ন \"$newSubjectName\" › \"$newSubTopicName\"-এ সরানো হয়েছে",
+                    toast = "📦 ${ids.size}টি প্রশ্ন সরানো হয়েছে",
+                    contentEditVersion = it.contentEditVersion + 1) }
+                android.util.Log.i("AdminMove", "Instant local move done: $sheet/${ids.size} → $newSubjectName/$newSubTopicName")
+            } catch (e: Exception) {
+                android.util.Log.e("AdminMove", "Instant local move FAILED: ${e.message}", e)
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ Move ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                try {
+                    val cm = getApplication<android.app.Application>()
+                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+                    if (isOnline) {
+                        when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                            .moveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, newTopicId)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success ->
+                                android.util.Log.i("AdminMove", "Background sheet move SUCCESS: ${r.data}টি প্রশ্ন")
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                android.util.Log.e("AdminMove", "Background sheet move FAILED: ${r.message} — queueing")
+                                q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, newTopicId)
+                                loadPendingEdits()
+                            }
+                        }
+                    } else {
+                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, newTopicId)
+                        loadPendingEdits()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AdminMove", "EXCEPTION in background sync: ${e.message}", e)
+                    try {
+                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, newTopicId)
+                        loadPendingEdits()
+                    } catch (e2: Exception) {
+                        android.util.Log.e("AdminMove", "QUEUE ALSO FAILED: ${e2.message}", e2)
+                    }
+                }
+            }
+        }
+    }
+
+    /** একটা পুরো Topic (তার আন্ডারের সব প্রশ্নসহ) অন্য Subject-এ move করে। destination
+     *  Subject-এ same নামের (newSubTopicName) Topic আগে থেকে থাকলে auto-merge হয়ে যায়
+     *  (topic_id-ও সেই existing id-তে বদলে যায়) — নাহলে topic_id অপরিবর্তিত রেখে শুধু
+     *  reparent হয়। */
+    fun adminMoveTopic(
+        sheet          : String,
+        oldSubject     : String,
+        oldSubTopic    : String,
+        newSubjectName : String,
+        newSubTopicName: String = oldSubTopic
+    ) {
+        if (!_state.value.isAdmin) return
+        if (oldSubject.isBlank() || oldSubTopic.isBlank() || newSubjectName.isBlank() || newSubTopicName.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+
+            // ── সোর্স Topic-এর topicId রিজলভ (Room reference-টেবিল থেকে) ──
+            val oldSubjectId = contentRepo.resolveSubjectId(sheet, oldSubject)
+            val topicId = oldSubjectId?.let { contentRepo.resolveTopicId(it, oldSubTopic) }
+            if (topicId == null) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ \"$oldSubject\" › \"$oldSubTopic\" রিজলভ করা যায়নি — একবার রিফ্রেশ করে আবার চেষ্টা করুন") }
+                return@launch
+            }
+            // ── destination Subject রিজলভ, আর same নামের Topic থাকলে auto-merge target ──
+            val newSubjectId = contentRepo.resolveSubjectId(sheet, newSubjectName)
+            if (newSubjectId == null) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ \"$newSubjectName\" নামে কোনো Subject পাওয়া যায়নি") }
+                return@launch
+            }
+            if (newSubjectId == oldSubjectId && newSubTopicName.trim().equals(oldSubTopic.trim(), ignoreCase = true)) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "ℹ️ এটা এখন যেখানে আছে, সেখানেই আছে — কিছু বদলায়নি") }
+                return@launch
+            }
+            val mergeTopicId = contentRepo.resolveTopicId(newSubjectId, newSubTopicName)
+                ?.takeIf { it != topicId }   // নিজের সাথে merge না — নিরাপত্তা check
+
+            val effectiveTopicId = mergeTopicId ?: topicId
+            try {
+                contentRepo.moveContentByTopicAndPersist(sheet, oldSubject, oldSubTopic, newSubjectName, newSubTopicName)
+                try {
+                    contentRepo.moveRoomQuestionsByTopic(sheet, topicId, newSubjectName, newSubTopicName, newSubjectId, effectiveTopicId)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminMove", "Room questions move (topic) failed (non-fatal): ${e.message}")
+                }
+                try {
+                    contentRepo.moveRoomTopicReference(topicId, newSubjectId, mergeTopicId)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminMove", "Room topic reference move failed (non-fatal): ${e.message}")
+                }
+                val mergeNote = if (mergeTopicId != null) " (একই নামের Topic-এর সাথে merge)" else ""
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "✅ \"$oldSubTopic\" অধ্যায় \"$newSubjectName\"-এ সরানো হয়েছে$mergeNote",
+                    toast = "📦 \"$oldSubTopic\" অধ্যায় সরানো হয়েছে",
+                    contentEditVersion = it.contentEditVersion + 1) }
+                android.util.Log.i("AdminMove", "Instant local topic move done: $topicId → $newSubjectName/$newSubTopicName")
+            } catch (e: Exception) {
+                android.util.Log.e("AdminMove", "Instant local topic move FAILED: ${e.message}", e)
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ Move ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                try {
+                    val cm = getApplication<android.app.Application>()
+                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+                    if (isOnline) {
+                        when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                            .moveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success ->
+                                android.util.Log.i("AdminMove", "Background sheet topic-move SUCCESS: ${r.data}টি প্রশ্ন")
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                android.util.Log.e("AdminMove", "Background sheet topic-move FAILED: ${r.message} — queueing")
+                                q.enqueueAdminMoveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)
+                                loadPendingEdits()
+                            }
+                        }
+                    } else {
+                        q.enqueueAdminMoveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)
+                        loadPendingEdits()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AdminMove", "EXCEPTION in background sync: ${e.message}", e)
+                    try {
+                        q.enqueueAdminMoveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)
+                        loadPendingEdits()
+                    } catch (e2: Exception) {
+                        android.util.Log.e("AdminMove", "QUEUE ALSO FAILED: ${e2.message}", e2)
+                    }
+                }
+            }
+        }
+    }
 
     // ── Toast clear ───────────────────────────────────────────
 
