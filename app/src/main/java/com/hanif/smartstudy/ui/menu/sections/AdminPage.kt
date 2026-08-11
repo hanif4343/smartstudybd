@@ -821,8 +821,20 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                         gson.fromJson(action.payload, Map::class.java)
                     } catch (e: Exception) { emptyMap<String, Any>() }
 
-                    val sheet    = payload["sheet"]?.toString() ?: "?"
-                    val preview  = payload["questionPreview"]?.toString() ?: ""
+                    // ── admin_delete_subject_topic-এ "sheet" (singular) না, "sheets" (লিস্ট)
+                    // থাকে আর questionPreview-এর বদলে subject/subTopic নাম দিয়ে preview বানাতে
+                    // হয় — নাহলে এই কার্ডে sheet="?" আর preview খালি দেখাতো ──
+                    val sheet = payload["sheet"]?.toString()
+                        ?: (payload["sheets"] as? List<*>)?.joinToString("+") ?: "?"
+                    val preview = payload["questionPreview"]?.toString()?.ifBlank { null }
+                        ?: run {
+                            val subj = payload["subject"]?.toString().orEmpty()
+                            val subT = payload["subTopic"]?.toString().orEmpty()
+                            val delSub = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
+                            if (subj.isNotBlank()) {
+                                if (delSub && subT.isNotBlank()) "\"$subj\" › \"$subT\" (পুরো অধ্যায়)" else "\"$subj\" (পুরো বিষয়)"
+                            } else ""
+                        }
                     val retry    = action.retryCount
 
                     Card(
@@ -855,9 +867,10 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                                             color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
                                     }
                                     val (typeLabel, typeColor) = when (action.type) {
-                                        "admin_add_question"    -> "➕ নতুন" to Color(0xFF16A34A)
-                                        "admin_delete_question" -> "🗑️ ডিলিট" to Color(0xFFDC2626)
-                                        else                     -> "✏️ এডিট" to Color(0xFF4F46E5)
+                                        "admin_add_question"         -> "➕ নতুন" to Color(0xFF16A34A)
+                                        "admin_delete_question"      -> "🗑️ ডিলিট" to Color(0xFFDC2626)
+                                        "admin_delete_subject_topic" -> "🗑️ বিষয়/অধ্যায় ডিলিট" to Color(0xFFDC2626)
+                                        else                          -> "✏️ এডিট" to Color(0xFF4F46E5)
                                     }
                                     Surface(shape = RoundedCornerShape(6.dp),
                                         color = typeColor.copy(0.1f)) {
