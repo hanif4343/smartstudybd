@@ -1237,6 +1237,129 @@ function doGet(e) {
     return json({status:"success",result:"success",deleted:driiRangeCount,examAppearancesDeleted:driiEaDeleted,sheet:driiSheetName});
   }
 
+  // ── moveQuestions — এক বা একাধিক প্রশ্ন (id দিয়ে, comma-separated) অন্য
+  // Subject/Topic-এ move করে। শুধু subject/sub_topic/subject_id/topic_id ফিল্ড বদলায়,
+  // প্রশ্নের নিজের id অপরিবর্তিত থাকে (তাই Exam_Appearances/bookmark/quiz-history —
+  // কিছুই ভাঙে না, ঠিক যেভাবে renameField-ও id ছোঁয় না)। ──
+  if (action==="moveQuestions") {
+    var mqShName=e.parameter.sheet||"";
+    var mqShMap={quiz:"Quiz",qbank:"QBank",study:"Study"};
+    mqShName=mqShMap[mqShName.toLowerCase()]||mqShName;
+    var mqIds=(e.parameter.ids||"").split(",").map(function(x){return x.trim();}).filter(Boolean);
+    var mqNewSubject=(e.parameter.newSubject||"").toString().trim();
+    var mqNewSubjectId=(e.parameter.newSubjectId||"").toString().trim();
+    var mqNewSubTopic=(e.parameter.newSubTopic||"").toString().trim();
+    var mqNewTopicId=(e.parameter.newTopicId||"").toString().trim();
+    if (!mqIds.length) return json({status:"error",result:"error",message:"ids প্রয়োজন"});
+    if (!mqNewSubject||!mqNewSubjectId||!mqNewSubTopic||!mqNewTopicId)
+      return json({status:"error",result:"error",message:"newSubject/newSubjectId/newSubTopic/newTopicId প্রয়োজন"});
+
+    var mqSs=SpreadsheetApp.getActiveSpreadsheet(), mqSh=mqSs.getSheetByName(mqShName);
+    if (!mqSh) return json({status:"error",result:"error",message:"sheet not found: "+mqShName});
+    var mqData=mqSh.getDataRange().getValues(), mqHdr=mqData[0];
+    var mqIdCol=mqHdr.indexOf("id");
+    var mqSubCol=mqHdr.indexOf("subject");
+    var mqSubIdCol=mqHdr.indexOf("subject_id");
+    var mqSTCol=mqHdr.indexOf("sub_topic");
+    // ⚠️ Study ট্যাবের আসল হেডার "sub_topic" না, "topic" — renameField/updateField-এর
+    // মতোই fallback, নাহলে Study-তে move সবসময় "column not found" দিত।
+    if (mqSTCol<0) mqSTCol=mqHdr.indexOf("topic");
+    var mqTopicIdCol=mqHdr.indexOf("topic_id");
+    var mqUpdAtCol=mqHdr.indexOf("updatedAt"); if (mqUpdAtCol<0) mqUpdAtCol=mqHdr.indexOf("updatedat");
+    if (mqIdCol<0||mqSubCol<0||mqSTCol<0) return json({status:"error",result:"error",message:"id/subject/sub_topic কলাম পাওয়া যায়নি"});
+
+    var mqNow=Date.now(), mqMoved=0, mqTouchedRows=[];
+    for (var mi=1;mi<mqData.length;mi++){
+      var mqRowId=(mqData[mi][mqIdCol]||"").toString().trim();
+      if (mqIds.indexOf(mqRowId)<0) continue;
+      mqSh.getRange(mi+1,mqSubCol+1).setValue(mqNewSubject);
+      mqSh.getRange(mi+1,mqSTCol+1).setValue(mqNewSubTopic);
+      if (mqSubIdCol>=0) mqSh.getRange(mi+1,mqSubIdCol+1).setValue(mqNewSubjectId);
+      if (mqTopicIdCol>=0) mqSh.getRange(mi+1,mqTopicIdCol+1).setValue(mqNewTopicId);
+      if (mqUpdAtCol>=0) mqSh.getRange(mi+1,mqUpdAtCol+1).setValue(mqNow);
+      mqTouchedRows.push(mi+1);
+      mqMoved++;
+    }
+    if (!mqMoved) return json({status:"error",result:"error",message:"কোনো matching প্রশ্ন পাওয়া যায়নি"});
+
+    // updateField/renameField-এর প্যাটার্ন অনুসরণ — শুধু touched row-গুলোর updatedAt
+    // বসিয়ে syncToFirebase-কে incremental patch করতে দেওয়া হয়, পুরো sheet re-upload হয় না
+    var mqFbSynced=true;
+    if (mqUpdAtCol>=0 && mqTouchedRows.length) mqFbSynced=syncToFirebase(mqShName,mqShName);
+
+    return json({status:"success",result:"success",moved:mqMoved,sheet:mqShName,firebaseSynced:mqFbSynced});
+  }
+
+  // ── moveTopic — একটা গোটা Topic (তার আন্ডারের সব প্রশ্নসহ) অন্য Subject-এ move
+  // করে। mergeTopicId দেওয়া থাকলে destination-এ same নামের existing Topic-এর সাথে
+  // merge হয় (সব প্রশ্নের topic_id সেই existing topic_id-তে বসে, আর সোর্স Topic-এর
+  // reference-রো ডিলিট হয়ে যায়) — নাহলে topic_id অপরিবর্তিত রেখে শুধু Topics
+  // ট্যাবে তার subject_id reparent হয়। প্রশ্নের id/topic_id (merge না হলে) কোনোটাই
+  // ভাঙে না — Exam_Appearances/bookmark সব ঠিক থাকে। ──
+  if (action==="moveTopic") {
+    var mtTopicId=(e.parameter.topicId||"").toString().trim();
+    var mtNewSubjectId=(e.parameter.newSubjectId||"").toString().trim();
+    var mtNewSubjectName=(e.parameter.newSubjectName||"").toString().trim();
+    var mtNewSubTopicName=(e.parameter.newSubTopicName||"").toString().trim();
+    var mtMergeTopicId=(e.parameter.mergeTopicId||"").toString().trim();
+    if (!mtTopicId||!mtNewSubjectId||!mtNewSubjectName||!mtNewSubTopicName)
+      return json({status:"error",result:"error",message:"topicId/newSubjectId/newSubjectName/newSubTopicName প্রয়োজন"});
+
+    var mtSs=SpreadsheetApp.getActiveSpreadsheet();
+    var mtTopicsSh=mtSs.getSheetByName("Topics");
+    if (!mtTopicsSh) return json({status:"error",result:"error",message:"Topics sheet নেই"});
+    var mtTData=mtTopicsSh.getDataRange().getValues(), mtTHdr=mtTData[0];
+    var mtTIdCol=mtTHdr.indexOf("topic_id"), mtTSubCol=mtTHdr.indexOf("subject_id");
+    if (mtTIdCol<0||mtTSubCol<0) return json({status:"error",result:"error",message:"Topics ট্যাবে topic_id/subject_id কলাম নেই"});
+
+    var mtFoundRow=-1;
+    for (var tr=1;tr<mtTData.length;tr++){ if((mtTData[tr][mtTIdCol]||"").toString().trim()===mtTopicId){ mtFoundRow=tr; break; } }
+    if (mtFoundRow<0) return json({status:"error",result:"error",message:"topicId পাওয়া যায়নি: "+mtTopicId});
+
+    // sheet নাম বের করা (topic_id-এর প্রিফিক্স থেকে, deleteByReferenceId-এর মতোই)
+    var mtSheetName=mtTopicId.indexOf("QZ")===0?"Quiz":mtTopicId.indexOf("QB")===0?"QBank":mtTopicId.indexOf("ST")===0?"Study":"";
+    var mtSh=mtSs.getSheetByName(mtSheetName);
+    if (!mtSh) return json({status:"error",result:"error",message:"Sheet not found for topicId: "+mtTopicId});
+
+    var mtEffectiveTopicId=mtMergeTopicId?mtMergeTopicId:mtTopicId;
+
+    if (mtMergeTopicId) {
+      // merge — সোর্স Topic-এর reference-রো বাদ (destination-এর existing topic_id-ই থাকবে)
+      mtTopicsSh.deleteRow(mtFoundRow+1);
+    } else {
+      // শুধু reparent — topic_id অপরিবর্তিত, শুধু subject_id বদলায়
+      mtTopicsSh.getRange(mtFoundRow+1,mtTSubCol+1).setValue(mtNewSubjectId);
+    }
+
+    // ── ডেটা-শিটে (Quiz/QBank/Study) এই টপিকের সব প্রশ্নের subject/sub_topic/
+    // subject_id/topic_id বাল্ক-আপডেট ──
+    var mtData=mtSh.getDataRange().getValues(), mtHdr=mtData[0];
+    var mtSubCol=mtHdr.indexOf("subject");
+    var mtSubIdCol=mtHdr.indexOf("subject_id");
+    var mtSTCol=mtHdr.indexOf("sub_topic"); if (mtSTCol<0) mtSTCol=mtHdr.indexOf("topic");
+    var mtTopicIdCol=mtHdr.indexOf("topic_id");
+    var mtUpdAtCol=mtHdr.indexOf("updatedAt"); if (mtUpdAtCol<0) mtUpdAtCol=mtHdr.indexOf("updatedat");
+    if (mtSubCol<0||mtSTCol<0||mtTopicIdCol<0) return json({status:"error",result:"error",message:"Data sheet-এ subject/sub_topic/topic_id কলাম নেই"});
+
+    var mtNow=Date.now(), mtMoved=0, mtTouchedRows=[];
+    for (var mr=1;mr<mtData.length;mr++){
+      if ((mtData[mr][mtTopicIdCol]||"").toString().trim()!==mtTopicId) continue;
+      mtSh.getRange(mr+1,mtSubCol+1).setValue(mtNewSubjectName);
+      mtSh.getRange(mr+1,mtSTCol+1).setValue(mtNewSubTopicName);
+      if (mtSubIdCol>=0) mtSh.getRange(mr+1,mtSubIdCol+1).setValue(mtNewSubjectId);
+      mtSh.getRange(mr+1,mtTopicIdCol+1).setValue(mtEffectiveTopicId);
+      if (mtUpdAtCol>=0) mtSh.getRange(mr+1,mtUpdAtCol+1).setValue(mtNow);
+      mtTouchedRows.push(mr+1);
+      mtMoved++;
+    }
+
+    var mtFbSynced=true;
+    if (mtUpdAtCol>=0 && mtTouchedRows.length) mtFbSynced=syncToFirebase(mtSheetName,mtSheetName);
+
+    return json({status:"success",result:"success",moved:mtMoved,sheet:mtSheetName,mergedInto:mtMergeTopicId||null,firebaseSynced:mtFbSynced});
+  }
+
+
   // ── adminNotify ──
   if (action==="adminNotify") {
     var adminPhone=(cfg.ADMIN_PHONE||"").toString().replace(/^'+/,'').trim();
