@@ -184,6 +184,16 @@ interface QuestionDao {
     @Query("DELETE FROM questions WHERE sheet = :sheet AND fbKey = :fbKey")
     suspend fun deleteByFbKey(sheet: String, fbKey: String)
 
+    // ── FIX ("সাবজেক্ট/টপিক ডিলিট হচ্ছে না" বাগ): Admin যখন একটা পুরো Subject/SubTopic
+    // ডিলিট করে (তার আন্ডারের সব প্রশ্নসহ) — deleteByFbKey-এর মতোই সাথে সাথে Room থেকে
+    // বাদ দেওয়া দরকার, নাহলে টপিক-স্ক্রিন (যেটা topicId/subject/subTopic দিয়ে Room পড়ে)
+    // পুরনো প্রশ্নই দেখাতে থাকে যতক্ষণ না পুরো টপিক আবার রিফ্রেশ হয়। ──
+    @Query("DELETE FROM questions WHERE sheet = :sheet AND subject = :subject")
+    suspend fun deleteBySubject(sheet: String, subject: String)
+
+    @Query("DELETE FROM questions WHERE sheet = :sheet AND subject = :subject AND subTopic = :subTopic")
+    suspend fun deleteBySubjectAndSubTopic(sheet: String, subject: String, subTopic: String)
+
     // ── সব data মুছো ──────────────────────────────────────────────────────────
     @Query("DELETE FROM questions")
     suspend fun deleteAll()
