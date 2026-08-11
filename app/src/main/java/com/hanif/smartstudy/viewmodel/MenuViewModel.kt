@@ -1544,7 +1544,18 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Admin: Subject/SubTopic-এর সব প্রশ্ন একসাথে ডিলিট (destructive — নিশ্চিত হয়ে কল করবে) ──
+    // ── Admin: Subject/SubTopic-এর সব প্রশ্ন + নিজেই একসাথে ডিলিট (destructive — নিশ্চিত
+    //    হয়ে কল করবে) ──
+    // ── FIX ("সাবজেক্ট/টপিক Delete হচ্ছে না" বাগ): আগে এখানে সরাসরি
+    // adminDeleteBySubjectBoth() (পুরো Sheet fetch + deleteByIds, network-heavy) কল করে
+    // অপেক্ষা করা হতো, তারপর সফল হলে তবেই UI "ডিলিট হয়েছে" দেখাতো — GAS cold-start/বড়
+    // Subject-এ এটা কয়েক সেকেন্ড-মিনিট লাগতে পারত বলে মনে হতো ডিলিট কাজই করছে না। আর
+    // সফল হলেও শুধু প্রশ্ন-রো মুছত, Subject/Topic নিজেই (SubjectListScreen যেই Room
+    // reference-টেবিল থেকে পড়ে) খালি অবস্থায় তালিকায় থেকে যেত। এখন adminEditQuestion/
+    // adminDeleteQuestion-এর মতোই প্যাটার্ন: প্রথমে (network-এর আগেই) লোকাল সব জায়গা
+    // (bulk cache + Room questions + Room reference টেবিল, তার আন্ডারের সব প্রশ্নসহ)
+    // থেকে সরিয়ে সাথে সাথেই UI আপডেট দেখানো হয়, আসল Sheet delete সম্পূর্ণ ব্যাকগ্রাউন্ডে
+    // চলে — ব্যর্থ/অফলাইন হলে pending queue-তে ঢুকে নেট ফিরলে auto sync হয়ে যাবে। ──
     fun adminDeleteSubjectOrTopic(
         sheets         : List<String>,
         subject        : String,
@@ -1555,17 +1566,92 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (sheets.isEmpty() || subject.isBlank() || (deleteSubTopic && subTopic.isBlank())) return
         viewModelScope.launch {
             _state.update { it.copy(isDeletingSubject = true, deleteSubjectMsg = null) }
-            when (val r = adminDeleteBySubjectBoth(sheets, subject, subTopic, deleteSubTopic)) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    cache.clearCache()
-                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
-                    val what = if (deleteSubTopic) "\"$subTopic\" অধ্যায়ের" else "\"$subject\" বিষয়ের"
-                    _state.update { it.copy(isDeletingSubject = false,
-                        deleteSubjectMsg = "✅ $what ${r.data}টি প্রশ্ন মুছে ফেলা হয়েছে",
-                        contentEditVersion = it.contentEditVersion + 1) }
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val what = if (deleteSubTopic) "\"$subTopic\" অধ্যায়ের" else "\"$subject\" বিষয়ের"
+
+            // sheet -> resolved subjectId/topicId (Room reference-টেবিলে পাওয়া গেলে) —
+            // ব্যাকগ্রাউন্ড sync-এ Sheet-এর Subjects/Topics ট্যাব থেকেও একইভাবে ডিলিট করতে লাগবে
+            val resolvedIds = mutableMapOf<String, String>()
+            try {
+                for (sheet in sheets) {
+                    contentRepo.removeContentBySubjectAndPersist(sheet, subject, subTopic, deleteSubTopic)
+                    try {
+                        contentRepo.removeRoomQuestionsBySubject(sheet, subject, subTopic, deleteSubTopic)
+                    } catch (e: Exception) {
+                        android.util.Log.w("AdminDeleteSubject", "Room questions purge failed for $sheet (non-fatal): ${e.message}")
+                    }
+                    try {
+                        contentRepo.removeRoomReferenceForSubjectOrTopic(sheet, subject, subTopic, deleteSubTopic)
+                            ?.let { resolvedIds[sheet] = it }
+                    } catch (e: Exception) {
+                        android.util.Log.w("AdminDeleteSubject", "Room reference purge failed for $sheet (non-fatal): ${e.message}")
+                    }
                 }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(isDeletingSubject = false, deleteSubjectMsg = "❌ ${r.message}") }
+                _state.update { it.copy(isDeletingSubject = false,
+                    deleteSubjectMsg = "✅ $what সব প্রশ্ন মুছে ফেলা হয়েছে",
+                    toast = "🗑️ $what সব প্রশ্ন মুছে ফেলা হয়েছে",
+                    contentEditVersion = it.contentEditVersion + 1) }
+                android.util.Log.i("AdminDeleteSubject", "Instant local delete done: $sheets/$subject/$subTopic")
+            } catch (e: Exception) {
+                android.util.Log.e("AdminDeleteSubject", "Instant local delete FAILED: ${e.message}", e)
+                _state.update { it.copy(isDeletingSubject = false,
+                    deleteSubjectMsg = "❌ ডিলিট ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+
+            // ── Background sync (silent) — UI ইতিমধ্যে আপডেট দেখিয়ে দিয়েছে, তাই এখানে
+            // ব্যর্থ হলেও শুধু pending queue-তে ফেলে রাখাই যথেষ্ট, UI ব্লক করার দরকার নেই। ──
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                try {
+                    val cm = getApplication<android.app.Application>()
+                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                            as android.net.ConnectivityManager
+                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
+                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    android.util.Log.d("AdminDeleteSubject", "background sync: isOnline=$isOnline")
+
+                    if (isOnline) {
+                        when (val r = adminDeleteBySubjectBoth(sheets, subject, subTopic, deleteSubTopic)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                android.util.Log.i("AdminDeleteSubject", "Background sheet delete SUCCESS: $sheets/$subject/$subTopic (${r.data} প্রশ্ন)")
+                                // deleteByIds শুধু প্রশ্ন-রো মোছে, Subjects/Topics ট্যাব স্পর্শ করে
+                                // না — তাই আলাদা করে (id-ম্যাচ, নিরাপদ) সেই এন্ট্রিও ডিলিট করা হলো
+                                val refType = if (deleteSubTopic) "topics" else "subjects"
+                                resolvedIds.values.toSet().forEach { rid ->
+                                    when (val rr = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem(refType, rid)) {
+                                        is com.hanif.smartstudy.data.remote.ApiResult.Success ->
+                                            android.util.Log.i("AdminDeleteSubject", "Reference item deleted: $refType/$rid")
+                                        is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                                            android.util.Log.w("AdminDeleteSubject", "Reference item delete failed: ${rr.message}")
+                                    }
+                                }
+                                cache.clearCache()
+                                com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                                // Room reference টেবিল (Subjects/Topics/SubTopics) জোর করে আবার
+                                // sync — যাতে অন্য কোনো ডিভাইস/সেশনেও নিশ্চিতভাবে হালনাগাদ দেখায়
+                                contentRepo.syncReferenceData(force = true)
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                android.util.Log.e("AdminDeleteSubject", "Background sheet delete FAILED: ${r.message} — queueing")
+                                q.enqueueAdminDeleteSubjectTopic(sheets, subject, subTopic, deleteSubTopic, resolvedIds)
+                                loadPendingEdits()
+                            }
+                        }
+                    } else {
+                        q.enqueueAdminDeleteSubjectTopic(sheets, subject, subTopic, deleteSubTopic, resolvedIds)
+                        loadPendingEdits()
+                        android.util.Log.d("AdminDeleteSubject", "OFFLINE — enqueued for later sync")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AdminDeleteSubject", "EXCEPTION in background sync: ${e.message}", e)
+                    try {
+                        q.enqueueAdminDeleteSubjectTopic(sheets, subject, subTopic, deleteSubTopic, resolvedIds)
+                        loadPendingEdits()
+                    } catch (e2: Exception) {
+                        android.util.Log.e("AdminDeleteSubject", "QUEUE ALSO FAILED: ${e2.message}", e2)
+                    }
+                }
             }
         }
     }
