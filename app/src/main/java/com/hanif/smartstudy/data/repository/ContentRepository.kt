@@ -968,6 +968,74 @@ class ContentRepository(private val context: Context) {
         dao.deleteByFbKey(sheet.uppercase(), rowKey)
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // FIX ("সাবজেক্ট/টপিক Delete হচ্ছে না" বাগ): adminDeleteSubjectOrTopic() আগে
+    // প্রথমে (network-এর আগেই) কোনো লোকাল ক্যাশ/Room touch করতো না — সরাসরি Sheet-এ
+    // পুরো sheet fetch + deleteByIds কল করে অপেক্ষা করত, তারপর তবেই UI বলত "ডিলিট
+    // হয়েছে"। GAS cold-start/বড় Sheet-এ এটা সহজেই কয়েক সেকেন্ড-মিনিট লাগতে পারত,
+    // ফলে ইউজার/এডমিনের মনে হতো ডিলিট "হচ্ছেই না"। এখন adminEditQuestion/
+    // adminDeleteQuestion-এর মতোই প্যাটার্ন: এই তিনটে ফাংশন দিয়ে সাথে সাথেই (network
+    // কলের আগে) লোকাল সব জায়গা (bulk cache + Room questions + Room reference টেবিল)
+    // থেকে subject/subTopic-এর সব প্রশ্ন ও নিজেই সরিয়ে দেওয়া হয়, আসল Sheet delete
+    // ব্যাকগ্রাউন্ডে (দেখো MenuViewModel.adminDeleteSubjectOrTopic) চলে।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Admin Subject/SubTopic ডিলিট করার পর in-memory + disk cache থেকে সাথে সাথেই
+     *  matching সব প্রশ্ন বাদ দেয় — removeContentAndPersist()-এর মতোই প্যাটার্ন, কিন্তু
+     *  একটা id-এর বদলে subject(+subTopic) মিলিয়ে বাল্ক ফিল্টার করে। */
+    suspend fun removeContentBySubjectAndPersist(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        fun norm(s: String?) = s?.trim()?.lowercase().orEmpty()
+        val subjN  = norm(subject)
+        val subTpN = norm(subTopic)
+        fun matches(s: String?, st: String?): Boolean =
+            if (deleteSubTopic) norm(s) == subjN && norm(st) == subTpN else norm(s) == subjN
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.filterNot { matches(it.subject, it.subTopic) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.filterNot  { matches(it.subject, it.subTopic) })
+            "QBank" -> base.copy(qbank = base.qbank.filterNot { matches(it.subject, it.subTopic) })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /** removeRoomQuestion()-এর বাল্ক সংস্করণ — Subject/SubTopic-এর সব প্রশ্ন Room থেকে
+     *  একসাথে সরিয়ে দেয়, যাতে টপিক-স্ক্রিন (Room-নির্ভর) সাথে সাথে খালি দেখায়। */
+    suspend fun removeRoomQuestionsBySubject(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val roomSheet = sheet.uppercase()
+        if (deleteSubTopic) dao.deleteBySubjectAndSubTopic(roomSheet, subject, subTopic)
+        else dao.deleteBySubject(roomSheet, subject)
+    }
+
+    /** Room-এর reference টেবিল (Subjects/Topics/SubTopics — SubjectListScreen/
+     *  SubTopicListScreen এখান থেকেই পড়ে) থেকে নিজে Subject/Topic এন্ট্রিটাও সাথে সাথে
+     *  সরিয়ে দেয়, নাহলে ভিতরের সব প্রশ্ন মুছে গেলেও Subject/Topic নিজেই (খালি অবস্থায়)
+     *  তালিকায় থেকে যেত। নাম দিয়ে subjectId/topicId রিজলভ করে রিটার্ন করে — পাওয়া গেলে
+     *  ব্যাকগ্রাউন্ডে Sheet-এর Subjects/Topics ট্যাব থেকেও (GasContentService.deleteReferenceItem)
+     *  একইভাবে ডিলিট করতে caller (MenuViewModel) এই id ব্যবহার করে। পুরনো/আগে থেকে
+     *  reference-টেবিলে sync না-হওয়া ডেটার জন্য null রিটার্ন করে (তখনও প্রশ্ন ঠিকই ডিলিট
+     *  হয়ে গেছে, শুধু id-ভিত্তিক reference cleanup skip হয়)। */
+    suspend fun removeRoomReferenceForSubjectOrTopic(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ): String? = withContext(Dispatchers.IO) {
+        val subjectEntity = refDao.getSubjectByName(sheet, subject) ?: return@withContext null
+        if (!deleteSubTopic) {
+            refDao.deleteSubjectCascade(subjectEntity.subjectId)
+            subjectEntity.subjectId
+        } else {
+            val topicEntity = refDao.getTopicByName(subjectEntity.subjectId, subTopic) ?: return@withContext null
+            refDao.deleteTopicCascade(topicEntity.topicId)
+            topicEntity.topicId
+        }
+    }
+
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
     //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
     suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
