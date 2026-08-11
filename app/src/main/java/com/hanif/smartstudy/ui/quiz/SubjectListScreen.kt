@@ -171,8 +171,6 @@ fun SubjectListScreen(
         }
 
         // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
-        // (টাইপিং প্র্যাকটিসও এই একই সাবজেক্ট-তালিকায় একটা এন্ট্রি হিসেবে আছে, যাতে একই
-        // ফোকাস-মোড সেকশন ও নোটিফিকেশন পাইপলাইন টাইপিং-এর জন্যও ব্যবহার করা যায়)
         if (mode == StudyMode.STUDY && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
             item {
                 com.hanif.smartstudy.focus.FocusTodayCard(
@@ -180,8 +178,6 @@ fun SubjectListScreen(
                 )
             }
         }
-
-        // (দুর্বল টপিক শুধু Profile/Stats পেজে দেখাবে)
 
         // Loading
         if (isLoading) {
@@ -195,25 +191,25 @@ fun SubjectListScreen(
         // Empty state
         if (!isLoading && displaySubjects.isEmpty()) {
             item {
-                androidx.compose.foundation.layout.Column(
+                Column(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    androidx.compose.material3.Text(
+                    Text(
                         text = if (showQBankFilterBar && qbankSearchQuery.isNotBlank())
                                    "🔍 কিছু পাওয়া যায়নি" else "⚠️ ডেটা আসেনি",
                         fontSize = 15.sp,
                         fontFamily = NotoSansBengali,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        color = androidx.compose.ui.graphics.Color(0xFFE53935)
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE53935)
                     )
                     if (error != null) {
-                        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
-                        androidx.compose.material3.Text(
+                        Spacer(Modifier.height(8.dp))
+                        Text(
                             text = error,
                             fontSize = 11.sp,
                             fontFamily = NotoSansBengali,
-                            color = androidx.compose.ui.graphics.Color.Gray,
+                            color = Color.Gray,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
@@ -244,9 +240,6 @@ fun SubjectListScreen(
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
                                 QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
-                                // ── FIX: "পদবী" এখন পদ/প্রতিষ্ঠান-ভিত্তিক নতুন তালিকা
-                                // (আগের মতো আর প্লেইন Subject/অধ্যায় লিস্ট না) — তাই POST-এর
-                                // মতোই "X টি প্রতিষ্ঠান" লেবেল দেখানো হচ্ছে ──
                                 QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                             }
                         )
@@ -268,7 +261,7 @@ fun SubjectListScreen(
             }
         }
 
-        // ── QBank subject list — banner ad (list এর শেষে, Mock button এর আগে) ──
+        // ── QBank subject list — banner ad ──
         if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
             item {
                 Spacer(Modifier.height(8.dp))
@@ -277,19 +270,7 @@ fun SubjectListScreen(
             }
         }
 
-        // ── Mock Test বাটন এখান থেকে সরানো হয়েছে — এটা অলরেডি Home স্ক্রিনে আছে,
-        //    তাই Quiz/QBank নেভিগেশনে এটা রিডান্ড্যান্ট ছিল। onMockZone প্যারামিটার
-        //    signature-এ রাখা হলো (backward-compat), শুধু এখানে আর ব্যবহার হচ্ছে না।
-
-        // ── Model Test — শুধু QBank মোডে (এন্ট্রি পয়েন্ট এখানেই, প্রশ্ন আসে Quiz sheet থেকে) —
-        // Job ইউজারের জন্য সরাসরি জেনারেট-ফর্ম, Student ইউজারের জন্য আগে subject picker ──
-        // ── FIX: আগে শুধু "পদবী"(তখন প্লেইন Subject লিস্ট) মোডেই দেখানো হতো, কারণ
-        // openModelTestPicker() নিজের আলাদা subject picker খুলত বলে ভাবা হতো এটা
-        // qbankFilterMode-নির্ভর — আসলে openModelTestPicker() পুরোপুরি স্বাধীন (নিজের
-        // getContent() থেকে subject আনে, স্ক্রিনে দেখানো qbankPosts/qbankInstitutions
-        // লিস্টের ওপর নির্ভর করে না)। এখন "পদবী" নতুন Post/Institution তালিকা দেখায়
-        // (আসল Subject না) — তাই এই শর্ত তুলে দিয়ে সব QBank ফিল্টার-মোডেই বাটন দেখানো
-        // হচ্ছে, নাহলে Model Test-এ ঢোকারই কোনো পথ থাকতো না। ──
+        // ── Model Test — শুধু QBank মোডে ──
         if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
             item {
                 Spacer(Modifier.height(6.dp))
@@ -332,7 +313,7 @@ private fun AdminMenuButton(
     onToggleReorder: () -> Unit,
     onRenameClick  : () -> Unit,
     onDeleteClick  : () -> Unit,
-    onMoveClick    : (() -> Unit)? = null   // শুধু SubTopicListScreen-এ পাস হয় (Subject-এর মধ্যে "move" করার কিছু নেই)
+    onMoveClick    : (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -381,9 +362,6 @@ private fun AdminMenuButton(
     }
 }
 
-// ── বর্তমান sheet (Quiz/QBank/Study — যেটাতে ইউজার এখন আছে)-এর subject বা
-// subtopic-এর মধ্য থেকে একটা বেছে নিয়ে নতুন নাম দেওয়ার ডায়ালগ। items সবসময়
-// এই screen-এই দেখানো list থেকে আসে, তাই অন্য sheet-এর ডেটা কখনো দেখায় না। ──
 @Composable
 private fun AdminRenamePickerDialog(
     title    : String,
@@ -432,9 +410,6 @@ private fun AdminRenamePickerDialog(
     )
 }
 
-// ── একই রকম, শুধু rename এর বদলে ডিলিট — ধ্বংসাত্মক কাজ, তাই ২-ধাপে কনফার্ম করা হয়
-// (লিস্ট থেকে বাছাই → শেষে হ্যাঁ/না)। আগে নাম টাইপ করে কনফার্ম করা লাগত, কিন্তু emoji-সহ
-// নাম কিবোর্ড দিয়ে হুবহু টাইপ করা কঠিন ছিল বলে সেটা বাদ দেওয়া হয়েছে — এখন শুধু ট্যাপ। ──
 @Composable
 private fun AdminDeletePickerDialog(
     title    : String,
@@ -443,7 +418,7 @@ private fun AdminDeletePickerDialog(
     onDismiss: () -> Unit
 ) {
     var selected      by remember { mutableStateOf(items.firstOrNull() ?: "") }
-    var confirmStep   by remember { mutableStateOf(false) }   // false = লিস্ট থেকে বাছাই, true = শেষ নিশ্চিতকরণ
+    var confirmStep   by remember { mutableStateOf(false) }
 
     if (!confirmStep) {
         AlertDialog(
@@ -480,8 +455,6 @@ private fun AdminDeletePickerDialog(
             dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
         )
     } else {
-        // ── শেষ নিশ্চিতকরণ — টাইপ করার ঝামেলা নেই, শুধু ২টা বাটনে চাপ। emoji-সহ
-        // নাম হুবহু টাইপ করতে গিয়ে আটকে যাওয়ার সমস্যা এড়াতে টাইপ-কনফার্ম বাদ দেওয়া হলো। ──
         AlertDialog(
             onDismissRequest = { confirmStep = false },
             title = { Text("⚠️ একদম নিশ্চিত?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
@@ -501,23 +474,18 @@ private fun AdminDeletePickerDialog(
     }
 }
 
-// ── Admin "Move Topic" (ফাইল ম্যানেজারের মতো — একটা Topic তার আন্ডারের সব প্রশ্নসহ
-// অন্য Subject-এ move) — প্রথমে কোন Topic move করবে বাছাই, তারপর destination Subject
-// বাছাই, তারপর destination-এ কী নামে থাকবে (ডিফল্ট: একই নাম) — যদি destination-এ
-// আগে থেকেই এই নামে Topic থাকে, auto-merge হয়ে যাবে (আলাদা কোনো merge-জিজ্ঞাসা নেই)। ──
 @Composable
 private fun AdminMoveTopicPickerDialog(
     title           : String,
-    items           : List<String>,     // বর্তমান Subject-এর Topic-গুলোর নাম
-    otherSubjects   : List<String>,     // destination হিসেবে বাছাই করার মতো অন্য Subject-গুলো
+    items           : List<String>,
+    otherSubjects   : List<String>,
     onConfirm       : (oldTopic: String, newSubject: String, newTopicName: String) -> Unit,
     onDismiss       : () -> Unit
 ) {
     var selectedTopic   by remember { mutableStateOf(items.firstOrNull() ?: "") }
     var selectedSubject by remember { mutableStateOf(otherSubjects.firstOrNull() ?: "") }
     var newTopicName    by remember { mutableStateOf(selectedTopic) }
-    // ── Topic বদলালে নতুন নামের বক্সও ডিফল্ট সেই টপিকের নামে রিসেট হবে (ইউজার
-    // আলাদা কিছু টাইপ না করা পর্যন্ত) — নাহলে আগের selection-এর নাম থেকে যেত ──
+
     LaunchedEffect(selectedTopic) { newTopicName = selectedTopic }
 
     AlertDialog(
@@ -612,11 +580,6 @@ private fun OrderHintBar(isSaving: Boolean, msg: String?) {
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// QBank-only ফিল্টার বার — পদবী(ডিফল্ট)/প্রতিষ্ঠান/সাল চিপ + নাম-সার্চ।
-// শুধু QBank subject-list (এবং প্রতিষ্ঠান/সাল ফিল্টারের depth0-লিস্ট) এর উপরে বসে,
-// Quiz/Study মোডে এই কম্পোনেন্টই কল হয় না।
-// ─────────────────────────────────────────────────────────
 @Composable
 private fun QBankFilterBar(
     filterMode         : QBankFilterMode,
@@ -629,12 +592,6 @@ private fun QBankFilterBar(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // ── ৩টা ফিল্টার চিপ — পদবী ডিফল্ট। ── FIX: আগে ৪টা চিপ ছিল (পদবী/প্রতিষ্ঠান/
-        // সাল/পদ) — "পদবী" চিপ পুরনো ভাঙা subject/sub_topic টেক্সট-কলাম সিস্টেম
-        // ব্যবহার করতো (কলাম দুটোই এখন Sheet-এ নেই, তাই সবসময় "ডেটা আসেনি" দেখাতো)।
-        // এখন "পদবী" চিপ সঠিক Posts/Institutions/Exam_Appearances reference-টেবিল
-        // থেকে চলে (আগে যেটা আলাদা "পদ" চিপে ছিল — দেখো QuizViewModel.rebuildQBankPosts),
-        // তাই রিডান্ড্যান্ট "পদ" চিপ বাদ দেওয়া হলো ──
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.horizontalScroll(rememberScrollState())
@@ -644,7 +601,6 @@ private fun QBankFilterBar(
                 ChipDef(QBankFilterMode.DESIGNATION, "পদবী", "🧑‍💼"),
                 ChipDef(QBankFilterMode.INSTITUTION, "প্রতিষ্ঠান", "🏢"),
                 ChipDef(QBankFilterMode.YEAR, "সাল", "📅")
-                // ── FIX: "পদ" চিপ বাদ — পদবী চিপই এখন সেই কাজ করে (উপরের কমেন্ট দেখো) ──
             ).forEach { chip ->
                 val selected = filterMode == chip.mode
                 Surface(
@@ -669,7 +625,6 @@ private fun QBankFilterBar(
             }
         }
 
-        // ── QBank-only সার্চ — শুধু এই লিস্টের নাম (পদবী/প্রতিষ্ঠান/সাল/পদ) খুঁজে বের করে ──
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
@@ -713,7 +668,6 @@ private fun SubjectCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না (student/non-review স্ক্রিনে) ──
     reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -732,7 +686,6 @@ private fun SubjectCard(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Icon circle
             Box(
                 Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
@@ -745,7 +698,6 @@ private fun SubjectCard(
                 Text("${subject.totalQ} প্রশ্ন", fontSize = 11.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
                 Spacer(Modifier.height(6.dp))
-                // Progress bar
                 Box(
                     Modifier.fillMaxWidth().height(5.dp)
                         .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
@@ -758,8 +710,6 @@ private fun SubjectCard(
                 Spacer(Modifier.height(2.dp))
                 Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
-                // ── Review System (Admin-only) — আলাদা রঙের ছোট বার, student progressPct
-                // বার থেকে আলাদা করে চেনার জন্য ──
                 if (reviewPct != null) {
                     Spacer(Modifier.height(6.dp))
                     Box(
@@ -787,8 +737,6 @@ private fun SubjectCard(
     }
 }
 
-// ── QBank Subject Card — গ্রিড (২-কলাম) এ দেখানো হয়, সাবজেক্টের ভিতরে কতগুলো
-// অধ্যায় (সাবটপিক) আছে সেটা দেখায় — মোট প্রশ্ন সংখ্যা না ──
 @Composable
 private fun QBankSubjectCard(
     subject : SubjectEntry,
@@ -798,10 +746,7 @@ private fun QBankSubjectCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    // ── প্রতিষ্ঠান/সাল ফিল্টার লিস্টে ডিফল্ট "X টি অধ্যায়"-এর বদলে অর্থপূর্ণ টেক্সট
-    // (যেমন "X টি পদবী" / "X টি প্রশ্ন") দেখাতে — null থাকলে আগের ডিফল্ট আচরণই থাকে ──
     subLabelOverride: String? = null,
-    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
     reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -840,7 +785,6 @@ private fun QBankSubjectCard(
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
             }
 
-            // Progress bar
             Box(
                 Modifier.fillMaxWidth().height(5.dp)
                     .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
@@ -853,7 +797,6 @@ private fun QBankSubjectCard(
             Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                 fontFamily = NotoSansBengali)
 
-            // ── Review System (Admin-only) ──
             if (reviewPct != null) {
                 Box(
                     Modifier.fillMaxWidth().height(5.dp)
@@ -952,8 +895,7 @@ fun SubTopicListScreen(
     subTopics  : List<SubTopicEntry>,
     onSubTopic : (String) -> Unit,
     onBack     : () -> Unit,
-    onModelTest : (String) -> Unit = {},   // "মডেল টেস্ট" ভার্চুয়াল কার্ডে ট্যাপ করলে — subject পাস হয়
-    // ── Admin: ইনলাইন ক্রম সাজানো ──
+    onModelTest : (String) -> Unit = {},
     isAdmin       : Boolean        = false,
     isReorderMode : Boolean        = false,
     isSavingOrder : Boolean        = false,
@@ -962,14 +904,8 @@ fun SubTopicListScreen(
     onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubTopic: (old: String, new: String) -> Unit = { _, _ -> },
     onDeleteSubTopic: (name: String) -> Unit = {},
-    // ── Admin "Move to Subject" (ফাইল ম্যানেজারের মতো — এই Topic-টা তার আন্ডারের
-    // সব প্রশ্নসহ অন্য Subject-এ move) — onMoveSubTopic-এর সাথে গুলিয়ে ফেলা যাবে না,
-    // ওইটা শুধু একই Subject-এর ভিতরে ক্রম (position) বদলায়। এখানে destination
-    // Subject-এর তালিকা (বর্তমান Subject বাদে) caller থেকে আসে — না দিলে (খালি লিস্ট)
-    // "Move to Subject" অপশনটাই দেখানো হয় না। ──
     otherSubjectsForMove : List<String> = emptyList(),
     onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
-    // ── Review System (Admin-only) — topicId ধরে {total, reviewed} % ──
     reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap()
 ) {
     val isQBank = mode == StudyMode.QBANK
@@ -982,7 +918,6 @@ fun SubTopicListScreen(
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
         item {
-            // Subject header
             Box(
                 Modifier.fillMaxWidth()
                     .background(
@@ -1014,7 +949,6 @@ fun SubTopicListScreen(
                 OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg)
                 Spacer(Modifier.height(6.dp))
             }
-            // ── Banner Ad — subject header এর নিচে ──
             AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QUIZ_LIST)
             Spacer(Modifier.height(6.dp))
         }
@@ -1022,7 +956,6 @@ fun SubTopicListScreen(
         val reorderEnabled = isAdmin && isReorderMode
 
         if (isQBank) {
-            // QBank Grid layout
             item {
                 LazyVerticalGrid(
                     columns            = GridCells.Fixed(2),
@@ -1096,7 +1029,6 @@ private fun SubTopicCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
     reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -1145,7 +1077,6 @@ private fun SubTopicCard(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = textColor, fontFamily = NotoSansBengali)
-                    // review symbol সরানো হয়েছে
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
                     color = mutedColor, fontFamily = NotoSansBengali)
@@ -1159,7 +1090,6 @@ private fun SubTopicCard(
                             .background(Color(0xFF22C55E))
                     )
                 }
-                // ── Review System (Admin-only) ──
                 if (reviewPct != null) {
                     Spacer(Modifier.height(5.dp))
                     Box(
@@ -1194,7 +1124,6 @@ private fun QBankTopicCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    // ── Review System (Admin-only) — null হলে কিছুই দেখাবে না ──
     reviewPct : Int? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -1220,9 +1149,9 @@ private fun QBankTopicCard(
     }
 
     val accent = when (st.questionTypeLabel) {
-        "written" -> Color(0xFF7C3AED)   // বেগুনি — Written
-        "mixed"   -> Color(0xFFEA580C)   // কমলা — Mixed (MCQ + Written দুটোই)
-        else      -> Color(0xFF0891B2)   // সায়ান — MCQ (ডিফল্ট)
+        "written" -> Color(0xFF7C3AED)
+        "mixed"   -> Color(0xFFEA580C)
+        else      -> Color(0xFF0891B2)
     }
     val typeIcon  = when (st.questionTypeLabel) { "written" -> "✍️"; "mixed" -> "🔀"; else -> "🔘" }
     val typeLabel = when (st.questionTypeLabel) { "written" -> "Written"; "mixed" -> "মিশ্র"; else -> "MCQ" }
@@ -1259,7 +1188,6 @@ private fun QBankTopicCard(
             }
             Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
-            // ── প্রশ্ন সংখ্যার পাশেই প্রশ্নের ধরন (MCQ / Written / মিশ্র) প্লেইন টেক্সট আকারে ──
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
                 Text("·", fontSize = 10.sp, color = mutedColor)
@@ -1267,7 +1195,6 @@ private fun QBankTopicCard(
                 Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
                     color = accent, fontFamily = NotoSansBengali)
             }
-            // ── Review System (Admin-only) — কমপ্যাক্ট টেক্সট ব্যাজ (গ্রিড কার্ডে জায়গা কম) ──
             if (reviewPct != null) {
                 Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
                     fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
