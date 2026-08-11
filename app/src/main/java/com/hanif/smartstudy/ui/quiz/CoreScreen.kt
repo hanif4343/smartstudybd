@@ -25,12 +25,19 @@ fun CoreScreen(
     onStreakUpdated       : (Int) -> Unit = {},
     onAdminEdit           : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete         : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── Admin "Move" (এক/একাধিক প্রশ্ন অন্য Subject/Topic-এ, ফাইল ম্যানেজারের মতো) —
+    // QuestionListScreen-এর সিলেক্ট-মোড থেকে ট্রিগার হয় ──
+    onAdminMoveQuestions  : ((sheet: String, ids: List<String>, newSubject: String, newSubTopic: String) -> Unit)? = null,
     // ── Subject/SubTopic-লেভেল Rename/Delete — SubjectListScreen/SubTopicListScreen-এর
     // "Admin" মেনু থেকে ট্রিগার হয়, বর্তমান sheet (নিচে sheetKey দেখো)-এর ওপরই কাজ করে ──
     onAdminRenameSubject  : ((sheet: String, oldName: String, newName: String) -> Unit)? = null,
     onAdminDeleteSubject  : ((sheet: String, name: String) -> Unit)? = null,
     onAdminRenameSubTopic : ((sheet: String, subject: String, oldName: String, newName: String) -> Unit)? = null,
-    onAdminDeleteSubTopic : ((sheet: String, subject: String, name: String) -> Unit)? = null
+    onAdminDeleteSubTopic : ((sheet: String, subject: String, name: String) -> Unit)? = null,
+    // ── Subject/SubTopic "Move" (ফাইল ম্যানেজারের মতো — একটা Topic তার আন্ডারের সব
+    // প্রশ্নসহ অন্য Subject-এ move) — SubTopicListScreen-এর "Admin" মেনুর "📦 Move to
+    // Subject" থেকে ট্রিগার হয়। destination-এ same নামের Topic থাকলে auto-merge। ──
+    onAdminMoveSubTopic   : ((sheet: String, subject: String, oldName: String, newSubject: String, newTopicName: String) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val ctx   = LocalContext.current
@@ -161,7 +168,8 @@ fun CoreScreen(
                 onSubmit       = {},
                 currentUser    = currentUser,
                 onAdminEdit    = onAdminEdit,
-                onAdminDelete  = onAdminDelete
+                onAdminDelete  = onAdminDelete,
+                onAdminMoveQuestions = onAdminMoveQuestions
             )
             ResultModal(
                 result  = state.result!!,
@@ -276,7 +284,8 @@ fun CoreScreen(
                 highlightQuestionId = state.highlightQuestionId,
                 onHighlightConsumed = { viewModel.consumeHighlight() },
                 onAdminEdit         = onAdminEdit,
-                onAdminDelete       = onAdminDelete
+                onAdminDelete       = onAdminDelete,
+                onAdminMoveQuestions = onAdminMoveQuestions
             )
         }
 
@@ -302,6 +311,12 @@ fun CoreScreen(
                 },
                 onDeleteSubTopic = { name ->
                     onAdminDeleteSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", name)
+                },
+                // ── Move-এর destination Subject picker — বর্তমান sheet-এর সব Subject
+                // (বর্তমানটা বাদে) ──
+                otherSubjectsForMove = state.subjects.map { it.name }.filterNot { it == state.navPath.subject },
+                onMoveSubTopicToSubject = { old, newSubject, newTopicName ->
+                    onAdminMoveSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", old, newSubject, newTopicName)
                 }
             )
         }
