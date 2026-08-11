@@ -331,7 +331,8 @@ private fun AdminMenuButton(
     isReorderMode  : Boolean,
     onToggleReorder: () -> Unit,
     onRenameClick  : () -> Unit,
-    onDeleteClick  : () -> Unit
+    onDeleteClick  : () -> Unit,
+    onMoveClick    : (() -> Unit)? = null   // শুধু SubTopicListScreen-এ পাস হয় (Subject-এর মধ্যে "move" করার কিছু নেই)
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -364,6 +365,13 @@ private fun AdminMenuButton(
                 text = { Text("✏️ Rename", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 onClick = { expanded = false; onRenameClick() }
             )
+            if (onMoveClick != null) {
+                DropdownMenuItem(
+                    text = { Text("📦 Move to Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0EA5E9)) },
+                    onClick = { expanded = false; onMoveClick() }
+                )
+            }
             DropdownMenuItem(
                 text = { Text("🗑️ Delete", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
                     color = Color(0xFFEF4444)) },
@@ -491,6 +499,87 @@ private fun AdminDeletePickerDialog(
             dismissButton = { TextButton(onClick = { confirmStep = false }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
         )
     }
+}
+
+// ── Admin "Move Topic" (ফাইল ম্যানেজারের মতো — একটা Topic তার আন্ডারের সব প্রশ্নসহ
+// অন্য Subject-এ move) — প্রথমে কোন Topic move করবে বাছাই, তারপর destination Subject
+// বাছাই, তারপর destination-এ কী নামে থাকবে (ডিফল্ট: একই নাম) — যদি destination-এ
+// আগে থেকেই এই নামে Topic থাকে, auto-merge হয়ে যাবে (আলাদা কোনো merge-জিজ্ঞাসা নেই)। ──
+@Composable
+private fun AdminMoveTopicPickerDialog(
+    title           : String,
+    items           : List<String>,     // বর্তমান Subject-এর Topic-গুলোর নাম
+    otherSubjects   : List<String>,     // destination হিসেবে বাছাই করার মতো অন্য Subject-গুলো
+    onConfirm       : (oldTopic: String, newSubject: String, newTopicName: String) -> Unit,
+    onDismiss       : () -> Unit
+) {
+    var selectedTopic   by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var selectedSubject by remember { mutableStateOf(otherSubjects.firstOrNull() ?: "") }
+    var newTopicName    by remember { mutableStateOf(selectedTopic) }
+    // ── Topic বদলালে নতুন নামের বক্সও ডিফল্ট সেই টপিকের নামে রিসেট হবে (ইউজার
+    // আলাদা কিছু টাইপ না করা পর্যন্ত) — নাহলে আগের selection-এর নাম থেকে যেত ──
+    LaunchedEffect(selectedTopic) { newTopicName = selectedTopic }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("📦 কোন অধ্যায় (Topic) move করবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (items.isEmpty()) {
+                    Text("⚠️ কোনো Topic পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                items.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selectedTopic = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedTopic == name, onClick = { selectedTopic = name },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (otherSubjects.isEmpty()) {
+                    Text("⚠️ move করার মতো অন্য কোনো Subject নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                otherSubjects.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selectedSubject = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedSubject == name, onClick = { selectedSubject = name },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                OutlinedTextField(
+                    value = newTopicName, onValueChange = { newTopicName = it },
+                    label = { Text("Destination-এ Topic-এর নাম", fontFamily = NotoSansBengali) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "ℹ️ ওই বিষয়ে আগে থেকেই এই নামে কোনো অধ্যায় থাকলে, দুটো এক হয়ে যাবে (merge) — নাহলে নতুন অধ্যায় হিসেবে যোগ হবে।",
+                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
+                )
+            }
+        },
+        confirmButton = {
+            val canConfirm = selectedTopic.isNotBlank() && selectedSubject.isNotBlank() && newTopicName.isNotBlank()
+            TextButton(
+                onClick = { if (canConfirm) { onConfirm(selectedTopic, selectedSubject, newTopicName); onDismiss() } },
+                enabled = canConfirm
+            ) { Text("📦 Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF0EA5E9)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
 }
 
 @Composable
@@ -873,12 +962,20 @@ fun SubTopicListScreen(
     onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubTopic: (old: String, new: String) -> Unit = { _, _ -> },
     onDeleteSubTopic: (name: String) -> Unit = {},
+    // ── Admin "Move to Subject" (ফাইল ম্যানেজারের মতো — এই Topic-টা তার আন্ডারের
+    // সব প্রশ্নসহ অন্য Subject-এ move) — onMoveSubTopic-এর সাথে গুলিয়ে ফেলা যাবে না,
+    // ওইটা শুধু একই Subject-এর ভিতরে ক্রম (position) বদলায়। এখানে destination
+    // Subject-এর তালিকা (বর্তমান Subject বাদে) caller থেকে আসে — না দিলে (খালি লিস্ট)
+    // "Move to Subject" অপশনটাই দেখানো হয় না। ──
+    otherSubjectsForMove : List<String> = emptyList(),
+    onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
     // ── Review System (Admin-only) — topicId ধরে {total, reviewed} % ──
     reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap()
 ) {
     val isQBank = mode == StudyMode.QBANK
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMoveDialog   by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier       = Modifier.fillMaxSize(),
@@ -906,7 +1003,8 @@ fun SubTopicListScreen(
                             isReorderMode   = isReorderMode,
                             onToggleReorder = onToggleReorder,
                             onRenameClick   = { showRenameDialog = true },
-                            onDeleteClick   = { showDeleteDialog = true }
+                            onDeleteClick   = { showDeleteDialog = true },
+                            onMoveClick     = if (otherSubjectsForMove.isNotEmpty()) { { showMoveDialog = true } } else null
                         )
                     }
                 }
@@ -976,6 +1074,15 @@ fun SubTopicListScreen(
             items   = subTopics.filterNot { it.isModelTest }.map { it.name },
             onConfirm = { name -> onDeleteSubTopic(name) },
             onDismiss = { showDeleteDialog = false }
+        )
+    }
+    if (isAdmin && showMoveDialog) {
+        AdminMoveTopicPickerDialog(
+            title         = "$subject — অধ্যায় Move to Subject",
+            items         = subTopics.filterNot { it.isModelTest }.map { it.name },
+            otherSubjects = otherSubjectsForMove,
+            onConfirm     = { oldTopic, newSubject, newTopicName -> onMoveSubTopicToSubject(oldTopic, newSubject, newTopicName) },
+            onDismiss     = { showMoveDialog = false }
         )
     }
 }
