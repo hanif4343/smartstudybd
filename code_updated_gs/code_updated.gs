@@ -197,7 +197,16 @@ function isDuplicate(sheet, subject, questionText, sub_topic) {
 }
 
 /* ══ FIREBASE SYNC ══ */
+// ⛔ HARD NO-FIREBASE LIST — Quiz/QBank/Study এখন সম্পূর্ণভাবে Google Sheet-only।
+// User App (student-facing app)-ও এখন Sheet থেকেই ডেটা পড়ে, তাই এই ৩ ট্যাবের জন্য
+// আর কোনো Firebase mirror-sync দরকার নেই। syncToFirebase/forceFullRekeySync/syncNFRows
+// — এই তিনটা ফাংশনই এই লিস্টের sheet পেলে সাথে সাথে no-op হয়ে {ok:true} রিটার্ন করে,
+// কোনো UrlFetchApp কল হয় না। Users/Reports/Notice/Typing-এর মতো ছোট ডেটার জন্য
+// Firebase sync আগের মতোই চলবে (এই লিস্টে নেই)।
+var NO_FIREBASE_SHEETS = ["Quiz", "QBank", "Study"];
+
 function syncToFirebase(sheetName, folderName) {
+  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return true; // ⛔ Sheet-only, mirror-sync বন্ধ
   try {
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), fbSh=ss.getSheetByName(sheetName);
     if(!fbSh)return true;
@@ -287,6 +296,7 @@ function syncToFirebase(sheetName, folderName) {
    User App সরাসরি REST দিয়ে পড়ে (live listener না), তাই এই এক-বারের write কোনো
    ডিভাইসেই বাড়তি download ট্রিগার করে না। ── */
 function forceFullRekeySync(sheetName, folderName){
+  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return {ok:true, msg:"⛔ "+sheetName+" এখন Sheet-only — Firebase rekey স্কিপ করা হলো"};
   try{
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), fbSh=ss.getSheetByName(sheetName);
     if(!fbSh) return {ok:false,msg:"Sheet not found: "+sheetName};
@@ -321,6 +331,7 @@ function forceFullRekeySync(sheetName, folderName){
    এটা force_full_rekey_sync-এর ছোট, নিরাপদ, targeted বিকল্প — যখন শুধু নির্দিষ্ট
    কিছু row-ই নতুন (পুরো sheet না), তখন এটাই ব্যবহার করা ভালো। ── */
 function syncNFRows(sheetName, folderName){
+  if (NO_FIREBASE_SHEETS.indexOf(sheetName) > -1) return {ok:true, msg:"⛔ "+sheetName+" এখন Sheet-only — Firebase NF-sync স্কিপ করা হলো", count:0};
   try{
     var cfg=getProps(), ss=SpreadsheetApp.getActiveSpreadsheet(), sh=ss.getSheetByName(sheetName);
     if(!sh) return {ok:false,msg:"Sheet not found: "+sheetName,count:0};
@@ -424,29 +435,38 @@ function doGet(e) {
     if(!uSheet)return json({result:"error",error:"Sheet not found: "+shName});
     var uRows=uSheet.getDataRange().getValues();
     var uHdr=uRows[0].map(function(h){return h.toString().toLowerCase().trim();});
+    // ── normalize: শুধু a-z0-9 রেখে বাকি সব ফেলে দেওয়া — bulk_save_rows-এর
+    // buildRowArray ঠিক এই normalize দিয়েই কলাম বসায়, তাই actual header
+    // "Sub Topic" (স্পেস) হোক বা "sub_topic" (আন্ডারস্কোর) হোক বা "SubTopic"
+    // — সব normalize করলে "subtopic" হয়ে যায় এবং মিলে যায়। আগে শুধু
+    // lowercase+trim দিয়ে exact/substring চেক হতো, যেটা স্পেস/আন্ডারস্কোর
+    // ভিন্নতায় miss করত — Review Tab-এ "সেভ ব্যর্থ, ফিল্ড: sub_topic" বাগের
+    // মূল কারণ এটাই ছিল। ──
+    var ufNorm=function(s){return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");};
+    var uHdrNorm=uRows[0].map(function(h){return ufNorm(h);});
     var idC=uHdr.indexOf("id"); if(idC===-1)idC=uHdr.indexOf("phone");
     var fld=(e.parameter.field||"").toLowerCase().trim();
-    // opt1→Opt1, opt2→Opt2 etc. mapping
-    var fldAlias={opt1:"opt1",opt2:"opt2",opt3:"opt3",opt4:"opt4"};
-    var fldC=uHdr.indexOf(fld);
+    var fldNorm=ufNorm(fld);
+    // opt1→Opt1, opt2→Opt2 etc. মিল normalized indexOf দিয়েই প্রথমে ট্রাই
+    var fldC=uHdrNorm.indexOf(fldNorm);
     if(fldC===-1){
       // try "opt1" → look for "opt1" OR "option1" columns
       var altMap={"opt1":["opt1","option1"],"opt2":["opt2","option2"],"opt3":["opt3","option3"],"opt4":["opt4","option4"]};
       if(altMap[fld]){
-        for(var ai=0;ai<altMap[fld].length;ai++){fldC=uHdr.indexOf(altMap[fld][ai]);if(fldC!==-1)break;}
+        for(var ai=0;ai<altMap[fld].length;ai++){fldC=uHdrNorm.indexOf(ufNorm(altMap[fld][ai]));if(fldC!==-1)break;}
       }
     }
-    if(fldC===-1){for(var fc=0;fc<uHdr.length;fc++){if(uHdr[fc].includes(fld)){fldC=fc;break;}}}
-    // ⚠️ Study ট্যাবের আসল হেডার "sub_topic"/"subtopic" না, "topic" — ওপরের এক্সাক্ট/
-    // সাবস্ট্রিং ম্যাচ কোনোটাই সেটা ধরতে পারে না (কারণ "topic".includes("sub_topic")
-    // false)। fld যদি sub_topic/subtopic-জাতীয় কিছু হয় আর কলাম না পাওয়া যায়, "topic"
+    if(fldC===-1){for(var fc=0;fc<uHdrNorm.length;fc++){if(uHdrNorm[fc].indexOf(fldNorm)!==-1){fldC=fc;break;}}}
+    // ⚠️ Study ট্যাবের আসল হেডার "sub_topic"/"subtopic" না, "topic" — normalized
+    // ম্যাচেও সেটা ধরা যায় না (কারণ "topic" আর "subtopic" সম্পূর্ণ আলাদা শব্দ)।
+    // fld যদি sub_topic/subtopic-জাতীয় কিছু হয় আর কলাম না পাওয়া যায়, "topic"
     // কলাম ট্রাই করা হচ্ছে — নইলে Admin App থেকে Study-র sub-topic এডিট করলে
     // "Column not found" এরর দিত।
-    if(fldC===-1 && (fld==="sub_topic"||fld==="subtopic")) fldC=uHdr.indexOf("topic");
+    if(fldC===-1 && (fld==="sub_topic"||fld==="subtopic")) fldC=uHdrNorm.indexOf("topic");
     if(idC===-1||fldC===-1)return json({result:"error",error:"Column not found: "+fld});
     var targetId=(e.parameter.id||"").toString().trim();
     var content=(e.parameter.content||"");
-    var ufAtC=uHdr.indexOf("updatedat");
+    var ufAtC=uHdrNorm.indexOf("updatedat");
     for(var ur=1;ur<uRows.length;ur++){
       if(uRows[ur][idC].toString().trim()===targetId){
         uSheet.getRange(ur+1,fldC+1).setValue(content);
@@ -783,12 +803,32 @@ function doGet(e) {
     var ribTopicsSh=ribSs.getSheetByName("Topics");
     var ribTopicsData=ribTopicsSh?ribTopicsSh.getDataRange().getValues():[];
     var ribTopicsHdr=ribTopicsData[0]||[];
-    // Topics ট্যাবে row_start/row_count কলাম না থাকলে যোগ করো
-    var ribRsCol=ribTopicsHdr.indexOf("row_start"), ribRcCol=ribTopicsHdr.indexOf("row_count");
-    if (ribTopicsSh && ribRsCol<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue("row_start"); ribRsCol=ribTopicsHdr.length; }
-    if (ribTopicsSh && ribRcCol<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+(ribRsCol===ribTopicsHdr.length?2:1)).setValue("row_count"); ribRcCol=ribRsCol+1; }
 
-    var ribIndexMap={}; // topic_id -> {start,count,sheet}
+    // ── FIX (bug: Quiz/Study-তে প্রশ্ন 0 দেখাতো যদিও QBank-এ ঠিক দেখাতো) ──
+    // আগে row_start/row_count Topics-এ মাত্র ১টা কলাম-জোড়া ছিল, আর নিচের লুপে
+    // একটাই shared ribIndexMap (শুধু topic_id দিয়ে key করা) Quiz→QBank→Study
+    // তিনটা শিট প্রসেস করতো। কোনো topic_id একাধিক শিটে (যেমন Quiz আর QBank দুটোতেই)
+    // থাকলে পরের শিট আগেরটার index চুপচাপ ওভাররাইট করে দিতো — ফলে Quiz browse
+    // করার সময় getQuestionsPage ভুল sheet-এর row-range Quiz ট্যাবে apply করতে
+    // যেতো (range Quiz ট্যাবের বাইরে পড়লে getRange() এরর দেয়, ক্লায়েন্টে সেটাই
+    // "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" হয়ে দেখা যায়)।
+    // এখন প্রতিটা শিটের জন্য আলাদা row_start_<sheet>/row_count_<sheet> কলাম-জোড়া
+    // রাখা হচ্ছে, তাই কোনো ওভাররাইট হয় না — একই topic_id তিন শিটেই থাকলেও
+    // প্রতিটার নিজের সঠিক row-range নিজের কলামে থাকে। ──
+    var ribColPairs={}; // sheetName -> {rsCol, rcCol}
+    for (var rp=0;rp<ribSheets.length;rp++){
+      var ribPName=ribSheets[rp].name;
+      var ribRsColName="row_start_"+ribPName.toLowerCase();
+      var ribRcColName="row_count_"+ribPName.toLowerCase();
+      var ribRsC=ribTopicsHdr.indexOf(ribRsColName), ribRcC=ribTopicsHdr.indexOf(ribRcColName);
+      if (ribTopicsSh && ribRsC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRsColName); ribRsC=ribTopicsHdr.length; ribTopicsHdr.push(ribRsColName); }
+      if (ribTopicsSh && ribRcC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRcColName); ribRcC=ribTopicsHdr.length; ribTopicsHdr.push(ribRcColName); }
+      ribColPairs[ribPName]={rsCol:ribRsC,rcCol:ribRcC};
+    }
+    // ⚠️ legacy generic row_start/row_count কলাম থাকলেও রেখে দেওয়া হলো (পুরনো ক্লায়েন্ট/
+    // স্ক্রিপ্ট এখনো পড়তে পারে বলে), কিন্তু নতুন লজিক এখন এগুলোর ওপর নির্ভর করে না।
+    var ribLegacyRsCol=ribTopicsHdr.indexOf("row_start"), ribLegacyRcCol=ribTopicsHdr.indexOf("row_count");
+
     for (var rs=0;rs<ribSheets.length;rs++) {
       var ribShName=ribSheets[rs].name;
       var ribSh=ribSs.getSheetByName(ribShName);
@@ -802,33 +842,44 @@ function doGet(e) {
       var ribSortCols=[{column:ribSubCol+1,ascending:true}];
       if (ribTopCol>=0) ribSortCols.push({column:ribTopCol+1,ascending:true});
       ribSh.getRange(2,1,ribSh.getLastRow()-1,ribSh.getLastColumn()).sort(ribSortCols);
-      // re-read after sort, build contiguous ranges per topic_id
+      // re-read after sort, build contiguous ranges per topic_id — এই শিটের নিজস্ব ম্যাপে
+      var ribIndexMap={}; // topic_id -> {start,count} — শুধু এই sheet-এর জন্য, আলাদা প্রতিবার
       var ribData2=ribSh.getDataRange().getValues();
       var curTopic=null, curStart=2, curCount=0;
       for (var i5=1;i5<ribData2.length;i5++){
         var tId=ribTopCol>=0?(ribData2[i5][ribTopCol]||"").toString():"";
         if (tId!==curTopic) {
-          if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount,sheet:ribShName};
+          if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
           curTopic=tId; curStart=i5+1; curCount=0;
         }
         curCount++;
       }
-      if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount,sheet:ribShName};
+      if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
       ribResults[ribShName]="sorted, "+(ribData2.length-1)+" rows";
-    }
-    // Topics ট্যাবে row_start/row_count বসাও (topic_id দিয়ে ম্যাচ করে)
-    if (ribTopicsSh) {
-      var ribTIdCol=ribTopicsHdr.indexOf("topic_id");
-      for (var t2=1;t2<ribTopicsData.length;t2++){
-        var ribTid=(ribTopicsData[t2][ribTIdCol]||"").toString();
-        var ribEntry=ribIndexMap[ribTid];
-        if (ribEntry) {
-          ribTopicsSh.getRange(t2+1,ribRsCol+1).setValue(ribEntry.start);
-          ribTopicsSh.getRange(t2+1,ribRcCol+1).setValue(ribEntry.count);
+
+      // এই শিটের row_start_<sheet>/row_count_<sheet> কলামে বসাও (topic_id ম্যাচ করে)
+      if (ribTopicsSh) {
+        var ribPair=ribColPairs[ribShName];
+        var ribTIdCol=ribTopicsHdr.indexOf("topic_id");
+        for (var t2=1;t2<ribTopicsData.length;t2++){
+          var ribTid=(ribTopicsData[t2][ribTIdCol]||"").toString();
+          var ribEntry=ribIndexMap[ribTid];
+          if (ribEntry) {
+            ribTopicsSh.getRange(t2+1,ribPair.rsCol+1).setValue(ribEntry.start);
+            ribTopicsSh.getRange(t2+1,ribPair.rcCol+1).setValue(ribEntry.count);
+            // legacy কলাম থাকলে সর্বশেষ প্রসেস হওয়া শিট দিয়ে রেফারেন্সের জন্য আপডেট (backward-compat only)
+            if (ribLegacyRsCol>=0) ribTopicsSh.getRange(t2+1,ribLegacyRsCol+1).setValue(ribEntry.start);
+            if (ribLegacyRcCol>=0) ribTopicsSh.getRange(t2+1,ribLegacyRcCol+1).setValue(ribEntry.count);
+          } else {
+            // এই sheet-এ এই topic_id-এর কোনো রো নেই — আগের স্টেল ভ্যালু মুছে দাও,
+            // নইলে পুরনো row_start_quiz স্টেল/ভুল range নিয়ে fast-path ভুলভাবে ট্রিগার হতে পারে
+            ribTopicsSh.getRange(t2+1,ribPair.rsCol+1).setValue("");
+            ribTopicsSh.getRange(t2+1,ribPair.rcCol+1).setValue("");
+          }
         }
       }
     }
-    return json({status:"success",result:"success",message:"Index rebuilt",details:ribResults});
+    return json({status:"success",result:"success",message:"Index rebuilt (per-sheet)",details:ribResults});
   }
 
   // ── getQuestionsPage — subject_id(+topic_id) অনুযায়ী ঠিক ৫০টা (বা limit)
@@ -858,12 +909,22 @@ function doGet(e) {
     var gqpHdr=gqpSh.getRange(1,1,1,gqpSh.getLastColumn()).getValues()[0];
     var gqpHdrNorm=gqpHdr.map(function(h){return h.toString().trim().toLowerCase();});
 
-    // ── index (row_start/row_count) খুঁজে দেখা — থাকলে ও বৈধ (start>0) হলে fast path ──
+    // ── index খুঁজে দেখা — থাকলে ও বৈধ হলে fast path ──
+    // ⚠️ FIX: আগে generic row_start/row_count কলাম পড়া হতো, যেটা rebuildIndex-এ
+    // Quiz/QBank/Study তিন শিটই শেয়ার করতো (শেষে যেটা প্রসেস হতো সেটাই টিকে থাকতো)।
+    // এখন এই request যে sheet-এর (gqpSheet) জন্য, ঠিক সেই sheet-স্কোপড
+    // row_start_<sheet>/row_count_<sheet> কলাম পড়া হচ্ছে — অন্য sheet-এর range
+    // এখানে ভুলবশত apply হওয়ার আর সুযোগ নেই।
     var gqpEntry=null;
     var gqpTopicsSh=gqpSs.getSheetByName("Topics");
     if (gqpTopicsSh) {
       var gqpTData=gqpTopicsSh.getDataRange().getValues(), gqpTHdr=gqpTData[0]||[];
-      var gqpTIdCol=gqpTHdr.indexOf("topic_id"), gqpRsCol=gqpTHdr.indexOf("row_start"), gqpRcCol=gqpTHdr.indexOf("row_count");
+      var gqpSheetKey=gqpSheet.toLowerCase();
+      var gqpTIdCol=gqpTHdr.indexOf("topic_id");
+      var gqpRsCol=gqpTHdr.indexOf("row_start_"+gqpSheetKey), gqpRcCol=gqpTHdr.indexOf("row_count_"+gqpSheetKey);
+      // পুরনো index (rebuildIndex আগের ভার্সনে চালানো, নতুন per-sheet কলাম এখনো নেই) হলে
+      // legacy generic কলামে fallback করো, নাহলে একদম নতুন সেটআপে সবাই fallback-scan করত
+      if (gqpRsCol<0 || gqpRcCol<0) { gqpRsCol=gqpTHdr.indexOf("row_start"); gqpRcCol=gqpTHdr.indexOf("row_count"); }
       if (gqpTIdCol>=0 && gqpRsCol>=0 && gqpRcCol>=0) {
         for (var g1=1;g1<gqpTData.length;g1++){
           if ((gqpTData[g1][gqpTIdCol]||"").toString()===gqpTopicId){
@@ -876,29 +937,43 @@ function doGet(e) {
     }
 
     var gqpRows=[], gqpTotal=0, gqpNextCursor=gqpCursor, gqpHasMore=false;
+    var gqpFastPathFailed=false;
 
     if (gqpEntry) {
       // ── FAST PATH: ইনডেক্স আছে ও বৈধ — সরাসরি row-range পড়ো ──
-      var gqpReadStart=gqpEntry.start+gqpCursor;
-      var gqpRemaining=gqpEntry.count-gqpCursor;
-      gqpTotal=gqpEntry.count;
-      if (gqpRemaining>0) {
-        var gqpReadCount=Math.min(gqpLimit, gqpRemaining);
-        var gqpVals=gqpSh.getRange(gqpReadStart,1,gqpReadCount,gqpSh.getLastColumn()).getValues();
-        for (var g2=0;g2<gqpVals.length;g2++){
-          var gqpRec={};
-          for (var g3=0;g3<gqpHdr.length;g3++){
-            var gqpKey=gqpHdr[g3].toString().trim();
-            if (!gqpKey) continue;
-            var gqpVal=gqpVals[g2][g3];
-            gqpRec[gqpKey]=(gqpVal instanceof Date)?Utilities.formatDate(gqpVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqpVal;
-          }
-          gqpRows.push(gqpRec);
+      // ⚠️ try/catch যোগ করা হলো: index স্টেল/অন্য sheet-এর হলে (out-of-range) আগে
+      // getRange() সরাসরি এরর ছুঁড়তো আর সেটাই ক্লায়েন্টে "কোনো প্রশ্ন পাওয়া যায়নি —
+      // ইন্টারনেট চেক করো" হয়ে দেখাতো। এখন এমন হলে চুপচাপ live-scan fallback-এ নেমে যায়।
+      try {
+        var gqpReadStart=gqpEntry.start+gqpCursor;
+        var gqpRemaining=gqpEntry.count-gqpCursor;
+        if (gqpReadStart<1 || gqpReadStart+Math.max(gqpRemaining,0)-1>gqpSh.getLastRow()) {
+          throw new Error("stale index range for sheet "+gqpSheet);
         }
-        gqpNextCursor=gqpCursor+gqpReadCount;
+        gqpTotal=gqpEntry.count;
+        if (gqpRemaining>0) {
+          var gqpReadCount=Math.min(gqpLimit, gqpRemaining);
+          var gqpVals=gqpSh.getRange(gqpReadStart,1,gqpReadCount,gqpSh.getLastColumn()).getValues();
+          for (var g2=0;g2<gqpVals.length;g2++){
+            var gqpRec={};
+            for (var g3=0;g3<gqpHdr.length;g3++){
+              var gqpKey=gqpHdr[g3].toString().trim();
+              if (!gqpKey) continue;
+              var gqpVal=gqpVals[g2][g3];
+              gqpRec[gqpKey]=(gqpVal instanceof Date)?Utilities.formatDate(gqpVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):gqpVal;
+            }
+            gqpRows.push(gqpRec);
+          }
+          gqpNextCursor=gqpCursor+gqpReadCount;
+        }
+        gqpHasMore=gqpNextCursor<gqpTotal;
+      } catch (gqpFastErr) {
+        Logger.log("getQuestionsPage fast-path failed, falling back to live scan: "+gqpFastErr);
+        gqpFastPathFailed=true;
+        gqpRows=[]; gqpTotal=0; gqpNextCursor=gqpCursor; gqpHasMore=false;
       }
-      gqpHasMore=gqpNextCursor<gqpTotal;
-    } else {
+    }
+    if (!gqpEntry || gqpFastPathFailed) {
       // ── FALLBACK PATH: ইনডেক্স নেই/স্টেল/এই topic_id-এর জন্য অনুপস্থিত —
       // sheet-এ topic_id কলাম দিয়ে সরাসরি লাইভ স্ক্যান করে ম্যাচিং রো বের করো ──
       var gqpTopicColIdx=gqpHdrNorm.indexOf("topic_id");
@@ -995,6 +1070,25 @@ function doGet(e) {
     var aeaNewId="EA-"+Utilities.getUuid().substring(0,8);
     aeaSh.appendRow([aeaNewId, aeaQid, aeaPostId, aeaInstId, aeaYear]);
     return json({status:"success",result:"success",appearanceId:aeaNewId});
+  }
+
+  // ── deleteExamAppearance — একটা নির্দিষ্ট appearance-এন্ট্রি মুছে দেয় (appearance_id
+  // দিয়ে), মূল প্রশ্ন বা বাকি appearance-গুলো touch হয় না। ভুল করে যোগ হওয়া
+  // পদ/প্রতিষ্ঠান/সাল সরানোর জন্য (Browse-এর 🧾 কুইক-মডাল থেকে ব্যবহার হয়)। ──
+  if (action==="deleteExamAppearance") {
+    var deaId=(e.parameter.appearanceId||"").toString().trim();
+    if (!deaId) return json({status:"error",result:"error",message:"appearanceId প্রয়োজন"});
+    var deaSs=SpreadsheetApp.getActiveSpreadsheet(), deaSh=deaSs.getSheetByName("Exam_Appearances");
+    if (!deaSh || deaSh.getLastRow()<2) return json({status:"error",result:"error",message:"Exam_Appearances sheet খালি"});
+    var deaData=deaSh.getDataRange().getValues(), deaHdr=deaData[0];
+    var deaIdCol=deaHdr.indexOf("appearance_id");
+    for (var de=deaData.length-1; de>=1; de--){
+      if ((deaData[de][deaIdCol]||"").toString().trim()===deaId){
+        deaSh.deleteRow(de+1);
+        return json({status:"success",result:"success",deleted:1});
+      }
+    }
+    return json({status:"error",result:"error",message:"এই appearance_id পাওয়া যায়নি"});
   }
 
   // ── getAllExamAppearances — পুরো Exam_Appearances ট্যাব একবারে বাল্ক-ফেচ (Android
@@ -1617,12 +1711,16 @@ function doPost(e) {
       var bHdr=bRawHdr.map(function(h){return h.toString().toLowerCase().trim();});
       var bQIdx=bHdr.indexOf("question"), bSubIdx=bHdr.indexOf("subject"), bStIdx=bHdr.indexOf("sub_topic");
       if(bStIdx===-1)bStIdx=bHdr.indexOf("subtopic");
+      var bIdIdx=bHdr.indexOf("id");
       var bNorm=function(s){return (s||'').toString().toLowerCase().replace(/\s+/g,' ').trim().substring(0,100);};
+      // ── FIX (ডুপ্লিকেট প্রশ্নে Appearance যোগ): bExisting আগে শুধু true রাখতো (key
+      // মিললেই স্কিপ) — এখন সাথে বিদ্যমান রো-র "id"-ও রাখা হয়, যাতে duplicate ধরা
+      // পড়লে (নিচে দেখো) সেই id-তে নতুন Exam_Appearance জোড়া যায়, স্রেফ স্কিপ না করে। ──
       var bExisting={};
       if(bQIdx!==-1){
         for(var ber=1;ber<bData.length;ber++){
           var bek=bNorm(bData[ber][bQIdx])+"|"+(bStIdx!==-1?bNorm(bData[ber][bStIdx]):"")+"|"+(bSubIdx!==-1?bNorm(bData[ber][bSubIdx]):"");
-          bExisting[bek]=true;
+          bExisting[bek]=(bIdIdx!==-1?(bData[ber][bIdIdx]||"").toString():true);
         }
       }
 
@@ -1652,6 +1750,7 @@ function doPost(e) {
       // ব্যাচ-write (bNewRows-এর মতোই একই lock-এর ভেতরে, race condition এড়াতে)। ──
       var bAppearanceRows=[];
       var bAppearanceProp, bAppearanceCurId=0;
+      var bLinkedExistingCount=0; // ডুপ্লিকেট প্রশ্ন হলেও নতুন appearance যোগ হলে এখানে গোনা হয়
       if(params.examAppearance && bTab==="QBank"){
         bAppearanceProp=PropertiesService.getScriptProperties();
         bAppearanceCurId=parseInt(bAppearanceProp.getProperty("MAX_ID_EXAM_APPEARANCES")||"0");
@@ -1691,7 +1790,31 @@ function doPost(e) {
           var row=bRows[bi]||{};
           try{
             var bKey=bNorm(row.question)+"|"+bNorm(row.sub_topic)+"|"+bNorm(row.subject);
-            if(row.question && bExisting[bKey]){ bSkipped++; continue; }
+            // ── FIX (আসল সমস্যা): আগে ডুপ্লিকেট পেলে সাথে সাথে skip করে continue হতো —
+            // examAppearance দেওয়া থাকলেও সেটা হারিয়ে যেত, কারণ appearance-attach লজিক
+            // নিচে (নতুন রো তৈরির পরে) ছিল, যেটা duplicate-এর জন্য কখনো চলতোই না। এখন
+            // duplicate পেলে, যদি examAppearance দেওয়া থাকে (QBank-এই শুধু), তাহলে নতুন রো
+            // না বানিয়ে সেই বিদ্যমান প্রশ্নের id-তেই একটা নতুন Exam_Appearance জোড়া হয় —
+            // এটাই Admin App-এর "একই প্রশ্ন আবার এলে duplicate না বানিয়ে appearance যোগ
+            // করো" ফিচারের মূল সার্ভার-সাইড অংশ। ──
+            if(row.question && bExisting[bKey]){
+              bSkipped++;
+              if(params.examAppearance && bTab==="QBank"){
+                var bExistingId=bExisting[bKey];
+                if(bExistingId && bExistingId!==true){
+                  bAppearanceCurId++;
+                  bAppearanceRows.push([
+                    "EA"+bAppearanceCurId,
+                    bExistingId.toString(),
+                    params.examAppearance.postId||"",
+                    params.examAppearance.institutionId||"",
+                    params.examAppearance.year||""
+                  ]);
+                  bLinkedExistingCount++;
+                }
+              }
+              continue;
+            }
 
             var bId;
             if(row.editId){ bId=row.editId; }
@@ -1720,7 +1843,7 @@ function doPost(e) {
 
             if(!row.editId){ /* id বসানো হয়ে গেছে উপরেই */ }
             bNewRows.push(bLine);
-            bExisting[bKey]=true; // একই ব্যাচে দুইবার একই প্রশ্ন থাকলে দ্বিতীয়টাও বাদ পড়বে
+            bExisting[bKey]=bId; // একই ব্যাচে দুইবার একই প্রশ্ন থাকলে দ্বিতীয়টাও এখন bId পাবে (আগে শুধু true থাকতো, appearance জোড়া যেত না)
             bAdded++;
             if(params.examAppearance && bTab==="QBank"){
               bAppearanceCurId++;
@@ -1750,7 +1873,7 @@ function doPost(e) {
       var bShouldSync = (params.sync!==undefined) ? !!params.sync : true; // পুরনো কলার (sync ফ্ল্যাগ ছাড়া) থাকলে আগের মতোই প্রতিবার সিঙ্ক হবে, নতুন ফ্রন্টএন্ড শুধু শেষ চাংকেই sync:true পাঠায়
       var bSyncOk = true;
       if(bShouldSync) bSyncOk = syncToFirebase(bTab,bTab);
-      return json({result:"success",added:bAdded,skipped:bSkipped,firebaseSynced:bSyncOk,examAppearancesAdded:bAppearanceRows.length});
+      return json({result:"success",added:bAdded,skipped:bSkipped,firebaseSynced:bSyncOk,examAppearancesAdded:bAppearanceRows.length,examAppearancesLinkedToExisting:bLinkedExistingCount});
     }
 
     // ── নতুন User signup ──
@@ -1861,7 +1984,7 @@ function doPost(e) {
         if(col!==-1) arr[col]=fieldMap[fk];
       }
       return arr;
-    }
+    } 
 
     var fieldMap=null;
     if(tTab==="Quiz"){
@@ -1973,14 +2096,17 @@ function json(o){return ContentService.createTextOutput(JSON.stringify(o)).setMi
    কোনো automatic trigger নেই — Apps Script এডিটরে ফাংশন বেছে ▶ Run চেপে
    ম্যানুয়ালি চালাতে হবে।
 ══════════════════════════════════════════════════════════ */
-function backupFirebaseToSheet_Quiz()  { pullFirebaseToSheet_("Quiz"); }
-function backupFirebaseToSheet_QBank() { pullFirebaseToSheet_("QBank"); }
-function backupFirebaseToSheet_Study() { pullFirebaseToSheet_("Study"); }
+// ⛔ Quiz/QBank/Study এখন Sheet-only (source of truth = Sheet, Firebase-এ এই ডেটা
+// আর মিরর হয় না) — তাই Firebase → Sheet pull করাটা এখন উল্টো ক্ষতিকর (পুরনো/খালি
+// Firebase ডেটা দিয়ে Sheet ওভাররাইট করে দিতে পারে)। তাই এই ৪টা ফাংশন এখন সচেতনভাবে
+// no-op, শুধু Logger-এ কারণ জানায়। দরকার হলে (নতুন ফিচার হিসেবে) সরাসরি pullFirebaseToSheet_()
+// ম্যানুয়ালি কল করা যাবে, কিন্তু এখন থেকে এটা কখনো Quiz/QBank/Study-এর জন্য অটো-চলবে না।
+function backupFirebaseToSheet_Quiz()  { Logger.log("⛔ স্কিপড: Quiz এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
+function backupFirebaseToSheet_QBank() { Logger.log("⛔ স্কিপড: QBank এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
+function backupFirebaseToSheet_Study() { Logger.log("⛔ স্কিপড: Study এখন Sheet-only, Firebase-এ ডেটা নেই।"); }
 
 function backupFirebaseToSheet_All() {
-  pullFirebaseToSheet_("Quiz");
-  pullFirebaseToSheet_("QBank");
-  pullFirebaseToSheet_("Study");
+  Logger.log("⛔ স্কিপড: Quiz/QBank/Study এখন Sheet-only, Firebase-এ ডেটা নেই। pullFirebaseToSheet_() এখন কোনো auto/named ফাংশন থেকে কল হয় না।");
 }
 
 function pullFirebaseToSheet_(sheetName) {
