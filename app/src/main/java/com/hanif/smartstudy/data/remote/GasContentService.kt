@@ -548,6 +548,26 @@ object GasContentService {
     }
 
     /**
+     * adminDeleteSubjectOrTopic() এর জন্য — Sheet-এর "Subjects"/"Topics" reference-ট্যাব
+     * থেকে সরাসরি একটা এন্ট্রি (id দিয়ে) ডিলিট করে। deleteBySubjectOrTopic() শুধু
+     * প্রশ্ন-রো (Quiz/QBank/Study) মোছে, এই দুইটা রেফারেন্স-ট্যাব স্পর্শ করে না — তাই
+     * প্রশ্ন সব মুছে গেলেও Subject/Topic নিজেই তালিকায় থেকে যেত। GAS-এর
+     * `deleteReferenceItem` action id ম্যাচ করেই সরাসরি রো ডিলিট করে (কোনো row-index/
+     * offset গণনা লাগে না — তাই rebuildIndex স্টেল থাকলেও নিরাপদ, `deleteByReferenceId`
+     * এর মতো ঝুঁকি নেই)। refType: "subjects" | "topics"।
+     */
+    suspend fun deleteReferenceItem(refType: String, id: String): ApiResult<Unit> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        if (id.isBlank()) return@withContext ApiResult.Error("id ফাঁকা")
+        try {
+            val ok = callGetAction(mapOf("action" to "deleteReferenceItem", "refType" to refType, "id" to id))
+            if (ok) ApiResult.Success(Unit) else ApiResult.Error("Reference item (Subjects/Topics ট্যাব) থেকে ডিলিট ব্যর্থ হয়েছে")
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
+    /**
      * adminRenameSubjectOrTopic() এর জন্য — একাধিক sheet-এ subject/sub_topic rename।
      * GAS-এর renameField subject-স্কোপড না (দেখো ফাইলের ওপরের কমেন্ট) — oldSubTopic দেওয়া
      * থাকলে sub_topic কলামেই rename হয়, subject মিলিয়ে filter হয় না।
