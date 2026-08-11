@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.first
  *
  * Supported actions: quiz_answer, study_progress, xp_update, admin_edit_question,
  * admin_add_question, admin_delete_question, admin_reorder_subject, admin_reorder_subtopic,
- * admin_delete_subject_topic
+ * admin_delete_subject_topic, admin_move_questions, admin_move_topic
  */
 data class PendingAction(
     val id         : String = java.util.UUID.randomUUID().toString(),
@@ -151,6 +151,48 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — অফলাইন/ব্যর্থ হলে queue এ রাখা হয়, নেট
+    //    আসলে Sheet-এ (প্রশ্ন + সম্ভব হলে reference টেবিল) সরিয়ে দেবে ──
+    suspend fun enqueueAdminMoveQuestions(
+        sheet        : String,
+        ids          : List<String>,
+        newSubject   : String,
+        newSubjectId : String,
+        newSubTopic  : String,
+        newTopicId   : String
+    ) {
+        enqueue(PendingAction(
+            type    = "admin_move_questions",
+            payload = gson.toJson(mapOf(
+                "sheet"        to sheet,
+                "ids"          to ids,
+                "newSubject"   to newSubject,
+                "newSubjectId" to newSubjectId,
+                "newSubTopic"  to newSubTopic,
+                "newTopicId"   to newTopicId
+            ))
+        ))
+    }
+
+    suspend fun enqueueAdminMoveTopic(
+        topicId         : String,
+        newSubjectId    : String,
+        newSubjectName  : String,
+        newSubTopicName : String,
+        mergeTopicId    : String? = null
+    ) {
+        enqueue(PendingAction(
+            type    = "admin_move_topic",
+            payload = gson.toJson(mapOf(
+                "topicId"         to topicId,
+                "newSubjectId"    to newSubjectId,
+                "newSubjectName"  to newSubjectName,
+                "newSubTopicName" to newSubTopicName,
+                "mergeTopicId"    to (mergeTopicId ?: "")
+            ))
+        ))
+    }
+
     // ── Admin: offline/fail অবস্থায় Subject reorder — mode+tag এর জন্য পুরো
     //    order map টাই queue-তে রাখা হয় (PUT — সম্পূর্ণ node replace), তাই একই
     //    mode+tag-এ বারবার reorder করলে পুরনো pending entry গুলো আর দরকার নেই,
@@ -212,12 +254,13 @@ class PendingQueue(private val context: Context) {
         save(queue)
     }
 
-    // ── Pending admin edit + add + delete + reorder — সবগুলোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
+    // ── Pending admin edit + add + delete + reorder + move — সবগুলোই একসাথে (Pending Sync ট্যাবে দেখানোর জন্য) ──
     suspend fun getPendingAdminActions(): List<PendingAction> =
         getAll().filter {
             it.type == "admin_edit_question" || it.type == "admin_add_question" ||
             it.type == "admin_delete_question" || it.type == "admin_reorder_subject" ||
-            it.type == "admin_reorder_subtopic" || it.type == "admin_delete_subject_topic"
+            it.type == "admin_reorder_subtopic" || it.type == "admin_delete_subject_topic" ||
+            it.type == "admin_move_questions" || it.type == "admin_move_topic"
         }
 
     // ── Pending admin edits আলাদা করে দেখাও ──
