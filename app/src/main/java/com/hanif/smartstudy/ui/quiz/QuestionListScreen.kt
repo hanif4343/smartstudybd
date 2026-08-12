@@ -890,6 +890,7 @@ fun QuestionListScreen(
         AdminMoveQuestionsPickerDialog(
             subjects  = vmState.subjects.map { it.name },
             selectedCount = selectedQuestionIds.size,
+            onLoadTopics = { subject -> viewModel.adminTopicsForSubject(moveSheetKey, subject) },
             onConfirm = { newSubject, newSubTopic ->
                 onAdminMoveQuestions(moveSheetKey, selectedQuestionIds.toList(), newSubject, newSubTopic)
                 isSelectMode = false
@@ -1119,58 +1120,160 @@ fun QuestionListScreen(
 }
 
 // ── Admin "Move Question(s)" ডায়ালগ — সিলেক্ট করা এক/একাধিক প্রশ্ন কোন Subject ›
-// কোন Topic-এ যাবে বাছাই করে। destination Topic অবশ্যই আগে থেকে থাকতে হবে (টেক্সট
-// ফিল্ড — লিস্ট থেকে বাছাই না, কারণ এখানে অন্য Subject-এর Topic লিস্ট লাইভ আনতে
-// আলাদা Room কল লাগবে; না থাকলে ViewModel পরিষ্কার এরর দেখাবে)। ──
+// কোন Topic-এ যাবে বাছাই করে। প্রতিটা Subject-এর পাশে Expand বাটন — ট্যাপ করলে ওই
+// Subject-এর আন্ডারের সব Topic (Room থেকে লাইভ, onLoadTopics দিয়ে) দেখায়। এখান
+// থেকে existing Topic সিলেক্ট করা যায়, অথবা "🆕 নতুন Topic যোগ করুন" বেছে নতুন নাম
+// টাইপ করে সরাসরি সেই নতুন Topic-এই move করা যায় (ViewModel নিজে থেকেই নতুন Topic
+// বানিয়ে নেবে, আলাদা করে আগে Topic বানানোর দরকার নেই)। ──
 @Composable
 private fun AdminMoveQuestionsPickerDialog(
     subjects      : List<String>,
     selectedCount : Int,
+    onLoadTopics  : suspend (subject: String) -> List<String>,
     onConfirm     : (newSubject: String, newSubTopic: String) -> Unit,
     onDismiss     : () -> Unit
 ) {
-    var selectedSubject by remember { mutableStateOf(subjects.firstOrNull() ?: "") }
-    var newSubTopic by remember { mutableStateOf("") }
+    var expandedSubject by remember { mutableStateOf<String?>(null) }
+    val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
+    var loadingSubject by remember { mutableStateOf<String?>(null) }
+
+    var pickedSubject by remember { mutableStateOf<String?>(null) }
+    var pickedTopic by remember { mutableStateOf<String?>(null) }        // নির্বাচিত existing Topic
+    var addingNewTopicFor by remember { mutableStateOf<String?>(null) }  // কোন subject-এর জন্য "নতুন Topic" ফিল্ড খোলা
+    var newTopicText by remember { mutableStateOf("") }
+
+    val scope = rememberCoroutineScope()
+
+    fun toggleExpand(subject: String) {
+        val opening = expandedSubject != subject
+        expandedSubject = if (opening) subject else null
+        if (opening && !topicsCache.containsKey(subject)) {
+            loadingSubject = subject
+            scope.launch {
+                val topics = try { onLoadTopics(subject) } catch (e: Exception) { emptyList() }
+                topicsCache[subject] = topics
+                if (loadingSubject == subject) loadingSubject = null
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
         text = {
             Column(
-                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন — বিষয়ের পাশে ট্যাপ করলে অধ্যায় দেখা যাবে",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 if (subjects.isEmpty()) {
                     Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
-                subjects.forEach { name ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { selectedSubject = name }.padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                Spacer(Modifier.height(4.dp))
+                subjects.forEach { subject ->
+                    val isExpanded = expandedSubject == subject
+                    val isPicked = pickedSubject == subject &&
+                        (pickedTopic != null || (addingNewTopicFor == subject && newTopicText.isNotBlank()))
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isPicked) Color(0xFF0EA5E9).copy(alpha = 0.08f) else Color.Transparent)
                     ) {
-                        RadioButton(selected = selectedSubject == name, onClick = { selectedSubject = name },
-                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
-                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { toggleExpand(subject) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (isExpanded) "▼" else "▶",
+                                fontSize = 12.sp, color = Color(0xFF0EA5E9),
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                            Text(
+                                subject, fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                fontWeight = if (isPicked) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isPicked) Text("✅", fontSize = 13.sp)
+                        }
+                        if (isExpanded) {
+                            Column(Modifier.padding(start = 26.dp, bottom = 6.dp)) {
+                                if (loadingSubject == subject) {
+                                    Text("⏳ লোড হচ্ছে...", fontFamily = NotoSansBengali, fontSize = 11.5.sp, color = Color(0xFF6B7280))
+                                } else {
+                                    val topics = topicsCache[subject].orEmpty()
+                                    if (topics.isEmpty()) {
+                                        Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 11.5.sp, color = Color(0xFF6B7280))
+                                    }
+                                    topics.forEach { topic ->
+                                        val checked = pickedSubject == subject && pickedTopic == topic
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    pickedSubject = subject; pickedTopic = topic; addingNewTopicFor = null
+                                                }
+                                                .padding(vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = checked,
+                                                onClick = { pickedSubject = subject; pickedTopic = topic; addingNewTopicFor = null },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9))
+                                            )
+                                            Text(topic, fontFamily = NotoSansBengali, fontSize = 12.5.sp)
+                                        }
+                                    }
+                                    // ── "নতুন Topic যোগ করুন" — এই Subject-এ নতুন Topic বানিয়ে সরাসরি move ──
+                                    val addingHere = addingNewTopicFor == subject
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                pickedSubject = subject; pickedTopic = null
+                                                if (addingNewTopicFor != subject) newTopicText = ""
+                                                addingNewTopicFor = subject
+                                            }
+                                            .padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = addingHere,
+                                            onClick = {
+                                                pickedSubject = subject; pickedTopic = null
+                                                if (addingNewTopicFor != subject) newTopicText = ""
+                                                addingNewTopicFor = subject
+                                            },
+                                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF16A34A))
+                                        )
+                                        Text("🆕 নতুন Topic যোগ করুন", fontFamily = NotoSansBengali, fontSize = 12.5.sp,
+                                            color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                                    }
+                                    if (addingHere) {
+                                        OutlinedTextField(
+                                            value = newTopicText,
+                                            onValueChange = { newTopicText = it },
+                                            label = { Text("নতুন Topic-এর নাম", fontFamily = NotoSansBengali) },
+                                            modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
+                    Divider(Modifier.padding(vertical = 2.dp))
                 }
-
-                Divider(Modifier.padding(vertical = 4.dp))
-                OutlinedTextField(
-                    value = newSubTopic, onValueChange = { newSubTopic = it },
-                    label = { Text("Topic-এর নাম (আগে থেকেই থাকতে হবে)", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    "ℹ️ ওই বিষয়ে এই নামে Topic আগে থেকে না থাকলে move ব্যর্থ হবে — বানান ঠিকমতো লিখুন।",
-                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
-                )
             }
         },
         confirmButton = {
-            val canConfirm = selectedSubject.isNotBlank() && newSubTopic.isNotBlank()
+            val finalTopic = if (addingNewTopicFor != null && addingNewTopicFor == pickedSubject) newTopicText.trim() else pickedTopic
+            val canConfirm = pickedSubject != null && !finalTopic.isNullOrBlank()
             TextButton(
-                onClick = { if (canConfirm) { onConfirm(selectedSubject, newSubTopic); onDismiss() } },
+                onClick = { if (canConfirm) { onConfirm(pickedSubject!!, finalTopic!!); onDismiss() } },
                 enabled = canConfirm
             ) { Text("📦 Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF0EA5E9)) }
         },
