@@ -1129,6 +1129,30 @@ class ContentRepository(private val context: Context) {
         else refDao.reparentTopic(topicId, newSubjectId)
     }
 
+    // ── "নতুন Topic যোগ করে Move" — adminAddQuestion()-এর localId প্যাটার্নের মতোই,
+    // এখানে নতুন Topic-এর জন্য। ──
+
+    /** অস্থায়ী লোকাল topicId দিয়ে সাথে সাথে Room reference-এ (Topics টেবিলে) নতুন
+     *  Topic-এন্ট্রি যোগ করে — যাতে UI-তে সাথে সাথেই দেখা যায়, ব্যাকগ্রাউন্ডে GAS আসল
+     *  id দিলে replaceRoomTopicId() দিয়ে বদলে নিতে হবে। */
+    suspend fun addRoomTopicLocal(topicId: String, subjectId: String, name: String) = withContext(Dispatchers.IO) {
+        refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(
+            topicId = topicId, subjectId = subjectId, name = name
+        )))
+    }
+
+    /** অস্থায়ী লোকাল topicId-কে GAS-এর দেওয়া আসল topicId দিয়ে বদলে দেয় (Topics
+     *  reference টেবিল + questions টেবিল দুই জায়গাতেই) — replaceLocalIdAndPersist()-এর
+     *  মতোই কনসেপ্ট, শুধু bulk-cache patch এখানে দরকার নেই (Topic নিজে bulk cache-এ
+     *  কোনো id হিসেবে সংরক্ষিত থাকে না, শুধু নাম হিসেবে)। */
+    suspend fun replaceRoomTopicId(oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
+        refDao.replaceTopicId(oldTopicId, newTopicId)
+    }
+
+    suspend fun replaceRoomQuestionsTopicId(sheet: String, oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
+        dao.replaceTopicId(sheet.uppercase(), oldTopicId, newTopicId)
+    }
+
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
     //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
     suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
