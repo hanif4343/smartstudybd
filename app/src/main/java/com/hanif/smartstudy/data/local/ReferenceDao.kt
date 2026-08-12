@@ -48,6 +48,9 @@ interface ReferenceDao {
     @Query("SELECT * FROM topics ORDER BY name")
     suspend fun getAllTopics(): List<TopicEntity>
 
+    @Query("SELECT * FROM topics WHERE topicId = :topicId LIMIT 1")
+    suspend fun getTopicById(topicId: String): TopicEntity?
+
     @Query("DELETE FROM topics")
     suspend fun deleteAllTopics()
 
@@ -110,6 +113,17 @@ interface ReferenceDao {
     suspend fun mergeTopicCascade(sourceTopicId: String, targetTopicId: String) {
         reassignSubTopics(sourceTopicId, targetTopicId)
         deleteTopicById(sourceTopicId)
+    }
+
+    // ── "নতুন Topic যোগ করে Move" — অস্থায়ী লোকাল topicId (adminAddQuestion-এর
+    // localId প্যাটার্নের মতোই) ব্যাকগ্রাউন্ডে GAS-এর addReferenceItem দেওয়া আসল
+    // topicId দিয়ে replace করে (Room-এর PK topicId বলে "update" না, delete+insert)। ──
+    @Transaction
+    suspend fun replaceTopicId(oldTopicId: String, newTopicId: String) {
+        val old = getTopicById(oldTopicId) ?: return
+        deleteTopicById(oldTopicId)
+        upsertTopics(listOf(old.copy(topicId = newTopicId)))
+        reassignSubTopics(oldTopicId, newTopicId)
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────
