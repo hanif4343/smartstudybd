@@ -504,6 +504,36 @@ object GasContentService {
     }
 
     /**
+     * AdminMoveQuestionsPickerDialog-এ "নতুন Topic" টাইপ করে move করলে — সেই Topic
+     * আগে থেকে না থাকলে GAS-এর `addReferenceItem` action দিয়ে Subjects/Topics
+     * reference-ট্যাবে নতুন এন্ট্রি বানায় (id নিজে থেকে জেনারেট হয়, parent-scoped
+     * prefix সহ)। refType: "topics" (parentId=subjectId আবশ্যক) | "subjects"
+     * (sheet আবশ্যক) | "tags"/"posts"/"institutions"।
+     */
+    suspend fun addReferenceItem(
+        refType  : String,
+        name     : String,
+        parentId : String = "",
+        sheet    : String = ""
+    ): ApiResult<String> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        if (name.isBlank()) return@withContext ApiResult.Error("নাম প্রয়োজন")
+        try {
+            val params = mutableMapOf("action" to "addReferenceItem", "refType" to refType, "name" to name)
+            if (parentId.isNotBlank()) params["parentId"] = parentId
+            if (sheet.isNotBlank()) params["sheet"] = sheet
+            val obj = callGetActionRaw(params) ?: return@withContext ApiResult.Error("Network error")
+            if (obj.get("result")?.asString == "success") {
+                ApiResult.Success(obj.get("id")?.asString ?: "")
+            } else {
+                ApiResult.Error(obj.get("message")?.asString ?: "যোগ করা ব্যর্থ হয়েছে")
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
+    /**
      * adminMoveQuestions() এর জন্য — এক বা একাধিক প্রশ্ন (id দিয়ে) অন্য Subject/Topic-এ
      * move করে (GAS action=moveQuestions)। প্রশ্নের নিজের id অপরিবর্তিত থাকে — শুধু
      * subject/sub_topic/subject_id/topic_id ফিল্ড বদলায়, তাই bookmark/quiz-history/
