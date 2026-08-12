@@ -459,8 +459,23 @@ class SyncWorker(
             val newSubject = payload["newSubject"]?.toString() ?: return false
             val newSubjectId = payload["newSubjectId"]?.toString() ?: return false
             val newSubTopic = payload["newSubTopic"]?.toString() ?: return false
-            val newTopicId = payload["newTopicId"]?.toString() ?: return false
+            var newTopicId = payload["newTopicId"]?.toString() ?: ""
+            val createIfMissing = payload["createIfMissing"]?.toString()?.toBoolean() ?: false
             if (ids.isEmpty()) return false
+
+            // ── অফলাইনে "নতুন Topic যোগ করে Move" queue হয়ে থাকলে — retry-এর সময়
+            // প্রথমে GAS addReferenceItem দিয়ে আসল topicId বানিয়ে নিতে হবে (offline
+            // অবস্থায় শুধু অস্থায়ী লোকাল id ছিল, blank/local id দিয়ে move করা যাবে না) ──
+            if (createIfMissing || newTopicId.isBlank() || newTopicId.startsWith("-local")) {
+                when (val cr = com.hanif.smartstudy.data.remote.GasContentService
+                    .addReferenceItem("topics", newSubTopic, newSubjectId)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> newTopicId = cr.data
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        Log.w(TAG, "syncAdminMoveQuestions: addReferenceItem failed: ${cr.message}")
+                        return false
+                    }
+                }
+            }
 
             when (val r = com.hanif.smartstudy.data.remote.GasContentService
                 .moveQuestions(sheet, ids, newSubject, newSubjectId, newSubTopic, newTopicId)) {
