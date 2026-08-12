@@ -1118,11 +1118,6 @@ fun QuestionListScreen(
     }
 }
 
-/**
- * Review System (Admin-only) — বড়, স্পষ্ট ✓ বাটন। রিভিউ করা হয়ে গেলে সবুজ+ভরাট,
- * না হলে ধূসর+ফাঁকা আউটলাইন — এক নজরে বোঝা যায় কোনটা বাকি।
- */
-@Composable
 // ── Admin "Move Question(s)" ডায়ালগ — সিলেক্ট করা এক/একাধিক প্রশ্ন কোন Subject ›
 // কোন Topic-এ যাবে বাছাই করে। destination Topic অবশ্যই আগে থেকে থাকতে হবে (টেক্সট
 // ফিল্ড — লিস্ট থেকে বাছাই না, কারণ এখানে অন্য Subject-এর Topic লিস্ট লাইভ আনতে
@@ -1183,6 +1178,11 @@ private fun AdminMoveQuestionsPickerDialog(
     )
 }
 
+/**
+ * Review System (Admin-only) — বড়, স্পষ্ট ✓ বাটন। রিভিউ করা হয়ে গেলে সবুজ+ভরাট,
+ * না হলে ধূসর+ফাঁকা আউটলাইন — এক নজরে বোঝা যায় কোনটা বাকি।
+ */
+@Composable
 private fun ReviewTickButton(reviewed: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
