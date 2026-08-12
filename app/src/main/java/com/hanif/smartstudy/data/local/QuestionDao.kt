@@ -217,6 +217,12 @@ interface QuestionDao {
         newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
     )
 
+    // ── "নতুন Topic যোগ করে Move" — অস্থায়ী লোকাল topicId (adminAddQuestion-এর
+    // "-local..." id প্যাটার্নের মতোই) ব্যাকগ্রাউন্ডে GAS-এর দেওয়া আসল topicId দিয়ে
+    // replace করতে হয়, নাহলে Room-এ প্রশ্নগুলো এতিম (orphan) topicId ধরে থেকে যাবে ──
+    @Query("UPDATE questions SET topicId = :newTopicId WHERE sheet = :sheet AND topicId = :oldTopicId")
+    suspend fun replaceTopicId(sheet: String, oldTopicId: String, newTopicId: String)
+
     // ── সব data মুছো ──────────────────────────────────────────────────────────
     @Query("DELETE FROM questions")
     suspend fun deleteAll()
