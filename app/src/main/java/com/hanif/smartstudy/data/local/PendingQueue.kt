@@ -154,22 +154,26 @@ class PendingQueue(private val context: Context) {
     // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — অফলাইন/ব্যর্থ হলে queue এ রাখা হয়, নেট
     //    আসলে Sheet-এ (প্রশ্ন + সম্ভব হলে reference টেবিল) সরিয়ে দেবে ──
     suspend fun enqueueAdminMoveQuestions(
-        sheet        : String,
-        ids          : List<String>,
-        newSubject   : String,
-        newSubjectId : String,
-        newSubTopic  : String,
-        newTopicId   : String
+        sheet          : String,
+        ids            : List<String>,
+        newSubject     : String,
+        newSubjectId   : String,
+        newSubTopic    : String,
+        newTopicId     : String,
+        // ── newTopicId ফাঁকা/অস্থায়ী হলে (নতুন Topic বানানো বাকি) true — SyncWorker
+        // retry-এর সময় আগে GAS addReferenceItem দিয়ে আসল topicId বানিয়ে নেবে ──
+        createIfMissing: Boolean = false
     ) {
         enqueue(PendingAction(
             type    = "admin_move_questions",
             payload = gson.toJson(mapOf(
-                "sheet"        to sheet,
-                "ids"          to ids,
-                "newSubject"   to newSubject,
-                "newSubjectId" to newSubjectId,
-                "newSubTopic"  to newSubTopic,
-                "newTopicId"   to newTopicId
+                "sheet"          to sheet,
+                "ids"            to ids,
+                "newSubject"     to newSubject,
+                "newSubjectId"   to newSubjectId,
+                "newSubTopic"    to newSubTopic,
+                "newTopicId"     to newTopicId,
+                "createIfMissing" to createIfMissing
             ))
         ))
     }
