@@ -1123,10 +1123,15 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             for (action in pending) {
                 try {
                     val payload = gson.fromJson(action.payload, Map::class.java)
-                    val sheet   = payload["sheet"]?.toString() ?: continue
-
+                    // ── sheet এখন প্রতিটা case-এর ভিতরেই আলাদাভাবে বের করা হয় — আগে এখানে
+                    // একবারে বের করে পুরো block-এর জন্য গেট করা হতো, কিন্তু
+                    // admin_delete_subject_topic-এ "sheet" না "sheets" (লিস্ট) থাকে, আর
+                    // admin_move_topic-এ কোনো sheet ফিল্ডই নেই (topicId দিয়ে GAS নিজেই
+                    // ঠিক sheet বের করে) — তাই আগের ব্লকেট extraction এই দুই টাইপকেই
+                    // silently skip করে দিত (sync হতোই না) ──
                     when (action.type) {
                         "admin_edit_question" -> {
+                            val sheet = payload["sheet"]?.toString() ?: continue
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
@@ -1141,6 +1146,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "admin_add_question" -> {
+                            val sheet = payload["sheet"]?.toString() ?: continue
                             @Suppress("UNCHECKED_CAST")
                             val fields  = payload["fields"] as? Map<String, String> ?: continue
                             val localId = payload["localId"]?.toString() ?: continue
@@ -1156,11 +1162,81 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "admin_delete_question" -> {
+                            val sheet = payload["sheet"]?.toString() ?: continue
                             val questionId = payload["questionId"]?.toString() ?: continue
                             when (adminDeleteRow(sheet, questionId)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // লোকাল cache থেকে তো ডিলিটের সময়ই সরানো হয়ে গেছে,
                                     // এখানে শুধু Firebase-এ পাঠানো সফল হলো এটাই নিশ্চিত করা
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
+                        "admin_delete_subject_topic" -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val sheets = (payload["sheets"] as? List<*>)?.map { it.toString() } ?: continue
+                            val subject = payload["subject"]?.toString() ?: continue
+                            val subTopic = payload["subTopic"]?.toString() ?: ""
+                            val deleteSubTopic = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
+                            @Suppress("UNCHECKED_CAST")
+                            val referenceIds = (payload["referenceIds"] as? Map<*, *>)
+                                ?.entries?.associate { (k, v) -> k.toString() to v.toString() } ?: emptyMap()
+                            when (val r = adminDeleteBySubjectBoth(sheets, subject, subTopic, deleteSubTopic)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    val refType = if (deleteSubTopic) "topics" else "subjects"
+                                    referenceIds.values.toSet().forEach { rid ->
+                                        if (rid.isNotBlank()) com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem(refType, rid)
+                                    }
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
+                        "admin_move_questions" -> {
+                            val sheet = payload["sheet"]?.toString() ?: continue
+                            @Suppress("UNCHECKED_CAST")
+                            val ids = (payload["ids"] as? List<*>)?.map { it.toString() } ?: continue
+                            val newSubject = payload["newSubject"]?.toString() ?: continue
+                            val newSubjectId = payload["newSubjectId"]?.toString() ?: continue
+                            val newSubTopic = payload["newSubTopic"]?.toString() ?: continue
+                            var newTopicId = payload["newTopicId"]?.toString() ?: ""
+                            val createIfMissing = payload["createIfMissing"]?.toString()?.toBoolean() ?: false
+                            var moveOk = true
+                            if (createIfMissing || newTopicId.isBlank() || newTopicId.startsWith("-local")) {
+                                when (val cr = com.hanif.smartstudy.data.remote.GasContentService
+                                    .addReferenceItem("topics", newSubTopic, newSubjectId)) {
+                                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> newTopicId = cr.data
+                                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> moveOk = false
+                                }
+                            }
+                            if (moveOk) {
+                                when (com.hanif.smartstudy.data.remote.GasContentService
+                                    .moveQuestions(sheet, ids, newSubject, newSubjectId, newSubTopic, newTopicId)) {
+                                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                        q.remove(action.id); successCount++
+                                    }
+                                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                        q.incrementRetry(action.id); failCount++
+                                    }
+                                }
+                            } else {
+                                q.incrementRetry(action.id); failCount++
+                            }
+                        }
+                        "admin_move_topic" -> {
+                            val topicId = payload["topicId"]?.toString() ?: continue
+                            val newSubjectId = payload["newSubjectId"]?.toString() ?: continue
+                            val newSubjectName = payload["newSubjectName"]?.toString() ?: continue
+                            val newSubTopicName = payload["newSubTopicName"]?.toString() ?: continue
+                            val mergeTopicId = payload["mergeTopicId"]?.toString()?.ifBlank { null }
+                            when (com.hanif.smartstudy.data.remote.GasContentService
+                                .moveTopic(topicId, newSubjectId, newSubjectName, newSubTopicName, mergeTopicId)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     q.remove(action.id); successCount++
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
