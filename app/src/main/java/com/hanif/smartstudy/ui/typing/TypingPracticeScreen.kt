@@ -66,10 +66,10 @@ import kotlinx.coroutines.launch
 
 // ── AI Adaptive Session কনফিগ — দেখো SmartStudyBD-টাইপিং-অডিট-ও-রোডম্যাপ.md সেকশন ৮ ──
 // প্রথম ধাপ (random, diagnostic) কত সেকেন্ড চলবে
-private const val ADAPTIVE_PHASE1_SECONDS = 180
+internal const val ADAPTIVE_PHASE1_SECONDS = 180
 // এই সেকেন্ডে পৌঁছালে phase-2 এর AI/blended প্যাসেজ ব্যাকগ্রাউন্ডে ফেচ শুরু হবে
 // (৬০ সেকেন্ড বাফার রেখে, যাতে phase ১ শেষ হওয়ার আগেই রেডি থাকে)
-private const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECONDS - 60
+internal const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECONDS - 60
 
 // ── BCC Exam Simulation Mode — বাস্তব বাংলাদেশ কম্পিউটার কাউন্সিল পরীক্ষার নিয়ম অনুযায়ী
 // প্রতিটা ভাষায় ঠিক ১০ মিনিট (৬০০ সেকেন্ড) — দেখো রোডম্যাপ সেকশন ৮ ──
@@ -1975,9 +1975,6 @@ fun TypingPracticeScreen(
                         Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
                         color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
                         onClick  = {
                             sessionMode = "free"; adaptivePhase = 1
