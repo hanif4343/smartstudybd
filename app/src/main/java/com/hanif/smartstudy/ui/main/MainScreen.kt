@@ -61,6 +61,11 @@ fun MainScreen(
     var showSmartTyping by remember { mutableStateOf(false) }
     // ── পর্ব ৩/৫.৩ ধাপ ৪: Exam/Govt Mock-এর জন্য তৃতীয় স্বতন্ত্র state ──
     var showExamTyping by remember { mutableStateOf(false) }
+    // ── পর্ব ৩/৫.৩ ধাপ ৩: এখন থেকে টাইপিং-এর "সামনের দরজা" এই মোড-সিলেক্ট স্ক্রিন —
+    // Focus-Mode নাজ-চেক পাস হওয়ার পর (openTypingWithFocusCheck() ইত্যাদি) সরাসরি
+    // পুরনো TypingPracticeScreen-এ না গিয়ে এখানে আসবে, তারপর ইউজার নিজে Normal/
+    // Smart/Exam/পুরনো-স্ক্রিন বেছে নেবে ──
+    var showModeSelect by remember { mutableStateOf(false) }
     var showTypingRace by remember { mutableStateOf(false) }
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
@@ -119,6 +124,7 @@ fun MainScreen(
             showNormalTyping              -> showNormalTyping = false
             showSmartTyping               -> showSmartTyping = false
             showExamTyping                -> showExamTyping = false
+            showModeSelect                -> showModeSelect = false
             showTypingRace                -> showTypingRace = false
             showFocusModeInfo             -> showFocusModeInfo = false
             currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
@@ -258,7 +264,7 @@ fun MainScreen(
             focusState.subject != com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
             pendingTypingNudge = true
         } else {
-            showTyping = true
+            showModeSelect = true
         }
     }
 
@@ -272,6 +278,16 @@ fun MainScreen(
     // ── Study সাবজেক্টের তালিকা — এখন টাইপিং স্ক্রিনের নিজস্ব "🎯 আজ ফোকাস" কার্ডেও লাগে,
     // তাই showFocusModeInfo ব্লকের বদলে এখানে একবারই collect করা হচ্ছে ──
     val studyStateForFocus by studyViewModel.state.collectAsStateWithLifecycle()
+    if (showModeSelect) {
+        com.hanif.smartstudy.ui.typing.TypingModeSelectScreen(
+            onBack = { showModeSelect = false },
+            onSelectNormal = { showModeSelect = false; showNormalTyping = true },
+            onSelectSmart = { showModeSelect = false; showSmartTyping = true },
+            onSelectExam = { showModeSelect = false; showExamTyping = true },
+            onSelectLegacy = { showModeSelect = false; showTyping = true }
+        )
+        return
+    }
     if (showTyping) {
         TypingPracticeScreen(
             onBack     = { showTyping = false },
@@ -495,7 +511,7 @@ fun MainScreen(
             daysLeft = fs.daysUntilExam(),
             onStart  = {
                 if (fs.subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
-                    showTyping = true
+                    showModeSelect = true
                 } else {
                     currentTab = BottomTab.STUDY
                     studyViewModel.navigateToSubject(fs.subject)
@@ -511,7 +527,7 @@ fun MainScreen(
             subject   = focusState.subject,
             onResume  = {
                 if (focusState.subject == com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) {
-                    showTyping = true
+                    showModeSelect = true
                 } else {
                     currentTab = BottomTab.STUDY
                     studyViewModel.navigateToSubject(focusState.subject)
@@ -539,7 +555,7 @@ fun MainScreen(
             },
             onTurnOff = {
                 scope.launch { focusStore.deactivate() }
-                showTyping = true
+                showModeSelect = true
                 pendingTypingNudge = false
             },
             onDismiss = { pendingTypingNudge = false }
