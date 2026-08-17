@@ -606,6 +606,9 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
+                                    onMoveQuestion = if (onAdminMoveQuestions != null) ({
+                                        selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                                    }) else null,
                                     onRegenerateOptions = onRegenerateOptions,
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
@@ -635,6 +638,9 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
+                            onMoveQuestion = if (onAdminMoveQuestions != null) ({
+                                selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                            }) else null,
                             onRegenerateOptions = onRegenerateOptions,
                             studyRevealMode = studyRevealMode,
                             studyRecallMode = studyRecallMode,
