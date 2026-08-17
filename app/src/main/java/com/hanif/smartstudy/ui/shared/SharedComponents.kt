@@ -237,6 +237,11 @@ fun QuestionCard(
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete  : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
+    // ── প্রশ্নের বর্তমান Subject/Topic ছোট করে দেখানো + Expand করে অন্য
+    // Subject/Topic-এ move করার শর্টকাট — শুধু parent-কে জানায় picker খুলতে
+    // হবে, picker (AdminMoveQuestionsPickerDialog) নিজে এখানে বানানো হয় না।
+    // null থাকলে (student view / non-admin) এই রো-ই দেখা যাবে না। ──
+    onMoveQuestion : (() -> Unit)? = null,
     // ── "প্রশ্ন" এডিট করার সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে ৪টা অপশন + সঠিক
     // উত্তর আবার জেনারেট করা — শুধু AdminFieldEditDialog-এ পাস-থ্রু হয়, null থাকলে
     // বাটনটাই দেখা যাবে না (আগের আচরণ অপরিবর্তিত থাকে) ──
@@ -373,6 +378,50 @@ fun QuestionCard(
                     text   = displayQuestion,
                     ttsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
                 )
+            }
+
+            // ── প্রশ্নের বর্তমান Subject/Topic — ছোট এক লাইনের চিপ, নিচে edit
+            // পিলগুলোর ঠিক উপরে। পুরো চিপ (সাবজেক্ট/টপিক টেক্সট + Expand আইকন,
+            // দুই জায়গাতেই) ট্যাপ করলে parent-এর move picker ডায়ালগ খোলে। ──
+            if (onMoveQuestion != null) {
+                Spacer(Modifier.height(6.dp))
+                Surface(
+                    onClick = onMoveQuestion,
+                    shape   = RoundedCornerShape(8.dp),
+                    color   = Color(0xFFF8FAFC),
+                    border  = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📂", fontSize = 11.sp)
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            buildString {
+                                append(item.subject.ifBlank { "—" })
+                                append("  ›  ")
+                                append(item.subTopic.ifBlank { "—" })
+                            },
+                            fontSize    = 11.sp,
+                            fontFamily  = NotoSansBengali,
+                            fontWeight  = FontWeight.Medium,
+                            color       = Color(0xFF475569),
+                            maxLines    = 1,
+                            overflow    = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier    = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Subject/Topic পরিবর্তন করুন (Move)",
+                            tint     = Color(0xFF64748B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             if (isAdminUser) {
