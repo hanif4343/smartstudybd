@@ -312,41 +312,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch {
-            val sheet = when (_state.value.mode) {
-                StudyMode.QUIZ  -> "Quiz"
-                StudyMode.QBANK -> "QBank"
-                StudyMode.STUDY -> "Study"
-            }
             val topicRows = repo.getRoomTopicsForSubject(subjectId)
-            // ── FIX ("Topic delete করলে count কমে/list ছোট হয়, কিন্তু Back করে আবার
-            // ঢুকলে পুরনো/ভুল Topic লিস্ট দেখায়"): আগে totalQ = t.rowCount (Topics
-            // reference-টেবিলের স্ট্যাটিক কাউন্ট) থেকে আসতো, আর সব topic (এমনকি ০
-            // প্রশ্নওয়ালা) দেখানো হতো — কারণ reference-টেবিলের সাথে আসল questions
-            // টেবিলের কোনো লাইভ যোগাযোগ ছিল না, background sync পুরনো/ভুল ডেটা দিয়ে
-            // reference-টেবিল overwrite করে দিলে ডিলিট করা topic-ও ফিরে আসতো। এখন
-            // আসল questions টেবিল থেকে প্রতিটা topic-এর *লাইভ* কাউন্ট গোনা হয় —
-            // এখন-শূন্য topic (move/delete করে সব প্রশ্ন চলে গেছে) লিস্টেই দেখাবে না,
-            // আর কোনো প্রশ্ন থাকলে ঠিক ততটাই দেখাবে (move করে আনা প্রশ্নসহ)। এই
-            // topic Move dialog-এ (AdminMoveQuestionsPickerDialog → adminTopicsForSubject())
-            // এখনো ঠিকই দেখা যাবে, কারণ সেটা এখনো reference-টেবিল (নাম-ভিত্তিক, count
-            // নির্বিশেষে) থেকেই লিস্ট আনে — তাই শূন্য-প্রশ্নের topic-এও আবার প্রশ্ন
-            // move করে আনা যায়। ──
-            val liveCounts = try {
-                repo.getRoomSubTopicLiveCounts(sheet, subjectName).associateBy({ it.subTopic }, { it.count })
-            } catch (e: Exception) { emptyMap() }
-            val subTopics = topicRows.mapNotNull { t ->
-                val liveCount = liveCounts[t.name] ?: 0
-                if (liveCount <= 0) return@mapNotNull null   // শূন্য প্রশ্নের topic লুকানো
+            val subTopics = topicRows.map { t ->
                 SubTopicEntry(
                     name      = t.name,
                     subject   = subjectName,
-                    totalQ    = liveCount,
+                    totalQ    = t.rowCount,   // Topics reference-টেবিলে indexed count (থাকলে), নাহলে ০
                     doneQ     = 0,
                     subjectId = t.subjectId,
                     topicId   = t.topicId
                 )
             }.sortedBy { it.name }
-            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size} (live-count filtered)")
+            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
             _state.update { it.copy(subTopics = subTopics, isLoading = false) }
         }
     }
