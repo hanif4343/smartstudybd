@@ -237,11 +237,16 @@ fun QuestionCard(
     onAdminRefresh : (() -> Unit)? = null,
     onAdminEdit    : ((sheet: String, rowKey: String, fields: Map<String, String>, preview: String) -> Unit)? = null,
     onAdminDelete  : ((sheet: String, rowKey: String, preview: String) -> Unit)? = null,
-    // ── প্রশ্নের বর্তমান Subject/Topic ছোট করে দেখানো + Expand করে অন্য
-    // Subject/Topic-এ move করার শর্টকাট — শুধু parent-কে জানায় picker খুলতে
-    // হবে, picker (AdminMoveQuestionsPickerDialog) নিজে এখানে বানানো হয় না।
-    // null থাকলে (student view / non-admin) এই রো-ই দেখা যাবে না। ──
-    onMoveQuestion : (() -> Unit)? = null,
+    // ── প্রশ্নের বর্তমান Subject/Topic ছোট করে দেখানো + দুইটা আলাদা Expand
+    // বাটন দিয়ে দ্রুত move করার শর্টকাট — Subject অংশে ট্যাপ করলে Subject
+    // dropdown সরাসরি খোলে, Topic অংশে ট্যাপ করলে Topic dropdown সরাসরি খোলে
+    // (দুই ট্যাপের বদলে এক ট্যাপেই কাজ হয়ে যায়)। parent-কে শুধু জানায় কোন
+    // dropdown খুলতে হবে, picker (AdminMoveQuestionsPickerDialog) নিজে
+    // এখানে বানানো হয় না। null থাকলে (student view / non-admin) এই রো-ই
+    // দেখা যাবে না। পুরো সেগমেন্ট (আইকন+টেক্সট+চেভরন) ট্যাপযোগ্য — ছোট
+    // চেভরন আইকনে নির্ভুলভাবে আঙুল রাখতে হবে না। ──
+    onMoveSubject : (() -> Unit)? = null,
+    onMoveTopic   : (() -> Unit)? = null,
     // ── "প্রশ্ন" এডিট করার সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে ৪টা অপশন + সঠিক
     // উত্তর আবার জেনারেট করা — শুধু AdminFieldEditDialog-এ পাস-থ্রু হয়, null থাকলে
     // বাটনটাই দেখা যাবে না (আগের আচরণ অপরিবর্তিত থাকে) ──
@@ -381,30 +386,35 @@ fun QuestionCard(
             }
 
             // ── প্রশ্নের বর্তমান Subject/Topic — ছোট এক লাইনের চিপ, নিচে edit
-            // পিলগুলোর ঠিক উপরে। পুরো চিপ (সাবজেক্ট/টপিক টেক্সট + Expand আইকন,
-            // দুই জায়গাতেই) ট্যাপ করলে parent-এর move picker ডায়ালগ খোলে। ──
-            if (onMoveQuestion != null) {
+            // পিলগুলোর ঠিক উপরে। এখন দুইটা আলাদা ট্যাপযোগ্য সেগমেন্ট: বাঁ পাশে
+            // Subject (নিজের Expand আইকন সহ) আর ডান পাশে Topic (নিজের Expand
+            // আইকন সহ) — মাঝে একটা পাতলা ডিভাইডার। Subject সেগমেন্টে ট্যাপ করলে
+            // সরাসরি Subject dropdown খোলে, Topic সেগমেন্টে ট্যাপ করলে সরাসরি
+            // Topic dropdown খোলে — এতে এক ট্যাপেই কাজ হয়ে যায়, আলাদা করে আগে
+            // Subject আবার বাছতে হয় না। প্রতিটা সেগমেন্টের পুরো এরিয়া (আইকন+
+            // টেক্সট+চেভরন, শুধু ছোট্ট চেভরন আইকন না) ট্যাপযোগ্য যাতে টাচ মিস না হয়। ──
+            if (onMoveSubject != null && onMoveTopic != null) {
                 Spacer(Modifier.height(6.dp))
-                Surface(
-                    onClick = onMoveQuestion,
-                    shape   = RoundedCornerShape(8.dp),
-                    color   = Color(0xFFF8FAFC),
-                    border  = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFF8FAFC))
+                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // ── Subject সেগমেন্ট ──
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onMoveSubject)
+                            .padding(horizontal = 9.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("📂", fontSize = 11.sp)
                         Spacer(Modifier.width(5.dp))
                         Text(
-                            buildString {
-                                append(item.subject.ifBlank { "—" })
-                                append("  ›  ")
-                                append(item.subTopic.ifBlank { "—" })
-                            },
+                            item.subject.ifBlank { "—" },
                             fontSize    = 11.sp,
                             fontFamily  = NotoSansBengali,
                             fontWeight  = FontWeight.Medium,
@@ -413,10 +423,52 @@ fun QuestionCard(
                             overflow    = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             modifier    = Modifier.weight(1f)
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Icon(
                             Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Subject/Topic পরিবর্তন করুন (Move)",
+                            contentDescription = "Subject পরিবর্তন করুন (Move)",
+                            tint     = Color(0xFF64748B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // ── মাঝের পাতলা ডিভাইডার ──
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .height(20.dp)
+                            .background(Color(0xFFE2E8F0))
+                    )
+
+                    // ── Topic সেগমেন্ট ──
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onMoveTopic)
+                            .padding(horizontal = 9.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "›",
+                            fontSize   = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = Color(0xFF94A3B8)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            item.subTopic.ifBlank { "—" },
+                            fontSize    = 11.sp,
+                            fontFamily  = NotoSansBengali,
+                            fontWeight  = FontWeight.Medium,
+                            color       = Color(0xFF475569),
+                            maxLines    = 1,
+                            overflow    = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier    = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Topic পরিবর্তন করুন (Move)",
                             tint     = Color(0xFF64748B),
                             modifier = Modifier.size(16.dp)
                         )
