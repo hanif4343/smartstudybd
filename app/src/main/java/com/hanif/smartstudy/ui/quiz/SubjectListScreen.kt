@@ -710,18 +710,11 @@ private fun SubjectCard(
                 Spacer(Modifier.height(2.dp))
                 Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
+                // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল — কনফিউশন থাকবে না"):
+                // আগে এখানে student progress bar-এর মতোই আরেকটা রঙিন বার আঁকা হতো, যেটা
+                // সহজেই ওপরের আসল progress bar-এর সাথে গুলিয়ে ফেলত। এখন শুধু % টেক্সট। ──
                 if (reviewPct != null) {
-                    Spacer(Modifier.height(6.dp))
-                    Box(
-                        Modifier.fillMaxWidth().height(5.dp)
-                            .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Box(
-                            Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
-                                .background(Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
-                        )
-                    }
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
                         fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
                 }
@@ -797,16 +790,8 @@ private fun QBankSubjectCard(
             Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
                 fontFamily = NotoSansBengali)
 
+            // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল") — বার সরিয়ে শুধু % টেক্সট ──
             if (reviewPct != null) {
-                Box(
-                    Modifier.fillMaxWidth().height(5.dp)
-                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Box(
-                        Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
-                            .background(Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
-                    )
-                }
                 Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
                     fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
             }
@@ -1090,17 +1075,9 @@ private fun SubTopicCard(
                             .background(Color(0xFF22C55E))
                     )
                 }
+                // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল") — বার সরিয়ে শুধু % টেক্সট ──
                 if (reviewPct != null) {
-                    Spacer(Modifier.height(5.dp))
-                    Box(
-                        Modifier.fillMaxWidth().height(4.dp)
-                            .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Box(
-                            Modifier.fillMaxWidth(reviewPct / 100f).fillMaxHeight()
-                                .background(Color(0xFFF59E0B))
-                        )
-                    }
+                    Spacer(Modifier.height(3.dp))
                     Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
                         fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
                 }
