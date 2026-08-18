@@ -262,6 +262,10 @@ fun QuestionListScreen(
         StudyMode.QBANK -> "QBank"
         StudyMode.STUDY -> "Study"
     }
+    // ── Move এখন সাথে সাথেই (dialog-এ confirm বাটন ছাড়াই) হয়ে যায় — ভুল ট্যাপে
+    // move হয়ে গেলে ফেরানোর জন্য নিচে ৫ সেকেন্ডের "Undo" স্ন্যাকবার দেখানো হয়। ──
+    val moveSnackbarHostState = remember { SnackbarHostState() }
+    val moveSnackbarScope = rememberCoroutineScope()
 
     // ── বিস্তারিত লিস্টে কোনো ভুল প্রশ্নে ট্যাপ করলে ডায়ালগ বন্ধ করে সরাসরি
     // সেই প্রশ্নের কার্ডে স্ক্রল করে ২.৫ সেকেন্ড হাইলাইট করে দেখায় (রিপোর্ট
@@ -380,7 +384,8 @@ fun QuestionListScreen(
                         }
                     } else null
                 )
-            }
+            },
+            snackbarHost = { SnackbarHost(moveSnackbarHostState) }
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
 
@@ -606,6 +611,9 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
+                                    onMoveQuestion = if (onAdminMoveQuestions != null) ({
+                                        selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                                    }) else null,
                                     onRegenerateOptions = onRegenerateOptions,
                                     studyRecallMode = studyRecallMode,
                                     answerFocusRequester = recallFocusRequesterFor(q.id),
@@ -635,6 +643,9 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
+                            onMoveQuestion = if (onAdminMoveQuestions != null) ({
+                                selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                            }) else null,
                             onRegenerateOptions = onRegenerateOptions,
                             studyRevealMode = studyRevealMode,
                             studyRecallMode = studyRecallMode,
@@ -888,13 +899,34 @@ fun QuestionListScreen(
     // ── Admin "Move" — destination Subject/Topic ডায়ালগ ──
     if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
         AdminMoveQuestionsPickerDialog(
-            subjects  = vmState.subjects.map { it.name },
-            selectedCount = selectedQuestionIds.size,
-            onLoadTopics = { subject -> viewModel.adminTopicsForSubject(moveSheetKey, subject) },
+            subjects        = vmState.subjects.map { it.name },
+            selectedCount   = selectedQuestionIds.size,
+            currentSubject  = subject,
+            currentSubTopic = subTopic,
+            onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(moveSheetKey, subj) },
             onConfirm = { newSubject, newSubTopic ->
-                onAdminMoveQuestions(moveSheetKey, selectedQuestionIds.toList(), newSubject, newSubTopic)
+                val movedIds    = selectedQuestionIds.toList()
+                val fromSubject = subject
+                val fromTopic   = subTopic
+                onAdminMoveQuestions(moveSheetKey, movedIds, newSubject, newSubTopic)
                 isSelectMode = false
                 selectedQuestionIds.clear()
+                // ── ৫ সেকেন্ডের Undo স্ন্যাকবার — চাপলে ঠিক আগের Subject/Topic-এ ফিরিয়ে নেয় ──
+                moveSnackbarScope.launch {
+                    val autoDismiss = launch {
+                        kotlinx.coroutines.delay(5000)
+                        moveSnackbarHostState.currentSnackbarData?.dismiss()
+                    }
+                    val result = moveSnackbarHostState.showSnackbar(
+                        message     = "সরানো হয়েছে (${movedIds.size}টি) ➜ $newSubject / $newSubTopic",
+                        actionLabel = "Undo",
+                        duration    = SnackbarDuration.Indefinite
+                    )
+                    autoDismiss.cancel()
+                    if (result == SnackbarResult.ActionPerformed) {
+                        onAdminMoveQuestions(moveSheetKey, movedIds, fromSubject, fromTopic)
+                    }
+                }
             },
             onDismiss = { showMoveQuestionsDialog = false }
         )
@@ -1119,165 +1151,206 @@ fun QuestionListScreen(
     }
 }
 
-// ── Admin "Move Question(s)" ডায়ালগ — সিলেক্ট করা এক/একাধিক প্রশ্ন কোন Subject ›
-// কোন Topic-এ যাবে বাছাই করে। প্রতিটা Subject-এর পাশে Expand বাটন — ট্যাপ করলে ওই
-// Subject-এর আন্ডারের সব Topic (Room থেকে লাইভ, onLoadTopics দিয়ে) দেখায়। এখান
-// থেকে existing Topic সিলেক্ট করা যায়, অথবা "🆕 নতুন Topic যোগ করুন" বেছে নতুন নাম
-// টাইপ করে সরাসরি সেই নতুন Topic-এই move করা যায় (ViewModel নিজে থেকেই নতুন Topic
-// বানিয়ে নেবে, আলাদা করে আগে Topic বানানোর দরকার নেই)। ──
+// ── Admin "Move Question(s)" ডায়ালগ — দুইটা পাশাপাশি dropdown চিপ: Subject ▼ আর
+// Topic ▼ (Material3 ExposedDropdownMenuBox, standard dropdown UX)। Subject বাছলেই
+// পুরনো Topic reset হয়ে যায়, নতুন subject-এর Topic লিস্ট (cache থেকে থাকলে সাথে সাথে,
+// নাহলে ছোট loading) লোড হয় এবং সুবিধার জন্য Topic dropdown auto-open হয়ে যায় — একটা
+// ট্যাপ বাঁচে। Topic বাছার সাথে সাথেই move হয়ে যায়, আলাদা "Move করুন" কনফার্ম বাটনের
+// দরকার নেই — dialog নিজে থেকেই বন্ধ হয়ে যায় (onDismiss() finishMove()-এর ভেতর থেকেই
+// কল হয়)। একই জায়গায় (current subject/topic) আবার
+// বাছলে move হয় না, শুধু dialog বন্ধ হয়। "🆕 নতুন Topic" এখনও Topic dropdown-এর নিচেই
+// আছে — টাইপ করে ✓ চাপলে সেই মুহূর্তেই move (ViewModel নিজে থেকেই নতুন Topic বানিয়ে নেয়,
+// আলাদা করে আগে Topic বানানোর দরকার নেই)। ──
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdminMoveQuestionsPickerDialog(
-    subjects      : List<String>,
-    selectedCount : Int,
-    onLoadTopics  : suspend (subject: String) -> List<String>,
-    onConfirm     : (newSubject: String, newSubTopic: String) -> Unit,
-    onDismiss     : () -> Unit
+    subjects        : List<String>,
+    selectedCount   : Int,
+    currentSubject  : String,
+    currentSubTopic : String,
+    onLoadTopics    : suspend (subject: String) -> List<String>,
+    onConfirm       : (newSubject: String, newSubTopic: String) -> Unit,
+    onDismiss       : () -> Unit
 ) {
-    var expandedSubject by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
-    var loadingSubject by remember { mutableStateOf<String?>(null) }
 
-    var pickedSubject by remember { mutableStateOf<String?>(null) }
-    var pickedTopic by remember { mutableStateOf<String?>(null) }        // নির্বাচিত existing Topic
-    var addingNewTopicFor by remember { mutableStateOf<String?>(null) }  // কোন subject-এর জন্য "নতুন Topic" ফিল্ড খোলা
+    var pickedSubject by remember { mutableStateOf(currentSubject) }
+    var pickedTopic by remember { mutableStateOf<String?>(null) }
+    var topicsLoading by remember { mutableStateOf(false) }
+
+    var subjectMenuExpanded by remember { mutableStateOf(false) }
+    var topicMenuExpanded by remember { mutableStateOf(false) }
+
+    var addingNewTopic by remember { mutableStateOf(false) }
     var newTopicText by remember { mutableStateOf("") }
 
-    val scope = rememberCoroutineScope()
-
-    fun toggleExpand(subject: String) {
-        val opening = expandedSubject != subject
-        expandedSubject = if (opening) subject else null
-        if (opening && !topicsCache.containsKey(subject)) {
-            loadingSubject = subject
-            scope.launch {
-                val topics = try { onLoadTopics(subject) } catch (e: Exception) { emptyList() }
-                topicsCache[subject] = topics
-                if (loadingSubject == subject) loadingSubject = null
+    fun loadTopicsFor(subj: String, autoOpenTopicMenu: Boolean) {
+        val cached = topicsCache[subj]
+        if (cached != null) {
+            if (autoOpenTopicMenu) topicMenuExpanded = true
+            return
+        }
+        topicsLoading = true
+        scope.launch {
+            val topics = try { onLoadTopics(subj) } catch (e: Exception) { emptyList() }
+            topicsCache[subj] = topics
+            if (pickedSubject == subj) {
+                topicsLoading = false
+                if (autoOpenTopicMenu) topicMenuExpanded = true
             }
         }
+    }
+
+    // প্রথমবার ডায়ালগ খুললেই বর্তমান subject-এর Topic লোড হয়ে যাক (auto-open ছাড়া)
+    LaunchedEffect(Unit) { loadTopicsFor(currentSubject, autoOpenTopicMenu = false) }
+
+    fun finishMove(newSubject: String, newSubTopic: String) {
+        if (newSubject != currentSubject || newSubTopic != currentSubTopic) {
+            onConfirm(newSubject, newSubTopic)
+        }
+        onDismiss()   // move হোক বা না হোক (একই জায়গা হলে), dialog সবসময় বন্ধ হয়ে যাবে
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
         text = {
-            Column(
-                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন — বিষয়ের পাশে ট্যাপ করলে অধ্যায় দেখা যাবে",
-                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    "Subject আর Topic বেছে নিলেই সাথে সাথে Move হয়ে যাবে",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
+                )
                 if (subjects.isEmpty()) {
                     Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
-                Spacer(Modifier.height(4.dp))
-                subjects.forEach { subject ->
-                    val isExpanded = expandedSubject == subject
-                    val isPicked = pickedSubject == subject &&
-                        (pickedTopic != null || (addingNewTopicFor == subject && newTopicText.isNotBlank()))
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isPicked) Color(0xFF0EA5E9).copy(alpha = 0.08f) else Color.Transparent)
+
+                // ── Subject ▼ ──
+                ExposedDropdownMenuBox(
+                    expanded = subjectMenuExpanded,
+                    onExpandedChange = { subjectMenuExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = pickedSubject,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Subject", fontFamily = NotoSansBengali) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = subjectMenuExpanded,
+                        onDismissRequest = { subjectMenuExpanded = false }
                     ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { toggleExpand(subject) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                if (isExpanded) "▼" else "▶",
-                                fontSize = 12.sp, color = Color(0xFF0EA5E9),
-                                modifier = Modifier.padding(end = 6.dp)
-                            )
-                            Text(
-                                subject, fontFamily = NotoSansBengali, fontSize = 13.sp,
-                                fontWeight = if (isPicked) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isPicked) Text("✅", fontSize = 13.sp)
-                        }
-                        if (isExpanded) {
-                            Column(Modifier.padding(start = 26.dp, bottom = 6.dp)) {
-                                if (loadingSubject == subject) {
-                                    Text("⏳ লোড হচ্ছে...", fontFamily = NotoSansBengali, fontSize = 11.5.sp, color = Color(0xFF6B7280))
-                                } else {
-                                    val topics = topicsCache[subject].orEmpty()
-                                    if (topics.isEmpty()) {
-                                        Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 11.5.sp, color = Color(0xFF6B7280))
-                                    }
-                                    topics.forEach { topic ->
-                                        val checked = pickedSubject == subject && pickedTopic == topic
-                                        Row(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    pickedSubject = subject; pickedTopic = topic; addingNewTopicFor = null
-                                                }
-                                                .padding(vertical = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            RadioButton(
-                                                selected = checked,
-                                                onClick = { pickedSubject = subject; pickedTopic = topic; addingNewTopicFor = null },
-                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9))
-                                            )
-                                            Text(topic, fontFamily = NotoSansBengali, fontSize = 12.5.sp)
-                                        }
-                                    }
-                                    // ── "নতুন Topic যোগ করুন" — এই Subject-এ নতুন Topic বানিয়ে সরাসরি move ──
-                                    val addingHere = addingNewTopicFor == subject
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                pickedSubject = subject; pickedTopic = null
-                                                if (addingNewTopicFor != subject) newTopicText = ""
-                                                addingNewTopicFor = subject
-                                            }
-                                            .padding(vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(
-                                            selected = addingHere,
-                                            onClick = {
-                                                pickedSubject = subject; pickedTopic = null
-                                                if (addingNewTopicFor != subject) newTopicText = ""
-                                                addingNewTopicFor = subject
-                                            },
-                                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF16A34A))
-                                        )
-                                        Text("🆕 নতুন Topic যোগ করুন", fontFamily = NotoSansBengali, fontSize = 12.5.sp,
-                                            color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
-                                    }
-                                    if (addingHere) {
-                                        OutlinedTextField(
-                                            value = newTopicText,
-                                            onValueChange = { newTopicText = it },
-                                            label = { Text("নতুন Topic-এর নাম", fontFamily = NotoSansBengali) },
-                                            modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 4.dp)
-                                        )
+                        subjects.forEach { subj ->
+                            DropdownMenuItem(
+                                text = { Text(subj, fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                                onClick = {
+                                    subjectMenuExpanded = false
+                                    if (subj != pickedSubject) {
+                                        pickedSubject = subj
+                                        pickedTopic = null
+                                        addingNewTopic = false
+                                        newTopicText = ""
+                                        // নতুন subject অনুযায়ি topic দেখানো + একটা ট্যাপ বাঁচাতে auto-open
+                                        loadTopicsFor(subj, autoOpenTopicMenu = true)
                                     }
                                 }
-                            }
+                            )
                         }
                     }
-                    Divider(Modifier.padding(vertical = 2.dp))
+                }
+
+                // ── Topic ▼ — বাছার সাথে সাথেই move ──
+                ExposedDropdownMenuBox(
+                    expanded = topicMenuExpanded && !topicsLoading,
+                    onExpandedChange = { topicMenuExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = pickedTopic ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Topic", fontFamily = NotoSansBengali) },
+                        placeholder = { Text("বাছাই করুন", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                        trailingIcon = {
+                            if (topicsLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = topicMenuExpanded)
+                            }
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = topicMenuExpanded && !topicsLoading,
+                        onDismissRequest = { topicMenuExpanded = false }
+                    ) {
+                        val topics = topicsCache[pickedSubject].orEmpty()
+                        if (topics.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)) },
+                                onClick = {},
+                                enabled = false
+                            )
+                        }
+                        topics.forEach { topic ->
+                            DropdownMenuItem(
+                                text = { Text(topic, fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                                onClick = {
+                                    topicMenuExpanded = false
+                                    pickedTopic = topic
+                                    finishMove(pickedSubject, topic)
+                                }
+                            )
+                        }
+                        Divider()
+                        // ── নতুন Topic যোগ করার অপশন — dropdown-এর একদম নিচে ──
+                        DropdownMenuItem(
+                            text = {
+                                Text("🆕 নতুন Topic যোগ করুন", fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                    color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                            },
+                            onClick = {
+                                topicMenuExpanded = false
+                                addingNewTopic = true
+                                newTopicText = ""
+                            }
+                        )
+                    }
+                }
+
+                // ── নতুন Topic টাইপ করার ফিল্ড — ✓ চাপলেই সেই মুহূর্তেই move ──
+                if (addingNewTopic) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = newTopicText,
+                            onValueChange = { newTopicText = it },
+                            label = { Text("নতুন Topic-এর নাম", fontFamily = NotoSansBengali) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                val name = newTopicText.trim()
+                                if (name.isNotBlank()) {
+                                    addingNewTopic = false
+                                    finishMove(pickedSubject, name)
+                                }
+                            },
+                            enabled = newTopicText.isNotBlank()
+                        ) {
+                            Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                                color = if (newTopicText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
-            val finalTopic = if (addingNewTopicFor != null && addingNewTopicFor == pickedSubject) newTopicText.trim() else pickedTopic
-            val canConfirm = pickedSubject != null && !finalTopic.isNullOrBlank()
-            TextButton(
-                onClick = { if (canConfirm) { onConfirm(pickedSubject!!, finalTopic!!); onDismiss() } },
-                enabled = canConfirm
-            ) { Text("📦 Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF0EA5E9)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+            TextButton(onClick = onDismiss) { Text("বন্ধ করুন", fontFamily = NotoSansBengali) }
+        }
     )
 }
 
