@@ -158,6 +158,31 @@ private fun vibrate(ctx: Context, pattern: LongArray, repeat: Int) {
     } catch (_: Exception) { }
 }
 
+// ── Admin "Move" ডায়ালগে Topic ড্রপডাউনে কোন Topic কতবার বাছা হয়েছে সেটার
+// লোকাল (ডিভাইস-প্রতি) কাউন্ট — SharedPreferences-এ সেভ থাকে, App বন্ধ/চালু
+// করলেও মনে থাকে। যত বেশিবার একটা Topic-এ move করা হবে, Topic ড্রপডাউনে
+// সেটা তত ওপরে দেখাবে — ঘন ঘন ব্যবহৃত Topic খুঁজতে স্ক্রল করা লাগবে না। ──
+private const val MOVE_TOPIC_USAGE_PREFS = "move_topic_usage_prefs"
+
+private fun moveTopicUsageKey(subject: String, topic: String) = "${subject}␟${topic}"
+
+private fun recordMoveTopicUsage(ctx: Context, subject: String, topic: String) {
+    try {
+        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
+        val key   = moveTopicUsageKey(subject, topic)
+        val count = prefs.getInt(key, 0)
+        prefs.edit().putInt(key, count + 1).apply()
+    } catch (_: Exception) { }
+}
+
+/** বেশি ব্যবহৃত Topic উপরে — কাউন্ট বেশি থেকে কমে (সমান হলে আগের ক্রম অক্ষুণ্ণ থাকে) */
+private fun sortTopicsByUsage(ctx: Context, subject: String, topics: List<String>): List<String> {
+    return try {
+        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
+        topics.sortedByDescending { prefs.getInt(moveTopicUsageKey(subject, it), 0) }
+    } catch (_: Exception) { topics }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionListScreen(
@@ -255,6 +280,19 @@ fun QuestionListScreen(
     var isSelectMode by remember { mutableStateOf(false) }
     val selectedQuestionIds = remember { mutableStateListOf<String>() }
     var showMoveQuestionsDialog by remember { mutableStateOf(false) }
+    // ── একটা প্রশ্নের নিজস্ব 📦 Move বাটনে ট্যাপ করলে (কার্ডের মধ্যে থাকা single-move
+    // আইকন) এখানে সেই প্রশ্নের id বসে — এটা selectedQuestionIds থেকে সম্পূর্ণ আলাদা,
+    // তাই মাল্টিপল-সিলেকশনে অনেকগুলো মার্ক করা অবস্থায় মাঝে কোনো একটা প্রশ্নে single
+    // move করলেও আগের মার্কগুলো কাটা/আনসিলেক্ট হয় না। null মানে single-move সক্রিয় নেই,
+    // তখন নিচের floating bar-এর selectedQuestionIds দিয়েই বাল্ক move হয়। ──
+    var singleMoveQuestionId by remember { mutableStateOf<String?>(null) }
+    // ── ডায়ালগ এই মুহূর্তে আসলে কোন প্রশ্ন(গুলো) move করবে তার তালিকা — single-move
+    // সক্রিয় থাকলে শুধু সেই একটা id, নাহলে মাল্টিপল-সিলেকশনের পুরো লিস্ট ──
+    val moveTargetIds = singleMoveQuestionId?.let { listOf(it) } ?: selectedQuestionIds.toList()
+    // ── কার্ডের Subject সেগমেন্টে ট্যাপ করলে false (Subject dropdown আগে খোলে),
+    // Topic সেগমেন্টে ট্যাপ করলে true (বর্তমান Subject-এর Topic dropdown
+    // সরাসরি/আগে থেকেই খোলা অবস্থায় দেখা যায় — এক ট্যাপেই কাজ হয়ে যায়) ──
+    var moveDialogOpenTopicFirst by remember { mutableStateOf(false) }
     // ── onAdminEdit/onAdminDelete-এর মতোই "sheet" string — CoreScreen.kt-এর sheetKey
     // হিসাবের সাথে হুবহু মিলিয়ে (GAS/Room-এ এই ক্যাপিটালাইজড ফর্মটাই ব্যবহার হয়) ──
     val moveSheetKey = when (mode) {
@@ -611,8 +649,15 @@ fun QuestionListScreen(
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     onAdminEdit = onAdminEdit,
                                     onAdminDelete = onAdminDelete,
-                                    onMoveQuestion = if (onAdminMoveQuestions != null) ({
-                                        selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                                    onMoveSubject = if (onAdminMoveQuestions != null) ({
+                                        singleMoveQuestionId = q.id
+                                        moveDialogOpenTopicFirst = false
+                                        showMoveQuestionsDialog = true
+                                    }) else null,
+                                    onMoveTopic = if (onAdminMoveQuestions != null) ({
+                                        singleMoveQuestionId = q.id
+                                        moveDialogOpenTopicFirst = true
+                                        showMoveQuestionsDialog = true
                                     }) else null,
                                     onRegenerateOptions = onRegenerateOptions,
                                     studyRecallMode = studyRecallMode,
@@ -643,8 +688,15 @@ fun QuestionListScreen(
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,
                             onAdminDelete = onAdminDelete,
-                            onMoveQuestion = if (onAdminMoveQuestions != null) ({
-                                selectedQuestionIds.clear(); selectedQuestionIds.add(q.id); showMoveQuestionsDialog = true
+                            onMoveSubject = if (onAdminMoveQuestions != null) ({
+                                singleMoveQuestionId = q.id
+                                moveDialogOpenTopicFirst = false
+                                showMoveQuestionsDialog = true
+                            }) else null,
+                            onMoveTopic = if (onAdminMoveQuestions != null) ({
+                                singleMoveQuestionId = q.id
+                                moveDialogOpenTopicFirst = true
+                                showMoveQuestionsDialog = true
                             }) else null,
                             onRegenerateOptions = onRegenerateOptions,
                             studyRevealMode = studyRevealMode,
@@ -881,7 +933,7 @@ fun QuestionListScreen(
                             Text("বাতিল", color = Color.White.copy(alpha = 0.75f), fontFamily = NotoSansBengali)
                         }
                         Button(
-                            onClick = { showMoveQuestionsDialog = true },
+                            onClick = { moveDialogOpenTopicFirst = false; showMoveQuestionsDialog = true },
                             enabled = selectedQuestionIds.isNotEmpty(),
                             colors  = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF0EA5E9),
@@ -900,17 +952,28 @@ fun QuestionListScreen(
     if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
         AdminMoveQuestionsPickerDialog(
             subjects        = vmState.subjects.map { it.name },
-            selectedCount   = selectedQuestionIds.size,
+            selectedCount   = moveTargetIds.size,
             currentSubject  = subject,
             currentSubTopic = subTopic,
+            openTopicFirst  = moveDialogOpenTopicFirst,
             onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(moveSheetKey, subj) },
             onConfirm = { newSubject, newSubTopic ->
-                val movedIds    = selectedQuestionIds.toList()
+                // ── সবচেয়ে বেশি ব্যবহৃত Topic উপরে দেখানোর জন্য প্রতিবার move
+                // করার সময় সিলেকশন-কাউন্ট বাড়ানো হয় (ডিভাইস-লোকাল, SharedPreferences) ──
+                recordMoveTopicUsage(ctxForPrefs, newSubject, newSubTopic)
+                val movedIds    = moveTargetIds
+                val wasSingleMove = singleMoveQuestionId != null
                 val fromSubject = subject
                 val fromTopic   = subTopic
                 onAdminMoveQuestions(moveSheetKey, movedIds, newSubject, newSubTopic)
-                isSelectMode = false
-                selectedQuestionIds.clear()
+                // ── single move হলে মাল্টিপল-সিলেকশন ও select-mode অক্ষত থাকে; শুধু
+                // বাল্ক (floating bar থেকে) move হলেই সব ক্লিয়ার হয় ──
+                if (wasSingleMove) {
+                    singleMoveQuestionId = null
+                } else {
+                    isSelectMode = false
+                    selectedQuestionIds.clear()
+                }
                 // ── ৫ সেকেন্ডের Undo স্ন্যাকবার — চাপলে ঠিক আগের Subject/Topic-এ ফিরিয়ে নেয় ──
                 moveSnackbarScope.launch {
                     val autoDismiss = launch {
@@ -928,7 +991,7 @@ fun QuestionListScreen(
                     }
                 }
             },
-            onDismiss = { showMoveQuestionsDialog = false }
+            onDismiss = { showMoveQuestionsDialog = false; singleMoveQuestionId = null }
         )
     }
 
@@ -1168,11 +1231,16 @@ private fun AdminMoveQuestionsPickerDialog(
     selectedCount   : Int,
     currentSubject  : String,
     currentSubTopic : String,
+    // ── true হলে ডায়ালগ খোলার সাথে সাথেই বর্তমান Subject-এর Topic dropdown
+    // সরাসরি খোলা অবস্থায় দেখা যায় (কার্ডের Topic সেগমেন্টে ট্যাপ করলে) —
+    // false হলে আগের মতোই Subject dropdown দিয়ে শুরু হয় (Subject সেগমেন্টে ট্যাপ করলে) ──
+    openTopicFirst  : Boolean = false,
     onLoadTopics    : suspend (subject: String) -> List<String>,
     onConfirm       : (newSubject: String, newSubTopic: String) -> Unit,
     onDismiss       : () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
 
     var pickedSubject by remember { mutableStateOf(currentSubject) }
@@ -1194,7 +1262,8 @@ private fun AdminMoveQuestionsPickerDialog(
         topicsLoading = true
         scope.launch {
             val topics = try { onLoadTopics(subj) } catch (e: Exception) { emptyList() }
-            topicsCache[subj] = topics
+            // ── বেশি ব্যবহৃত (বেশিবার move করা হয়েছে এমন) Topic উপরে ──
+            topicsCache[subj] = sortTopicsByUsage(ctx, subj, topics)
             if (pickedSubject == subj) {
                 topicsLoading = false
                 if (autoOpenTopicMenu) topicMenuExpanded = true
@@ -1202,8 +1271,14 @@ private fun AdminMoveQuestionsPickerDialog(
         }
     }
 
-    // প্রথমবার ডায়ালগ খুললেই বর্তমান subject-এর Topic লোড হয়ে যাক (auto-open ছাড়া)
-    LaunchedEffect(Unit) { loadTopicsFor(currentSubject, autoOpenTopicMenu = false) }
+    // প্রথমবার ডায়ালগ খুললেই বর্তমান subject-এর Topic লোড হয়ে যাক — Topic
+    // সেগমেন্ট থেকে খোলা হলে (openTopicFirst) সাথে সাথেই Topic dropdown-ও
+    // auto-open হয়ে যায়, এক ট্যাপেই কাজ হয়ে যায়। Subject সেগমেন্ট থেকে খোলা
+    // হলে (openTopicFirst == false) বদলে Subject dropdown-টাই সরাসরি auto-open হয়। ──
+    LaunchedEffect(Unit) {
+        loadTopicsFor(currentSubject, autoOpenTopicMenu = openTopicFirst)
+        if (!openTopicFirst) subjectMenuExpanded = true
+    }
 
     fun finishMove(newSubject: String, newSubTopic: String) {
         if (newSubject != currentSubject || newSubTopic != currentSubTopic) {
