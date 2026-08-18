@@ -258,16 +258,6 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomSubjectsRef()                     = refDao.getAllSubjects()
     suspend fun getRoomSubjectsRefBySheet(sheet: String)  = refDao.getSubjectsBySheet(sheet)
     suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
-
-    // ── FIX ("Topic delete/move করার পর ভুল/পুরনো কাউন্ট দেখানো" বাগ): Topics
-    // reference-টেবিলের rowCount একটা স্ট্যাটিক/ক্যাশড সংখ্যা — প্রশ্ন ডিলিট/move
-    // হলে এটা নিজে থেকে বদলায় না, আর syncReferenceData() ব্যাকগ্রাউন্ডে GAS থেকে
-    // পুরো Topics টেবিল replace করে দিলে আগের local delete-ও চাপা পড়ে যেতে পারে।
-    // এই ফাংশনটা আসল questions টেবিল থেকে সরাসরি প্রতিটা subTopic-এর *এখনকার*
-    // লাইভ কাউন্ট গোনে (GROUP BY, ০-কাউন্ট subTopic এমনিতেই বাদ পড়ে যায়) —
-    // navigateToSubjectLazy() এটা দিয়েই আসল সংখ্যা + শূন্য-প্রশ্নের Topic
-    // লুকানোর কাজ করে। ──
-    suspend fun getRoomSubTopicLiveCounts(sheet: String, subject: String) = dao.getSubTopicCounts(sheet, subject)
     suspend fun getRoomSubTopicsForTopic(topicId: String)  = refDao.getSubTopicsForTopic(topicId)
     suspend fun getRoomTags()                             = refDao.getAllTags()
     suspend fun getRoomPosts()                            = refDao.getAllPosts()
