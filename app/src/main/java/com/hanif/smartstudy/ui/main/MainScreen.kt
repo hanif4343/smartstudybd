@@ -416,6 +416,7 @@ fun MainScreen(
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
                     },
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        quizViewModel.removeQuestionsLocally(ids)
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
@@ -447,6 +448,7 @@ fun MainScreen(
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
                     },
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        qbankViewModel.removeQuestionsLocally(ids)
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
@@ -478,6 +480,7 @@ fun MainScreen(
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
                     },
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
+                        studyViewModel.removeQuestionsLocally(ids)
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
