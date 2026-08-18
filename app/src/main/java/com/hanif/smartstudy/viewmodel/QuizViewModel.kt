@@ -342,7 +342,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun navigateToSubTopicLazy(topicName: String) {
         val subject = _state.value.navPath.subject ?: return
-        val topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
+        var topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
         timerJob?.cancel()
 
         // আগের টপিকের জন্য চলমান লোড থাকলে সাথে সাথে বাতিল করো, আর এই রিকোয়েস্টের
@@ -368,16 +368,41 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 error          = null
             )
         }
-        if (topicId.isBlank()) {
-            _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি") }
-            return
-        }
         subTopicLoadJob = viewModelScope.launch {
             val sheet = when (_state.value.mode) {
                 StudyMode.QUIZ  -> "Quiz"
                 StudyMode.QBANK -> "QBank"
                 StudyMode.STUDY -> "Study"
             }
+
+            // ── FIX ("Submit → ad দেখানোর পর টপিকে ঢুকলে প্রশ্ন ফাঁকা দেখায়, Back-এও
+            // একই সমস্যা"): আগে topicId শুধু state.subTopics থেকেই খোঁজা হতো, সরাসরি
+            // এই ফাংশনের শুরুতেই (কোনো coroutine ছাড়া)। কিন্তু Result থেকে ফেরার সময়
+            // navigateBack() নিজেই আগে navPath আপডেট করে তারপর rebuildSubTopics() একটা
+            // আলাদা coroutine-এ async ভাবে চালায় — সেই coroutine শেষ হওয়ার আগেই যদি এই
+            // ফাংশন কল হয় (যেমন Ad dismiss হওয়ার সাথে সাথেই বা onRetry-তে) তাহলে
+            // state.subTopics তখনো পুরনো/খালি থাকতে পারে, topicId ফাঁকা থেকে যেত, আর
+            // "এই Topic-এর ID পাওয়া যায়নি" এরর সেট হয়ে সাথে সাথেই রিটার্ন করে ফেলত —
+            // ফলাফলে প্রশ্ন-লিস্ট চিরকাল ফাঁকাই থেকে যেত। এখন state.subTopics-এ না
+            // পেলে সরাসরি Room থেকে (subjectId + topicName দিয়ে) topicId রিজলভ করার
+            // চেষ্টা করা হয় — এটা coroutine-এর ভেতরে হওয়ায় rebuildSubTopics()-এর race
+            // থাকে না। ──
+            if (topicId.isBlank()) {
+                val subjectId = _state.value.subjects.find { it.name == subject }?.subjectId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: repo.resolveSubjectId(sheet, subject)
+                if (!subjectId.isNullOrBlank()) {
+                    topicId = repo.resolveTopicId(subjectId, topicName).orEmpty()
+                }
+            }
+
+            if (myToken != subTopicLoadToken) return@launch
+
+            if (topicId.isBlank()) {
+                _state.update { it.copy(isLoading = false, error = "এই Topic-এর ID পাওয়া যায়নি — আবার চেষ্টা করুন") }
+                return@launch
+            }
+
             val user     = session.getCurrentUser()
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
@@ -589,6 +614,40 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * Admin ঠিক যেখানে ছিল সেখানেই থাকে, আর edit করা কনটেন্ট সাথে সাথে
      * স্ক্রিনে দেখা যায় — কোনো reload/navigation jump ছাড়াই।
      */
+    /**
+     * ── FIX ("Admin delete করলে প্রশ্ন কার্ড সাথে সাথে হারায় না, উপরের জায়গা খালি
+     * থাকে যতক্ষণ না full refresh আসে"): MenuViewModel.adminDeleteQuestion() ডিলিট
+     * নিজে async ভাবে করে আর শুধু contentEditVersion বাড়ায় — MainScreen-এর
+     * LaunchedEffect(contentEditVersion) তখন adminRefreshContent() কল করে, যেটা
+     * Room থেকে পুরো টপিক আবার fetch করে (নেটওয়ার্ক/DB রাউন্ড-ট্রিপ, তাই ইনস্ট্যান্ট
+     * না)। এই ফাংশনটা admin delete-এর ঠিক পরপরই MainScreen থেকে সরাসরি কল হয়
+     * (adminRefreshContent()-এর আগেই) — state.questions থেকে আইটেমটা সাথে সাথেই
+     * ফিল্টার করে বাদ দেয়, তাই নিচের প্রশ্নগুলো নিজে থেকেই ওপরে উঠে জায়গা পূরণ করে,
+     * কোনো ফাঁকা গ্যাপ দেখা যায় না। totalQuestions/subTopics/subjects-এর গণনাও
+     * সাথে সাথেই ১ কমিয়ে দেওয়া হয় যাতে প্রগ্রেস % ভুল না দেখায়। পরে
+     * adminRefreshContent() এসে Room থেকে আসল/চূড়ান্ত ডেটা দিয়ে সবকিছু ঠিক করে দেবে।
+     */
+    fun removeQuestionLocally(rowKey: String) {
+        val current = _state.value
+        val target  = current.questions.find { it.id == rowKey } ?: return
+        _state.update {
+            it.copy(
+                questions      = it.questions.filterNot { q -> q.id == rowKey },
+                totalQuestions = (it.totalQuestions - 1).coerceAtLeast(0),
+                subTopics      = it.subTopics.map { st ->
+                    if (st.name == target.subTopic || st.name == current.navPath.subTopic)
+                        st.copy(totalQ = (st.totalQ - 1).coerceAtLeast(0))
+                    else st
+                },
+                subjects       = it.subjects.map { subj ->
+                    if (subj.name == target.subject || subj.name == current.navPath.subject)
+                        subj.copy(totalQ = (subj.totalQ - 1).coerceAtLeast(0))
+                    else subj
+                }
+            )
+        }
+    }
+
     fun adminRefreshContent() {
         viewModelScope.launch {
             val path = _state.value.navPath
