@@ -2479,11 +2479,26 @@ fun AdminFieldEditDialog(
         )
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.92f),
+            // ── FIX ("কিবোর্ড খুললে Close/Update বাটন কিবোর্ডের নিচে চাপা পড়ে যায়"):
+            // আগে এই Dialog-এর কোনো IME-awareness ছিল না — 280dp-এর OutlinedTextField
+            // (multi-line) ফোকাস করে কিবোর্ড খুললে পুরো Column-টাই স্ক্রিনের বাইরে/
+            // কিবোর্ডের নিচে চলে যেত, কারণ Dialog নিজে কিবোর্ড ইনসেট হ্যান্ডেল করে না।
+            // এখন Surface-এ .imePadding() যোগ করা হয়েছে — কিবোর্ড খুললে এটা সেই
+            // পরিমাণ উপরে উঠে যায়, আর .heightIn(max=...) + ভেতরে verticalScroll দিয়ে
+            // ছোট স্ক্রিনেও পুরো ডায়ালগ (Close/Update বাটনসহ) সবসময় দৃশ্যমান থাকে,
+            // দরকার হলে ভেতরের কনটেন্ট (টেক্সট ফিল্ড ইত্যাদি) স্ক্রল হয়। ──
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .imePadding()
+                .heightIn(max = 560.dp),
             shape    = RoundedCornerShape(20.dp),
             color    = MaterialTheme.colorScheme.surface
         ) {
-            Column(Modifier.padding(20.dp)) {
+            Column(
+                Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
