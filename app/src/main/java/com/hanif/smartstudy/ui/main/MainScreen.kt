@@ -397,6 +397,7 @@ fun MainScreen(
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
+                        quizViewModel.removeQuestionLocally(rowKey)
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     },
                     onAdminRenameSubject = { sheet, old, new ->
@@ -427,6 +428,7 @@ fun MainScreen(
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
+                        qbankViewModel.removeQuestionLocally(rowKey)
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     },
                     onAdminRenameSubject = { sheet, old, new ->
@@ -457,6 +459,7 @@ fun MainScreen(
                         menuViewModel.adminEditQuestion(sheet, rowKey, fields, preview)
                     },
                     onAdminDelete = { sheet, rowKey, preview ->
+                        studyViewModel.removeQuestionLocally(rowKey)
                         menuViewModel.adminDeleteQuestion(sheet, rowKey, preview)
                     },
                     onAdminRenameSubject = { sheet, old, new ->
