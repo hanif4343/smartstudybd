@@ -312,18 +312,41 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch {
+            val sheet = when (_state.value.mode) {
+                StudyMode.QUIZ  -> "Quiz"
+                StudyMode.QBANK -> "QBank"
+                StudyMode.STUDY -> "Study"
+            }
             val topicRows = repo.getRoomTopicsForSubject(subjectId)
-            val subTopics = topicRows.map { t ->
+            // ── FIX ("Topic delete করলে count কমে/list ছোট হয়, কিন্তু Back করে আবার
+            // ঢুকলে পুরনো/ভুল Topic লিস্ট দেখায়"): আগে totalQ = t.rowCount (Topics
+            // reference-টেবিলের স্ট্যাটিক কাউন্ট) থেকে আসতো, আর সব topic (এমনকি ০
+            // প্রশ্নওয়ালা) দেখানো হতো — কারণ reference-টেবিলের সাথে আসল questions
+            // টেবিলের কোনো লাইভ যোগাযোগ ছিল না, background sync পুরনো/ভুল ডেটা দিয়ে
+            // reference-টেবিল overwrite করে দিলে ডিলিট করা topic-ও ফিরে আসতো। এখন
+            // আসল questions টেবিল থেকে প্রতিটা topic-এর *লাইভ* কাউন্ট গোনা হয় —
+            // এখন-শূন্য topic (move/delete করে সব প্রশ্ন চলে গেছে) লিস্টেই দেখাবে না,
+            // আর কোনো প্রশ্ন থাকলে ঠিক ততটাই দেখাবে (move করে আনা প্রশ্নসহ)। এই
+            // topic Move dialog-এ (AdminMoveQuestionsPickerDialog → adminTopicsForSubject())
+            // এখনো ঠিকই দেখা যাবে, কারণ সেটা এখনো reference-টেবিল (নাম-ভিত্তিক, count
+            // নির্বিশেষে) থেকেই লিস্ট আনে — তাই শূন্য-প্রশ্নের topic-এও আবার প্রশ্ন
+            // move করে আনা যায়। ──
+            val liveCounts = try {
+                repo.getRoomSubTopicLiveCounts(sheet, subjectName).associateBy({ it.subTopic }, { it.count })
+            } catch (e: Exception) { emptyMap() }
+            val subTopics = topicRows.mapNotNull { t ->
+                val liveCount = liveCounts[t.name] ?: 0
+                if (liveCount <= 0) return@mapNotNull null   // শূন্য প্রশ্নের topic লুকানো
                 SubTopicEntry(
                     name      = t.name,
                     subject   = subjectName,
-                    totalQ    = t.rowCount,   // Topics reference-টেবিলে indexed count (থাকলে), নাহলে ০
+                    totalQ    = liveCount,
                     doneQ     = 0,
                     subjectId = t.subjectId,
                     topicId   = t.topicId
                 )
             }.sortedBy { it.name }
-            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
+            Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size} (live-count filtered)")
             _state.update { it.copy(subTopics = subTopics, isLoading = false) }
         }
     }
@@ -643,6 +666,46 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     if (subj.name == target.subject || subj.name == current.navPath.subject)
                         subj.copy(totalQ = (subj.totalQ - 1).coerceAtLeast(0))
                     else subj
+                }
+            )
+        }
+    }
+
+    /**
+     * ── Admin "Move Question(s)" — removeQuestionLocally()-এরই বাল্ক ভার্সন। Move
+     * confirm হওয়ার সাথে সাথেই (menuViewModel.adminMoveQuestions() এর network/Room কল
+     * শেষ হওয়ার অপেক্ষা না করে) MainScreen থেকে এটা কল হয় — সরানো প্রশ্নগুলো
+     * state.questions থেকে সাথে সাথে বাদ পড়ে, LazyColumn-এর animateItemPlacement()
+     * (দেখো QuestionCard-এর modifier) বাকি প্রশ্নগুলোকে নিজে থেকেই স্মূথলি ওপরে তুলে
+     * আনে — কোনো ফাঁকা গ্যাপ বা রিফ্রেশের অপেক্ষা ছাড়াই "সরানো হয়েছে" তাৎক্ষণিক অনুভূত হয়।
+     *
+     * এখনকার Topic-এর subTopics এন্ট্রির totalQ-ও সাথে সাথেই কমে যায় — এটা ০-তে নেমে
+     * গেলে (এই Topic-এর সব প্রশ্নই move হয়ে গেছে) সেই Topic subTopics লিস্ট থেকে সাথে
+     * সাথেই সরে যায় (নেভিগেট করে subject-এ আবার ঢোকার অপেক্ষা করা লাগে না) —
+     * navigateToSubjectLazy()-এর লাইভ-কাউন্ট ফিল্টারের সাথে সামঞ্জস্যপূর্ণ আচরণ।
+     * পরে adminRefreshContent() এসে Room থেকে আসল/চূড়ান্ত ডেটা দিয়ে সবকিছু নিশ্চিত করে দেবে।
+     */
+    fun removeQuestionsLocally(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val idSet   = ids.toSet()
+        val current = _state.value
+        val removed = current.questions.filter { it.id in idSet }
+        if (removed.isEmpty()) return
+        val countBySubTopic = removed.groupingBy { it.subTopic.ifBlank { current.navPath.subTopic.orEmpty() } }.eachCount()
+        val countBySubject  = removed.groupingBy { it.subject.ifBlank { current.navPath.subject.orEmpty() } }.eachCount()
+        _state.update {
+            it.copy(
+                questions      = it.questions.filterNot { q -> q.id in idSet },
+                totalQuestions = (it.totalQuestions - removed.size).coerceAtLeast(0),
+                subTopics      = it.subTopics.mapNotNull { st ->
+                    val dec = countBySubTopic[st.name] ?: 0
+                    if (dec <= 0) return@mapNotNull st
+                    val newTotal = (st.totalQ - dec).coerceAtLeast(0)
+                    if (newTotal <= 0) null else st.copy(totalQ = newTotal)   // শূন্য হলে সাথে সাথেই লিস্ট থেকে হাইড
+                },
+                subjects       = it.subjects.map { subj ->
+                    val dec = countBySubject[subj.name] ?: 0
+                    if (dec <= 0) subj else subj.copy(totalQ = (subj.totalQ - dec).coerceAtLeast(0))
                 }
             )
         }
