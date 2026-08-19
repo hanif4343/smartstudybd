@@ -55,6 +55,13 @@ private val subjectIcons = mapOf(
 private fun subjectIcon(name: String): String =
     subjectIcons.entries.firstOrNull { name.contains(it.key) }?.value ?: "📚"
 
+// ── একটা অধ্যায়ে (topic) আসলেই কোনো প্রশ্ন আছে কিনা — টপিক লিস্টে দেখানো এবং
+// সাবজেক্ট কার্ডে "X টি অধ্যায়" গোনা, দুই জায়গাতেই এই একই শর্ত ব্যবহার করতে হবে,
+// নাহলে সাবজেক্টে বলা টপিক-সংখ্যা আর আসল টপিক-লিস্টে দেখানো সংখ্যা বেমিল হয়ে যায়।
+// Model Test এন্ট্রি totalQ দিয়ে গোনা হয় না (ওটার প্রশ্ন modelTestCount দিয়ে গোনা হয়),
+// তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
+private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
+
 // ─────────────────────────────────────────────────────────
 // Subject List Screen
 // ─────────────────────────────────────────────────────────
@@ -774,7 +781,7 @@ private fun QBankSubjectCard(
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("📂", fontSize = 10.sp)
-                Text(subLabelOverride ?: "${subject.subTopics.size} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
+                Text(subLabelOverride ?: "${subject.subTopics.count { it.hasQuestions() }} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
             }
 
@@ -898,6 +905,15 @@ fun SubTopicListScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveDialog   by remember { mutableStateOf(false) }
 
+    // ── প্রশ্ন-শূন্য অধ্যায় সাধারণ ব্রাউজিং-এ কখনোই দেখানো হবে না (student ভুল করে
+    // ফাঁকা টপিকে ঢুকবে না, আর হেডারের "X টি অধ্যায়" কাউন্টও লিস্টে যা দেখা যাচ্ছে
+    // তার সাথে মিলবে)। তবে Admin যখন reorder মোডে আছে, তখন পুরো (ফাঁকাসহ) লিস্ট
+    // দেখানো হয় — নাহলে খালি হয়ে যাওয়া টপিক আর সাজানো/দেখা যাবে না। Rename/Delete/
+    // Move ডায়ালগও ইচ্ছাকৃতভাবে নিচে পুরো subTopics লিস্ট ব্যবহার করে, যাতে খালি
+    // টপিক অ্যাডমিন ঠিক করতে/মুছতে পারে। ──
+    val visibleSubTopics = if (isAdmin && isReorderMode) subTopics
+                            else subTopics.filter { it.hasQuestions() }
+
     LazyColumn(
         modifier       = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 100.dp)
@@ -915,7 +931,7 @@ fun SubTopicListScreen(
                     Column(Modifier.weight(1f)) {
                         Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali)
-                        Text("${subTopics.size} টি অধ্যায়", fontSize = 11.sp, color = Color.White.copy(0.65f),
+                        Text("${visibleSubTopics.size} টি অধ্যায়", fontSize = 11.sp, color = Color.White.copy(0.65f),
                             fontFamily = NotoSansBengali)
                     }
                     if (isAdmin) {
@@ -948,13 +964,13 @@ fun SubTopicListScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement   = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(subTopics) { idx, st ->
+                    itemsIndexed(visibleSubTopics) { idx, st ->
                         QBankTopicCard(
                             st = st,
                             onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
                             reorderEnabled = reorderEnabled && !st.isModelTest,
                             isFirst = idx == 0,
-                            isLast  = idx == subTopics.lastIndex,
+                            isLast  = idx == visibleSubTopics.lastIndex,
                             onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
                             onMoveDown = { onMoveSubTopic(idx, idx + 1) },
                             reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
@@ -963,13 +979,13 @@ fun SubTopicListScreen(
                 }
             }
         } else {
-            itemsIndexed(subTopics) { idx, st ->
+            itemsIndexed(visibleSubTopics) { idx, st ->
                 SubTopicCard(
                     st = st,
                     onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
                     reorderEnabled = reorderEnabled && !st.isModelTest,
                     isFirst = idx == 0,
-                    isLast  = idx == subTopics.lastIndex,
+                    isLast  = idx == visibleSubTopics.lastIndex,
                     onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
                     onMoveDown = { onMoveSubTopic(idx, idx + 1) },
                     reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
