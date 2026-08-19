@@ -42,6 +42,13 @@ android {
 
         buildConfigField "String", "GAS_URL",    secretField("GAS_URL")
         buildConfigField "String", "GAS_SECRET", secretField("GAS_SECRET")
+
+        // ── CDN Phase 9 — Worker URL/secret, GAS_URL/GAS_SECRET-এর একই প্যাটার্নে।
+        // env var সেট না থাকলে খালি স্ট্রিং হয়ে যাবে (secretField-এর ডিফল্ট),
+        // তখন CdnService.isConfigured()=false আর অ্যাপ GAS পাথেই চলবে —
+        // কোনো compile-time নির্ভরতা নেই deploy হয়েছে কিনা তার ওপর। ──
+        buildConfigField "String", "CDN_WORKER_URL", secretField("CDN_WORKER_URL")
+        buildConfigField "String", "CDN_APP_SECRET", secretField("CDN_APP_SECRET")
     }
 
     signingConfigs {
