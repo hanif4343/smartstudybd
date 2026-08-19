@@ -35,7 +35,14 @@ import androidx.room.RoomDatabase
     // subjectVisibleForUser() ও QuizViewModel.rebuildSubjectsLazy())।
     // fallbackToDestructiveMigration() থাকায় migration SQL লাগে না — শুধু cache
     // রিফ্রেশ হবে, পরের syncReferenceData()-এই আবার পপুলেট হয়ে যাবে।
-    version = 13,
+    // v13 → v14: TopicEntity-তে rowCountQuiz/rowCountQbank/rowCountStudy কলাম যোগ হলো
+    // — FIX ("Article: 74 প্রশ্ন" দেখাতো কিন্তু Quiz শুরু করলে ভিতরে ২৩টা): আগে একটাই
+    // mode-নিরপেক্ষ rowCount কলাম ছিল যেটাতে আসলে সবসময় Study sheet-এর কাউন্ট বসতো
+    // (GAS rebuildIndex-এর প্রসেসিং-ক্রমের কারণে) — Quiz/QBank মোডে ব্রাউজ করলেও ভুল
+    // সংখ্যা দেখাতো। এখন per-sheet কলাম আলাদা, দেখো ReferenceModels.kt/QuizViewModel.
+    // navigateToSubjectLazy()। fallbackToDestructiveMigration() থাকায় migration SQL
+    // লাগে না।
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
