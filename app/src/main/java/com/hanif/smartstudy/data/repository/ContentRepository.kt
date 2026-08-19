@@ -1115,10 +1115,20 @@ class ContentRepository(private val context: Context) {
     // সাথে সাথেই dao.countByTopicId() দিয়ে Room-এর প্রশ্ন-টেবিল থেকে আসল/লাইভ কাউন্ট
     // গুনে সরাসরি Topics.rowCount আপডেট করে দেওয়া হয় — GAS sync-এর অপেক্ষা ছাড়াই,
     // Room-ই একমাত্র সোর্স-অফ-ট্রুথ (local ও DB সবসময় সেম থাকে)। ──
+    // ── FIX ("Article: 74 প্রশ্ন" দেখাতো Quiz-এ ঢুকলে ভিতরে ২৩টা — মূল কারণ): rowCount
+    // মোড-নিরপেক্ষ একটাই generic কলাম ছিল, কিন্তু একই topic_id Quiz/QBank/Study তিন
+    // sheet-এই আলাদা প্রশ্ন-সংখ্যা রাখতে পারে। এখন live count যেই sheet-এ move হলো
+    // ঠিক তার নিজের per-sheet কলামেই বসে (+ legacy generic কলামও sync রাখা হয়, পুরনো
+    // কোনো UI path এখনো সেটা পড়লে অন্তত এই sheet-এর সঠিক সংখ্যাই পাবে)। ──
     private suspend fun refreshTopicRowCount(sheet: String, topicId: String) {
         if (topicId.isBlank()) return
         val live = dao.countByTopicId(sheet.uppercase(), topicId)
-        refDao.updateTopicRowCount(topicId, live)
+        refDao.updateTopicRowCount(topicId, live)   // legacy fallback column
+        when (sheet.uppercase()) {
+            "QUIZ"  -> refDao.updateTopicRowCountQuiz(topicId, live)
+            "QBANK" -> refDao.updateTopicRowCountQbank(topicId, live)
+            "STUDY" -> refDao.updateTopicRowCountStudy(topicId, live)
+        }
     }
 
     /** removeRoomQuestionsBySubject()-এর মতোই — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list) Room-এ
