@@ -102,6 +102,16 @@ interface ReferenceDao {
     @Query("UPDATE topics SET subjectId = :newSubjectId WHERE topicId = :topicId")
     suspend fun reparentTopic(topicId: String, newSubjectId: String)
 
+    // ── FIX ("সাবজেক্টে টপিক-সংখ্যা / টপিকে প্রশ্ন-সংখ্যা বেমিল দেখাচ্ছে", "move করার পর
+    // কাউন্ট রিয়েল-টাইম আপডেট হয় না"): rowCount কলাম শুধু syncReferenceData()
+    // (GAS থেকে, পর্যায়ক্রমে) দিয়ে বসতো — কোনো move/delete-এর সময় local ভাবে এটা কখনো
+    // ছোঁয়াই হতো না। ContentRepository.refreshTopicRowCount() move-এর সাথে সাথেই
+    // dao.countByTopicId() দিয়ে Room-এর প্রশ্ন-টেবিল থেকে লাইভ কাউন্ট গুনে এই মেথড দিয়ে
+    // সরাসরি বসিয়ে দেয় — শুধু rowCount কলামটাই ছোঁয়, বাকি সব ফিল্ড (name, subjectId,
+    // order ইত্যাদি) অক্ষত থাকে। ──
+    @Query("UPDATE topics SET rowCount = :count WHERE topicId = :topicId")
+    suspend fun updateTopicRowCount(topicId: String, count: Int)
+
     @Query("UPDATE subtopics SET topicId = :targetTopicId WHERE topicId = :sourceTopicId")
     suspend fun reassignSubTopics(sourceTopicId: String, targetTopicId: String)
 
