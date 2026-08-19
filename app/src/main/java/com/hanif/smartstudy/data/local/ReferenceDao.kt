@@ -103,14 +103,26 @@ interface ReferenceDao {
     suspend fun reparentTopic(topicId: String, newSubjectId: String)
 
     // ── FIX ("সাবজেক্টে টপিক-সংখ্যা / টপিকে প্রশ্ন-সংখ্যা বেমিল দেখাচ্ছে", "move করার পর
-    // কাউন্ট রিয়েল-টাইম আপডেট হয় না"): rowCount কলাম শুধু syncReferenceData()
-    // (GAS থেকে, পর্যায়ক্রমে) দিয়ে বসতো — কোনো move/delete-এর সময় local ভাবে এটা কখনো
-    // ছোঁয়াই হতো না। ContentRepository.refreshTopicRowCount() move-এর সাথে সাথেই
-    // dao.countByTopicId() দিয়ে Room-এর প্রশ্ন-টেবিল থেকে লাইভ কাউন্ট গুনে এই মেথড দিয়ে
-    // সরাসরি বসিয়ে দেয় — শুধু rowCount কলামটাই ছোঁয়, বাকি সব ফিল্ড (name, subjectId,
-    // order ইত্যাদি) অক্ষত থাকে। ──
+    // কাউন্ট রিয়েল-টাইম আপডেট হয় না", "Article: 74 প্রশ্ন দেখাতো Quiz-এ ঢুকলে ভিতরে ২৩টা"):
+    // rowCount কলাম শুধু syncReferenceData() (GAS থেকে, পর্যায়ক্রমে) দিয়ে বসতো — কোনো
+    // move/delete-এর সময় local ভাবে এটা কখনো ছোঁয়াই হতো না। এছাড়াও একই topic_id
+    // Quiz/QBank/Study — তিনটা sheet-এই আলাদা প্রশ্ন-সংখ্যা থাকতে পারে, তাই একটা মাত্র
+    // generic rowCount কলামে সব sheet-এর জন্য একই সংখ্যা বসানো ভুল ছিল। এখন প্রতিটা
+    // sheet-এর জন্য আলাদা আপডেট-মেথড — ContentRepository.refreshTopicRowCount() move-এর
+    // সাথে সাথেই dao.countByTopicId() দিয়ে Room থেকে লাইভ কাউন্ট গুনে সঠিক sheet-এর
+    // কলামে বসিয়ে দেয় (+ legacy rowCount-ও fallback হিসেবে সিঙ্কে রাখে) — বাকি সব ফিল্ড
+    // (name, subjectId, order ইত্যাদি) অক্ষত থাকে। ──
     @Query("UPDATE topics SET rowCount = :count WHERE topicId = :topicId")
     suspend fun updateTopicRowCount(topicId: String, count: Int)
+
+    @Query("UPDATE topics SET rowCountQuiz = :count WHERE topicId = :topicId")
+    suspend fun updateTopicRowCountQuiz(topicId: String, count: Int)
+
+    @Query("UPDATE topics SET rowCountQbank = :count WHERE topicId = :topicId")
+    suspend fun updateTopicRowCountQbank(topicId: String, count: Int)
+
+    @Query("UPDATE topics SET rowCountStudy = :count WHERE topicId = :topicId")
+    suspend fun updateTopicRowCountStudy(topicId: String, count: Int)
 
     @Query("UPDATE subtopics SET topicId = :targetTopicId WHERE topicId = :sourceTopicId")
     suspend fun reassignSubTopics(sourceTopicId: String, targetTopicId: String)
