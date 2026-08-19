@@ -15,6 +15,8 @@ jobs:
       FCM_PRIVATE_KEY:  ${{ secrets.FCM_PRIVATE_KEY }}
       GAS_URL:          ${{ secrets.GAS_URL }}
       GAS_SECRET:       ${{ secrets.GAS_SECRET }}
+      CDN_WORKER_URL:   ${{ secrets.CDN_WORKER_URL }}
+      CDN_APP_SECRET:   ${{ secrets.CDN_APP_SECRET }}
 
     steps:
       - name: Checkout
