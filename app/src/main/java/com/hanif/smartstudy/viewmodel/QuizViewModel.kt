@@ -311,13 +311,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(isLoading = false, error = "এই Subject-এর ID পাওয়া যায়নি — Admin App-এ Reference ঠিক আছে কিনা দেখো") }
             return
         }
+        val mode = _state.value.mode
         viewModelScope.launch {
             val topicRows = repo.getRoomTopicsForSubject(subjectId)
             val subTopics = topicRows.map { t ->
+                // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
+                // (generic legacy কলাম) সবসময় Study sheet-এর কাউন্ট বহন করতো, মোড যাই হোক
+                // না কেন। এখন বর্তমান StudyMode অনুযায়ী সঠিক per-sheet কলাম বেছে নেওয়া হচ্ছে
+                // — নতুন কলাম এখনো ০ থাকলে (rebuildIndex পুরনো ভার্সনে চলেছিল/এখনো চলেনি,
+                // per-sheet কলাম ফাঁকা) legacy rowCount-এ fallback করে, যাতে rebuildIndex
+                // নতুন করে না চালানো পর্যন্ত পুরোপুরি ০ না দেখায়। ──
+                val perSheetCount = when (mode) {
+                    StudyMode.QUIZ  -> t.rowCountQuiz
+                    StudyMode.QBANK -> t.rowCountQbank
+                    StudyMode.STUDY -> t.rowCountStudy
+                }
                 SubTopicEntry(
                     name      = t.name,
                     subject   = subjectName,
-                    totalQ    = t.rowCount,   // Topics reference-টেবিলে indexed count (থাকলে), নাহলে ০
+                    totalQ    = if (perSheetCount > 0) perSheetCount else t.rowCount,
                     doneQ     = 0,
                     subjectId = t.subjectId,
                     topicId   = t.topicId
