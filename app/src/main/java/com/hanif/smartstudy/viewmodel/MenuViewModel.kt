@@ -1788,10 +1788,30 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             }
             val finalNewTopicId = newTopicId
 
+            // ── FIX ("move করার পর সোর্স টপিকের কাউন্ট রিয়েল-টাইম আপডেট হচ্ছিল না"):
+            // moveRoomQuestionsByIds()-কে সোর্স টপিকের rowCount সাথে সাথে ঠিক করতে হলে
+            // ওই ids গুলো move হওয়ার *আগে* কোন topicId-তে ছিল সেটা জানা লাগে — এখানে
+            // আগে কখনো resolve করা হতো না। এখন patch/move শুরু করার ঠিক আগে (তখনো
+            // পুরনো subject/topic-ই আছে) Room থেকে ওই ids-এর আসল প্রশ্ন এনে তাদের
+            // subject/subTopic দিয়ে oldTopicId বের করে নেওয়া হচ্ছে — audience-filter
+            // ছাড়াই (admin-only ফাংশন, getAdminAudienceTag() দিয়ে সব দেখা যায়)। ──
+            val oldTopicId = try {
+                val adminTag = session.getAdminAudienceTag()
+                val sourceItems = contentRepo.getRoomQuestionsByIds(sheet, ids, adminTag)
+                val firstSource = sourceItems.firstOrNull()
+                if (firstSource != null) {
+                    val oldSubjectId = contentRepo.resolveSubjectId(sheet, firstSource.subject)
+                    oldSubjectId?.let { contentRepo.resolveTopicId(it, firstSource.subTopic) }
+                } else null
+            } catch (e: Exception) {
+                android.util.Log.w("AdminMove", "oldTopicId resolve failed (non-fatal, source rowCount won't live-refresh): ${e.message}")
+                null
+            }
+
             try {
                 contentRepo.patchContentBulkAndPersist(sheet, ids.toSet(), mapOf("subject" to newSubjectName, "sub_topic" to newSubTopicName))
                 try {
-                    contentRepo.moveRoomQuestionsByIds(sheet, ids, newSubjectName, newSubTopicName, newSubjectId, finalNewTopicId)
+                    contentRepo.moveRoomQuestionsByIds(sheet, ids, newSubjectName, newSubTopicName, newSubjectId, finalNewTopicId, oldTopicId)
                 } catch (e: Exception) {
                     android.util.Log.w("AdminMove", "Room questions move failed (non-fatal): ${e.message}")
                 }
@@ -1913,7 +1933,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     android.util.Log.w("AdminMove", "Room questions move (topic) failed (non-fatal): ${e.message}")
                 }
                 try {
-                    contentRepo.moveRoomTopicReference(topicId, newSubjectId, mergeTopicId)
+                    contentRepo.moveRoomTopicReference(topicId, newSubjectId, mergeTopicId, sheet)
                 } catch (e: Exception) {
                     android.util.Log.w("AdminMove", "Room topic reference move failed (non-fatal): ${e.message}")
                 }
