@@ -24,7 +24,14 @@ import java.util.concurrent.TimeUnit
  * ══════════════════════════════════════════════════════════════════════════
  */
 object CdnService {
-    private const val TAG = "CdnService"
+    // ── Kotlin visibility নিয়ম: `suspend inline fun <reified T>` (নিচে
+    // fetchTopicJson) পাবলিক inline ফাংশন — inline ফাংশনের বাইটকোড call-site-এ
+    // কপি হয়ে যায় বলে ভিতরে `private` মেম্বার ব্যবহার করা যায় না (Kotlin
+    // কম্পাইলার এরর দেয়: "Public-API inline function cannot access non-public-
+    // API")। তাই এই ৪টা মেম্বার `private`-এর বদলে `@PublishedApi internal` —
+    // এতে module-এর বাইরে এক্সপোজ হয় না (কার্যত private-ই থাকে), কিন্তু
+    // inline ফাংশন থেকে ব্যবহার করা যায়। ──
+    @PublishedApi internal const val TAG = "CdnService"
 
     // ⚠️ app/build.gradle-এ buildConfigField হিসেবে যোগ করা হয়েছে (GAS_URL/
     // GAS_SECRET-এর একই secretField() প্যাটার্নে) — env var সেট না থাকলে খালি
@@ -32,12 +39,12 @@ object CdnService {
     private val WORKER_URL: String by lazy { BuildConfig.CDN_WORKER_URL.trimEnd('/') }
     private val APP_SECRET: String by lazy { BuildConfig.CDN_APP_SECRET }
 
-    private val client = OkHttpClient.Builder()
+    @PublishedApi internal val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val gson = CaseInsensitiveGson.instance
+    @PublishedApi internal val gson = CaseInsensitiveGson.instance
 
     fun isConfigured(): Boolean = WORKER_URL.isNotBlank() && APP_SECRET.isNotBlank()
 
@@ -55,7 +62,7 @@ object CdnService {
         val topics        : Map<String, TopicManifestEntry> = emptyMap()
     )
 
-    private fun requestBuilder(path: String): Request.Builder =
+    @PublishedApi internal fun requestBuilder(path: String): Request.Builder =
         Request.Builder().url("$WORKER_URL$path").header("X-App-Secret", APP_SECRET)
 
     /** manifest.json — no-cache (Worker-সাইডে সবসময় fresh), তাই এখানেও কোনো
