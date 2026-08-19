@@ -1106,27 +1106,62 @@ class ContentRepository(private val context: Context) {
         cache.saveContent(patched)
     }
 
-    /** removeRoomQuestionsBySubject()-এর মতোই — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list) Room-এ
-     *  move করে (subject/subTopic/subjectId/topicId আপডেট, fbKey/id অপরিবর্তিত)। */
-    suspend fun moveRoomQuestionsByIds(
-        sheet: String, ids: List<String>, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
-    ) = withContext(Dispatchers.IO) {
-        dao.moveQuestionsByIds(sheet.uppercase(), ids, newSubject, newSubTopic, newSubjectId, newTopicId)
+    // ── FIX ("সাবজেক্টে টপিক-সংখ্যা / টপিকে প্রশ্ন-সংখ্যা বেমিল দেখাচ্ছে", "move করার পর
+    // কাউন্ট রিয়েল-টাইম আপডেট হয় না"): Topics reference-টেবিলের rowCount কলাম শুধু
+    // syncReferenceData() (GAS থেকে, পর্যায়ক্রমে/cache-gate সহ) দিয়ে বসে — কোনো move/
+    // delete-এর সময় local ভাবে এটা কখনো ছোঁয়াই হতো না। ফলে প্রশ্ন move হওয়ার পরও
+    // সোর্স/ডেস্টিনেশন দুই টপিকেরই দেখানো সংখ্যা পুরনো/ভুল থেকে যেত যতক্ষণ না পরের
+    // পর্যায়ক্রমিক reference sync আসত (মিনিট কয়েক লাগতে পারত)। এখন প্রতিটা move-এর
+    // সাথে সাথেই dao.countByTopicId() দিয়ে Room-এর প্রশ্ন-টেবিল থেকে আসল/লাইভ কাউন্ট
+    // গুনে সরাসরি Topics.rowCount আপডেট করে দেওয়া হয় — GAS sync-এর অপেক্ষা ছাড়াই,
+    // Room-ই একমাত্র সোর্স-অফ-ট্রুথ (local ও DB সবসময় সেম থাকে)। ──
+    private suspend fun refreshTopicRowCount(sheet: String, topicId: String) {
+        if (topicId.isBlank()) return
+        val live = dao.countByTopicId(sheet.uppercase(), topicId)
+        refDao.updateTopicRowCount(topicId, live)
     }
 
-    /** পুরো Topic-এর (topicId মিলিয়ে) সব প্রশ্ন Room-এ move করে। */
+    /** removeRoomQuestionsBySubject()-এর মতোই — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list) Room-এ
+     *  move করে (subject/subTopic/subjectId/topicId আপডেট, fbKey/id অপরিবর্তিত)। move-এর
+     *  পরপরই সোর্স ও ডেস্টিনেশন — দুই Topic-এরই rowCount Room থেকে লাইভ গুনে আপডেট হয়।
+     *  oldTopicId ঐচ্ছিক (caller-এর কাছে সবসময় নাও থাকতে পারে) — দিলে সোর্স টপিকের কাউন্টও
+     *  সাথে সাথে ঠিক হয়ে যায়, না দিলে শুধু ডেস্টিনেশন টপিকের কাউন্ট আপডেট হবে। */
+    suspend fun moveRoomQuestionsByIds(
+        sheet: String, ids: List<String>, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String,
+        oldTopicId: String? = null
+    ) = withContext(Dispatchers.IO) {
+        dao.moveQuestionsByIds(sheet.uppercase(), ids, newSubject, newSubTopic, newSubjectId, newTopicId)
+        if (!oldTopicId.isNullOrBlank()) refreshTopicRowCount(sheet, oldTopicId)
+        refreshTopicRowCount(sheet, newTopicId)
+    }
+
+    /** পুরো Topic-এর (topicId মিলিয়ে) সব প্রশ্ন Room-এ move করে। move-এর পর সোর্স Topic-এর
+     *  rowCount ০-তে নেমে যায় (তাই লিস্টে আর দেখাবে না) আর ডেস্টিনেশন Topic-এর rowCount
+     *  Room থেকে লাইভ গুনে ঠিক হয়ে যায়। */
     suspend fun moveRoomQuestionsByTopic(
         sheet: String, oldTopicId: String, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
     ) = withContext(Dispatchers.IO) {
         dao.moveQuestionsByTopicId(sheet.uppercase(), oldTopicId, newSubject, newSubTopic, newSubjectId, newTopicId)
+        refreshTopicRowCount(sheet, oldTopicId)
+        refreshTopicRowCount(sheet, newTopicId)
     }
 
     /** Room reference-টেবিলে (Topics) Topic-টা reparent করে — mergeTopicId দেওয়া থাকলে
      *  destination-এর existing Topic-এর সাথে merge (সোর্স Topic-রো ডিলিট), নাহলে শুধু
-     *  subjectId কলাম বদলে reparent। */
-    suspend fun moveRoomTopicReference(topicId: String, newSubjectId: String, mergeTopicId: String?) = withContext(Dispatchers.IO) {
-        if (!mergeTopicId.isNullOrBlank()) refDao.mergeTopicCascade(topicId, mergeTopicId)
-        else refDao.reparentTopic(topicId, newSubjectId)
+     *  subjectId কলাম বদলে reparent। merge হলে সব প্রশ্ন mergeTopicId-এর আন্ডারে চলে যায়,
+     *  তাই merge target-এর rowCount-ও সাথে সাথে লাইভ রিফ্রেশ হয়ে যায় — একটা sheet
+     *  প্যারামিটার লাগে (প্রশ্ন কোন Room টেবিলে আছে সেটা বলার জন্য); না দিলে (পুরনো
+     *  call site ভাঙবে না বলে ডিফল্ট null) rowCount রিফ্রেশ স্কিপ হবে, পরের পর্যায়ক্রমিক
+     *  reference sync-এই ঠিক হবে। */
+    suspend fun moveRoomTopicReference(
+        topicId: String, newSubjectId: String, mergeTopicId: String?, sheet: String? = null
+    ) = withContext(Dispatchers.IO) {
+        if (!mergeTopicId.isNullOrBlank()) {
+            refDao.mergeTopicCascade(topicId, mergeTopicId)
+            if (!sheet.isNullOrBlank()) refreshTopicRowCount(sheet, mergeTopicId)
+        } else {
+            refDao.reparentTopic(topicId, newSubjectId)
+        }
     }
 
     // ── "নতুন Topic যোগ করে Move" — adminAddQuestion()-এর localId প্যাটার্নের মতোই,
