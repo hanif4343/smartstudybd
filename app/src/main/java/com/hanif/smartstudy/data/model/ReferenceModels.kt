@@ -36,7 +36,18 @@ data class TopicRef(
     // EntityExtensions.kt-এর toEntity()-তে toIntOrNull() দিয়ে ডিফেন্সিভলি হয় —
     // এই একই প্যাটার্ন এই ফাইলেরই অন্য জায়গায় (QuestionEntity.subIndex) আগে থেকেই আছে।
     @SerializedName("row_start")  val rowStart  : String? = null,
-    @SerializedName("row_count")  val rowCount  : String? = null
+    @SerializedName("row_count")  val rowCount  : String? = null,
+    // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz শুরু করলে ভিতরে ২৩টা — মূল কারণ):
+    // GAS-এর rebuildIndex Quiz/QBank/Study প্রতিটার জন্য আলাদা row_count_<sheet>
+    // কলাম বসায় (Topics ট্যাবের একই topic_id একাধিক sheet-এ থাকতে পারে, প্রতিটার
+    // নিজের প্রশ্ন-সংখ্যা আলাদা)। কিন্তু উপরের generic row_count কলামে rebuildIndex
+    // সবসময় সবচেয়ে শেষে প্রসেস হওয়া sheet-এর (Study) মান বসায় (legacy backward-compat
+    // কলাম, একবারই ওভাররাইট হয়) — তাই এতদিন Quiz/QBank মোডেও ভুলে Study sheet-এর
+    // কাউন্ট দেখানো হচ্ছিল। এখন সঠিক per-sheet কলাম আলাদাভাবে পড়া হচ্ছে, আর
+    // QuizViewModel.navigateToSubjectLazy() বর্তমান StudyMode অনুযায়ী সঠিকটা বেছে নেয়। ──
+    @SerializedName("row_count_quiz")  val rowCountQuiz  : String? = null,
+    @SerializedName("row_count_qbank") val rowCountQbank : String? = null,
+    @SerializedName("row_count_study") val rowCountStudy : String? = null
 )
 
 data class SubTopicRef(
