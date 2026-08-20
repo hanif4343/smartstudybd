@@ -37,8 +37,18 @@ fun SplashScreen(
         label = "scale"
     )
 
+    // ── FIX ("অ্যাপ ওপেন হতে ১৫-২০ সেকেন্ড লাগে"): আগে এখানে হার্ডকোড করা
+    // delay(2500) ছিল — শুধু লোগো দেখানোর জন্য প্রতিবার অ্যাপ-ওপেনে আড়াই সেকেন্ড
+    // জোর করে বসিয়ে রাখা হতো, session/login চেক ঢাকঢাক থেকেই ইনস্ট্যান্ট
+    // (SharedPreferences read, নেটওয়ার্ক কল না)। এই ২.৫ সেকেন্ড + Android-এর নিজস্ব
+    // system splash (installSplashScreen()) + MainActivity.onCreate()-এর কাজ
+    // মিলিয়েই বেশিরভাগ "অ্যাপ খুলতে দেরি" অনুভূতির মূল কারণ ছিল। এখন মাত্র ৪৫০ms
+    // রাখা হলো — লোগো/অ্যানিমেশন এক ঝলক দেখা যাওয়ার জন্য যথেষ্ট, কিন্তু আর কৃত্রিম
+    // অপেক্ষা নেই। SessionManager(context).isLoggedIn() একটা লোকাল
+    // SharedPreferences read মাত্র (কোনো নেটওয়ার্ক কল না) — তাই এরপর সাথে সাথেই
+    // পরের স্ক্রিনে চলে যাওয়া নিরাপদ। ──
     LaunchedEffect(Unit) {
-        delay(2500)
+        delay(450)
         if (SessionManager(context).isLoggedIn()) onNavigateToMain()
         else onNavigateToAuth()
     }
