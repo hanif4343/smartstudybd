@@ -32,6 +32,7 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
  * Typing/Focus-Mode ইন্টিগ্রেশন) এখনো শুধু পুরনো ফাইলেই আছে, তাই এটা এখনই পুরোপুরি
  * সরিয়ে দেওয়া হয়নি — একটা নিরাপদ fallback হিসেবে রাখা হলো।
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TypingModeSelectScreen(
     onBack: () -> Unit,
