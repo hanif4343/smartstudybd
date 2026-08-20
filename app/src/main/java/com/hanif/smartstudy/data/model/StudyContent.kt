@@ -77,6 +77,13 @@ data class QuizItem(
     // Admin App-এ যোগ করা) — একই group_id শেয়ার করে, sub_index দিয়ে ক্রম ঠিক থাকে
     @SerializedName("group_id")      val groupId      : String? = null,
     @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── FIX ("গণিত/সাধারণ জ্ঞানে হেডিং দরকার নেই, বাংলা/ইংরেজিতে দরকার"): multi-part
+    // (একই group_id) প্রশ্নে প্রথম sub-question-এর question টেক্সটটাই এতদিন সবসময়
+    // "হেডিং" হিসেবে দেখানো হতো (যেমন "এক কথায় প্রকাশ করুন")। এখন Admin App থেকে এটা
+    // চাইলে বন্ধও করা যাবে — খালি/"true" মানে হেডিং দেখাবে (ডিফল্ট, পুরনো ডেটার
+    // আচরণ অপরিবর্তিত থাকবে), "false" দিলে হেডিং লুকিয়ে সরাসরি সিরিয়াল-নম্বর দিয়ে
+    // sub-question গুলো শুরু হবে (গণিত/সাধারণ জ্ঞানের জন্য উপযোগী)।
+    @SerializedName("show_heading")  val showHeading  : String? = null,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
@@ -120,6 +127,9 @@ data class QBankItem(
     @SerializedName("subtopic_id")   val subtopicId   : String? = null,
     @SerializedName("group_id")      val groupId      : String? = null,
     @SerializedName("sub_index")     val subIndex     : String? = null,
+    // ── FIX ("গণিত/সাধারণ জ্ঞানে হেডিং দরকার নেই") — দেখো StudyItem-এর একই ফিল্ডের কমেন্ট।
+    // QBank-এর written প্রশ্নপত্রেই (QBankExamPaperScreen) এটা সবচেয়ে বেশি প্রাসঙ্গিক। ──
+    @SerializedName("show_heading")  val showHeading  : String? = null,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
