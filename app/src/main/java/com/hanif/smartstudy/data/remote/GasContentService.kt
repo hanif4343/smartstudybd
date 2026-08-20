@@ -785,7 +785,10 @@ object GasContentService {
             if (year.isBlank()) return@withContext ApiResult.Error("সাল ফাঁকা")
             try {
                 val ids = fetchSheetRows<QBankItem>("QBank").items
-                    .filter { it.year.trim() == year.trim() }
+                    // ── FIX (build error: "Only safe (?.) or non-null asserted (!!.) calls
+                    // are allowed on a nullable receiver of type String?") — QBankItem.year
+                    // nullable (String?), তাই ?.trim() লাগবে, .trim() না ──
+                    .filter { it.year?.trim() == year.trim() }
                     .mapNotNull { it.id }
                 if (ids.isEmpty()) return@withContext ApiResult.Error("এই সালের কোনো QBank প্রশ্ন পাওয়া যায়নি")
                 val ok = callGetAction(mapOf("action" to "deleteByIds", "sheet" to "QBank", "ids" to ids.joinToString(",")))
