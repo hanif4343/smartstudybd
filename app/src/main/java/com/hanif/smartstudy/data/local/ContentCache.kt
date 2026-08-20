@@ -10,6 +10,8 @@ import com.hanif.smartstudy.data.model.CaseInsensitiveGson
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.util.dataStore
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ContentCache(private val context: Context) {
 
@@ -57,13 +59,23 @@ class ContentCache(private val context: Context) {
         val KEY_STUDY_DATE    = stringPreferencesKey("today_study_date")
     }
 
-    suspend fun saveContent(content: AppContent) {
+    // ── FIX ("অ্যাপ ওপেন হতে ১৫-২০ সেকেন্ড লাগে", মূল কারণ): হাজার হাজার প্রশ্নের
+    // পুরো Quiz+QBank+Study লিস্ট Gson দিয়ে JSON-এ সিরিয়ালাইজ করা একটা ভারী CPU
+    // কাজ — কিন্তু এই suspend fun-টা caller-এর dispatcher-ই (viewModelScope.launch
+    // এর ডিফল্ট Main thread) ব্যবহার করত, তাই gson.toJson() পুরো UI থ্রেড ব্লক করে
+    // দিত (জ্যান্ক/অ্যাপ ফ্রিজ মনে হতো)। এখন withContext(Dispatchers.IO) দিয়ে এই
+    // ভারী কাজটা background থ্রেডে সরানো হলো। ──
+    suspend fun saveContent(content: AppContent) = withContext(Dispatchers.IO) {
+        val studyJson      = gson.toJson(content.study)
+        val quizJson       = gson.toJson(content.quiz)
+        val qbankJson      = gson.toJson(content.qbank)
+        val modelTestsJson = gson.toJson(content.modelTests)
         context.dataStore.edit { prefs ->
             prefs[KEY_CACHE_VERSION] = CACHE_VERSION
-            prefs[KEY_STUDY_JSON] = gson.toJson(content.study)
-            prefs[KEY_QUIZ_JSON]  = gson.toJson(content.quiz)
-            prefs[KEY_QBANK_JSON] = gson.toJson(content.qbank)
-            prefs[KEY_MODELTESTS_JSON] = gson.toJson(content.modelTests)
+            prefs[KEY_STUDY_JSON] = studyJson
+            prefs[KEY_QUIZ_JSON]  = quizJson
+            prefs[KEY_QBANK_JSON] = qbankJson
+            prefs[KEY_MODELTESTS_JSON] = modelTestsJson
             prefs[KEY_CACHE_TIME] = content.fetchedAt
             prefs[KEY_REMOTE_UPDATED_AT] = content.remoteUpdatedAt
         }
@@ -99,14 +111,21 @@ class ContentCache(private val context: Context) {
     }
 
     // FIX: version mismatch হলে cache invalid — নতুন data fetch হবে
-    suspend fun loadContent(): AppContent? {
-        return try {
+    // ── FIX ("অ্যাপ ওপেন হতে ১৫-২০ সেকেন্ড লাগে", মূল কারণ): saveContent()-এর
+    // মতোই — হাজার হাজার প্রশ্নের JSON parse (gson.fromJson) খুব ভারী, কিন্তু আগে
+    // এটা caller-এর Main thread এ চলত (HomeViewModel.loadHomeData() →
+    // viewModelScope.launch { repo.getContent() } → cache.loadContent()) — প্রতিবার
+    // অ্যাপ খোলার সময় UI থ্রেড কয়েক সেকেন্ডের জন্য ফ্রিজ হয়ে যেত, এটাই "অ্যাপ ওপেন
+    // হতে অনেক সময় লাগে" সমস্যার আসল কারণ (নেটওয়ার্ক না — লোকাল CPU কাজ)। এখন
+    // withContext(Dispatchers.IO) দিয়ে background থ্রেডে সরানো হলো। ──
+    suspend fun loadContent(): AppContent? = withContext(Dispatchers.IO) {
+        try {
             val prefs = context.dataStore.data.first()
             val fetchedAt = prefs[KEY_CACHE_TIME] ?: 0L
             val savedVersion = prefs[KEY_CACHE_VERSION] ?: 0
 
             // কোনো cache নেই বা পুরানো version
-            if (fetchedAt == 0L || savedVersion < CACHE_VERSION) return null
+            if (fetchedAt == 0L || savedVersion < CACHE_VERSION) return@withContext null
 
             val studyJson  = prefs[KEY_STUDY_JSON] ?: "[]"
             val quizJson   = prefs[KEY_QUIZ_JSON]  ?: "[]"
