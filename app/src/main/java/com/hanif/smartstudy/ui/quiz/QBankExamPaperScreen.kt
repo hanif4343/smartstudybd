@@ -260,16 +260,18 @@ private fun ExamSerialCard(
                 ExamQAItem(prefixLabel = null, q = q, onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap)
             }
         } else {
-            // ── multi-part গ্রুপ — একটা গ্রুপ-প্রশ্ন লাইনের নিচে ক/খ/গ... ──
+            // ── multi-part গ্রুপ — একটা গ্রুপ-হেডিং লাইনের নিচে ক/খ/গ... ──
             Column(Modifier.weight(1f)) {
-                // ── FIX ("গণিত/সাধারণ জ্ঞানে হেডিং দরকার নেই, বাংলা/ইংরেজিতে দরকার"):
-                // এতদিন গ্রুপের প্রথম sub-question-এর question টেক্সট সবসময় বোল্ড
-                // হেডিং হিসেবে বসতো। এখন showGroupHeading = false হলে (Admin App-এ
-                // সেট করা) এই লাইনটাই বাদ, সরাসরি সিরিয়াল-নম্বরের পাশ থেকে ক/খ/গ...
-                // শুরু হয়ে যায়। ──
-                if (serial.first().showGroupHeading) {
+                // ── SIMPLIFIED ("হেডিং অন করে টেক্সট বসালেই তো হবে"): আগে প্রথম sub-
+                // question-এর নিজের question টেক্সট হেডিং হিসেবে (ভুলভাবে) রিইউজ করা
+                // হতো, প্লাস একটা আলাদা showGroupHeading বুলিয়ান থাকতো — এখন Admin
+                // App-এ যা টাইপ করা হয়েছে (groupHeading) সেটাই সরাসরি এখানে বসে, খালি
+                // থাকলে (থিওরিটে হওয়ার কথা না — গ্রুপ থাকা মানেই হেডিং টাইপ করা হয়েছে,
+                // কারণ group_id নিজেই Admin App-এ groupHeading টাইপ করলে তবেই বসে) কোনো
+                // হেডিং-লাইন দেখাবে না, নিরাপত্তার জন্য fallback হিসেবে। ──
+                if (serial.first().groupHeading.isNotBlank()) {
                     Text(
-                        text = serial.first().question.ifBlank { "নিচের অংশগুলোর উত্তর দিন:" },
+                        text = serial.first().groupHeading,
                         fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
                     )
                     Spacer(Modifier.height(8.dp))
