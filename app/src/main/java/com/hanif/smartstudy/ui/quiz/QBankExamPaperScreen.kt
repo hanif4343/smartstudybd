@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,6 +74,12 @@ private val WRITTEN_SUBJECT_BUCKET = mapOf(
 )
 private val WRITTEN_SUBJECT_ORDER = listOf("বাংলা", "ইংরেজি", "গণিত", "সাধারণ জ্ঞান")
 
+// ── top-level করা হলো (আগে QBankExamPaperScreen()-এর ভিতরে local fun ছিল) — এখন
+// ExamSerialCard/ExamQAItem থেকেও সরাসরি কল করা যায়, selectedSubject থ্রেড করে
+// পাঠাতে হয় না (q.subjectId থেকেই সবসময় নির্ভুলভাবে বের করা যায়) ──
+private fun subjectLabelOf(q: QuestionItem): String =
+    WRITTEN_SUBJECT_BUCKET[q.subjectId] ?: "অন্যান্য"
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,9 +92,9 @@ fun QBankExamPaperScreen(
     onReport        : (globalIndex: Int, issue: String) -> Unit
 ) {
     // ── FIX: এখন subjectId-কে সরাসরি (Room reference-নাম না) ৪-বাকেট কনসোলিডেশন
-    // ম্যাপ দিয়ে রেজল্ভ করা হয় — written অংশে সবসময় ঠিক ৪টা সাবজেক্ট-ট্যাবই দেখাবে ──
-    fun subjectLabel(q: QuestionItem): String =
-        WRITTEN_SUBJECT_BUCKET[q.subjectId] ?: "অন্যান্য"
+    // ম্যাপ দিয়ে রেজল্ভ করা হয় — written অংশে সবসময় ঠিক ৪টা সাবজেক্ট-ট্যাবই দেখাবে
+    // (top-level subjectLabelOf() ব্যবহার হচ্ছে, দেখো ফাইলের ওপরে) ──
+    fun subjectLabel(q: QuestionItem): String = subjectLabelOf(q)
 
     // ── সাবজেক্ট ট্যাবের ক্রম — সবসময় বাংলা→ইংরেজি→গণিত→সাধারণ জ্ঞান (যেগুলোর
     // প্রশ্ন আছে শুধু সেগুলোই দেখাবে), "অন্যান্য" থাকলে সবার শেষে (ডেটা-গ্যাপ নির্দেশক) ──
@@ -198,8 +205,9 @@ fun QBankExamPaperScreen(
         Divider(color = GoldAccent, thickness = 1.dp)
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(serials, key = { it.key }) { serial ->
+            itemsIndexed(serials, key = { _, s -> s.key }) { idx, serial ->
                 ExamSerialCard(
+                    serialNo     = idx + 1,
                     serial       = serial.items,
                     onBookmark   = onBookmark,
                     onSpeak      = { text, key -> TtsManager.speak(text, key) },
@@ -225,6 +233,7 @@ fun QBankExamPaperScreen(
 /** একটা "সিরিয়াল" — হয় একটা একক প্রশ্ন, অথবা একই groupId-এর একগুচ্ছ sub-part (ক/খ/গ...) */
 @Composable
 private fun ExamSerialCard(
+    serialNo    : Int,
     serial      : List<QuestionItem>,
     onBookmark  : (String) -> Unit,
     onSpeak     : (String, String) -> Unit,
@@ -232,6 +241,18 @@ private fun ExamSerialCard(
 ) {
     val labels = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ")
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        // ── সিরিয়াল-নম্বর ব্যাজ — একক প্রশ্ন হোক বা মাল্টি-পার্ট গ্রুপ, সবসময় থাকে
+        // (গণিত/সাধারণ জ্ঞানে হেডিং না থাকলেও অন্তত এই নম্বরটা দিয়ে প্রশ্ন শুরু হয়) ──
+        Box(
+            Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(HeaderBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "$serialNo", color = HeaderCream, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(8.dp))
         if (serial.size == 1) {
             // ── একক প্রশ্ন — নাম্বার + প্রশ্ন + উত্তর সরাসরি ──
             val q = serial[0]
@@ -241,11 +262,18 @@ private fun ExamSerialCard(
         } else {
             // ── multi-part গ্রুপ — একটা গ্রুপ-প্রশ্ন লাইনের নিচে ক/খ/গ... ──
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = serial.first().question.ifBlank { "নিচের অংশগুলোর উত্তর দিন:" },
-                    fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
-                )
-                Spacer(Modifier.height(8.dp))
+                // ── FIX ("গণিত/সাধারণ জ্ঞানে হেডিং দরকার নেই, বাংলা/ইংরেজিতে দরকার"):
+                // এতদিন গ্রুপের প্রথম sub-question-এর question টেক্সট সবসময় বোল্ড
+                // হেডিং হিসেবে বসতো। এখন showGroupHeading = false হলে (Admin App-এ
+                // সেট করা) এই লাইনটাই বাদ, সরাসরি সিরিয়াল-নম্বরের পাশ থেকে ক/খ/গ...
+                // শুরু হয়ে যায়। ──
+                if (serial.first().showGroupHeading) {
+                    Text(
+                        text = serial.first().question.ifBlank { "নিচের অংশগুলোর উত্তর দিন:" },
+                        fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 serial.forEachIndexed { idx, sub ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
                         Text(
@@ -285,13 +313,18 @@ private fun ExamQAItem(
         }
         Spacer(Modifier.height(4.dp))
         // ── উত্তর — সরাসরি সঠিক উত্তরের টেক্সট (MCQ হলে answer ফিল্ডে টেক্সট থাকে,
-        // Written হলেও answer ফিল্ডই মডেল-উত্তর ধরে নেওয়া হচ্ছে) ──
+        // Written হলেও answer ফিল্ডই মডেল-উত্তর ধরে নেওয়া হচ্ছে)।
+        // ── FIX ("English এ Ans দরকার নাই"): "উত্তর:" প্রিফিক্স-লেবেল শুধু ইংরেজি
+        // সাবজেক্ট ছাড়া বাকি সব জায়গায় (বাংলা/গণিত/সাধারণ জ্ঞান) দেখায় — ইংরেজিতে
+        // (সাধারণত fill-in-the-blank টাইপ, answer এমনিতেই বাক্যের ফাঁকে বোঝা যায়)
+        // শুধু উত্তরের টেক্সটটাই থাকে, কোনো লেবেল ছাড়া। ──
         if (q.answer.isNotBlank()) {
+            val labelPrefix = if (subjectLabelOf(q) == "ইংরেজি") "" else "উত্তর: "
             Box(
                 Modifier.clip(RoundedCornerShape(3.dp)).background(AnswerBg).padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = "উত্তর: ${q.answer}",
+                    text = "$labelPrefix${q.answer}",
                     fontSize = if (compact) 13.sp else 13.5.sp,
                     color = AnswerText,
                     fontWeight = FontWeight.Medium
