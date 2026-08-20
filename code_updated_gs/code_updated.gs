@@ -42,6 +42,504 @@ function normalizeFieldValue_(s){
     .trim();
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   markTopicDirty(topicId) — GitHub CDN Plan (Delta-Publish)-এর ভিত্তি।
+   কোনো Topic-এর প্রশ্ন এডিট/ডিলিট/মুভ/রিনেম হলে এখানে কল করে জানিয়ে দেওয়া হয় —
+   একটা ছোট "_DirtyTopics" শিটে (নেই থাকলে নিজে থেকে তৈরি হয়) topic_id + সময়
+   জমা থাকে। GAS Publish স্ক্রিপ্ট (পরে বানানো হবে) এই লিস্ট পড়ে **শুধু** dirty
+   topic-গুলোর JSON রিজেনারেট করবে — হাজার হাজার প্রশ্ন bulk-move করলেও পুরো
+   ডেটাসেট re-publish করা লাগবে না, শুধু যা বদলেছে তাই।
+   ⚠️ এই ফাংশনটা ছোট, দ্রুত (কোনো নেটওয়ার্ক কল নেই) — তাই লক-করা action-গুলোর
+   ভিতরেই নিরাপদে কল করা যায়, বাড়তি সময় লাগে না বললেই চলে।
+   ══════════════════════════════════════════════════════════════════════════ */
+function markTopicDirty(topicId) {
+  if (!topicId) return;
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName("_DirtyTopics");
+    if (!sh) {
+      sh = ss.insertSheet("_DirtyTopics");
+      sh.getRange(1,1,1,2).setValues([["topic_id","markedAt"]]);
+    }
+    var lastRow = sh.getLastRow();
+    if (lastRow >= 2) {
+      var ids = sh.getRange(2,1,lastRow-1,1).getValues();
+      for (var i=0;i<ids.length;i++){
+        if ((ids[i][0]||"").toString() === topicId) {
+          sh.getRange(i+2,2).setValue(Date.now());  // আগে থেকেই আছে — শুধু টাইমস্ট্যাম্প রিফ্রেশ
+          return;
+        }
+      }
+    }
+    sh.appendRow([topicId, Date.now()]);
+  } catch (mtdErr) {
+    // dirty-tracking ব্যর্থ হলেও আসল mutation (edit/delete/move) যেন কখনো ব্যর্থ না
+    // হয় — এটা শুধু পরে publish-এর জন্য "সহায়ক তথ্য", ক্রিটিক্যাল পাথ না
+    Logger.log("markTopicDirty error (non-fatal): " + mtdErr);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   একাধিক Topic একসাথে dirty মার্ক করতে — renameField/deleteByIds-এর মতো
+   action-গুলোতে একসাথে অনেক distinct topicId touched হতে পারে, সেগুলো Set
+   বানিয়ে একবারে পাস করার জন্য (loop এর ভিতরে বারবার markTopicDirty() কল করলে
+   প্রতিবারই পুরো "_DirtyTopics" শিট আবার পড়তে হতো — অপ্রয়োজনীয়)
+   ══════════════════════════════════════════════════════════════════════════ */
+function markTopicsDirty(topicIdSet) {
+  for (var tid in topicIdSet) { if (topicIdSet.hasOwnProperty(tid) && tid) markTopicDirty(tid); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   withWriteLock(fn) — কোনো Sheet-write action (updateField/deleteByIds/
+   moveQuestions/moveTopic/renameField ইত্যাদি)-কে script-lock দিয়ে wrap করার
+   জন্য common helper (getNextId()-এর প্যাটার্নই, শুধু reusable করা হলো)।
+   Smart Study App (instant-local + background sync) আর Admin App (OCR
+   bulk-add) — দুটোই একই Sheet-এ লেখে, প্রায়ই কাছাকাছি সময়ে। লক ছাড়া থাকলে:
+   একটা action রো-ইনডেক্স হিসাব করে রাখার পরই আরেকটা action যদি রো শিফট করে
+   ফেলে (ডিলিট/ইনসার্ট), প্রথমটা ভুল রো-তে গিয়ে লিখতে পারে। ৩০ সেকেন্ড টাইমআউট
+   (getNextId()-এর ১৫ সেকেন্ডের চেয়ে একটু বেশি, কারণ moveQuestions/deleteByIds
+   বড় sheet-এ কিছুটা সময় নিতে পারে)।
+   ══════════════════════════════════════════════════════════════════════════ */
+function withWriteLock(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 3 — GAS Publish Pipeline (Dirty-Topic Delta → GitHub → manifest.json)
+   ═══════════════════════════════════════════════════════════════════════
+   "Publish Now" (Admin App বাটন, doGet action="publishNow") অথবা scheduled
+   trigger (scheduledPublish()) থেকে কল হয়। শুধু "_DirtyTopics" শিটে থাকা
+   topic_id-গুলোর JSON রিজেনারেট করে GitHub-এ commit করে — পুরো ডেটাসেট
+   re-publish করে না, তাই ২১,০০০+ প্রশ্ন bulk-move করলেও দ্রুত ও কম-quota-তে
+   চলে (দেখো GAS_CDN_PLANNING.md-এর "Dirty-Topic Queue" সেকশন)।
+
+   প্রয়োজনীয় Script Properties (Apps Script এডিটর → Project Settings →
+   Script Properties-এ ম্যানুয়ালি বসাতে হবে, একবারই):
+     GITHUB_WRITE_TOKEN — Contents:Read+Write স্কোপ, শুধু এই একটা repo-তে
+                           (⚠️ Worker-এর token থেকে আলাদা — সেটা read-only,
+                           এটা write করে, দুটো এক না রাখাই নিরাপদ)
+     GH_OWNER            — GitHub username/org
+     GH_REPO             — repo name (Worker-এর wrangler.toml-এর সাথে মিলিয়ে)
+     GH_BRANCH           — সাধারণত "main"
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function publishDirtyTopics() {
+  var props = PropertiesService.getScriptProperties();
+  var STALE_MS = 10 * 60 * 1000; // ১০ মিনিট — GAS-এর ৬ মিনিট hard execution
+                                  // limit-এর চেয়ে বেশি safety margin রেখে।
+                                  // timeout-এ মাঝপথে থেমে গেলে finally ব্লক
+                                  // চলার সুযোগ নাও পেতে পারে, ফলে lock আটকে
+                                  // থেকে যেতে পারে — তাই "পুরনো" lock নিজে
+                                  // থেকেই stale ধরে auto-clear করা হয়, কোনো
+                                  // ম্যানুয়াল unlock action ছাড়াই self-healing
+  var startedAt = props.getProperty("publishStartedAt");
+  if (props.getProperty("isPublishing") === "1") {
+    if (startedAt && (Date.now() - parseInt(startedAt, 10)) < STALE_MS) {
+      return { status: "error", result: "error", message: "ইতিমধ্যে একটা Publish চলছে, একটু পরে আবার চেষ্টা করুন" };
+    }
+    Logger.log("Stale publish lock detected (>10min old) — auto-clearing এবং চালিয়ে যাওয়া হচ্ছে");
+  }
+  props.setProperty("isPublishing", "1");
+  props.setProperty("publishStartedAt", String(Date.now()));
+  try {
+    return doPublish_();
+  } catch (pubErr) {
+    Logger.log("publishDirtyTopics FATAL error: " + pubErr);
+    return { status: "error", result: "error", message: "Publish ব্যর্থ (unexpected): " + pubErr };
+  } finally {
+    props.deleteProperty("isPublishing");
+    props.deleteProperty("publishStartedAt");
+  }
+}
+
+function doPublish_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var props = PropertiesService.getScriptProperties();
+  var ghOwner = props.getProperty("GH_OWNER");
+  var ghRepo = props.getProperty("GH_REPO");
+  var ghBranch = props.getProperty("GH_BRANCH") || "main";
+  var ghToken = props.getProperty("GITHUB_WRITE_TOKEN");
+  if (!ghOwner || !ghRepo || !ghToken) {
+    return { status: "error", result: "error", message: "GitHub config (GH_OWNER/GH_REPO/GITHUB_WRITE_TOKEN) Script Properties-এ সেট করা নেই" };
+  }
+
+  var dirtySh = ss.getSheetByName("_DirtyTopics");
+  if (!dirtySh || dirtySh.getLastRow() < 2) {
+    return { status: "success", result: "success", message: "কোনো dirty topic নেই, publish করার কিছু নেই", published: 0, failed: 0 };
+  }
+
+  var dirtyRows = dirtySh.getRange(2, 1, dirtySh.getLastRow() - 1, 1).getValues();
+  var uniqTopicIds = {};
+  dirtyRows.forEach(function (r) { var t = (r[0] || "").toString(); if (t) uniqTopicIds[t] = 1; });
+  var allDirtyTopicIds = Object.keys(uniqTopicIds);
+  if (!allDirtyTopicIds.length) {
+    return { status: "success", result: "success", message: "কোনো dirty topic নেই", published: 0, failed: 0 };
+  }
+
+  // ── Safety cap: এক Publish-এ সর্বোচ্চ এতগুলো টপিক (GAS-এর ৬ মিনিট hard
+  // execution limit-এ যেন কখনোই ধাক্কা না লাগে, ২১,০০০+ প্রশ্ন bulk-reclassify-
+  // এর মতো কাজেও)। বাকিগুলো dirty list-এই থেকে যায় (clearContent()-এ শুধু
+  // processed অংশ সরানো হবে নিচে), পরের Publish-এ (ম্যানুয়াল আবার চাপলে বা
+  // scheduled trigger-এ) বাকিটা এগোবে — বড় bulk কাজে একাধিকবার Publish লাগতে
+  // পারে, সেটাই প্রত্যাশিত ও নিরাপদ। ──
+  var MAX_TOPICS_PER_RUN = 400;
+  var dirtyTopicIds = allDirtyTopicIds.slice(0, MAX_TOPICS_PER_RUN);
+  var remainingAfterThisRun = allDirtyTopicIds.length - dirtyTopicIds.length;
+
+  // ── Topics/Subjects reference-ডেটা লোড (নাম resolve করতে, JSON ফাইলে
+  // subject/subTopic-এর মানুষ-পড়ার-মতো নাম বসানোর জন্য) ──
+  var topicsSh = ss.getSheetByName("Topics");
+  var topicsMap = {};
+  if (topicsSh) {
+    var tData = topicsSh.getDataRange().getValues(), tHdr = tData[0];
+    var tIdCol = tHdr.indexOf("topic_id"), tNameCol = tHdr.indexOf("name"), tSubjIdCol = tHdr.indexOf("subject_id");
+    for (var ti = 1; ti < tData.length; ti++) {
+      var tid = (tData[ti][tIdCol] || "").toString();
+      if (tid) topicsMap[tid] = { name: tData[ti][tNameCol], subjectId: (tData[ti][tSubjIdCol] || "").toString() };
+    }
+  }
+  var subjectsSh = ss.getSheetByName("Subjects");
+  var subjectsMap = {};
+  if (subjectsSh) {
+    var sData = subjectsSh.getDataRange().getValues(), sHdr = sData[0];
+    var sIdCol = sHdr.indexOf("subject_id"), sNameCol = sHdr.indexOf("name");
+    for (var si = 1; si < sData.length; si++) {
+      var sid = (sData[si][sIdCol] || "").toString();
+      if (sid) subjectsMap[sid] = sData[si][sNameCol];
+    }
+  }
+
+  // ── বর্তমান manifest.json আনা (existing topics-এর hash/count বজায় রাখতে —
+  // শুধু dirty topic-গুলোর এন্ট্রি আপডেট হবে, বাকিগুলো অক্ষত থাকবে) ──
+  var manifestGet = ghGetFile_(ghOwner, ghRepo, ghBranch, "manifest.json", ghToken);
+  var manifest = manifestGet.exists ? JSON.parse(manifestGet.content) : { version: 0, schemaVersion: 1, topics: {} };
+  if (!manifest.topics) manifest.topics = {};
+
+  // ── পুরো repo-র file→sha ম্যাপ একবারেই আনা (ghGetTree_) — প্রতিটা টপিক-
+  // ফাইলের জন্য আলাদা GET কল এড়ানোর জন্য (বাল্ক publish-এ GitHub API কল
+  // প্রায় অর্ধেক করে দেয়, ব্যর্থ হলে খালি {} আসে, তখন per-file lookup-এ
+  // স্বয়ংক্রিয়ভাবে fallback হয়) ──
+  var shaMap = ghGetTree_(ghOwner, ghRepo, ghBranch, ghToken);
+
+  var results = { published: 0, failed: 0, errors: [], totalQuestions: 0 };
+
+  // 🐛 EFFICIENCY FIX (২১,০০০+ প্রশ্ন bulk-reclassify প্রজেক্টের জন্য জরুরি):
+  // আগে প্রতিটা dirty topic-এর জন্য আলাদাভাবে dataSh.getDataRange().getValues()
+  // কল হতো (পুরো Quiz/QBank/Study শিট রিড+স্ক্যান) — মানে ৫০০টা dirty topic হলে
+  // একই বড় শিট ৫০০ বার রিড হতো! GAS-এর ৬ মিনিট hard execution limit-এ এটা
+  // সহজেই ধাক্কা খেত বড় bulk-move-এর পরে। এখন প্রতিটা sheet (Quiz/QBank/Study)
+  // **একবারই** পড়া হয়, single pass-এ সব dirty topic_id-এর রো একসাথে গ্রুপ করে
+  // নেওয়া হয় — তারপর প্রতিটা topic শুধু তার নিজের already-grouped রো-গুলো থেকে
+  // JSON বানায় (কোনো re-scan নেই)।
+  var dirtyBySheet = { Quiz: [], QBank: [], Study: [] };
+  dirtyTopicIds.forEach(function (tid) {
+    var sn = tid.indexOf("QZ") === 0 ? "Quiz" : tid.indexOf("QB") === 0 ? "QBank" : tid.indexOf("ST") === 0 ? "Study" : null;
+    if (sn) dirtyBySheet[sn].push(tid);
+    else { results.errors.push(tid + ": অজানা sheet prefix"); results.failed++; }
+  });
+
+  ["Quiz", "QBank", "Study"].forEach(function (sheetName) {
+    var sheetDirtyIds = dirtyBySheet[sheetName];
+    if (!sheetDirtyIds.length) return;
+
+    var dataSh = ss.getSheetByName(sheetName);
+    if (!dataSh) {
+      sheetDirtyIds.forEach(function (tid) { results.errors.push(tid + ": " + sheetName + " sheet পাওয়া যায়নি"); results.failed++; });
+      return;
+    }
+    var data = dataSh.getDataRange().getValues(), hdr = data[0];
+    var topicIdCol = hdr.indexOf("topic_id");
+    if (topicIdCol < 0) {
+      sheetDirtyIds.forEach(function (tid) { results.errors.push(tid + ": " + sheetName + "-এ topic_id কলাম নেই"); results.failed++; });
+      return;
+    }
+    var subTopicKey = hdr.indexOf("sub_topic") >= 0 ? "sub_topic" : (hdr.indexOf("topic") >= 0 ? "topic" : null);
+
+    // ── single pass — শুধু dirty topic_id-গুলোর রো গ্রুপ করে নেওয়া হচ্ছে ──
+    var dirtySet = {};
+    sheetDirtyIds.forEach(function (tid) { dirtySet[tid] = true; });
+    var rowsByTopic = {}; // topicId -> [qObj, qObj, ...]
+    for (var ri = 1; ri < data.length; ri++) {
+      var rowTopicId = (data[ri][topicIdCol] || "").toString();
+      if (!dirtySet[rowTopicId]) continue;
+      var qObj = {};
+      for (var ci = 0; ci < hdr.length; ci++) {
+        var key = hdr[ci];
+        if (!key) continue;
+        var val = data[ri][ci];
+        qObj[key] = (val instanceof Date) ? val.getTime() : val;
+      }
+      (rowsByTopic[rowTopicId] || (rowsByTopic[rowTopicId] = [])).push(qObj);
+    }
+
+    // ── এখন প্রতিটা dirty topic — pre-grouped রো থেকেই (কোনো re-scan ছাড়াই) ──
+    sheetDirtyIds.forEach(function (topicId) {
+      try {
+        var topicMeta = topicsMap[topicId];
+        var resolvedSubject = topicMeta && subjectsMap[topicMeta.subjectId] ? subjectsMap[topicMeta.subjectId] : null;
+        var resolvedSubTopic = topicMeta ? topicMeta.name : null;
+
+        var questions = rowsByTopic[topicId] || [];
+        if (resolvedSubject !== null || (resolvedSubTopic !== null && subTopicKey)) {
+          questions.forEach(function (q) {
+            if (resolvedSubject !== null) q["subject"] = resolvedSubject;
+            if (resolvedSubTopic !== null && subTopicKey) q[subTopicKey] = resolvedSubTopic;
+          });
+        }
+
+        var filePath = sheetLowerName_(sheetName) + "/" + topicId + ".json";
+        var knownSha = shaMap.hasOwnProperty(filePath) ? shaMap[filePath] : null;
+
+        if (questions.length === 0) {
+          // ── এই টপিকে আর কোনো প্রশ্ন নেই (সব move/delete হয়ে গেছে) — GitHub-এ
+          // ফাইলটা থাকলে মুছে দেওয়া হচ্ছে, manifest থেকেও এন্ট্রি সরানো হচ্ছে ──
+          ghDeleteFile_(ghOwner, ghRepo, ghBranch, filePath, ghToken, knownSha);
+          delete manifest.topics[topicId];
+          results.published++;
+          return;
+        }
+
+        var jsonStr = JSON.stringify(questions);
+        var hash = computeHash_(jsonStr);
+        var putResult = ghPutFile_(ghOwner, ghRepo, ghBranch, filePath, jsonStr, ghToken,
+          "Publish " + topicId + " (" + questions.length + " questions)", knownSha);
+        if (!putResult.success) {
+          results.errors.push(topicId + ": GitHub commit ব্যর্থ — " + putResult.error);
+          results.failed++;
+          return;
+        }
+
+        var subjectName = topicMeta && subjectsMap[topicMeta.subjectId] ? subjectsMap[topicMeta.subjectId] : "";
+        var topicName = topicMeta ? topicMeta.name : "";
+        manifest.topics[topicId] = { subject: subjectName, subTopic: topicName, count: questions.length, hash: hash };
+        results.totalQuestions += questions.length;
+        results.published++;
+
+      } catch (topicErr) {
+        results.errors.push(topicId + ": " + topicErr);
+        results.failed++;
+      }
+    });
+  });
+
+  // ── Reference ডেটা (Subjects/Topics তালিকা) — প্রতিবার publish-এ রিফ্রেশ,
+  // এটা ছোট ডেটা বলে আলাদা dirty-tracking না করে সবসময় আপডেট করাই সহজ ──
+  if (results.published > 0) {
+    try {
+      ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/subjects.json", JSON.stringify(sheetToJsonArray_(subjectsSh)), ghToken, "Update reference/subjects.json");
+      ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/topics.json", JSON.stringify(sheetToJsonArray_(topicsSh)), ghToken, "Update reference/topics.json");
+    } catch (refErr) {
+      Logger.log("Reference data publish error (non-fatal): " + refErr);
+    }
+  }
+
+  // ── Sanity-check: Sheet-এর আসল মোট প্রশ্নসংখ্যা vs manifest-এ থাকা মোট
+  // count — অমিল থাকলে warning (publish আটকায় না, কিন্তু চোখে পড়ার মতো করে
+  // ফলাফলে ফেরত যায়) ──
+  var totalInSheets = countAllQuestions_(ss);
+  var totalInManifest = 0;
+  for (var mtid in manifest.topics) { if (manifest.topics.hasOwnProperty(mtid)) totalInManifest += (manifest.topics[mtid].count || 0); }
+  var sanityWarning = null;
+  if (totalInSheets !== totalInManifest) {
+    sanityWarning = "⚠️ Sheet-এ মোট " + totalInSheets + "টি প্রশ্ন, কিন্তু manifest-এ মোট " + totalInManifest +
+      "টি — অমিল থাকতে পারে কোনো টপিক এখনো কখনো publish হয়নি বলে (স্বাভাবিক, প্রথমবার সব dirty মার্ক করলে ঠিক হয়ে যাবে), অথবা কোনো bug-এর ইঙ্গিত।";
+  }
+
+  // ── manifest.json commit (অন্তত ১টা সফল হলেই) ──
+  if (results.published > 0) {
+    manifest.version = (manifest.version || 0) + 1;
+    manifest.publishedAt = Date.now();
+    var manifestPut = ghPutFile_(ghOwner, ghRepo, ghBranch, "manifest.json", JSON.stringify(manifest), ghToken, "Update manifest (v" + manifest.version + ")");
+    if (!manifestPut.success) {
+      return { status: "error", result: "error", message: "Topic ফাইল publish হলেও manifest.json commit ব্যর্থ: " + manifestPut.error, published: results.published, failed: results.failed };
+    }
+  }
+
+  // ── dirty list ক্লিয়ার — শুধু এই রানে processed (dirtyTopicIds) টপিকগুলোই
+  // সরানো হয়, cap-এর কারণে বাদ পড়া বা এই ফাংশন চলাকালীন নতুন যোগ হওয়া কোনো
+  // dirty entry অক্ষত থাকে। "সিদ্ধান্ত ক" অনুযায়ী: কোনো ব্যর্থতা থাকলে
+  // (failed>0) পুরো _DirtyTopics টেবিলই অক্ষত রাখা হয় (সফলগুলোও রিপাবলিশ
+  // হতে পারে পরের বার, ক্ষতি নেই — retry নিরাপদ) — শুধু সব-সফল হলেই এই রানের
+  // processed অংশ মোছা হয়। ──
+  if (results.failed === 0) {
+    var processedSet = {};
+    dirtyTopicIds.forEach(function (t) { processedSet[t] = true; });
+    var currentDirtyData = dirtySh.getLastRow() >= 2 ? dirtySh.getRange(2, 1, dirtySh.getLastRow() - 1, 2).getValues() : [];
+    var remainingRows = currentDirtyData.filter(function (row) { return !processedSet[(row[0] || "").toString()]; });
+    dirtySh.getRange(2, 1, Math.max(1, dirtySh.getLastRow() - 1), 2).clearContent();
+    if (remainingRows.length) {
+      dirtySh.getRange(2, 1, remainingRows.length, 2).setValues(remainingRows);
+    }
+  }
+
+  return {
+    status: results.failed === 0 ? "success" : "partial",
+    result: results.failed === 0 ? "success" : "partial",
+    published: results.published,
+    failed: results.failed,
+    errors: results.errors,
+    totalQuestions: results.totalQuestions,
+    manifestVersion: manifest.version,
+    sanityWarning: sanityWarning,
+    // ── MAX_TOPICS_PER_RUN cap-এর কারণে এই রানে ধরা পড়েনি এমন dirty topic
+    // থাকলে — Admin App UI-কে জানানো, যাতে "আরও Publish লাগবে" বোঝানো যায় ──
+    remaining: remainingAfterThisRun
+  };
+}
+
+/** সময়-ভিত্তিক trigger থেকে কল করার জন্য (Apps Script এডিটর → Triggers →
+ *  Add Trigger → publishScheduled → Time-driven → Day timer)। manual
+ *  "Publish Now" ছাড়াও safety-net হিসেবে দৈনিক একবার চালানো যায়, যাতে
+ *  ভুলে Publish Now চাপতে ভুলে গেলেও দিনে একবার ঠিক হয়ে যায়। */
+function publishScheduled() {
+  var result = publishDirtyTopics();
+  Logger.log("publishScheduled result: " + JSON.stringify(result));
+  return result;
+}
+
+/* ── GitHub Contents API helpers (write path, GAS UrlFetchApp দিয়ে) ── */
+
+function sheetLowerName_(sheetName) {
+  return sheetName === "Quiz" ? "quiz" : sheetName === "QBank" ? "qbank" : sheetName === "Study" ? "study" : sheetName.toLowerCase();
+}
+
+function ghGetFile_(owner, repo, branch, path, token) {
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path + "?ref=" + branch;
+  var resp = UrlFetchApp.fetch(url, {
+    method: "get",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code === 404) return { exists: false };
+  if (code !== 200) return { exists: false, error: "HTTP " + code + ": " + resp.getContentText() };
+  var body = JSON.parse(resp.getContentText());
+  var content = Utilities.newBlob(Utilities.base64Decode(body.content.replace(/\n/g, ""))).getDataAsString("UTF-8");
+  return { exists: true, sha: body.sha, content: content };
+}
+
+function ghPutFile_(owner, repo, branch, path, contentStr, token, message, knownSha) {
+  // ── existing ফাইলের sha লাগবে update করতে। knownSha দেওয়া থাকলে (batch
+  // tree lookup থেকে, দেখো ghGetTree_) আলাদা GET কল স্কিপ হয় — বাল্ক publish-এ
+  // (২১,০০০+ প্রশ্ন reclassify-এর মতো কাজে) এটা GitHub API কল অর্ধেক করে দেয়,
+  // যা GAS-এর ৬ মিনিট execution limit-এ ধাক্কা খাওয়ার ঝুঁকি অনেকটাই কমায়। ──
+  var sha = knownSha;
+  if (sha === undefined) {
+    var existing = ghGetFile_(owner, repo, branch, path, token);
+    sha = existing.exists ? existing.sha : null;
+  }
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path;
+  var payload = {
+    message: message || ("Update " + path),
+    content: Utilities.base64Encode(contentStr, Utilities.Charset.UTF_8),
+    branch: branch
+  };
+  if (sha) payload.sha = sha;
+
+  var resp = UrlFetchApp.fetch(url, {
+    method: "put",
+    contentType: "application/json",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code === 200 || code === 201) return { success: true };
+  return { success: false, error: "HTTP " + code + ": " + resp.getContentText() };
+}
+
+function ghDeleteFile_(owner, repo, branch, path, token, knownSha) {
+  var sha = knownSha;
+  if (sha === undefined) {
+    var existing = ghGetFile_(owner, repo, branch, path, token);
+    if (!existing.exists) return { success: true }; // আগে থেকেই নেই, কাজ শেষ
+    sha = existing.sha;
+  } else if (!sha) {
+    return { success: true }; // knownSha explicitly null/falsy — tree-তেই ছিল না, মানে আগে থেকেই নেই
+  }
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path;
+  var resp = UrlFetchApp.fetch(url, {
+    method: "delete",
+    contentType: "application/json",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    payload: JSON.stringify({ message: "Delete " + path, sha: sha, branch: branch }),
+    muteHttpExceptions: true
+  });
+  return { success: resp.getResponseCode() === 200 };
+}
+
+/** পুরো repo-র (recursive) file→sha ম্যাপ **একটা** কলে আনে (Git Trees API) —
+ *  বাল্ক publish-এ প্রতিটা ফাইলের জন্য আলাদা ghGetFile_ কল এড়ানোর জন্য।
+ *  ব্যর্থ হলে খালি {} রিটার্ন করে — কল করা কোড তখন per-file lookup-এ
+ *  স্বয়ংক্রিয়ভাবে fallback করে (ghPutFile_-এ knownSha=undefined মানেই সেটা)। */
+function ghGetTree_(owner, repo, branch, token) {
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/git/trees/" + branch + "?recursive=1";
+  var resp = UrlFetchApp.fetch(url, {
+    method: "get",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) return {};
+  try {
+    var body = JSON.parse(resp.getContentText());
+    var map = {};
+    (body.tree || []).forEach(function (item) {
+      if (item.type === "blob") map[item.path] = item.sha;
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+function computeHash_(str) {
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, str, Utilities.Charset.UTF_8);
+  return digest.map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? "0" + v : v; }).join("").substring(0, 12);
+}
+
+function countAllQuestions_(ss) {
+  var total = 0;
+  ["Quiz", "QBank", "Study"].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (sh) total += Math.max(0, sh.getLastRow() - 1);
+  });
+  return total;
+}
+
+function sheetToJsonArray_(sh) {
+  if (!sh) return [];
+  var data = sh.getDataRange().getValues(), hdr = data[0];
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    var obj = {};
+    for (var c = 0; c < hdr.length; c++) { if (hdr[c]) obj[hdr[c]] = (data[i][c] instanceof Date) ? data[i][c].getTime() : data[i][c]; }
+    out.push(obj);
+  }
+  return out;
+}
+
 /* ══ FCM V1 ══ */
 function getFCMAccessToken() {
   var cfg = getProps();
@@ -427,6 +925,7 @@ function doGet(e) {
 
   // ── updateField ──
   if (action==="updateField") {
+    return withWriteLock(function(){
     var ss=SpreadsheetApp.getActiveSpreadsheet();
     var shName=e.parameter.sheet||"";
     var shMap={quiz:"Quiz",qbank:"QBank",study:"Study",users:"Users",typing:"Typing"};
@@ -445,6 +944,7 @@ function doGet(e) {
     var ufNorm=function(s){return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");};
     var uHdrNorm=uRows[0].map(function(h){return ufNorm(h);});
     var idC=uHdr.indexOf("id"); if(idC===-1)idC=uHdr.indexOf("phone");
+    var uTopicIdC=uHdr.indexOf("topic_id");  // ── dirty-tracking-এর জন্য ──
     var fld=(e.parameter.field||"").toLowerCase().trim();
     var fldNorm=ufNorm(fld);
     // opt1→Opt1, opt2→Opt2 etc. মিল normalized indexOf দিয়েই প্রথমে ট্রাই
@@ -467,15 +967,42 @@ function doGet(e) {
     var targetId=(e.parameter.id||"").toString().trim();
     var content=(e.parameter.content||"");
     var ufAtC=uHdrNorm.indexOf("updatedat");
+    // ── 🆕 Added by / Edited by / Review — কে/কখন/কী বদলালো তার audit trail।
+    // editSource না পাঠালে ডিফল্ট "Admin App" (এখন পর্যন্ত updateField শুধু Admin
+    // App থেকেই কল হয়) — Main Smart Study App থেকে কোনোদিন এই একই endpoint
+    // কল হলে "Main App" পাঠালেই যথেষ্ট, বাকিটা এমনিই কাজ করবে। এডিট-কলামগুলো
+    // (edited_by/review) sheet-এ না থাকলে চুপচাপ স্কিপ হয়ে যাবে (ক্ষতি নেই),
+    // তাই বাকি সব এডিট আগের মতোই কাজ করবে যতক্ষণ না কলাম দুটো ম্যানুয়ালি
+    // Quiz/QBank/Study শিটে যোগ করা হচ্ছে। ──
+    var editSource=(e.parameter.editSource||"Admin App").toString().trim();
+    var editedByC=uHdrNorm.indexOf("editedby");
+    var reviewC=uHdrNorm.indexOf("review");
+    var reviewLabel=reviewLabelForField(fld);
     for(var ur=1;ur<uRows.length;ur++){
       if(uRows[ur][idC].toString().trim()===targetId){
         uSheet.getRange(ur+1,fldC+1).setValue(content);
         if(ufAtC!==-1) uSheet.getRange(ur+1,ufAtC+1).setValue(Date.now());
+        if(editedByC!==-1) uSheet.getRange(ur+1,editedByC+1).setValue(editSource+" - "+new Date().toLocaleString('bn-BD'));
+        if(reviewC!==-1 && reviewLabel){
+          var prevReview=(uRows[ur][reviewC]||"").toString().trim();
+          var nextReview=prevReview?(prevReview+", "+reviewLabel):reviewLabel;
+          uSheet.getRange(ur+1,reviewC+1).setValue(nextReview);
+        }
         syncToFirebase(shName,shName);
+        // 🐛 ফিক্স (Admin App audit-এ পাওয়া): field নিজেই "topic_id" হলে
+        // pre-write snapshot (uRows[ur][uTopicIdC]) ব্যবহার করলে *নতুন* topic_id
+        // কখনো dirty মার্ক হতো না (পুরনো/ফাঁকা মান মার্ক হতো) — ReviewTab-এর
+        // parallel ৪-field subject/topic-classify ফ্লো-তে (syncFieldsToSheet)
+        // এটাই ছিল যেই একটা কল আসলে topic_id বসাচ্ছে সেটাই ভুল/কোনো dirty-মার্ক
+        // না করার কারণ। এখন field===topic_id হলে সদ্য-লেখা content (নতুন মান)
+        // ব্যবহার হয়, নাহলে আগের মতোই snapshot-এর মান।
+        var uDirtyTopicId = (uTopicIdC>=0 && fldC===uTopicIdC) ? content.toString() : (uTopicIdC>=0 ? (uRows[ur][uTopicIdC]||"").toString() : "");
+        if (uDirtyTopicId) markTopicDirty(uDirtyTopicId);
         return json({result:"success"});
       }
     }
     return json({result:"error",error:"ID not found: "+targetId});
+    });
   }
 
   // ── changePassword ──
@@ -546,6 +1073,7 @@ function doGet(e) {
 
   // ── renameField ── ★ subject/topic/sub_topic cascade rename across entire sheet
   if (action==="renameField") {
+    return withWriteLock(function(){
     var shName=e.parameter.sheet||"QBank";
     var shMap2={quiz:"Quiz",qbank:"QBank",study:"Study"};
     shName=shMap2[shName.toLowerCase()]||shName;
@@ -576,18 +1104,21 @@ function doGet(e) {
     if(fIdx<0)return json({result:"error",error:"field not found: "+field});
 
     // Firebase mirror sync-এর জন্য দরকার — updateField-এর মতোই id/updatedAt কলাম বের করা হচ্ছে
-    var updColIdx2=-1, idColIdx2=-1;
+    var updColIdx2=-1, idColIdx2=-1, rfTopicIdC=-1;
     for(var uc=0;uc<h3.length;uc++){
       var un=h3[uc].toString().toLowerCase().replace(/\s+/g,"");
       if(un==="updatedat")updColIdx2=uc;
       if(un==="id")idColIdx2=uc;
+      if(un==="topicid")rfTopicIdC=uc;   // ── dirty-tracking-এর জন্য ──
     }
+    var rfDirty={};   // ── touched হওয়া সব distinct topic_id (dirty-tracking) ──
 
     var count=0, nowMs=Date.now(), touchedRows=[];
     for(var i3=1;i3<d3.length;i3++){
       if(normalizeFieldValue_(d3[i3][fIdx])===oldV){
         sh3.getRange(i3+1,fIdx+1).setValue(newV);
         if(updColIdx2!==-1) sh3.getRange(i3+1,updColIdx2+1).setValue(nowMs);
+        if(rfTopicIdC>=0) rfDirty[(d3[i3][rfTopicIdC]||"").toString()]=1;
         touchedRows.push(i3+1);
         count++;
       }
@@ -602,6 +1133,7 @@ function doGet(e) {
           if(stVal.indexOf(oldV+" > ")===0){
             sh3.getRange(i4+1,stIdx+1).setValue(newV+" > "+stVal.substring(oldV.length+3));
             if(updColIdx2!==-1) sh3.getRange(i4+1,updColIdx2+1).setValue(nowMs);
+            if(rfTopicIdC>=0) rfDirty[(d3[i4][rfTopicIdC]||"").toString()]=1;
             if(touchedRows.indexOf(i4+1)===-1) touchedRows.push(i4+1);
             count++;
           }
@@ -618,8 +1150,10 @@ function doGet(e) {
     if(idColIdx2!==-1 && updColIdx2!==-1 && touchedRows.length){
       fbSynced=syncToFirebase(shName, shName);
     }
+    markTopicsDirty(rfDirty);
 
     return json({result:"success",count:count,field:field,old:oldV,new:newV,firebaseSynced:fbSynced});
+    });
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -627,6 +1161,21 @@ function doGet(e) {
      Subjects/Topics/Tags/Posts/Institutions reference-টেবিল
      ও paginated question-fetch এর জন্য
   ══════════════════════════════════════════════════════════ */
+
+  // ── reviewLabelForField — কোন ফিল্ড এডিট হলে Review কলামে কোন লেবেল যোগ হবে
+  // তার ম্যাপিং। শুধু "মূল প্রশ্ন/উত্তর/option/ব্যাখ্যা/subject/topic" — এই ৬
+  // ক্যাটাগরির এডিটই ট্র্যাক করা হয় (technique/tags/timestamp-জাতীয় মেটাডেটা
+  // এডিটে Review কলাম ছোঁয়া হয় না, নাহলে অপ্রয়োজনীয় শব্দে ভরে যাবে)। ──
+  function reviewLabelForField(fld){
+    var f=(fld||"").toString().toLowerCase().trim();
+    if(f==="question") return "Question Reviewed";
+    if(f==="correct") return "Ans Reviewed";
+    if(f==="opt1"||f==="opt2"||f==="opt3"||f==="opt4"||f==="option1"||f==="option2"||f==="option3"||f==="option4") return "Option Reviewed";
+    if(f==="explanation") return "Explanation Reviewed";
+    if(f==="subject"||f==="subject_id"||f==="subjectid") return "Subject Reviewed";
+    if(f==="topic"||f==="sub_topic"||f==="subtopic"||f==="topic_id"||f==="topicid") return "Topic Reviewed";
+    return null;
+  }
 
   // ── REF_TABS: reference-টেবিলের নাম ও তাদের id-কলাম ──
   var REF_TABS = {
@@ -636,6 +1185,82 @@ function doGet(e) {
     posts:        {sheet:"Posts",        idCol:"post_id",      nameCol:"post_name"},
     institutions: {sheet:"Institutions", idCol:"institution_id", nameCol:"institution_name"}
   };
+
+  // ── resolveOrCreateSubjectTopicId — যেসব automation-এ (যেমন QBank→Quiz
+  // converter) শুধু subject/topic-এর নাম আসে, কোনো id আসে না, সেখান থেকে সরাসরি
+  // id resolve/create করার জন্য। addReferenceItem-এর সাথে হুবহু একই ID-কনভেনশন
+  // মেনে চলে (Quiz→QZ_S, QBank→QB, Study→ST_S; topic সবসময় subject_id+"_T"+
+  // সিরিয়াল) — নাম মিলিয়ে (case/space-insensitive) বিদ্যমান subject/topic থাকলে
+  // সেটাই রিইউজ করে, না থাকলে নতুন তৈরি করে। batchCache দিলে (একই ব্যাচে বারবার
+  // sheet না পড়ে) in-memory-তেই নতুন তৈরি হওয়া entry গুলো cache থাকে। ──
+  function resolveOrCreateSubjectTopicId(sheetName, subjectName, topicName, batchCache){
+    subjectName=(subjectName||"").toString().trim();
+    topicName=(topicName||"").toString().trim();
+    if(!subjectName) return{subjectId:"",topicId:""};
+    var rstNorm=function(s){return (s||"").toString().trim().toLowerCase().replace(/\s+/g," ");};
+    var rstSs=SpreadsheetApp.getActiveSpreadsheet();
+    var cache=batchCache||{};
+
+    if(!cache._subjSh){
+      cache._subjSh=rstSs.getSheetByName("Subjects");
+      cache._subjData=cache._subjSh.getDataRange().getValues();
+      cache._subjHdr=cache._subjData[0];
+      cache._subjIdCol=cache._subjHdr.indexOf("subject_id");
+      cache._subjNameCol=cache._subjHdr.indexOf("subject_name");
+      cache._subjSheetCol=cache._subjHdr.indexOf("sheet");
+    }
+    if(!cache._topicSh){
+      cache._topicSh=rstSs.getSheetByName("Topics");
+      cache._topicData=cache._topicSh.getDataRange().getValues();
+      cache._topicHdr=cache._topicData[0];
+      cache._topicIdCol=cache._topicHdr.indexOf("topic_id");
+      cache._topicNameCol=cache._topicHdr.indexOf("topic_name");
+      cache._topicSubCol=cache._topicHdr.indexOf("subject_id");
+    }
+
+    var subjectId="";
+    for(var rs=1;rs<cache._subjData.length;rs++){
+      if(cache._subjData[rs][cache._subjSheetCol]===sheetName && rstNorm(cache._subjData[rs][cache._subjNameCol])===rstNorm(subjectName)){
+        subjectId=(cache._subjData[rs][cache._subjIdCol]||"").toString(); break;
+      }
+    }
+    if(!subjectId){
+      var rstPrefix=(sheetName==="Quiz"?"QZ_S":sheetName==="QBank"?"QB":"ST_S");
+      var rstMax=0;
+      for(var rs2=1;rs2<cache._subjData.length;rs2++){
+        var rsId=(cache._subjData[rs2][cache._subjIdCol]||"").toString();
+        if(rsId.indexOf(rstPrefix)===0){ var rsN=parseInt(rsId.substring(rstPrefix.length),10); if(!isNaN(rsN)&&rsN>rstMax) rstMax=rsN; }
+      }
+      subjectId=rstPrefix+(rstMax+1<10?"0"+(rstMax+1):(rstMax+1));
+      var rstNewSubjRow=new Array(cache._subjHdr.length).fill("");
+      rstNewSubjRow[cache._subjIdCol]=subjectId; rstNewSubjRow[cache._subjNameCol]=subjectName; rstNewSubjRow[cache._subjSheetCol]=sheetName;
+      cache._subjSh.appendRow(rstNewSubjRow);
+      cache._subjData.push(rstNewSubjRow); // in-memory cache-ও আপডেট, একই ব্যাচে আবার লাগলে সেভ হওয়া রো-ই রিইউজ হবে
+    }
+
+    if(!topicName) return{subjectId:subjectId,topicId:""};
+
+    var topicId="";
+    for(var rt=1;rt<cache._topicData.length;rt++){
+      if((cache._topicData[rt][cache._topicSubCol]||"").toString()===subjectId && rstNorm(cache._topicData[rt][cache._topicNameCol])===rstNorm(topicName)){
+        topicId=(cache._topicData[rt][cache._topicIdCol]||"").toString(); break;
+      }
+    }
+    if(!topicId){
+      var rstTPrefix=subjectId+"_T";
+      var rstTMax=0;
+      for(var rt2=1;rt2<cache._topicData.length;rt2++){
+        var rtId=(cache._topicData[rt2][cache._topicIdCol]||"").toString();
+        if(rtId.indexOf(rstTPrefix)===0){ var rtN=parseInt(rtId.substring(rstTPrefix.length),10); if(!isNaN(rtN)&&rtN>rstTMax) rstTMax=rtN; }
+      }
+      topicId=rstTPrefix+(rstTMax+1<10?"0"+(rstTMax+1):(rstTMax+1));
+      var rstNewTopicRow=new Array(cache._topicHdr.length).fill("");
+      rstNewTopicRow[cache._topicIdCol]=topicId; rstNewTopicRow[cache._topicNameCol]=topicName; rstNewTopicRow[cache._topicSubCol]=subjectId;
+      cache._topicSh.appendRow(rstNewTopicRow);
+      cache._topicData.push(rstNewTopicRow);
+    }
+    return{subjectId:subjectId,topicId:topicId};
+  }
 
   // ── getReferenceData — Subjects/Topics/Tags/Posts/Institutions
   // সবগুলো ছোট রেফারেন্স-টেবিল একবারে fetch করে (এগুলো ছোট বলেই বাল্ক-ফেচ
@@ -670,6 +1295,7 @@ function doGet(e) {
   // subject_id/topic_id দিয়ে reference করে বলে rename-এ তাদের কিছুই ছোঁয়া
   // লাগে না — এটাই মূল fix যেটা বহুবার আলোচনা হয়েছে। ──
   if (action==="renameReferenceItem") {
+    return withWriteLock(function(){
     var rriType=(e.parameter.refType||"").toLowerCase();
     var rriId=(e.parameter.id||"").toString().trim();
     var rriNewName=(e.parameter.newName||"").toString().trim();
@@ -705,13 +1331,41 @@ function doGet(e) {
         UrlFetchApp.fetch(rriUrl,{method:"put",contentType:"application/json",payload:JSON.stringify(rriNewName),muteHttpExceptions:true});
       }
     } catch(rriErr){ rriFbOk=false; }
+
+    // ── CDN dirty-tracking — cascade এড়ানো হলেও (Quiz/QBank/Study রো টাচ হয়
+    // না), publish স্ক্রিপ্ট এখন subject/subTopic নাম Reference টেবিল থেকেই
+    // resolve করে (Option B, GAS_CDN_PLANNING.md দেখো) — তাই rename করলে যেসব
+    // Topic-এর content JSON-এ এই নাম দেখায়, সেগুলোকে dirty মার্ক করতে হবে,
+    // নাহলে পুরনো নামই CDN-এ থেকে যাবে। Subject rename হলে তার আন্ডারের সব
+    // Topic; Topic rename হলে শুধু সেই একটা Topic। ──
+    if (rriType==="topics") {
+      markTopicDirty(rriId);
+    } else if (rriType==="subjects") {
+      var rriTopicsSh=rriSs.getSheetByName("Topics");
+      if (rriTopicsSh) {
+        var rriTData=rriTopicsSh.getDataRange().getValues(), rriTHdr=rriTData[0];
+        var rriTIdCol=rriTHdr.indexOf("topic_id"), rriTSubCol=rriTHdr.indexOf("subject_id");
+        if (rriTIdCol>=0 && rriTSubCol>=0) {
+          var rriDirty={};
+          for (var rt=1;rt<rriTData.length;rt++){
+            if ((rriTData[rt][rriTSubCol]||"").toString().trim()===rriId) {
+              rriDirty[(rriTData[rt][rriTIdCol]||"").toString()]=1;
+            }
+          }
+          markTopicsDirty(rriDirty);
+        }
+      }
+    }
+
     return json({status:"success",result:"success",refType:rriType,id:rriId,newName:rriNewName,rowsChanged:1,firebaseSynced:rriFbOk});
+    });
   }
 
   // ── addReferenceItem — Subjects/Topics/Tags/Posts/Institutions-এ
   // নতুন এন্ট্রি যোগ করে, id নিজে থেকে জেনারেট করে (parent-scoped prefix সহ)।
   // Manager UI থেকে "নতুন যোগ করো" বাটনে ব্যবহার হয়। ──
   if (action==="addReferenceItem") {
+    return withWriteLock(function(){
     var ariType=(e.parameter.refType||"").toLowerCase();
     var ariName=(e.parameter.name||"").toString().trim();
     var ariParentId=(e.parameter.parentId||"").toString().trim(); // topics→subject_id
@@ -727,10 +1381,19 @@ function doGet(e) {
     var ariData=ariSh.getDataRange().getValues(), ariHdr=ariData[0];
     var ariIdCol=ariHdr.indexOf(ariCfg.idCol);
 
-    // ── নতুন id জেনারেট (parent-scoped prefix + পরের সিরিয়াল নাম্বার) ──
+    // ── নতুন id জেনারেট (parent-scoped prefix + পরের সিরিয়াল নাম্বার) —
+    // ⚠️ getNextId()-এর মতোই এখানেও max-scan করে পরের সিরিয়াল বের করা হয়, তাই
+    // withWriteLock ছাড়া দুইটা concurrent addReferenceItem কল একই id জেনারেট
+    // করে ফেলতে পারত (duplicate topic_id) — এখন lock-এর ভিতরে বলে নিরাপদ। ──
     var ariNewId="";
     if (ariType==="subjects") {
-      var ariPrefix=(ariSheet==="Quiz"?"QZ_S":ariSheet==="QBank"?"QB_S":"ST_S");
+      // ⚠️ QBank-এর subject id কনভেনশন অন্য দুটোর (Quiz→QZ_S, Study→ST_S) থেকে আলাদা —
+      // QBank-এ আগে থেকেই বিদ্যমান subject-গুলো "QB01".."QB09" ফরম্যাটে (আন্ডারস্কোর/S
+      // ছাড়া) তৈরি হয়ে আছে। আগে এখানে ভুলবশত সব সিটেই "_S" প্যাটার্ন ব্যবহার হতো
+      // (QBank-এও "QB_S01" জেনারেট হতো), যেটা বিদ্যমান কনভেনশনের সাথে না মেলায় প্রতিটা
+      // নতুন Subject আলাদা/ভিন্ন id-তে চলে যেত, বিদ্যমান এন্ট্রির সাথে মিলতো না। এখন
+      // QBank-এর জন্য বিদ্যমান কনভেনশন অনুসরণ করা হচ্ছে (Quiz/Study অপরিবর্তিত)। ──
+      var ariPrefix=(ariSheet==="Quiz"?"QZ_S":ariSheet==="QBank"?"QB":"ST_S");
       var ariMax=0;
       for (var a1=1;a1<ariData.length;a1++){
         var aId1=(ariData[a1][ariIdCol]||"").toString();
@@ -765,6 +1428,7 @@ function doGet(e) {
     ariSh.appendRow(ariNewRow);
 
     return json({status:"success",result:"success",refType:ariType,id:ariNewId,name:ariName});
+    });
   }
 
   // ── deleteReferenceItem — একটা রেফারেন্স-এন্ট্রি ডিলিট করে (id দিয়ে)।
@@ -772,6 +1436,7 @@ function doGet(e) {
   // তাদের subject_id/topic_id ফাঁকা/orphan হয়ে যাবে (প্রশ্ন মোছে না)। Admin
   // UI-তে ডিলিটের আগে ব্যবহার-সংখ্যা দেখিয়ে সতর্ক করা উচিত। ──
   if (action==="deleteReferenceItem") {
+    return withWriteLock(function(){
     var driType=(e.parameter.refType||"").toLowerCase();
     var driId=(e.parameter.id||"").toString().trim();
     var driCfg=REF_TABS[driType];
@@ -786,8 +1451,150 @@ function doGet(e) {
       if ((driData[d1][driIdCol]||"").toString().trim()===driId){ driSh.deleteRow(d1+1); driFound=true; break; }
     }
     if (!driFound) return json({status:"error",result:"error",message:"id পাওয়া যায়নি: "+driId});
-    return json({status:"success",result:"success",refType:driType,id:driId,deleted:1});
+
+    // ── FIX (App feature request ৩ — QBank Admin: পদবী/প্রতিষ্ঠান Delete):
+    // Post/Institution রেফারেন্স-এন্ট্রি ডিলিট হলে Exam_Appearances-এর সংশ্লিষ্ট
+    // রো-ও cascade-delete করা হয় (নাহলে ওই appearance-গুলো orphan post_id/
+    // institution_id নিয়ে পড়ে থাকত, "পদবী/প্রতিষ্ঠান-মোডে" প্রশ্ন গণনা ভুল দেখাত)।
+    // মূল প্রশ্ন (Quiz/QBank/Study রো) কখনোই টাচ হয় না — শুধু appearance-লিংক মোছে। ──
+    var driEaDeleted=0;
+    if (driType==="posts" || driType==="institutions") {
+      var driEaSh=driSs.getSheetByName("Exam_Appearances");
+      if (driEaSh && driEaSh.getLastRow()>=2) {
+        var driEaData=driEaSh.getDataRange().getValues(), driEaHdr=driEaData[0];
+        var driEaCol=driEaHdr.indexOf(driType==="posts"?"post_id":"institution_id");
+        if (driEaCol>=0) {
+          for (var de1=driEaData.length-1; de1>=1; de1--){
+            if ((driEaData[de1][driEaCol]||"").toString().trim()===driId){
+              driEaSh.deleteRow(de1+1); driEaDeleted++;
+            }
+          }
+        }
+      }
+    }
+    return json({status:"success",result:"success",refType:driType,id:driId,deleted:1,appearancesDeleted:driEaDeleted});
+    });
   }
+
+  // ── updateReferenceField — Subjects/Topics/Tags/Posts/Institutions-এর যেকোনো
+  // একটা কলাম (নাম-কলাম ছাড়া অন্য যেকোনো, যেমন "emoji") সেট করে, id দিয়ে খুঁজে।
+  // App feature request ৪ — এডমিন সাবজেক্ট/টপিক/পদবী/প্রতিষ্ঠানের ইমুজি বদলাতে
+  // পারবে। কলামটা শিটে না থাকলে নিজে থেকেই নতুন হেডার কলাম যোগ করে নেয় (তাই
+  // ম্যানুয়ালি শিটে "emoji" কলাম বানিয়ে রাখার দরকার নেই)। ──
+  if (action==="updateReferenceField") {
+    return withWriteLock(function(){
+    var urfType=(e.parameter.refType||"").toLowerCase();
+    var urfId=(e.parameter.id||"").toString().trim();
+    var urfField=(e.parameter.field||"").toString().trim();
+    var urfValue=(e.parameter.value||"").toString();
+    var urfCfg=REF_TABS[urfType];
+    if (!urfCfg) return json({status:"error",result:"error",message:"অজানা refType: "+urfType});
+    if (!urfId || !urfField) return json({status:"error",result:"error",message:"id/field প্রয়োজন"});
+    if (urfField===urfCfg.idCol || urfField===urfCfg.nameCol) {
+      return json({status:"error",result:"error",message:"id/name কলাম এখান থেকে বদলানো যাবে না"});
+    }
+    var urfSs=SpreadsheetApp.getActiveSpreadsheet(), urfSh=urfSs.getSheetByName(urfCfg.sheet);
+    if (!urfSh) return json({status:"error",result:"error",message:"Sheet not found: "+urfCfg.sheet});
+    var urfLastCol=urfSh.getLastColumn();
+    var urfHdr=urfSh.getRange(1,1,1,urfLastCol).getValues()[0];
+    var urfFieldCol=-1;
+    for (var uc=0;uc<urfHdr.length;uc++){
+      if (urfHdr[uc].toString().trim()===urfField) { urfFieldCol=uc; break; }
+    }
+    if (urfFieldCol<0) {
+      // কলাম নেই — শেষে নতুন কলাম যোগ করো (হেডার বসিয়ে)
+      urfFieldCol=urfLastCol;
+      urfSh.getRange(1,urfFieldCol+1).setValue(urfField);
+    }
+    var urfIdColIdx=urfHdr.indexOf(urfCfg.idCol);
+    if (urfIdColIdx<0) return json({status:"error",result:"error",message:"id column not found in "+urfCfg.sheet});
+    var urfLastRow=urfSh.getLastRow();
+    if (urfLastRow<2) return json({status:"error",result:"error",message:"শিট খালি"});
+    var urfIds=urfSh.getRange(2,urfIdColIdx+1,urfLastRow-1,1).getValues();
+    var urfFound=false;
+    for (var ur=0;ur<urfIds.length;ur++){
+      if ((urfIds[ur][0]||"").toString().trim()===urfId){
+        urfSh.getRange(ur+2,urfFieldCol+1).setValue(urfValue);
+        urfFound=true;
+        break;
+      }
+    }
+    if (!urfFound) return json({status:"error",result:"error",message:"id পাওয়া যায়নি: "+urfId});
+    return json({status:"success",result:"success",refType:urfType,id:urfId,field:urfField,value:urfValue});
+    });
+  }
+
+  // ── mergeReferenceItem — App feature request ৩ (QBank Admin "Move"): একটা
+  // Post/Institution-কে আরেকটার ভেতরে merge করে — Exam_Appearances-এর সব
+  // matching রো-র post_id/institution_id fromId থেকে toId-তে বদলে দেয়, তারপর
+  // fromId-এর reference-এন্ট্রি ডিলিট করে (Subject/SubTopic "move"-এর প্যাটার্নেই,
+  // যেখানে একই নামের destination থাকলে auto-merge হয়)। মূল প্রশ্ন কখনো টাচ হয় না। ──
+  if (action==="mergeReferenceItem") {
+    return withWriteLock(function(){
+    var mriType=(e.parameter.refType||"").toLowerCase();
+    var mriFromId=(e.parameter.fromId||"").toString().trim();
+    var mriToId=(e.parameter.toId||"").toString().trim();
+    if (mriType!=="posts" && mriType!=="institutions") {
+      return json({status:"error",result:"error",message:"refType শুধু posts/institutions হতে পারে"});
+    }
+    if (!mriFromId || !mriToId) return json({status:"error",result:"error",message:"fromId/toId প্রয়োজন"});
+    if (mriFromId===mriToId) return json({status:"error",result:"error",message:"fromId ও toId একই হতে পারবে না"});
+    var mriSs=SpreadsheetApp.getActiveSpreadsheet();
+    var mriEaSh=mriSs.getSheetByName("Exam_Appearances");
+    var mriMoved=0;
+    if (mriEaSh && mriEaSh.getLastRow()>=2) {
+      var mriEaData=mriEaSh.getDataRange().getValues(), mriEaHdr=mriEaData[0];
+      var mriEaCol=mriEaHdr.indexOf(mriType==="posts"?"post_id":"institution_id");
+      if (mriEaCol>=0) {
+        for (var me=1;me<mriEaData.length;me++){
+          if ((mriEaData[me][mriEaCol]||"").toString().trim()===mriFromId){
+            mriEaSh.getRange(me+1,mriEaCol+1).setValue(mriToId);
+            mriMoved++;
+          }
+        }
+      }
+    }
+    // ── from-side reference row ডিলিট (এখন আর কোনো appearance এটা পয়েন্ট করে না) ──
+    var mriCfg=REF_TABS[mriType];
+    var mriRefSh=mriSs.getSheetByName(mriCfg.sheet);
+    if (mriRefSh && mriRefSh.getLastRow()>=2) {
+      var mriRefData=mriRefSh.getDataRange().getValues(), mriRefHdr=mriRefData[0];
+      var mriRefIdCol=mriRefHdr.indexOf(mriCfg.idCol);
+      for (var mr=mriRefData.length-1; mr>=1; mr--){
+        if ((mriRefData[mr][mriRefIdCol]||"").toString().trim()===mriFromId){ mriRefSh.deleteRow(mr+1); break; }
+      }
+    }
+    return json({status:"success",result:"success",refType:mriType,fromId:mriFromId,toId:mriToId,rowsMoved:mriMoved});
+    });
+  }
+
+  // ── renameQBankYear — App feature request ৩: QBank "সাল" আসলে Exam_Appearances-এর
+  // কলাম না — এটা সরাসরি QBank শিটের প্রতিটা প্রশ্ন-রো-এর নিজস্ব "year" কলাম (দেখো
+  // QuestionItem.year — "QBank only")। তাই rename মানে: QBank শিটে যেসব রো-র year==
+  // oldYear তাদের সবার year কলাম newYear-এ বদলে দেওয়া (bulk field-update, ঠিক
+  // renameField action-এর মতোই, কিন্তু sheet সবসময় QBank + field সবসময় year এ ফিক্সড
+  // রাখা হলো যাতে Android থেকে ভুল sheet/field পাঠানোর ঝুঁকি না থাকে)। ──
+  if (action==="renameQBankYear") {
+    return withWriteLock(function(){
+    var ryOld=(e.parameter.oldYear||"").toString().trim();
+    var ryNew=(e.parameter.newYear||"").toString().trim();
+    if (!ryOld || !ryNew) return json({status:"error",result:"error",message:"oldYear/newYear প্রয়োজন"});
+    var rySs=SpreadsheetApp.getActiveSpreadsheet(), ryQbSh=rySs.getSheetByName("QBank");
+    if (!ryQbSh || ryQbSh.getLastRow()<2) return json({status:"error",result:"error",message:"QBank sheet খালি"});
+    var ryData=ryQbSh.getDataRange().getValues(), ryHdr=ryData[0];
+    var ryYearCol=ryHdr.indexOf("year");
+    if (ryYearCol<0) return json({status:"error",result:"error",message:"QBank শিটে year কলাম নেই"});
+    var ryCount=0;
+    for (var ry=1;ry<ryData.length;ry++){
+      if ((ryData[ry][ryYearCol]||"").toString().trim()===ryOld){
+        ryQbSh.getRange(ry+1,ryYearCol+1).setValue(ryNew);
+        ryCount++;
+      }
+    }
+    return json({status:"success",result:"success",oldYear:ryOld,newYear:ryNew,rowsChanged:ryCount});
+    });
+  }
+
 
   // ── rebuildIndex — Quiz/QBank/Study প্রতিটাকে subject_id (তারপর topic_id)
   // অনুযায়ী সাজায়, আর Topics ট্যাবে row_start/row_count বসিয়ে দেয়।
@@ -1116,6 +1923,7 @@ function doGet(e) {
 
   // ── deleteByIds ── ★ delete questions by comma-separated IDs
   if (action==="deleteByIds") {
+    return withWriteLock(function(){
     var shName2=e.parameter.sheet||"QBank";
     var shMap3={quiz:"Quiz",qbank:"QBank",study:"Study"};
     shName2=shMap3[shName2.toLowerCase()]||shName2;
@@ -1126,11 +1934,16 @@ function doGet(e) {
     var d4=sh4.getDataRange().getValues(), h4=d4[0];
     var idIdx=-1;
     for(var ii=0;ii<h4.length;ii++){var hh=h4[ii].toString().toLowerCase().trim();if(hh==="id"||hh==="sl"){idIdx=ii;break;}}
+    var dbiTopicIdC=h4.indexOf("topic_id");   // ── dirty-tracking-এর জন্য ──
+    var dbiDirty={};
     var deleted=0;
     // Delete from bottom to top to preserve row indices
     for(var i4=d4.length-1;i4>=1;i4--){
       var rowId=idIdx>=0?d4[i4][idIdx].toString():"";
-      if(ids.indexOf(rowId)>=0){sh4.deleteRow(i4+1);deleted++;}
+      if(ids.indexOf(rowId)>=0){
+        if(dbiTopicIdC>=0) dbiDirty[(d4[i4][dbiTopicIdC]||"").toString()]=1;
+        sh4.deleteRow(i4+1);deleted++;
+      }
     }
     // ── প্রশ্ন ডিলিট হলে সংশ্লিষ্ট Exam_Appearances রো-ও ক্লিন-আপ করা হয়,
     // নাহলে orphan appearance রো থেকে যেত (এমন question_id-কে পয়েন্ট করে
@@ -1147,8 +1960,10 @@ function doGet(e) {
         }
       }
     }
+    markTopicsDirty(dbiDirty);
     // Firebase already updated directly from app - DO NOT sync (would overwrite with array)
     return json({result:"success",deleted:deleted,sheet:shName2,examAppearancesDeleted:eaDeleted});
+    });
   }
 
   // ── deleteByReferenceId — একটা পুরো subject_id/topic_id-এর সব প্রশ্ন
@@ -1158,6 +1973,7 @@ function doGet(e) {
   // পারত — এটা তার থেকে অনেক দ্রুত)। ডিলিটের পর Topics ইনডেক্স নিজে থেকেই আপডেট
   // (shift/remove) করে দেওয়া হয়, আলাদা করে rebuildIndex চালাতে হয় না। ──
   if (action==="deleteByReferenceId") {
+    return withWriteLock(function(){
     var driiType=(e.parameter.refType||"").toLowerCase(); // "subject" | "topic"
     var driiId=(e.parameter.id||"").toString().trim();
     if (!driiId) return json({status:"error",result:"error",message:"id প্রয়োজন"});
@@ -1234,7 +2050,16 @@ function doGet(e) {
       }
     }
 
+    // ── CDN dirty-tracking — ডিলিট হওয়া প্রতিটা Topic-কে dirty মার্ক করা হচ্ছে;
+    // publish script দেখবে সেই topic_id-তে আর কোনো প্রশ্ন নেই আর GitHub থেকে
+    // সংশ্লিষ্ট JSON ফাইল মুছে দেবে (doPublish_-এর বিদ্যমান "questions.length===0"
+    // লজিক, দেখো Phase 3 কোড) ──
+    var driiDirty={};
+    driiAffectedTopicRows.forEach(function(i){ driiDirty[(driiTData[i][driiTIdCol]||"").toString()]=1; });
+    markTopicsDirty(driiDirty);
+
     return json({status:"success",result:"success",deleted:driiRangeCount,examAppearancesDeleted:driiEaDeleted,sheet:driiSheetName});
+    });
   }
 
   // ── moveQuestions — এক বা একাধিক প্রশ্ন (id দিয়ে, comma-separated) অন্য
@@ -1242,6 +2067,7 @@ function doGet(e) {
   // প্রশ্নের নিজের id অপরিবর্তিত থাকে (তাই Exam_Appearances/bookmark/quiz-history —
   // কিছুই ভাঙে না, ঠিক যেভাবে renameField-ও id ছোঁয় না)। ──
   if (action==="moveQuestions") {
+    return withWriteLock(function(){
     var mqShName=e.parameter.sheet||"";
     var mqShMap={quiz:"Quiz",qbank:"QBank",study:"Study"};
     mqShName=mqShMap[mqShName.toLowerCase()]||mqShName;
@@ -1268,10 +2094,12 @@ function doGet(e) {
     var mqUpdAtCol=mqHdr.indexOf("updatedAt"); if (mqUpdAtCol<0) mqUpdAtCol=mqHdr.indexOf("updatedat");
     if (mqIdCol<0||mqSubCol<0||mqSTCol<0) return json({status:"error",result:"error",message:"id/subject/sub_topic কলাম পাওয়া যায়নি"});
 
+    var mqDirty={};   // ── dirty-tracking: পুরনো + নতুন টপিক দুটোই (কাউন্ট বদলাবে) ──
     var mqNow=Date.now(), mqMoved=0, mqTouchedRows=[];
     for (var mi=1;mi<mqData.length;mi++){
       var mqRowId=(mqData[mi][mqIdCol]||"").toString().trim();
       if (mqIds.indexOf(mqRowId)<0) continue;
+      if (mqTopicIdCol>=0) mqDirty[(mqData[mi][mqTopicIdCol]||"").toString()]=1;   // পুরনো টপিক
       mqSh.getRange(mi+1,mqSubCol+1).setValue(mqNewSubject);
       mqSh.getRange(mi+1,mqSTCol+1).setValue(mqNewSubTopic);
       if (mqSubIdCol>=0) mqSh.getRange(mi+1,mqSubIdCol+1).setValue(mqNewSubjectId);
@@ -1281,13 +2109,16 @@ function doGet(e) {
       mqMoved++;
     }
     if (!mqMoved) return json({status:"error",result:"error",message:"কোনো matching প্রশ্ন পাওয়া যায়নি"});
+    mqDirty[mqNewTopicId]=1;   // নতুন টপিক
 
     // updateField/renameField-এর প্যাটার্ন অনুসরণ — শুধু touched row-গুলোর updatedAt
     // বসিয়ে syncToFirebase-কে incremental patch করতে দেওয়া হয়, পুরো sheet re-upload হয় না
     var mqFbSynced=true;
     if (mqUpdAtCol>=0 && mqTouchedRows.length) mqFbSynced=syncToFirebase(mqShName,mqShName);
+    markTopicsDirty(mqDirty);
 
     return json({status:"success",result:"success",moved:mqMoved,sheet:mqShName,firebaseSynced:mqFbSynced});
+    });
   }
 
   // ── moveTopic — একটা গোটা Topic (তার আন্ডারের সব প্রশ্নসহ) অন্য Subject-এ move
@@ -1297,6 +2128,7 @@ function doGet(e) {
   // ট্যাবে তার subject_id reparent হয়। প্রশ্নের id/topic_id (merge না হলে) কোনোটাই
   // ভাঙে না — Exam_Appearances/bookmark সব ঠিক থাকে। ──
   if (action==="moveTopic") {
+    return withWriteLock(function(){
     var mtTopicId=(e.parameter.topicId||"").toString().trim();
     var mtNewSubjectId=(e.parameter.newSubjectId||"").toString().trim();
     var mtNewSubjectName=(e.parameter.newSubjectName||"").toString().trim();
@@ -1355,10 +2187,101 @@ function doGet(e) {
 
     var mtFbSynced=true;
     if (mtUpdAtCol>=0 && mtTouchedRows.length) mtFbSynced=syncToFirebase(mtSheetName,mtSheetName);
+    // ── dirty-tracking: সোর্স টপিক (এখন হয় খালি, নয়তো merge হয়ে বিলুপ্ত) আর
+    // destination টপিক (effectiveTopicId) — দুটোই publish-এ প্রতিফলিত হতে হবে ──
+    markTopicDirty(mtTopicId);
+    markTopicDirty(mtEffectiveTopicId);
 
     return json({status:"success",result:"success",moved:mtMoved,sheet:mtSheetName,mergedInto:mtMergeTopicId||null,firebaseSynced:mtFbSynced});
+    });
   }
 
+
+  // ── publishNow — Admin App-এর "Publish Now" বাটন থেকে ট্রিগার হয়। Dirty
+  // topic-গুলো GitHub-এ commit করে, manifest.json আপডেট করে। synchronous —
+  // dirty topic বেশি হলে কয়েক সেকেন্ড-১/২ মিনিট লাগতে পারে (GAS-এর ৬ মিনিট
+  // hard limit-এর মধ্যেই থাকা উচিত স্বাভাবিক ব্যবহারে)। ──
+  if (action==="publishNow") {
+    return json(publishDirtyTopics());
+  }
+
+  // ── getDirtyTopicsCount — Publish বাটনের আগে "কতগুলো Topic অপেক্ষায় আছে"
+  // দেখানোর জন্য (read-only, lock লাগে না) ──
+  if (action==="getDirtyTopicsCount") {
+    var gdcSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("_DirtyTopics");
+    var gdcCount = 0;
+    if (gdcSh && gdcSh.getLastRow() >= 2) {
+      var gdcIds = gdcSh.getRange(2,1,gdcSh.getLastRow()-1,1).getValues();
+      var gdcUniq = {};
+      gdcIds.forEach(function(r){ var t=(r[0]||"").toString(); if(t) gdcUniq[t]=1; });
+      gdcCount = Object.keys(gdcUniq).length;
+    }
+    return json({status:"success",result:"success",dirtyCount:gdcCount});
+  }
+
+  // ── markAllTopicsDirty — "ধাপ ৮: পুরোটা স্কেল করা"-এর জন্য। Phase ১ deploy
+  // হওয়ার আগে থেকে থাকা পুরনো সব প্রশ্ন কখনো dirty মার্ক হয়নি (dirty-tracking
+  // শুধু নতুন write-এই কাজ করে), তাই সেগুলো এখনো GitHub-এ যায়নি। এই action
+  // Topics reference-শিটের সব topic_id একসাথে dirty মার্ক করে দেয় — এরপর
+  // একাধিকবার publishNow কল করলে (৪০০-এর cap-এর কারণে) ধীরে ধীরে পুরো
+  // প্রশ্নব্যাংক CDN-এ প্রথমবার সম্পূর্ণভাবে publish হয়ে যাবে। এক-কালীন কাজ —
+  // এরপর থেকে normal write-action-গুলোই dirty-tracking সামলাবে। ──
+  if (action==="markAllTopicsDirty") {
+    var matTopicsSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Topics");
+    if (!matTopicsSh) return json({status:"error",result:"error",message:"Topics sheet নেই"});
+    var matData = matTopicsSh.getDataRange().getValues(), matHdr = matData[0];
+    var matIdCol = matHdr.indexOf("topic_id");
+    if (matIdCol < 0) return json({status:"error",result:"error",message:"Topics ট্যাবে topic_id কলাম নেই"});
+    var matDirty = {};
+    for (var mt=1; mt<matData.length; mt++) {
+      var mtId = (matData[mt][matIdCol]||"").toString();
+      if (mtId) matDirty[mtId] = 1;
+    }
+    markTopicsDirty(matDirty);
+    return json({status:"success",result:"success",markedCount:Object.keys(matDirty).length});
+  }
+
+  // ── countOrphanQuestions — Diagnostic (read-only, নিরাপদ)। কোন Sheet-এ
+  // কতগুলো প্রশ্নের topic_id ফাঁকা বা Topics reference-শিটে নেই (orphan/
+  // unclassified) — এগুলো markAllTopicsDirty-এর dirty-list-এই কখনো ঢোকে না
+  // (সেটা Topics শিট থেকে topic_id নেয়), তাই কখনো publish/CDN-এ যায় না।
+  // sanity-check-এ "Sheet total ≠ manifest total" দেখা গেলে এটা দিয়েই সঠিক
+  // কারণ ও সংখ্যা বোঝা যাবে। ──
+  if (action==="countOrphanQuestions") {
+    var coqSs = SpreadsheetApp.getActiveSpreadsheet();
+    var coqTopicsSh = coqSs.getSheetByName("Topics");
+    var coqValidIds = {};
+    if (coqTopicsSh) {
+      var coqTData = coqTopicsSh.getDataRange().getValues(), coqTHdr = coqTData[0];
+      var coqTIdCol = coqTHdr.indexOf("topic_id");
+      if (coqTIdCol >= 0) {
+        for (var ct=1; ct<coqTData.length; ct++) {
+          var ctid = (coqTData[ct][coqTIdCol]||"").toString();
+          if (ctid) coqValidIds[ctid] = 1;
+        }
+      }
+    }
+    var coqResult = {};
+    ["Quiz", "QBank", "Study"].forEach(function (sheetName) {
+      var sh = coqSs.getSheetByName(sheetName);
+      if (!sh) { coqResult[sheetName] = { total: 0, blank: 0, orphan: 0 }; return; }
+      var data = sh.getDataRange().getValues(), hdr = data[0];
+      var topicIdCol = hdr.indexOf("topic_id");
+      var total = Math.max(0, data.length - 1);
+      var blank = 0, orphan = 0;
+      if (topicIdCol >= 0) {
+        for (var r=1; r<data.length; r++) {
+          var tid = (data[r][topicIdCol]||"").toString();
+          if (!tid) blank++;
+          else if (!coqValidIds[tid]) orphan++;
+        }
+      } else {
+        blank = total; // কলামই নেই মানে সবগুলোই "topic_id নেই" ধরা হচ্ছে
+      }
+      coqResult[sheetName] = { total: total, blank: blank, orphan: orphan, ok: total - blank - orphan };
+    });
+    return json({status:"success",result:"success",bySheet:coqResult});
+  }
 
   // ── adminNotify ──
   if (action==="adminNotify") {
@@ -1706,12 +2629,48 @@ function doPost(e) {
     // এটা শুধু Sheet-এ লেখে, কখনো syncToFirebase() কল করে না — ইচ্ছাকৃতভাবে,
     // কারণ Firebase quota রিসেট না হওয়া পর্যন্ত এই ডেটা শুধু Sheet-এ staging হিসেবে থাকবে।
     if (params.type === "qbank_to_quiz_bulk") {
+      return withWriteLock(function(){
       var targetSheetName = params.targetSheet || "Quiz";
       var qcSh = ss.getSheetByName(targetSheetName);
       if (!qcSh) return json({ result: "error", error: "Sheet not found: " + targetSheetName });
 
+      // 🐛 ফিক্স: আগে এখানে rowData একটা ফিক্সড ১৬-এলিমেন্ট positional array ছিল
+      // (subject_id/topic_id/group_id ইত্যাদি কলাম যোগ হওয়ার আগের পুরনো কোড) — তাই
+      // subject_id/topic_id কখনো লেখাই হতো না (এই দুটো কলাম array-তে ছিলই না), আর
+      // Quiz শিটের আসল কলাম-অর্ডার এখন এই assume করা অর্ডারের সাথে না মেলায় বাকি
+      // ফিল্ডও ভুল কলামে বসে যাওয়ার ঝুঁকি ছিল। bulk_save_rows যেভাবে header-name
+      // মিলিয়ে row বসায়, এখানেও ঠিক সেই একই পদ্ধতি ব্যবহার করা হচ্ছে — কলাম যেই
+      // অর্ডারেই থাকুক, নাম মিলিয়ে সঠিক জায়গায় বসবে। ──
+      var qcData=qcSh.getDataRange().getValues();
+      var qcRawHdr=qcData.length?qcData[0]:[];
+      var qcKeyNorm=function(s){return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");};
+      var qcColIdx={};
+      for(var qch=0; qch<qcRawHdr.length; qch++){ qcColIdx[qcKeyNorm(qcRawHdr[qch])]=qch; }
+      function qcBuildRow(fieldMap){
+        var arr=new Array(qcRawHdr.length).fill("");
+        for(var fk in fieldMap){ var ci=qcColIdx[qcKeyNorm(fk)]; if(ci!==undefined) arr[ci]=fieldMap[fk]; }
+        return arr;
+      }
+
+      // ── ID generation — bulk_save_rows-এর সাথে সামঞ্জস্যপূর্ণ (QZ-00001 স্টাইল),
+      // sheet স্ক্যান করেই max বের করা হয় (getNextId()-এর আলাদা script-property
+      // কাউন্টারের উপর নির্ভর না করে) — নাহলে দুটো ভিন্ন insert-path আলাদা কাউন্টার
+      // ব্যবহার করলে একই id দুইবার জেনারেট হয়ে যাওয়ার (collision) ঝুঁকি থাকে। ──
+      var qcPrefix=(targetSheetName==="Quiz"?"QZ-":targetSheetName==="QBank"?"QB-":targetSheetName==="Study"?"ST-":"");
+      var qcMaxNum=0;
+      var qcIdColIdx=qcColIdx["id"];
+      if(qcPrefix && qcIdColIdx!==undefined){
+        for(var qcr=1;qcr<qcData.length;qcr++){
+          var qcv=(qcData[qcr][qcIdColIdx]||"").toString();
+          if(qcv.indexOf(qcPrefix)===0){ var qcn=parseInt(qcv.substring(qcPrefix.length),10); if(!isNaN(qcn)&&qcn>qcMaxNum) qcMaxNum=qcn; }
+        }
+      }
+      var qcCurId=qcMaxNum;
+
       var rows = params.rows || [];
       var added = 0, skipped = 0, errors = [];
+      var qcRefCache={}; // এই ব্যাচের জন্য Subjects/Topics-এর in-memory cache (resolveOrCreateSubjectTopicId দেখো)
+      var qcNewRows=[];
 
       rows.forEach(function(r) {
         try {
@@ -1719,31 +2678,46 @@ function doPost(e) {
             skipped++;
             return;
           }
-          var newId = getNextId(targetSheetName);
-          var rowData = [
-            newId,
-            r.question || '',
-            r.opt1 || '', r.opt2 || '', r.opt3 || '', r.opt4 || '',
-            r.correct || '',
-            r.subject || '',
-            r.sub_topic || '',
-            r.explanation || '',
-            r.technique || '',
-            r.prevExam || '',              // QBank-এর মূল exam paper-এর নাম এখানে থাকবে
-            r.qType || 'MCQ',
-            r.timestamp || new Date().toLocaleString('bn-BD'),
-            r.audienceTags || 'Job',
-            Date.now(),
-            "NF"
-          ];
-          qcSh.appendRow(rowData);
+          var newId;
+          if(qcPrefix){ qcCurId++; newId=qcPrefix+(qcCurId<10000?("0000"+qcCurId).slice(-5):qcCurId); }
+          else { newId=getNextId(targetSheetName); }
+
+          // 🐛 ফিক্স: subject/topic-এর নাম দিয়ে id resolve/create করা হচ্ছে —
+          // আগে এই ধাপটাই ছিল না, তাই subject_id/topic_id সবসময় ফাঁকা থাকতো।
+          var refIds=resolveOrCreateSubjectTopicId(targetSheetName, r.subject||'', r.sub_topic||'', qcRefCache);
+
+          var rowArr=qcBuildRow({
+            "id": newId,
+            "question": r.question || '',
+            "option1": r.opt1 || '', "option2": r.opt2 || '', "option3": r.opt3 || '', "option4": r.opt4 || '',
+            "correct": r.correct || '',
+            "subject": r.subject || '',
+            "topic": r.sub_topic || '',
+            "subject_id": refIds.subjectId,
+            "topic_id": refIds.topicId,
+            "explanation": r.explanation || '',
+            "technique": r.technique || '',
+            "previousexam": r.prevExam || '',       // QBank-এর মূল exam paper-এর নাম এখানে থাকবে
+            "questiontype": r.qType || 'MCQ',
+            "timestamp": r.timestamp || new Date().toLocaleString('bn-BD'),
+            "audiencetags": r.audienceTags || 'Job',
+            "updatedat": Date.now(),
+            "notfirebase": "NF",
+            "added_by": "Q2Q",
+          });
+          qcNewRows.push(rowArr);
           added++;
         } catch (rowErr) {
           errors.push({ q: (r.question || '').substring(0, 40), err: rowErr.toString() });
         }
       });
 
+      if(qcNewRows.length){
+        qcSh.getRange(qcSh.getLastRow()+1, 1, qcNewRows.length, qcRawHdr.length).setValues(qcNewRows);
+      }
+
       return json({ result: "success", added: added, skipped: skipped, errors: errors });
+      });
     }
 
     if(params.action==="getAI"||e.parameter.action==="getAI"){
@@ -1867,6 +2841,12 @@ function doPost(e) {
 
       var bLock=LockService.getScriptLock(); bLock.waitLock(15000);
       var bAdded=0, bSkipped=0;
+      var bDirtyTopics={};   // ── CDN dirty-tracking: নতুন প্রশ্নে topic_id দেওয়া
+                              // থাকলে (BulkUploaderPage/MultiSubjectImportPage
+                              // থেকে) সরাসরি এখানেই মার্ক হবে; না থাকলে (বেশিরভাগ
+                              // OCR flow-তে ফাঁকা থাকে) পরে ReviewTab দিয়ে
+                              // classify করার সময় updateField-এর মাধ্যমে dirty
+                              // মার্ক হবে (নিচে সেই ফিক্সও করা হচ্ছে) ──
       // ── QBank + পদ/প্রতিষ্ঠান/সালের অন্তত ১টা দেওয়া থাকলে (BulkUploaderPage থেকে
       // params.examAppearance অবজেক্ট আসে) — প্রতিটা নতুন QBank প্রশ্নের bId অ্যাসাইন
       // হওয়ার সাথে সাথেই Exam_Appearances-এ একটা করে রো জমা করা হয়, লুপ শেষে একবারে
@@ -1959,10 +2939,19 @@ function doPost(e) {
               // না দিলে ফাঁকা থাকবে (পরে Admin App-এর Reference ট্যাব দিয়ে ঠিক করা যাবে) ──
               "subjectid":row.subject_id||"", "topicid":row.topic_id||"",
               "groupid":row.group_id||"",
-              "subindex":row.sub_index||"", "audiencetagsids":row.audienceTagsIds||""
+              "subindex":row.sub_index||"", "audiencetagsids":row.audienceTagsIds||"",
+              // 🆕 Added by — কোন ফিচার এই প্রশ্ন যোগ করলো (Bulk_Text/Bulk_OCR/Single_OCR/
+              // Single_Text ইত্যাদি, ফ্রন্টএন্ড params.source দিয়ে পাঠায়)। row.editId থাকলে
+              // (মানে এটা নতুন ইনসার্ট না, বিদ্যমান রো-র উপর edit/resubmit — যেমন ArchivePage)
+              // params.source দিয়ে ওভাররাইট না করে, row নিজে যদি added_by পাঠায় সেটাই রাখা
+              // হচ্ছে, নাহলে ফাঁকা রেখে দেওয়া হচ্ছে (আগের মান অক্ষত রাখতে buildRowArray-এর
+              // সীমাবদ্ধতা — পুরো রো নতুন করে বসে, তাই edit-path-এ ক্লায়েন্টকেই আগের
+              // added_by ফেরত পাঠাতে হবে চাইলে)।
+              "added_by": row.added_by||(row.editId?"":(params.source||""))
             };
             var bLine=buildRowArray(bFieldMap);
             if(bTab==="Typing"){ /* Typing-এর সরল schema — শুধু id/language/content/updatedAt/NF দরকার, বাকি field map-এ থাকলেও ক্ষতি নেই কারণ কলাম না থাকলে ignore হয় */ }
+            if(bFieldMap["topicid"]) bDirtyTopics[bFieldMap["topicid"].toString()]=1;
 
             if(!row.editId){ /* id বসানো হয়ে গেছে উপরেই */ }
             bNewRows.push(bLine);
@@ -1982,6 +2971,7 @@ function doPost(e) {
         }
         if(bNewRows.length){
           bSh.getRange(bSh.getLastRow()+1,1,bNewRows.length,bRawHdr.length).setValues(bNewRows);
+          markTopicsDirty(bDirtyTopics);
         }
         if(bAppearanceRows.length){
           var apSheet=ss.getSheetByName("Exam_Appearances");
