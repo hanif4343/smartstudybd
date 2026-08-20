@@ -2648,7 +2648,42 @@ fun AdminFieldEditDialog(
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+
+                // ── FIX ("কিবোর্ড খুললে Update/Close বাটন এর নিচে চাপা পড়ে যায়"):
+                // আগে এই বাটন দুটো সবার নিচে (টেক্সট-ফিল্ডের পরে) ছিল — মাল্টি-লাইন
+                // টেক্সট-ফিল্ড ফোকাস করে কিবোর্ড খুললে ছোট স্ক্রিনে স্ক্রল করেও অনেক সময়
+                // বাটন দেখা যেত না/কিবোর্ডের নিচে ঢুকে যেত। এখন Close/Update বাটন হেডারের
+                // ঠিক নিচে (সবার উপরে, টেক্সট-ফিল্ডের আগে) বসানো হলো — কিবোর্ড যতই বড়
+                // হোক, এই বাটন দুটো সবসময় প্রথমেই দৃশ্যমান, স্ক্রল করারও দরকার নেই। ──
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick  = { if (!isSaving) onDismiss() },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Text("Close", fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Button(
+                        onClick  = { if (!isSaving) doSave() },
+                        enabled  = !isSaving,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = adminIndigo)
+                    ) {
+                        if (isSaving) {
+                            CircularProgressIndicator(Modifier.size(18.dp), Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("Update", fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
                 Text(
                     "ID: ${item.id}",
                     fontSize   = 10.sp,
@@ -2739,34 +2774,6 @@ fun AdminFieldEditDialog(
                                         )
                                     }
                             }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick  = { if (!isSaving) onDismiss() },
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        shape    = RoundedCornerShape(12.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Text("Close", fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Button(
-                        onClick  = { if (!isSaving) doSave() },
-                        enabled  = !isSaving,
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        shape    = RoundedCornerShape(12.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = adminIndigo)
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(Modifier.size(18.dp), Color.White, strokeWidth = 2.dp)
-                        } else {
-                            Text("Update", fontWeight = FontWeight.ExtraBold, color = Color.White)
                         }
                     }
                 }
