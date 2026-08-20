@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
-import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.util.AudienceFilter.filterForUser
 import com.hanif.smartstudy.util.AudienceFilter.forUser
@@ -103,16 +102,7 @@ data class QuizUiState(
     val reviewProgressTopics  : Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
     // QBank-only সার্চ — শুধু depth0-এর নাম-লিস্ট (Designation/Institution/Year)
     // ক্লায়েন্ট-সাইড ফিল্টার করে, প্রশ্নের কনটেন্টে সার্চ করে না
-    val qbankSearchQuery : String = "",
-    // ── App feature request ৪: এডমিন সাবজেক্ট/টপিক/পদবী/প্রতিষ্ঠানের ইমুজি বদলাতে
-    // পারবে — key = "$refType:$id" (যেমন "subjects:QZ_S01"), দেখো
-    // data/local/EmojiOverrideStore.kt। খালি থাকলে ডিফল্ট keyword-ম্যাচ আইকন দেখাবে। ──
-    val emojiOverrides : Map<String, String> = emptyMap(),
-    // ── App feature request ৩: QBank Post/Institution/Year লিস্টে Rename/Delete/Move
-    // (Quiz-এর Subject/SubTopic-এর মতোই) — action চলাকালীন/শেষে এই মেসেজটা toast-এর
-    // মতো দেখানো হয় (orderSavedMsg-এর প্যাটার্নেই, শুধু আলাদা ফিল্ড যাতে দুটো একসাথে
-    // ওভাররাইট না করে)। ──
-    val qbankAdminMsg : String? = null
+    val qbankSearchQuery : String = ""
 )
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
@@ -130,7 +120,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val session = SessionManager(app)
     private val historyCache = TestHistoryCache(app)
     private val localModelTestStore = LocalModelTestStore(app)
-    private val emojiStore = com.hanif.smartstudy.data.local.EmojiOverrideStore(app)
 
     // ── Admin "Move Question(s)" ডায়ালগের Subject-এর পাশে Expand বাটনে ট্যাপ করলে
     // ওই Subject-এর Topic লিস্ট Room থেকে লাইভ আনতে (নাম দিয়ে subjectId রিজলভ করে) ──
@@ -209,9 +198,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val bookmarks  = prefs.getStringSet("bookmarks", emptySet()) ?: emptySet()
             val weakTopics = loadWeakTopics()
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
-            // ── App feature request ৪: এডমিন ইমুজি-ওভাররাইড লোকাল স্টোর থেকে লোড ──
-            val emojiOverrides = emojiStore.getAll()
-            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin, emojiOverrides = emojiOverrides) }
+            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin) }
 
             // ── Phase 6 লেজি-লোডিং ফিক্স (db-migration-v2) ────────────────────
             // আগে এখানে repo.getContent() দিয়ে পুরো ~১৪,০০০ row Quiz+QBank+Study
@@ -1180,15 +1167,28 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── FIX ("পরের পেজে উত্তর ক্লিক করলে কিছু হয় না" বাগ): QuestionListScreen.kt
+    // সবসময় globalIdx (= pageOffset + localIdx, পুরো লিস্টের সূচক) পাঠায় answerMcq/
+    // answerWritten/answerWrittenSelfGrade/reportQuestion-এ। কিন্তু _state.value.questions
+    // এ শুধু বর্তমান পেজের প্রশ্ন থাকে (goToPage()/loadQuestionsFromRoom...() প্রতিবার
+    // পুরো লিস্ট বর্তমান পেজ দিয়ে replace করে দেয়, PAGE_SIZE=50 আইটেম)। ১ম পেজে
+    // pageOffset=0 বলে globalIdx == localIdx মিলে যায়, তাই কাজ করে — কিন্তু ২য়+ পেজে
+    // globalIdx (৫০+) বর্তমান পেজের লিস্টের bound-এর বাইরে চলে যায়, getOrNull(...)
+    // null রিটার্ন করে, ফাংশন চুপচাপ কিছু না করেই রিটার্ন করে। এখন globalIdx-কে
+    // currentPage*PAGE_SIZE বাদ দিয়ে বর্তমান পেজের লোকাল ইনডেক্সে কনভার্ট করা হচ্ছে। ──
+    private fun toLocalPageIndex(globalIdx: Int): Int =
+        globalIdx - _state.value.currentPage * PAGE_SIZE
+
     fun answerMcq(questionIndex: Int, selectedOption: Int) {
+        val localIdx = toLocalPageIndex(questionIndex)
         val questions = _state.value.questions.toMutableList()
-        val q = questions.getOrNull(questionIndex) ?: return
+        val q = questions.getOrNull(localIdx) ?: return
         if (q.answerState !is AnswerState.Unanswered) return
         val selectedText = when (selectedOption) {
             1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
         }
         val isCorrect = selectedText.trim().equals(resolveCorrectText(q).trim(), ignoreCase = true)
-        questions[questionIndex] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
+        questions[localIdx] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
@@ -1219,10 +1219,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * টেস্টে MCQ ও Written প্রশ্ন মিশিয়ে দিলেও রেজাল্ট ঠিকভাবে হিসাব হয়।
      */
     fun answerWrittenSelfGrade(questionIndex: Int, isCorrect: Boolean) {
+        val localIdx = toLocalPageIndex(questionIndex)
         val questions = _state.value.questions.toMutableList()
-        val q = questions.getOrNull(questionIndex) ?: return
+        val q = questions.getOrNull(localIdx) ?: return
         if (q.answerState !is AnswerState.Unanswered) return
-        questions[questionIndex] = q.copy(
+        questions[localIdx] = q.copy(
             answerState = AnswerState.WrittenSubmitted(userText = "", matchPct = if (isCorrect) 100 else 0, isCorrect = isCorrect)
         )
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
@@ -1241,13 +1242,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun answerWritten(questionIndex: Int, userText: String): Int {
+        val localIdx = toLocalPageIndex(questionIndex)
         val questions = _state.value.questions.toMutableList()
-        val q = questions.getOrNull(questionIndex) ?: return 0
+        val q = questions.getOrNull(localIdx) ?: return 0
 
         // ── Model Test-এর written প্রশ্নে auto-match হয় না — শুধু রেকর্ড করে রাখা হয় ──
         val activeModelTest = _state.value.activeModelTest
         if (activeModelTest != null) {
-            questions[questionIndex] = q.copy(answerState = AnswerState.WrittenRecorded(userText))
+            questions[localIdx] = q.copy(answerState = AnswerState.WrittenRecorded(userText))
             _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
             markProgress(q.id, _state.value.mode)
             viewModelScope.launch {
@@ -1264,7 +1266,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
         val matchPct = fuzzyMatch(userText, q.answer)
         val isCorrect = matchPct >= 70
-        questions[questionIndex] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
+        questions[localIdx] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
         markProgress(q.id, _state.value.mode)
@@ -1447,7 +1449,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reportQuestion(questionIndex: Int, issue: String) {
-        val q    = _state.value.questions.getOrNull(questionIndex) ?: return
+        val q    = _state.value.questions.getOrNull(toLocalPageIndex(questionIndex)) ?: return
         val user = session.getCurrentUser()
         val tab  = when (_state.value.mode) {
             StudyMode.QUIZ  -> "quiz"
@@ -2047,135 +2049,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             startTimer(items.size)
-        }
-    }
-
-    // ═════════════════════════════════════════════════════════
-    // App feature request ৩: QBank Admin (পদবী/প্রতিষ্ঠান/সাল-এর উপর Rename/Delete/Move)
-    // — Quiz-এর Subject/SubTopic AdminMenuButton (SubjectListScreen.kt) ঠিক একই ভাবে
-    // এখানে qbankPosts/qbankInstitutions/qbankYears-এর ওপর কাজ করবে। প্রতিটা action
-    // সফল/ব্যর্থ হলে qbankAdminMsg-এ শর্ট মেসেজ বসে (toast-এর মতো UI-তে দেখানো হয়),
-    // আর সফল হলে সংশ্লিষ্ট rebuild ফাংশন কল করে লিস্ট রিফ্রেশ হয়।
-    // ═════════════════════════════════════════════════════════
-    fun clearQBankAdminMsg() { _state.update { it.copy(qbankAdminMsg = null) } }
-
-    /** Post রিনেম — GAS-এর renameReferenceItem (Posts ট্যাব), সফল হলে qbankPosts রিফ্রেশ */
-    fun adminRenameQBankPost(postId: String, newName: String) {
-        if (!_state.value.isAdmin || postId.isBlank() || newName.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem("posts", postId, newName)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "✅ পদবী rename হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Post ডিলিট — cascade-এ সংশ্লিষ্ট Exam_Appearances রো-ও মুছে যায় (GAS সাইড), মূল প্রশ্ন অক্ষত থাকে */
-    fun adminDeleteQBankPost(postId: String) {
-        if (!_state.value.isAdmin || postId.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem("posts", postId)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🗑️ পদবী ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Post "Move" (merge) — fromPost-এর সব appearance toPost-এ সরে যায়, fromPost এন্ট্রি ডিলিট হয় */
-    fun adminMoveQBankPost(fromPostId: String, toPostName: String) {
-        if (!_state.value.isAdmin || fromPostId.isBlank() || toPostName.isBlank()) return
-        val toPostId = _state.value.qbankPosts.find { it.name == toPostName }?.subjectId
-        if (toPostId.isNullOrBlank()) { _state.update { it.copy(qbankAdminMsg = "❌ টার্গেট পদবী খুঁজে পাওয়া যায়নি") }; return }
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.mergeReferenceItem("posts", fromPostId, toPostId)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🔀 পদবী move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Institution রিনেম */
-    fun adminRenameQBankInstitution(institutionId: String, newName: String) {
-        if (!_state.value.isAdmin || institutionId.isBlank() || newName.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem("institutions", institutionId, newName)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "✅ প্রতিষ্ঠান rename হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Institution ডিলিট */
-    fun adminDeleteQBankInstitution(institutionId: String) {
-        if (!_state.value.isAdmin || institutionId.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem("institutions", institutionId)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🗑️ প্রতিষ্ঠান ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Institution "Move" (merge) */
-    fun adminMoveQBankInstitution(fromInstitutionId: String, toInstitutionName: String) {
-        if (!_state.value.isAdmin || fromInstitutionId.isBlank() || toInstitutionName.isBlank()) return
-        val toId = _state.value.qbankInstitutions.find { it.name == toInstitutionName }?.subjectId
-        if (toId.isNullOrBlank()) { _state.update { it.copy(qbankAdminMsg = "❌ টার্গেট প্রতিষ্ঠান খুঁজে পাওয়া যায়নি") }; return }
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.mergeReferenceItem("institutions", fromInstitutionId, toId)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🔀 প্রতিষ্ঠান move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** সাল rename — QBank শিটের সব matching প্রশ্ন-রো-এর year কলাম bulk-update (দুই সাল এক করাও এভাবেই হয়) */
-    fun adminRenameQBankYear(oldYear: String, newYear: String) {
-        if (!_state.value.isAdmin || oldYear.isBlank() || newYear.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameQBankYear(oldYear, newYear)) {
-                is ApiResult.Success -> { rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "✅ সাল rename হয়েছে (${r.data}টা প্রশ্ন)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** সাল ডিলিট — সেই সালের সব QBank প্রশ্ন ডিলিট হয় (সাবধান — এটা প্রশ্ন-ই মুছে ফেলে, শুধু লিংক না) */
-    fun adminDeleteQBankYear(year: String) {
-        if (!_state.value.isAdmin || year.isBlank()) return
-        viewModelScope.launch {
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteQBankYear(year)) {
-                is ApiResult.Success -> { rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "🗑️ সালের ${r.data}টা প্রশ্ন ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** rebuildQBankYears(content) private, বাইরে থেকে রিফ্রেশ করতে এই পাবলিক wrapper */
-    private fun rebuildQBankYearsPublic() {
-        viewModelScope.launch {
-            val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            rebuildQBankYears(content)
-        }
-    }
-
-    /**
-     * App feature request ৪: Subject/Topic/QBank Post/Institution-এর ইমুজি বদলানো —
-     * লোকাল স্টোরে সাথে সাথে সেভ হয় (UI-তে instant দেখা যায়) + Sheet-এও best-effort
-     * লেখা হয় (GAS updateReferenceField, offline/ব্যর্থ হলেও লোকাল কপিটা ঠিকই থাকে)।
-     * refType: "subjects" | "topics" | "posts" | "institutions"
-     */
-    fun adminSetEmoji(refType: String, id: String, emoji: String) {
-        if (!_state.value.isAdmin || id.isBlank()) return
-        emojiStore.set(refType, id, emoji)
-        _state.update {
-            val key = "$refType:$id"
-            val updated = it.emojiOverrides.toMutableMap()
-            if (emoji.isBlank()) updated.remove(key) else updated[key] = emoji
-            it.copy(emojiOverrides = updated, qbankAdminMsg = "🎨 ইমুজি বদলানো হয়েছে")
-        }
-        viewModelScope.launch {
-            com.hanif.smartstudy.data.remote.GasContentService.updateReferenceField(refType, id, "emoji", emoji)
         }
     }
 
