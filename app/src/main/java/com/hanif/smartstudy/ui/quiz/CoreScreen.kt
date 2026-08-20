@@ -62,6 +62,17 @@ fun CoreScreen(
         if (streak > 0) { onStreakUpdated(streak); viewModel.consumeStreak() }
     }
 
+    // ── App feature request ৩: QBank Post/Institution/Year Rename/Delete/Move/Emoji
+    // action-এর ফলাফল (সফল/ব্যর্থ) একটা ছোট Toast হিসেবে দেখানো হয় — OrderHintBar-এর
+    // মতো UI-এ আলাদা জায়গা না নিয়ে, যেহেতু এই action গুলো reorder-মোডের বাইরেও ঘটে ──
+    val qbankAdminMsg = state.qbankAdminMsg
+    LaunchedEffect(qbankAdminMsg) {
+        if (!qbankAdminMsg.isNullOrBlank()) {
+            android.widget.Toast.makeText(ctx, qbankAdminMsg, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.clearQBankAdminMsg()
+        }
+    }
+
     // Mode init — শুধু প্রথমবার, পরে MainScreen থেকে আলাদা VM তাই দরকার নেই
     LaunchedEffect(Unit) {
         if (state.mode != mode) viewModel.setMode(mode)
@@ -333,10 +344,21 @@ fun CoreScreen(
                 onSubject  = { viewModel.selectQBankInstitution(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
-                // ── প্রতিষ্ঠান/সাল ফিল্টার লিস্ট synthetic (Subject/SubTopic নয়) —
-                // তাই এখানে Admin rename/delete/reorder বন্ধ রাখা হলো, ভুল ডেটার
-                // ওপর কাজ করে ফেলার ঝুঁকি এড়াতে ──
-                isAdmin         = false,
+                // ── App feature request ৩: Institution লিস্টে Rename/Delete (Quiz-এর
+                // Subject-এর মতোই) — নাম থেকে institutionId রিজলভ করে ভিউমডেলের নতুন
+                // ref-table-aware ফাংশন কল করা হয় (দেখো QuizViewModel.adminRenameQBankInstitution) ──
+                isAdmin         = state.isAdmin,
+                onRenameSubject = { old, new ->
+                    val id = state.qbankInstitutions.find { it.name == old }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankInstitution(id, new)
+                },
+                onDeleteSubject = { name ->
+                    val id = state.qbankInstitutions.find { it.name == name }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankInstitution(id)
+                },
+                emojiOverrides  = state.emojiOverrides,
+                refType         = "institutions",
+                onEmojiChange   = { id, emoji -> viewModel.adminSetEmoji("institutions", id, emoji) },
                 showQBankFilterBar      = true,
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
@@ -356,7 +378,26 @@ fun CoreScreen(
                 onSubTopic  = { viewModel.selectQBankDesignationUnderInstitution(it) },
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.qbankFilterBack() },
-                isAdmin     = false
+                // ── App feature request ৩: এই নেস্টেড লিস্টে পদবী Rename/Delete/Move —
+                // topicId এখানে আসলে postId (দেখো rebuildQBankInstitutions()-এ
+                // SubTopicEntry.topicId = postId) ──
+                isAdmin          = state.isAdmin,
+                onRenameSubTopic = { old, new ->
+                    val id = state.qbankDesignationsUnderInstitution.find { it.name == old }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankPost(id, new)
+                },
+                onDeleteSubTopic = { name ->
+                    val id = state.qbankDesignationsUnderInstitution.find { it.name == name }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankPost(id)
+                },
+                // ── "Move" = এই পদবীটাকে অন্য পদবীর সাথে merge (সব প্রশ্ন-লিংক নতুন
+                // পদবীতে সরে যায়) — otherSubjectsForMove এ বিদ্যমান সব পদবীর নাম (নিজেরটা
+                // বাদে) দেখানো হয় ──
+                otherSubjectsForMove = state.qbankPosts.map { it.name },
+                onMoveSubTopicToSubject = { old, newPostName, _ ->
+                    val id = state.qbankDesignationsUnderInstitution.find { it.name == old }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminMoveQBankPost(id, newPostName)
+                }
             )
         }
 
@@ -373,7 +414,11 @@ fun CoreScreen(
                 onSubject  = { viewModel.selectQBankYear(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
-                isAdmin         = false,
+                // ── App feature request ৩: সালের Rename/Delete — "সাল" reference-টেবিল
+                // না (নাম-ই সরাসরি year value, কোনো id নেই), তাই সরাসরি নাম দিয়েই কাজ করে ──
+                isAdmin         = state.isAdmin,
+                onRenameSubject = { old, new -> viewModel.adminRenameQBankYear(old, new) },
+                onDeleteSubject = { name -> viewModel.adminDeleteQBankYear(name) },
                 showQBankFilterBar      = true,
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
@@ -398,9 +443,20 @@ fun CoreScreen(
                 onSubject  = { viewModel.selectQBankPost(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
-                // ── পদবী/প্রতিষ্ঠান লিস্ট synthetic (Subject/SubTopic নয়) — তাই Admin
-                // rename/delete/reorder বন্ধ, ভুল ডেটার ওপর কাজ করে ফেলার ঝুঁকি এড়াতে ──
-                isAdmin         = false,
+                // ── App feature request ৩: পদবী লিস্টে Rename/Delete (Institution লিস্টের
+                // মতোই প্যাটার্ন) ──
+                isAdmin         = state.isAdmin,
+                onRenameSubject = { old, new ->
+                    val id = state.qbankPosts.find { it.name == old }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankPost(id, new)
+                },
+                onDeleteSubject = { name ->
+                    val id = state.qbankPosts.find { it.name == name }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankPost(id)
+                },
+                emojiOverrides  = state.emojiOverrides,
+                refType         = "posts",
+                onEmojiChange   = { id, emoji -> viewModel.adminSetEmoji("posts", id, emoji) },
                 showQBankFilterBar      = true,
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
@@ -421,7 +477,23 @@ fun CoreScreen(
                 onSubTopic  = { viewModel.selectQBankInstitutionUnderPost(it) },
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.qbankFilterBack() },
-                isAdmin     = false
+                // ── App feature request ৩: এই নেস্টেড লিস্টে প্রতিষ্ঠান Rename/Delete/Move —
+                // topicId এখানে আসলে institutionId (দেখো rebuildQBankPosts()-এ
+                // SubTopicEntry.topicId = instId) ──
+                isAdmin          = state.isAdmin,
+                onRenameSubTopic = { old, new ->
+                    val id = state.qbankInstitutionsUnderPost.find { it.name == old }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankInstitution(id, new)
+                },
+                onDeleteSubTopic = { name ->
+                    val id = state.qbankInstitutionsUnderPost.find { it.name == name }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankInstitution(id)
+                },
+                otherSubjectsForMove = state.qbankInstitutions.map { it.name },
+                onMoveSubTopicToSubject = { old, newInstitutionName, _ ->
+                    val id = state.qbankInstitutionsUnderPost.find { it.name == old }?.topicId
+                    if (!id.isNullOrBlank()) viewModel.adminMoveQBankInstitution(id, newInstitutionName)
+                }
             )
         }
 
@@ -447,6 +519,11 @@ fun CoreScreen(
                 onMoveSubject   = { from, to -> viewModel.moveSubject(from, to) },
                 onRenameSubject = { old, new -> onAdminRenameSubject?.invoke(sheetKey, old, new) },
                 onDeleteSubject = { name -> onAdminDeleteSubject?.invoke(sheetKey, name) },
+                // ── App feature request ৪: Subject-এরও ইমুজি বদলানো যাবে (Quiz/Study/QBank
+                // তিন মোডেই — একই "Subjects" শিট, subject_id প্রিফিক্স দিয়ে মোড আলাদা থাকে) ──
+                emojiOverrides  = state.emojiOverrides,
+                refType         = "subjects",
+                onEmojiChange   = { id, emoji -> viewModel.adminSetEmoji("subjects", id, emoji) },
                 // ── QBank-এ থাকলে ফিল্টার বার দেখাও (ডিফল্ট পদবী-চিপ সিলেক্টেড), Quiz/Study-তে না ──
                 showQBankFilterBar      = mode == StudyMode.QBANK,
                 qbankFilterMode         = state.qbankFilterMode,
