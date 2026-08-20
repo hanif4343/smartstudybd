@@ -78,6 +78,12 @@ data class QuestionItem(
     val subtopicId   : String     = "",     // QBank only
     val groupId      : String     = "",     // multi-part প্রশ্নের সব sub-question একই groupId শেয়ার করে
     val subIndex     : Int        = 0,      // group-এর ভেতর ক্রম (১,২,৩...) — sourceKey দিয়ে unique না বলে আলাদা
+    // ── FIX ("গণিত/সাধারণ জ্ঞানে হেডিং দরকার নেই, বাংলা/ইংরেজিতে দরকার"): multi-part
+    // গ্রুপের প্রথম sub-question-এর question টেক্সট "হেডিং" হিসেবে দেখানো হবে কিনা।
+    // ডিফল্ট true (পুরনো আচরণ অপরিবর্তিত) — Admin App থেকে false করলে (গণিত/সাধারণ
+    // জ্ঞানের জন্য) সরাসরি সিরিয়াল-নম্বর দিয়ে sub-question শুরু হবে, আলাদা হেডিং-লাইন
+    // ছাড়াই। দেখো QBankExamPaperScreen.ExamSerialCard()। ──
+    val showGroupHeading: Boolean = true,
     // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, কোনো UI/behavior
     // প্রভাব নেই। শুধু Admin-এর Review Mode-এ দেখানো/আপডেট করা হয়। ──
     val reviewed     : Boolean    = false,
@@ -118,6 +124,7 @@ data class QuestionItem(
             topicId      = s.topicId ?: "",
             groupId      = s.groupId ?: "",
             subIndex     = s.subIndex?.toIntOrNull() ?: 0,
+            showGroupHeading = s.showHeading?.lowercase()?.trim() != "false",
             reviewed     = s.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = s.reviewedAt?.toLongOrNull() ?: 0L
         )
@@ -143,6 +150,7 @@ data class QuestionItem(
             topicId      = q.topicId ?: "",
             groupId      = q.groupId ?: "",
             subIndex     = q.subIndex?.toIntOrNull() ?: 0,
+            showGroupHeading = q.showHeading?.lowercase()?.trim() != "false",
             reviewed     = q.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
@@ -172,6 +180,7 @@ data class QuestionItem(
             subtopicId   = q.subtopicId ?: "",
             groupId      = q.groupId ?: "",
             subIndex     = q.subIndex?.toIntOrNull() ?: 0,
+            showGroupHeading = q.showHeading?.lowercase()?.trim() != "false",
             reviewed     = q.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
