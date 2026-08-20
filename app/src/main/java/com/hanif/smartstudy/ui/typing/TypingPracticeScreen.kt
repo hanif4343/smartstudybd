@@ -1975,6 +1975,9 @@ fun TypingPracticeScreen(
                         Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
                     }
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)),
                         color    = if (sessionMode == "free") Indigo600 else MaterialTheme.colorScheme.surfaceVariant,
                         onClick  = {
                             sessionMode = "free"; adaptivePhase = 1
