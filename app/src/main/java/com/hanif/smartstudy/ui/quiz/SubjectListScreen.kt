@@ -93,7 +93,14 @@ fun SubjectListScreen(
     qbankFilterMode        : QBankFilterMode        = QBankFilterMode.DESIGNATION,
     onQBankFilterModeChange: (QBankFilterMode) -> Unit = {},
     qbankSearchQuery       : String                 = "",
-    onQBankSearchQueryChange: (String) -> Unit      = {}
+    onQBankSearchQueryChange: (String) -> Unit      = {},
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন — refType নির্ধারণ করে কোন
+    // reference-টেবিলে সেভ হবে ("subjects" | "posts" | "institutions"), emojiOverrides
+    // key = "$refType:${subject.subjectId}"। isAdmin true হলে আইকনে ট্যাপ করলে
+    // ছোট ইমুজি-এডিট ডায়ালগ খোলে (দেখো নিচে AdminEmojiEditDialog)। ──
+    emojiOverrides : Map<String, String> = emptyMap(),
+    refType        : String              = "subjects",
+    onEmojiChange  : (id: String, emoji: String) -> Unit = { _, _ -> }
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -130,6 +137,9 @@ fun SubjectListScreen(
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // ── App feature request ৪: কোন subjectId-এর ইমুজি এডিট হচ্ছে (null মানে বন্ধ) ──
+    var emojiEditTargetId by remember { mutableStateOf<String?>(null) }
+    var emojiEditCurrentEmoji by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier            = Modifier.fillMaxSize(),
@@ -243,6 +253,12 @@ fun SubjectListScreen(
                             onMoveUp   = { onMoveSubject(idx, idx - 1) },
                             onMoveDown = { onMoveSubject(idx, idx + 1) },
                             reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
+                            emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                            isAdmin = isAdmin && !isReorderMode,
+                            onEmojiClick = {
+                                emojiEditTargetId = subject.subjectId
+                                emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                            },
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
@@ -263,7 +279,13 @@ fun SubjectListScreen(
                     isLast  = idx == displaySubjects.lastIndex,
                     onMoveUp   = { onMoveSubject(idx, idx - 1) },
                     onMoveDown = { onMoveSubject(idx, idx + 1) },
-                    reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null
+                    reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
+                    emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                    isAdmin = isAdmin && !isReorderMode,
+                    onEmojiClick = {
+                        emojiEditTargetId = subject.subjectId
+                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                    }
                 )
             }
         }
@@ -310,6 +332,17 @@ fun SubjectListScreen(
             items   = subjects.map { it.name },
             onConfirm = { name -> onDeleteSubject(name) },
             onDismiss = { showDeleteDialog = false }
+        )
+    }
+    // ── App feature request ৪: এডমিন ইমুজি এডিট ডায়ালগ — আইকনে ট্যাপ করলে খোলে ──
+    emojiEditTargetId?.let { targetId ->
+        AdminEmojiEditDialog(
+            currentEmoji = emojiEditCurrentEmoji,
+            onConfirm = { newEmoji ->
+                onEmojiChange(targetId, newEmoji)
+                emojiEditTargetId = null
+            },
+            onDismiss = { emojiEditTargetId = null }
         )
     }
 }
@@ -412,6 +445,44 @@ private fun AdminRenamePickerDialog(
                 onClick = { if (canConfirm) { onConfirm(selected, newName); onDismiss() } },
                 enabled = canConfirm
             ) { Text("Rename করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+}
+
+/**
+ * App feature request ৪: এডমিন সাবজেক্ট/টপিক/পদবী/প্রতিষ্ঠানের ইমুজি বদলানোর ছোট
+ * ডায়ালগ — কার্ডের আইকনে ট্যাপ করলে খোলে। AlertDialog নিজেই ছোট (একটাই টেক্সট
+ * ফিল্ড), তাই কিবোর্ড-ওভারল্যাপের ঝুঁকি নেই (দেখো AdminFieldEditDialog-এর #৬ ফিক্স,
+ * সেটা অনেক বড় ডায়ালগের জন্য দরকার ছিল, এখানে না)।
+ */
+@Composable
+private fun AdminEmojiEditDialog(
+    currentEmoji: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var value by remember { mutableStateOf(currentEmoji) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🎨 ইমুজি বদলান", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("একটা ইমুজি টাইপ/পেস্ট করুন (খালি রাখলে ডিফল্ট আইকন ফিরে আসবে)",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray)
+                OutlinedTextField(
+                    value = value, onValueChange = { value = it },
+                    label = { Text("ইমুজি", fontFamily = NotoSansBengali) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 24.sp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(value.trim()); onDismiss() }) {
+                Text("সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
     )
@@ -675,7 +746,11 @@ private fun SubjectCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    reviewPct : Int? = null
+    reviewPct : Int? = null,
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন ──
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {}
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -695,9 +770,14 @@ private fun SubjectCard(
         ) {
             Box(
                 Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .then(
+                        if (isAdmin && subject.subjectId.isNotBlank())
+                            Modifier.clickable(onClick = onEmojiClick)
+                        else Modifier
+                    ),
                 contentAlignment = Alignment.Center
-            ) { Text(subjectIcon(subject.name), fontSize = 22.sp) }
+            ) { Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 22.sp) }
 
             Column(Modifier.weight(1f)) {
                 Text(subject.name, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
@@ -747,7 +827,11 @@ private fun QBankSubjectCard(
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
     subLabelOverride: String? = null,
-    reviewPct : Int? = null
+    reviewPct : Int? = null,
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন ──
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {}
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -766,9 +850,14 @@ private fun QBankSubjectCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
-                        .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f)))),
+                        .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
+                        .then(
+                            if (isAdmin && subject.subjectId.isNotBlank())
+                                Modifier.clickable(onClick = onEmojiClick)
+                            else Modifier
+                        ),
                     contentAlignment = Alignment.Center
-                ) { Text(subjectIcon(subject.name), fontSize = 20.sp) }
+                ) { Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 20.sp) }
                 Spacer(Modifier.weight(1f))
                 if (!reorderEnabled) {
                     Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
