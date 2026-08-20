@@ -686,6 +686,116 @@ object GasContentService {
     }
 
     /**
+     * App feature request ৩ (QBank Admin — পদবী/প্রতিষ্ঠান Rename): GAS-এর
+     * `renameReferenceItem` action কল করে — Subjects/Topics/Posts/Institutions
+     * যেকোনো reference-ট্যাবের একটা এন্ট্রি নাম বদলায় (id দিয়ে খুঁজে, ঠিক ১টা রো)।
+     * refType: "subjects" | "topics" | "tags" | "posts" | "institutions"
+     */
+    suspend fun renameReferenceItem(refType: String, id: String, newName: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (id.isBlank() || newName.isBlank()) return@withContext ApiResult.Error("id/নাম ফাঁকা")
+            try {
+                val ok = callGetAction(mapOf("action" to "renameReferenceItem", "refType" to refType, "id" to id, "newName" to newName))
+                if (ok) ApiResult.Success(Unit) else ApiResult.Error("Reference item rename ব্যর্থ হয়েছে")
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
+     * App feature request ৩ (QBank Admin — "Move"): একটা Post/Institution-কে
+     * আরেকটার ভেতরে merge করে — সব Exam_Appearances রো fromId থেকে toId-তে সরে
+     * যায়, তারপর fromId-এর reference এন্ট্রি ডিলিট হয়ে যায়। refType শুধু
+     * "posts" | "institutions"।
+     */
+    suspend fun mergeReferenceItem(refType: String, fromId: String, toId: String): ApiResult<Int> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (fromId.isBlank() || toId.isBlank()) return@withContext ApiResult.Error("id ফাঁকা")
+            try {
+                val url = "$BASE_URL?action=mergeReferenceItem&refType=${enc(refType)}&fromId=${enc(fromId)}&toId=${enc(toId)}&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("result")?.asString == "success") {
+                    ApiResult.Success(obj.get("rowsMoved")?.asInt ?: 0)
+                } else {
+                    ApiResult.Error(obj.get("message")?.asString ?: "Merge ব্যর্থ হয়েছে")
+                }
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
+     * App feature request ৪ (এডমিন ইমুজি পরিবর্তন): GAS-এর `updateReferenceField`
+     * action দিয়ে Subjects/Topics/Posts/Institutions-এর যেকোনো non-name/id কলাম
+     * (যেমন "emoji") সেট করে — কলামটা শিটে না থাকলে GAS নিজেই নতুন হেডার বসিয়ে
+     * নেয়।
+     */
+    suspend fun updateReferenceField(refType: String, id: String, field: String, value: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (id.isBlank()) return@withContext ApiResult.Error("id ফাঁকা")
+            try {
+                val ok = callGetAction(mapOf("action" to "updateReferenceField", "refType" to refType, "id" to id, "field" to field, "value" to value))
+                if (ok) ApiResult.Success(Unit) else ApiResult.Error("Field আপডেট ব্যর্থ হয়েছে")
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
+     * App feature request ৩ (QBank Admin — "সাল" Rename/Move): সাল কোনো
+     * reference-টেবিল না (শুধু Exam_Appearances-এর plain value কলাম), তাই
+     * rename মানে bulk-update — oldYear-এর সব appearance newYear-এ বদলে যায়
+     * (দুই সাল একই হলে merge-ও এটাই)।
+     */
+    suspend fun renameQBankYear(oldYear: String, newYear: String): ApiResult<Int> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (oldYear.isBlank() || newYear.isBlank()) return@withContext ApiResult.Error("সাল ফাঁকা")
+            try {
+                val url = "$BASE_URL?action=renameQBankYear&oldYear=${enc(oldYear)}&newYear=${enc(newYear)}&secret=${enc(SECRET)}"
+                val resp = client.newCall(Request.Builder().url(url).get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                val obj = JsonParser.parseString(body).asJsonObject
+                if (obj.get("result")?.asString == "success") {
+                    ApiResult.Success(obj.get("rowsChanged")?.asInt ?: 0)
+                } else {
+                    ApiResult.Error(obj.get("message")?.asString ?: "সাল rename ব্যর্থ হয়েছে")
+                }
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
+     * App feature request ৩ (QBank Admin — "সাল" Delete): "সাল" আসলে Exam_Appearances-এর
+     * কলাম না, QBank শিটের প্রতিটা প্রশ্ন-রো-এর নিজস্ব "year" কলাম — তাই ডিলিট মানে
+     * সেই সালের সব QBank প্রশ্ন-রো ডিলিট (ঠিক deleteBySubjectOrTopic()-এর প্যাটার্নেই:
+     * আগে client-side filter করে matching id বের করা হয়, তারপর একটাই deleteByIds কল)।
+     */
+    suspend fun deleteQBankYear(year: String): ApiResult<Int> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (year.isBlank()) return@withContext ApiResult.Error("সাল ফাঁকা")
+            try {
+                val ids = fetchSheetRows<QBankItem>("QBank").items
+                    .filter { it.year.trim() == year.trim() }
+                    .mapNotNull { it.id }
+                if (ids.isEmpty()) return@withContext ApiResult.Error("এই সালের কোনো QBank প্রশ্ন পাওয়া যায়নি")
+                val ok = callGetAction(mapOf("action" to "deleteByIds", "sheet" to "QBank", "ids" to ids.joinToString(",")))
+                if (ok) ApiResult.Success(ids.size) else ApiResult.Error("সাল delete ব্যর্থ হয়েছে")
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
      * adminRenameSubjectOrTopic() এর জন্য — একাধিক sheet-এ subject/sub_topic rename।
      * GAS-এর renameField subject-স্কোপড না (দেখো ফাইলের ওপরের কমেন্ট) — oldSubTopic দেওয়া
      * থাকলে sub_topic কলামেই rename হয়, subject মিলিয়ে filter হয় না।
