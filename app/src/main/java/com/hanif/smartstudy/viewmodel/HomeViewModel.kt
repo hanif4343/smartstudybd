@@ -8,6 +8,7 @@ import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +33,15 @@ data class HomeUiState(
     // 🔔 Notification inbox
     val notifications      : List<AppNotification> = emptyList(),
     val unreadNotifCount   : Int                    = 0,
-    val isLoadingNotifs    : Boolean                = false
+    val isLoadingNotifs    : Boolean                = false,
+    // ── App feature (এডমিন-অনলি): Home-এ "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
+    // Sheet (আসল Google Sheet-এ raw row count), CDN (manifest.json-এ publish
+    // হওয়া count), App (এই মুহূর্তে ডিভাইসে cache/lazy-load হওয়া count) —
+    // তিনটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার count, key = "Quiz"|"QBank"|"Study" ──
+    val sheetCounts        : Map<String, Int>  = emptyMap(),
+    val cdnCounts          : Map<String, Int>  = emptyMap(),
+    val cdnConfigured      : Boolean           = true,   // false হলে UI-তে "CDN কনফিগার নেই" দেখাবে
+    val isLoadingAdminCounts: Boolean          = false
 )
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -103,6 +112,60 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
             // 🔔 badge count-এর জন্য ব্যাকগ্রাউন্ডে notification ও রিফ্রেশ করো
             loadNotifications()
+
+            // ── App feature (এডমিন-অনলি): Sheet/CDN/App count ড্যাশবোর্ড —
+            // আলাদা coroutine-এ fire-and-forget (loadHomeData()-কে ব্লক করে
+            // না, তাই issue #২-এর মতো ধীরগতির ঝুঁকি নেই — এডমিন-অনলি এক্সট্রা
+            // নেটওয়ার্ক কল, বাকি সবার জন্য কোনো প্রভাব নেই) ──
+            if (user?.isAdmin() == true) loadAdminContentCounts()
+        }
+    }
+
+    /**
+     * App feature (এডমিন-অনলি Home ড্যাশবোর্ড, "কোন জায়গায় কমতি হয়েছে"):
+     * তিনটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার প্রশ্ন-সংখ্যা —
+     * ১) Sheet  — GAS `countOrphanQuestions` action (আসল Google Sheet raw row count)
+     * ২) CDN    — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST
+     *             দিয়ে গ্রুপ করে count যোগ করা হয়) — CDN কনফিগার না থাকলে
+     *             (BuildConfig.CDN_WORKER_URL খালি) cdnConfigured=false হবে
+     * ৩) App    — এই মুহূর্তে ডিভাইসে cache/lazy-load হয়ে থাকা content (HomeUiState.content)
+     */
+    fun loadAdminContentCounts() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingAdminCounts = true)
+
+            val sheetCountsDeferred = async {
+                when (val r = com.hanif.smartstudy.data.remote.GasContentService.getSheetQuestionCounts()) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> r.data
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error   -> emptyMap()
+                }
+            }
+            val cdnConfigured = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
+            val cdnCountsDeferred = async {
+                if (!cdnConfigured) return@async emptyMap<String, Int>()
+                val manifest = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return@async emptyMap<String, Int>()
+                val out = mutableMapOf("Quiz" to 0, "QBank" to 0, "Study" to 0)
+                for ((topicId, entry) in manifest.topics) {
+                    val sheetName = when {
+                        topicId.startsWith("QZ") -> "Quiz"
+                        topicId.startsWith("QB") -> "QBank"
+                        topicId.startsWith("ST") -> "Study"
+                        else -> null
+                    } ?: continue
+                    out[sheetName] = (out[sheetName] ?: 0) + entry.count
+                }
+                out
+            }
+
+            val sheetCounts = sheetCountsDeferred.await()
+            val cdnCounts   = cdnCountsDeferred.await()
+
+            _uiState.value = _uiState.value.copy(
+                sheetCounts          = sheetCounts,
+                cdnCounts            = cdnCounts,
+                cdnConfigured        = cdnConfigured,
+                isLoadingAdminCounts = false
+            )
         }
     }
 
