@@ -201,6 +201,16 @@ fun HomeScreen(
                 onOpenViva = onOpenViva
             )
 
+            // ── App feature (এডমিন-অনলি): "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
+            // Quiz/QBank/Study প্রতিটার জন্য Sheet/CDN/App তিনটা আলাদা count
+            // পাশাপাশি দেখায়, যাতে ঠিক কোন লেয়ারে সমস্যা সেটা এক নজরে বোঝা যায় ──
+            if (isAdmin) {
+                AdminContentCountsCard(
+                    state = state,
+                    onRefresh = { viewModel.loadAdminContentCounts() }
+                )
+            }
+
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = PrimaryIndigo, modifier = Modifier.size(32.dp))
@@ -224,6 +234,107 @@ fun HomeScreen(
             },
             onMarkAllRead = { viewModel.markAllNotificationsRead() }
         )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// App feature (এডমিন-অনলি): "কোথায় কমতি হয়েছে" ছোট ড্যাশবোর্ড — Quiz/QBank/
+// Study প্রতিটার জন্য ৩টা আলাদা সোর্সের count পাশাপাশি (Sheet = আসল Google
+// Sheet-এ raw row count, CDN = manifest.json-এ publish হওয়া count, App =
+// এই মুহূর্তে ডিভাইসে cache হয়ে থাকা count)। মিসম্যাচ হলে (Sheet ≠ CDN বা
+// Sheet ≠ App) লাল রঙে হাইলাইট হয়, যাতে ঠিক কোন লেয়ারে কমতি সেটা সহজে ধরা যায়।
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
+    val rows = listOf(
+        Triple("Quiz", "🧠", state.content.quiz.size),
+        Triple("QBank", "📋", state.content.qbank.size),
+        Triple("Study", "📖", state.content.study.size)
+    )
+    Card(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "🛠️ Admin — প্রশ্ন সংখ্যা (Sheet vs CDN vs App)",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize   = 13.sp,
+                    color      = MaterialTheme.colorScheme.onSurface
+                )
+                IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
+                    if (state.isLoadingAdminCounts) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "রিফ্রেশ", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            // ── কলাম হেডার ──
+            Row(Modifier.fillMaxWidth()) {
+                Text("", modifier = Modifier.weight(1.3f))
+                Text("Sheet", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("CDN",   modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("App",   modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+            Divider()
+
+            rows.forEach { (label, emoji, appCount) ->
+                val sheetCount = state.sheetCounts[label]
+                val cdnCount   = state.cdnCounts[label]
+                // ── মিসম্যাচ চেক: Sheet-ই সোর্স-অফ-ট্রুথ ধরা হচ্ছে, CDN/App তার
+                // চেয়ে কম হলে "কমতি" — sheetCount না এলে (এখনো লোড হয়নি /
+                // network fail) কোনো হাইলাইট দেখানো হয় না ──
+                val cdnMismatch  = sheetCount != null && cdnCount != null && cdnCount < sheetCount
+                val appMismatch  = sheetCount != null && appCount < sheetCount
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "$emoji $label",
+                        modifier = Modifier.weight(1.3f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        sheetCount?.toString() ?: "…",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        if (!state.cdnConfigured) "—" else (cdnCount?.toString() ?: "…"),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        color = if (cdnMismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        appCount.toString(),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        color = if (appMismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            if (!state.cdnConfigured) {
+                Text(
+                    "ℹ️ CDN কনফিগার করা নেই (BuildConfig.CDN_WORKER_URL খালি) — তাই CDN কলাম \"—\" দেখাচ্ছে।",
+                    fontSize = 10.sp, color = Color.Gray
+                )
+            }
+        }
     }
 }
 
