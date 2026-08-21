@@ -41,7 +41,12 @@ data class StudyItem(
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
-    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null,
+    // ── FIX (build error: "Unresolved reference: groupHeading" QuizModels.kt:126) —
+    // QuizItem/QBankItem-এ group_heading ফিল্ড আছে (উপরে/নিচে দেখো একই কমেন্ট), কিন্তু
+    // StudyItem ক্লাসে এটা যোগ করতে ভুলে যাওয়া হয়েছিল, যদিও QuizModels.kt-এর
+    // fromStudyItem() এটা ব্যবহার করে ──
+    @SerializedName("group_heading") val groupHeading : String? = null
 )
 
 data class QuizItem(
