@@ -155,6 +155,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     // চলে যাওয়া হয়েছে) সেই stale রেসপন্স চুপচাপ ফেলে দেওয়া হয়, state আপডেট হয় না। ──
     private var subTopicLoadJob: Job? = null
     private var subTopicLoadToken: Long = 0L
+    // ── FIX ("QBank প্রতিষ্ঠান/পদের ভিতর ঢুকলে ২-৩ সেকেন্ড 'কোনো প্রশ্ন নেই' দেখায়,
+    // তারপর নিজে থেকেই ঠিক হয়ে যায়") — নিচে selectQBankYear()-এ ব্যবহার হয় ──
+    private var qbankYearLoadToken: Long = 0L
     private val prefs = app.getSharedPreferences("quiz_prefs", android.content.Context.MODE_PRIVATE)
 
     // init এ কিছু করি না — setMode() call আসার জন্য অপেক্ষা
@@ -1836,6 +1839,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *  বদলে শুধু year দিয়ে cross-subject ফিল্টার হয়) */
     fun selectQBankYear(year: String) {
         timerJob?.cancel()
+        // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ২-৩ সেকেন্ড 'কোনো প্রশ্ন নেই' দেখায়,
+        // পরে নিজে থেকেই ঠিক হয়ে যায়"): এই ফাংশন আগে isLoading কখনোই true সেট করত না।
+        // Room-এ এই year প্রথমবার cache না থাকলে নিচের else শাখায় repo.getContent()
+        // (নেটওয়ার্ক/Firebase থেকে) দিয়ে ফলব্যাক লোড হয় যেটাতে ২-৩ সেকেন্ড লাগতে পারে —
+        // ততক্ষণ questions খালিই থাকত আর vmState.isLoading=false থাকায় UI সরাসরি
+        // "কোনো প্রশ্ন পাওয়া যায়নি" এরর দেখিয়ে দিত (দেখো QuestionListScreen.kt-এর
+        // pagedQuestions.isEmpty() ব্লক), যদিও প্রশ্ন আসলে লোড হচ্ছিলই — ডেটা এলে ঠিক
+        // হয়ে যেত বলে "নিজে থেকেই ঠিক" মনে হতো। এখন isLoading=true সেট করে দেওয়া হলো,
+        // তাই লোড শেষ না হওয়া পর্যন্ত স্পিনার দেখাবে, ভুল করে "নেই" দেখাবে না।
+        // পাশাপাশি token দিয়ে stale/race গার্ডও যোগ করা হলো (নিচে দেখো) যাতে পুরনো
+        // সালের রেসপন্স নতুন সাল সিলেক্ট করার পর এসে ওভাররাইট করতে না পারে। ──
+        val myToken = ++qbankYearLoadToken
         _state.update {
             it.copy(
                 qbankSelectedYear = year,
@@ -1844,7 +1859,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 // এখান থেকে Room query হয় না (নিচে আলাদাভাবে year দিয়েই হয়)
                 navPath = NavPath("সাল", year),
                 currentPage = 0,
-                qbankSearchQuery = ""
+                qbankSearchQuery = "",
+                isLoading = true,
+                questions = emptyList(),
+                totalQuestions = 0,
+                error = null
             )
         }
         viewModelScope.launch {
@@ -1855,17 +1874,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
 
             val roomCount = repo.getRoomYearTotalCount(sheet, year, tag)
+            if (myToken != qbankYearLoadToken) return@launch
             if (roomCount > 0) {
                 loadQBankYearQuestionsFromRoom(year, tag, page = 0)
                 if (BuildConfig.REALTIME_DATA) {
                     launch(Dispatchers.IO) {
                         val content = (repo.getContent() as? DataState.Success)?.data
-                        if (content != null) loadQBankYearQuestionsFallback(content, year)
+                        // ── FIX: এই ব্যাকগ্রাউন্ড রিফ্রেশ শুধু "আরও নতুন" ডেটা থাকলেই
+                        // ওভাররাইট করবে — খালি/stale রেসপন্স দিয়ে Room থেকে ইতিমধ্যে
+                        // সঠিকভাবে দেখানো প্রশ্নগুলো মুছে ফেলবে না, আর token স্টেল হলেও
+                        // (ততক্ষণে ইউজার অন্য সাল/স্ক্রিনে চলে গেলে) কিছু লিখবে না। ──
+                        if (content != null && myToken == qbankYearLoadToken) {
+                            loadQBankYearQuestionsFallback(content, year, allowEmptyOverwrite = false)
+                        }
                     }
                 }
             } else {
                 val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                loadQBankYearQuestionsFallback(content, year)
+                if (myToken != qbankYearLoadToken) return@launch
+                loadQBankYearQuestionsFallback(content, year, allowEmptyOverwrite = true)
             }
         }
     }
@@ -1892,18 +1919,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 totalQuestions   = total,
                 currentPage      = page,
                 questionsLoading = false,
+                isLoading        = false,
                 isQuizActive     = true,
                 showResult       = false,
                 result           = null,
                 answeredCount    = 0,
-                timerSec         = 0
+                timerSec         = 0,
+                error            = if (total == 0) "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" else null
             )
         }
         startTimer(total)
     }
 
-    /** Room-এ QBank সিঙ্ক না হয়ে থাকলে Firebase/AppContent থেকে সরাসরি ফলব্যাক (পেজিনেশন ছাড়া) */
-    private suspend fun loadQBankYearQuestionsFallback(content: AppContent, year: String) {
+    /** Room-এ QBank সিঙ্ক না হয়ে থাকলে Firebase/AppContent থেকে সরাসরি ফলব্যাক (পেজিনেশন ছাড়া)
+     *  @param allowEmptyOverwrite false হলে items খালি এলে state.questions ওভাররাইট করবে না —
+     *  ব্যাকগ্রাউন্ড রিফ্রেশে (Room-এ ইতিমধ্যে ডেটা দেখানো অবস্থায়) ব্যবহার হয়, যাতে একটা
+     *  সাময়িক/stale খালি রেসপন্স আগে থেকেই ঠিকভাবে দেখানো প্রশ্নগুলো মুছে না ফেলে। */
+    private suspend fun loadQBankYearQuestionsFallback(content: AppContent, year: String, allowEmptyOverwrite: Boolean = true) {
         val user     = session.getCurrentUser()
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
         val filtered = content.forUser(user, adminTag)
@@ -1918,6 +1950,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             .sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+        if (items.isEmpty() && !allowEmptyOverwrite) return
         _state.update {
             it.copy(
                 questions      = items,
@@ -1927,7 +1960,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 showResult     = false,
                 result         = null,
                 answeredCount  = 0,
-                timerSec       = 0
+                timerSec       = 0,
+                isLoading      = false,
+                error          = if (items.isEmpty()) "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" else null
             )
         }
         startTimer(items.size)
