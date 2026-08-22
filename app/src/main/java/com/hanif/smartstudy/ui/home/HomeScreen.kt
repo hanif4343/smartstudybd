@@ -145,6 +145,7 @@ fun HomeScreen(
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
     onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
+    onOpenOfficeApp: () -> Unit = {},           // "MS Office" কুইক-টাইল → Word/Excel/PowerPoint সিমুলেটর
     onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -198,7 +199,8 @@ fun HomeScreen(
                 onOpenMockTest = onOpenMockTest,
                 onOpenFocusMode = onOpenFocusMode,
                 onOpenAiChat = onOpenAiChat,
-                onOpenViva = onOpenViva
+                onOpenViva = onOpenViva,
+                onOpenOfficeApp = onOpenOfficeApp
             )
 
             // ── App feature (এডমিন-অনলি): "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
@@ -481,7 +483,8 @@ private fun HomeQuickAccessGrid(
     onOpenMockTest : (Boolean) -> Unit = {},
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},
-    onOpenViva     : () -> Unit = {}
+    onOpenViva     : () -> Unit = {},
+    onOpenOfficeApp: () -> Unit = {}
 ) {
     var showMockTestPicker by remember { mutableStateOf(false) }
 
@@ -501,6 +504,9 @@ private fun HomeQuickAccessGrid(
             title = "Practice", titleColor = Color(0xFFEA580C), onExplore = onOpenTyping,
             tiles = listOf(
                 GridTileData(vecIcon(Icons.Default.Keyboard), "Typing",       Color(0xFF16A34A), onOpenTyping),
+                // ── সরকারি চাকরি পরীক্ষার Office (Excel/Word/PowerPoint) সিমুলেটর —
+                // WebView-based, ui/officeapp প্যাকেজে বিস্তারিত আছে ──
+                GridTileData(emojiIcon("🗂️"), "MS Office",   Color(0xFF2563EB), onOpenOfficeApp),
                 // Mock Test ট্যাপ করলে আগে Quiz/QBank বেছে নিতে বলা হয়, তারপর সেই মোডে ফুল Mock Test ফ্লো ওপেন হয়
                 GridTileData(vecIcon(Icons.Default.Assignment), "Mock Test",  Color(0xFF7C3AED), { showMockTestPicker = true }),
                 // ── ভয়েসে কথোপকথনমূলক মৌখিক পরীক্ষা — AI ছাত্রের নাম ধরে বিষয়/টপিক
