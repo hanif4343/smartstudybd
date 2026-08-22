@@ -20,6 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -49,6 +53,39 @@ private val TextMuted    = Color(0xFF6B6552)
 private val AnswerBg     = Color(0xFFEAF1E4)
 private val AnswerText   = Color(0xFF2C4728)
 private val DashedLine   = Color(0xFFCFC6AC)
+
+// ── PAPER COMPOSER রেন্ডারিং হেল্পার ──
+// "highlight" ফরম্যাটে Admin App-এ টেক্সট সিলেক্ট করে "🖍 হাইলাইট করো" চাপলে question-এ
+// __word__ মার্কআপ বসে (দেখো QuizModels.kt-এর formatStyle কমেন্ট) — এখানে সেটা পার্স
+// করে বোল্ড+আন্ডারলাইন+রঙিন করে দেখানো হয় (যেমন কারক নির্ণয়ে নির্দিষ্ট শব্দ চিহ্নিত করা)।
+private val HIGHLIGHT_REGEX = Regex("__(.+?)__")
+private fun buildHighlightedText(raw: String): AnnotatedString = buildAnnotatedString {
+    var lastEnd = 0
+    for (m in HIGHLIGHT_REGEX.findAll(raw)) {
+        append(raw.substring(lastEnd, m.range.first))
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = HeaderTop, textDecoration = TextDecoration.Underline)) {
+            append(m.groupValues[1])
+        }
+        lastEnd = m.range.last + 1
+    }
+    append(raw.substring(lastEnd))
+}
+
+// "fillblank" ফরম্যাটে (ইংরেজি) question-এ blank-এর জায়গায় ___/…../.... থাকলে সেখানে
+// answer সরাসরি ইনলাইন (বোল্ড+আন্ডারলাইন) বসিয়ে দেখানো হয় — আলাদা "উত্তর:" বক্স লাগে না।
+// Blank marker না পাওয়া গেলে null ফেরত দেয়, তখন caller স্বাভাবিক Q+A-বক্স ফলব্যাক করবে।
+private val BLANK_REGEX = Regex("_{3,}|\\.{4,}|…{2,}")
+private fun buildFillBlankText(question: String, answer: String): AnnotatedString? {
+    val m = BLANK_REGEX.find(question) ?: return null
+    return buildAnnotatedString {
+        append(question.substring(0, m.range.first))
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AnswerText, textDecoration = TextDecoration.Underline)) {
+            append(answer)
+        }
+        append(question.substring(m.range.last + 1))
+    }
+}
+
 private val ExplainPanel = Color(0xFFEFE9D8)
 private val TechPanel    = Color(0xFFEAF1E4)
 
@@ -259,6 +296,29 @@ private fun ExamSerialCard(
             Column(Modifier.weight(1f)) {
                 ExamQAItem(prefixLabel = null, q = q, onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap)
             }
+        } else if (serial.first().formatStyle == "table") {
+            // ── PAPER COMPOSER "Table" ফরম্যাট (যেমন সন্ধি বিচ্ছেদ) — ক/খ/গ স্ট্যাক না
+            // করে সত্যিকারের দুই-কলাম টেবিল: শব্দ | ব্যাখ্যা/বিচ্ছেদ ──
+            Column(Modifier.weight(1f)) {
+                if (serial.first().groupHeading.isNotBlank()) {
+                    Text(
+                        text = serial.first().groupHeading,
+                        fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                    Text("শব্দ", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = TextMuted, modifier = Modifier.weight(0.38f))
+                    Text("ব্যাখ্যা / বিচ্ছেদ", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = TextMuted, modifier = Modifier.weight(0.62f))
+                }
+                serial.forEachIndexed { idx, sub ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                        Text(text = sub.question, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain, modifier = Modifier.weight(0.38f))
+                        Text(text = sub.answer, fontSize = 12.5.sp, color = AnswerText, modifier = Modifier.weight(0.62f))
+                    }
+                    if (idx < serial.lastIndex) Divider(color = DashedLine, thickness = 0.7.dp)
+                }
+            }
         } else {
             // ── multi-part গ্রুপ — একটা গ্রুপ-হেডিং লাইনের নিচে ক/খ/গ... ──
             Column(Modifier.weight(1f)) {
@@ -308,10 +368,16 @@ private fun ExamQAItem(
     var bookmarked by remember(q.id, q.isBookmarked) { mutableStateOf(q.isBookmarked) }
 
     Column {
-        if (!compact) {
-            Text(text = q.question, fontSize = 14.5.sp, lineHeight = 21.sp, color = TextMain)
-        } else {
-            Text(text = q.question, fontSize = 13.8.sp, lineHeight = 19.sp, color = TextMain)
+        // ── PAPER COMPOSER: formatStyle অনুযায়ী প্রশ্ন-টেক্সট রেন্ডার আলাদা হয় ──
+        val questionFontSize = if (compact) 13.8.sp else 14.5.sp
+        val questionLineHeight = if (compact) 19.sp else 21.sp
+        val inlineFillBlank = if (q.formatStyle == "fillblank" && q.answer.isNotBlank())
+            buildFillBlankText(q.question, q.answer) else null
+
+        when {
+            inlineFillBlank != null -> Text(text = inlineFillBlank, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
+            q.formatStyle == "highlight" -> Text(text = buildHighlightedText(q.question), fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
+            else -> Text(text = q.question, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
         }
         Spacer(Modifier.height(4.dp))
         // ── উত্তর — সরাসরি সঠিক উত্তরের টেক্সট (MCQ হলে answer ফিল্ডে টেক্সট থাকে,
@@ -319,8 +385,10 @@ private fun ExamQAItem(
         // ── FIX ("English এ Ans দরকার নাই"): "উত্তর:" প্রিফিক্স-লেবেল শুধু ইংরেজি
         // সাবজেক্ট ছাড়া বাকি সব জায়গায় (বাংলা/গণিত/সাধারণ জ্ঞান) দেখায় — ইংরেজিতে
         // (সাধারণত fill-in-the-blank টাইপ, answer এমনিতেই বাক্যের ফাঁকে বোঝা যায়)
-        // শুধু উত্তরের টেক্সটটাই থাকে, কোনো লেবেল ছাড়া। ──
-        if (q.answer.isNotBlank()) {
+        // শুধু উত্তরের টেক্সটটাই থাকে, কোনো লেবেল ছাড়া।
+        // ── inlineFillBlank != null হলে উত্তর ইতিমধ্যে বাক্যের ভিতরেই দেখানো হয়ে গেছে,
+        // তাই নিচে আবার আলাদা বক্সে দেখানো হয় না (ডুপ্লিকেট এড়াতে)। ──
+        if (q.answer.isNotBlank() && inlineFillBlank == null) {
             val labelPrefix = if (subjectLabelOf(q) == "ইংরেজি") "" else "উত্তর: "
             Box(
                 Modifier.clip(RoundedCornerShape(3.dp)).background(AnswerBg).padding(horizontal = 8.dp, vertical = 2.dp)
