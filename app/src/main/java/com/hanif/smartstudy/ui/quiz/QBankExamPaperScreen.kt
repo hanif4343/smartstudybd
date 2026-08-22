@@ -71,18 +71,28 @@ private fun buildHighlightedText(raw: String): AnnotatedString = buildAnnotatedS
     append(raw.substring(lastEnd))
 }
 
-// "fillblank" ফরম্যাটে (ইংরেজি) question-এ blank-এর জায়গায় ___/…../.... থাকলে সেখানে
-// answer সরাসরি ইনলাইন (বোল্ড+আন্ডারলাইন) বসিয়ে দেখানো হয় — আলাদা "উত্তর:" বক্স লাগে না।
-// Blank marker না পাওয়া গেলে null ফেরত দেয়, তখন caller স্বাভাবিক Q+A-বক্স ফলব্যাক করবে।
+// "fillblank" ফরম্যাটে (ইংরেজি) — Admin App-এর PaperComposer-এ 🖍 "Blank মার্ক করো" বাটনে
+// যে শব্দটা সিলেক্ট করা হয় সেটাই __word__ মার্কআপ হয়ে question-এর ভিতরে থেকে যায় (মুছে
+// যায় না — দেখো uploaderUtils.js buildSheetRow-এর কমেন্ট), আর সেই একই টেক্সট আলাদাভাবে
+// answer/correct কলামেও (extract করে) সেভ হয়। তাই এখানে রেন্ডার করার সময় প্রশ্নের ভিতরের
+// __..__ মার্ক করা অংশটাই সরিয়ে সেই জায়গায় answer টা বোল্ড+আন্ডারলাইন করে বসানো হয়।
+// 🐛 ফিক্স: আগে এখানে শুধু "____"/"...."/"……" style literal blank placeholder খোঁজা হতো
+// (BLANK_REGEX) — কিন্তু Admin App আসলে __word__ মার্কআপ পাঠায়, যেটাতেও প্রথম "__" নিজেই
+// BLANK_REGEX-এর "২+ underscore" শর্তে ম্যাচ করে যেত। ফলে answer টা বসতো ঠিকই, কিন্তু তার
+// পরে বাকি "word__ ..." অংশ (মার্ক করা শব্দ + বন্ধনী "__") অপরিবর্তিত/অতিরিক্ত টেক্সট হিসেবে
+// থেকে যেত — একই উত্তর বাক্যে দুইবার দেখাতো। এখন আগে __..__ মার্ক খোঁজা হয় (নতুন Admin App
+// convention), সেটা না পেলে পুরনো literal blank placeholder-এ (আগে ম্যানুয়ালি টাইপ করা কোনো
+// প্রশ্নে থাকলে) fallback করে — দুই ধরনের প্রশ্নই সঠিকভাবে রেন্ডার হবে।
 private val BLANK_REGEX = Regex("_{2,}|\\.{4,}|…{2,}")
 private fun buildFillBlankText(question: String, answer: String): AnnotatedString? {
-    val m = BLANK_REGEX.find(question) ?: return null
+    val markMatch = HIGHLIGHT_REGEX.find(question)
+    val blankRange = markMatch?.range ?: BLANK_REGEX.find(question)?.range ?: return null
     return buildAnnotatedString {
-        append(question.substring(0, m.range.first))
+        append(question.substring(0, blankRange.first))
         withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AnswerText, textDecoration = TextDecoration.Underline)) {
             append(answer)
         }
-        append(question.substring(m.range.last + 1))
+        append(question.substring(blankRange.last + 1))
     }
 }
 
