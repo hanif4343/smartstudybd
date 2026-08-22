@@ -83,6 +83,9 @@ data class QuestionItem(
     // না থাকলে না। এখন একটাই ফিল্ড — খালি হলে হেডিং নেই (আর group_id-ও তাই খালি
     // থাকবে, প্রশ্নটা স্বাধীন), টেক্সট থাকলে সেটাই বোল্ড হেডিং হিসেবে দেখানো হবে। ──
     val groupHeading : String     = "",
+    // ── PAPER COMPOSER: "table"|"highlight"|"fillblank"|"" (plain) — দেখো
+    // QBankExamPaperScreen.kt-এর রেন্ডারিং লজিক ──
+    val formatStyle  : String     = "",
     // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, কোনো UI/behavior
     // প্রভাব নেই। শুধু Admin-এর Review Mode-এ দেখানো/আপডেট করা হয়। ──
     val reviewed     : Boolean    = false,
@@ -124,6 +127,7 @@ data class QuestionItem(
             groupId      = s.groupId ?: "",
             subIndex     = s.subIndex?.toIntOrNull() ?: 0,
             groupHeading = s.groupHeading ?: "",
+            formatStyle  = "", // StudyItem-এ এই ফিল্ড নেই (শুধু QBank Written-এ প্রাসঙ্গিক)
             reviewed     = s.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = s.reviewedAt?.toLongOrNull() ?: 0L
         )
@@ -150,6 +154,7 @@ data class QuestionItem(
             groupId      = q.groupId ?: "",
             subIndex     = q.subIndex?.toIntOrNull() ?: 0,
             groupHeading = q.groupHeading ?: "",
+            formatStyle  = q.formatStyle ?: "",
             reviewed     = q.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
@@ -180,6 +185,7 @@ data class QuestionItem(
             groupId      = q.groupId ?: "",
             subIndex     = q.subIndex?.toIntOrNull() ?: 0,
             groupHeading = q.groupHeading ?: "",
+            formatStyle  = q.formatStyle ?: "",
             reviewed     = q.reviewed?.lowercase()?.trim() == "true",
             reviewedAt   = q.reviewedAt?.toLongOrNull() ?: 0L
         )
