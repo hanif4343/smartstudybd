@@ -65,6 +65,16 @@ fun MainScreen(
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
     var showViva       by remember { mutableStateOf(false) }
+    // ── MS Office সিমুলেটর (Word/Excel/PowerPoint) — officeapp/ প্যাকেজ, Home থেকে
+    // "MS Office" টাইলে ট্যাপ করলে খোলে। Picker → File List → Editor — তিন ধাপের
+    // নিজস্ব mini-navigation, showTyping-এর মতোই boolean/nullable state দিয়ে ──
+    var showOfficePicker       by remember { mutableStateOf(false) }
+    var showOfficeWordFileList by remember { mutableStateOf(false) }
+    var officeWordEditingFile  by remember { mutableStateOf<com.hanif.smartstudy.officeapp.common.OfficeFile?>(null) }
+    var showOfficeExcelFileList by remember { mutableStateOf(false) }
+    var officeExcelEditingFile  by remember { mutableStateOf<com.hanif.smartstudy.officeapp.common.OfficeFile?>(null) }
+    var showOfficePptFileList by remember { mutableStateOf(false) }
+    var officePptEditingFile  by remember { mutableStateOf<com.hanif.smartstudy.officeapp.common.OfficeFile?>(null) }
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -115,6 +125,13 @@ fun MainScreen(
     BackHandler(enabled = true) {
         when {
             showSearch                    -> showSearch = false
+            officePptEditingFile != null   -> officePptEditingFile = null
+            showOfficePptFileList          -> showOfficePptFileList = false
+            officeExcelEditingFile != null -> officeExcelEditingFile = null
+            showOfficeExcelFileList        -> showOfficeExcelFileList = false
+            officeWordEditingFile != null  -> officeWordEditingFile = null
+            showOfficeWordFileList         -> showOfficeWordFileList = false
+            showOfficePicker               -> showOfficePicker = false
             showTyping                    -> showTyping = false
             showNormalTyping              -> showNormalTyping = false
             showSmartTyping               -> showSmartTyping = false
@@ -330,6 +347,72 @@ fun MainScreen(
         )
         return
     }
+    // ── MS Office: Editor সবচেয়ে গভীর, তারপর File List, তারপর Picker — এই ক্রমেই
+    // return করা হচ্ছে যাতে একই সময়ে একাধিক স্ক্রিন ওভারল্যাপ না করে ──
+    officeWordEditingFile?.let { file ->
+        com.hanif.smartstudy.officeapp.word.WordEditorScreen(
+            initialFile = file,
+            onBack = { officeWordEditingFile = null }
+        )
+        return
+    }
+    if (showOfficeWordFileList) {
+        com.hanif.smartstudy.officeapp.word.WordFileListScreen(
+            onBack     = { showOfficeWordFileList = false },
+            onOpenFile = { f -> officeWordEditingFile = f }
+        )
+        return
+    }
+    officeExcelEditingFile?.let { file ->
+        com.hanif.smartstudy.officeapp.excel.ExcelEditorScreen(
+            initialFile = file,
+            onBack = { officeExcelEditingFile = null }
+        )
+        return
+    }
+    if (showOfficeExcelFileList) {
+        com.hanif.smartstudy.officeapp.excel.ExcelFileListScreen(
+            onBack     = { showOfficeExcelFileList = false },
+            onOpenFile = { f -> officeExcelEditingFile = f }
+        )
+        return
+    }
+    officePptEditingFile?.let { file ->
+        com.hanif.smartstudy.officeapp.ppt.PptEditorScreen(
+            initialFile = file,
+            onBack = { officePptEditingFile = null }
+        )
+        return
+    }
+    if (showOfficePptFileList) {
+        com.hanif.smartstudy.officeapp.ppt.PptFileListScreen(
+            onBack     = { showOfficePptFileList = false },
+            onOpenFile = { f -> officePptEditingFile = f }
+        )
+        return
+    }
+    if (showOfficePicker) {
+        com.hanif.smartstudy.officeapp.OfficePickerScreen(
+            onBack = { showOfficePicker = false },
+            onSelectModule = { module ->
+                when (module) {
+                    com.hanif.smartstudy.officeapp.common.OfficeModule.WORD -> {
+                        showOfficePicker = false
+                        showOfficeWordFileList = true
+                    }
+                    com.hanif.smartstudy.officeapp.common.OfficeModule.EXCEL -> {
+                        showOfficePicker = false
+                        showOfficeExcelFileList = true
+                    }
+                    com.hanif.smartstudy.officeapp.common.OfficeModule.PPT -> {
+                        showOfficePicker = false
+                        showOfficePptFileList = true
+                    }
+                }
+            }
+        )
+        return
+    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -386,6 +469,7 @@ fun MainScreen(
                     onOpenFocusMode = { showFocusModeInfo = true },
                     onOpenAiChat    = { showAiChat = true },
                     onOpenViva      = { showViva = true },
+                    onOpenOfficeApp = { showOfficePicker = true },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
