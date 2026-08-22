@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SmartStudy PowerPoint</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#1E293B;font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif;overflow:hidden;height:100%;}
+  #toolbar{
+    position:relative;z-index:50;background:#fff;border-bottom:1px solid #E2E8F0;
+    display:flex;align-items:center;gap:2px;padding:6px 8px;overflow-x:auto;white-space:nowrap;
+  }
+  .tb-btn{border:none;background:transparent;min-width:34px;height:34px;border-radius:6px;font-size:13px;color:#334155;cursor:pointer;padding:0 8px;}
+  .tb-btn.active{background:#FFEDD5;color:#EA580C;}
+  .tb-btn:active{background:#E2E8F0;}
+  .tb-sep{width:1px;height:22px;background:#E2E8F0;margin:0 4px;flex:none;}
+  select.tb-select{height:32px;border:1px solid #E2E8F0;border-radius:6px;background:#fff;font-size:12px;color:#334155;margin:0 2px;}
+
+  #stageWrap{position:absolute;top:46px;bottom:96px;left:0;right:0;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  #stage{
+    width:960px;height:540px;position:relative;overflow:hidden;
+    box-shadow:0 8px 30px rgba(0,0,0,.4);transform-origin:center center;
+  }
+  .elWrap{position:absolute;cursor:move;border:1px dashed transparent;}
+  .elWrap.selected{border:1px dashed #EA580C;}
+  .elWrap .content{width:100%;height:100%;overflow:hidden;}
+  .elWrap.text .content{outline:none;padding:6px;}
+  .elWrap .handle{
+    position:absolute;right:-8px;bottom:-8px;width:18px;height:18px;background:#EA580C;
+    border-radius:50%;display:none;border:2px solid #fff;
+  }
+  .elWrap.selected .handle{display:block;}
+  .elWrap .delBtn{
+    position:absolute;left:-10px;top:-10px;width:22px;height:22px;background:#DC2626;color:#fff;
+    border-radius:50%;display:none;align-items:center;justify-content:center;font-size:13px;border:2px solid #fff;
+  }
+  .elWrap.selected .delBtn{display:flex;}
+
+  #slidesStrip{
+    position:absolute;bottom:0;left:0;right:0;height:96px;background:#0F172A;
+    display:flex;align-items:center;gap:8px;padding:8px;overflow-x:auto;white-space:nowrap;
+  }
+  .thumb{
+    width:110px;height:62px;border-radius:6px;border:2px solid transparent;position:relative;flex:none;
+    overflow:hidden;background:#fff;
+  }
+  .thumb.active{border-color:#EA580C;}
+  .thumb .thumbInner{width:960px;height:540px;transform:scale(0.1146);transform-origin:top left;pointer-events:none;}
+  .thumb .num{position:absolute;left:3px;bottom:2px;font-size:9px;color:#94A3B8;background:rgba(0,0,0,.5);padding:1px 4px;border-radius:3px;}
+  .thumb .moveBtn{
+    position:absolute;top:2px;width:18px;height:18px;background:rgba(0,0,0,.55);color:#fff;
+    border:none;border-radius:4px;font-size:11px;line-height:18px;padding:0;
+  }
+  .thumb .moveLeft{left:2px;}
+  .thumb .moveRight{right:2px;}
+  .thumb .moveBtn:disabled{opacity:.25;}
+  #btnAddSlide{
+    flex:none;width:110px;height:62px;border-radius:6px;border:2px dashed #475569;background:none;color:#94A3B8;font-size:22px;
+  }
+
+  #playOverlay{position:fixed;inset:0;background:#000;z-index:200;display:none;align-items:center;justify-content:center;}
+  #playStage{width:100%;height:100%;position:relative;}
+  #playStage .pslide{position:absolute;inset:0;display:none;}
+  #playStage .pslide.showing{display:block;}
+  #playStage .pslide.fade{transition:opacity .5s ease;opacity:0;}
+  #playStage .pslide.fade.showing{opacity:1;}
+  #playStage .pslide.push{transition:transform .5s ease;transform:translateX(100%);}
+  #playStage .pslide.push.showing{transform:translateX(0);}
+  #btnClosePlay{position:fixed;top:16px;right:16px;z-index:201;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:20px;width:40px;height:40px;font-size:18px;}
+
+  .popup{position:fixed;z-index:997;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:8px;display:none;min-width:190px;}
+  .swatchRow{display:flex;gap:6px;padding:6px 4px;flex-wrap:wrap;}
+  .swatch{width:28px;height:28px;border-radius:6px;border:1px solid #E2E8F0;cursor:pointer;}
+  #popupOverlay{position:fixed;inset:0;z-index:996;display:none;}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button class="tb-btn" id="btnUndo" title="Undo">↺</button>
+  <button class="tb-btn" id="btnRedo" title="Redo">↻</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnAddText">🔤 Text</button>
+  <button class="tb-btn" id="btnAddRect">▭ Shape</button>
+  <button class="tb-btn" id="btnAddCircle">⬤ Shape</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnBg">🎨 Background</button>
+  <select class="tb-select" id="transitionSelect">
+    <option value="none">Transition: None</option>
+    <option value="fade">Transition: Fade</option>
+    <option value="push">Transition: Push</option>
+  </select>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnTextColor">🎨 A</button>
+  <select class="tb-select" id="fontSizeSelect">
+    <option value="18">18px</option>
+    <option value="24">24px</option>
+    <option value="32" selected>32px</option>
+    <option value="48">48px</option>
+    <option value="64">64px</option>
+  </select>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnPlay">▶️ Preview</button>
+</div>
+
+<div id="stageWrap"><div id="stage"></div></div>
+
+<div id="slidesStrip"></div>
+
+<div id="bgPopup" class="popup">
+  <div class="swatchRow">
+    <div class="swatch" data-bg="#FFFFFF" style="background:#FFFFFF;"></div>
+    <div class="swatch" data-bg="#1E293B" style="background:#1E293B;"></div>
+    <div class="swatch" data-bg="#EA580C" style="background:#EA580C;"></div>
+    <div class="swatch" data-bg="#2563EB" style="background:#2563EB;"></div>
+    <div class="swatch" data-bg="#16A34A" style="background:#16A34A;"></div>
+    <div class="swatch" data-bg="linear-gradient(135deg,#2563EB,#7C3AED)" style="background:linear-gradient(135deg,#2563EB,#7C3AED);"></div>
+    <div class="swatch" data-bg="linear-gradient(135deg,#EA580C,#DC2626)" style="background:linear-gradient(135deg,#EA580C,#DC2626);"></div>
+    <div class="swatch" data-bg="linear-gradient(135deg,#16A34A,#0D9488)" style="background:linear-gradient(135deg,#16A34A,#0D9488);"></div>
+  </div>
+</div>
+<div id="textColorPopup" class="popup">
+  <div class="swatchRow">
+    <div class="swatch" data-color="#111827" style="background:#111827;"></div>
+    <div class="swatch" data-color="#FFFFFF" style="background:#FFFFFF;border:1px solid #CBD5E1;"></div>
+    <div class="swatch" data-color="#DC2626" style="background:#DC2626;"></div>
+    <div class="swatch" data-color="#2563EB" style="background:#2563EB;"></div>
+    <div class="swatch" data-color="#16A34A" style="background:#16A34A;"></div>
+    <div class="swatch" data-color="#EA580C" style="background:#EA580C;"></div>
+  </div>
+</div>
+<div id="popupOverlay"></div>
+
+<div id="playOverlay">
+  <button id="btnClosePlay">✕</button>
+  <div id="playStage"></div>
+</div>
+
+<script>
+(function(){
+  var slides = [ makeSlide() ];
+  var activeSlideIdx = 0;
+  var selectedElId = null;
+  var elIdCounter = 1;
+
+  function makeSlide(){ return { bg:'#FFFFFF', transition:'none', elements: [] }; }
+  function activeSlide(){ return slides[activeSlideIdx]; }
+  function uid(){ return 'el' + (elIdCounter++); }
+
+  /* ===== render stage ===== */
+  var stage = document.getElementById('stage');
+  function renderStage(){
+    var s = activeSlide();
+    stage.style.background = s.bg;
+    stage.innerHTML = '';
+    s.elements.forEach(function(el){ stage.appendChild(renderElement(el)); });
+    renderSlidesStrip();
+  }
+
+  function renderElement(el){
+    var wrap = document.createElement('div');
+    wrap.className = 'elWrap ' + el.type + (el.id === selectedElId ? ' selected' : '');
+    wrap.style.left = el.x + 'px'; wrap.style.top = el.y + 'px';
+    wrap.style.width = el.w + 'px'; wrap.style.height = el.h + 'px';
+    wrap.setAttribute('data-id', el.id);
+
+    var content = document.createElement('div');
+    content.className = 'content';
+    if (el.type === 'text'){
+      content.contentEditable = 'true';
+      content.style.fontSize = (el.fontSize||32) + 'px';
+      content.style.color = el.color || '#111827';
+      content.style.fontWeight = el.bold ? '700' : '400';
+      content.innerText = el.text || 'টেক্সট লিখুন';
+      content.addEventListener('input', function(){ el.text = content.innerText; notifyChanged(); });
+      content.addEventListener('pointerdown', function(e){ e.stopPropagation(); selectElement(el.id); });
+    } else if (el.type === 'rect'){
+      content.style.background = el.color || '#EA580C';
+      content.style.borderRadius = '4px';
+    } else if (el.type === 'circle'){
+      content.style.background = el.color || '#2563EB';
+      content.style.borderRadius = '50%';
+    }
+    wrap.appendChild(content);
+
+    var del = document.createElement('div'); del.className='delBtn'; del.innerText='✕';
+    del.addEventListener('pointerdown', function(e){ e.stopPropagation(); deleteElement(el.id); });
+    wrap.appendChild(del);
+
+    var handle = document.createElement('div'); handle.className='handle';
+    wrap.appendChild(handle);
+
+    attachDrag(wrap, el, handle);
+    wrap.addEventListener('pointerdown', function(e){ if (e.target===wrap) selectElement(el.id); });
+    return wrap;
+  }
+
+  function selectElement(id){ selectedElId = id; renderStage(); }
+  function deleteElement(id){
+    activeSlide().elements = activeSlide().elements.filter(function(e){ return e.id !== id; });
+    if (selectedElId === id) selectedElId = null;
+    renderStage(); notifyChanged();
+  }
+
+  /* ===== drag / resize (pointer events — touch+mouse uনিফাইড) ===== */
+  function attachDrag(wrap, el, handle){
+    var dragging = false, resizing = false, startX=0, startY=0, orig={};
+    wrap.addEventListener('pointerdown', function(e){
+      if (e.target === handle) return;
+      dragging = true; selectElement(el.id);
+      startX = e.clientX; startY = e.clientY; orig = {x:el.x,y:el.y};
+      wrap.setPointerCapture(e.pointerId);
+    });
+    wrap.addEventListener('pointermove', function(e){
+      if (!dragging) return;
+      var scale = stage.getBoundingClientRect().width / 960;
+      el.x = Math.max(0, orig.x + (e.clientX-startX)/scale);
+      el.y = Math.max(0, orig.y + (e.clientY-startY)/scale);
+      wrap.style.left = el.x+'px'; wrap.style.top = el.y+'px';
+    });
+    function endDrag(e){ if (dragging){ dragging=false; notifyChanged(); } if(resizing){ resizing=false; notifyChanged(); } }
+    wrap.addEventListener('pointerup', endDrag);
+    wrap.addEventListener('pointercancel', endDrag);
+
+    handle.addEventListener('pointerdown', function(e){
+      e.stopPropagation(); resizing = true; selectElement(el.id);
+      startX = e.clientX; startY = e.clientY; orig = {w:el.w,h:el.h};
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', function(e){
+      if (!resizing) return;
+      var scale = stage.getBoundingClientRect().width / 960;
+      el.w = Math.max(30, orig.w + (e.clientX-startX)/scale);
+      el.h = Math.max(30, orig.h + (e.clientY-startY)/scale);
+      wrap.style.width = el.w+'px'; wrap.style.height = el.h+'px';
+    });
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+  }
+
+  stage.addEventListener('pointerdown', function(e){ if (e.target===stage) selectElement(null); });
+
+  /* ===== scale stage to fit screen ===== */
+  function fitStage(){
+    var wrap = document.getElementById('stageWrap');
+    var scale = Math.min(wrap.clientWidth/960, wrap.clientHeight/540) * 0.96;
+    stage.style.transform = 'scale('+scale+')';
+  }
+  window.addEventListener('resize', fitStage);
+
+  /* ===== toolbar: add elements ===== */
+  document.getElementById('btnAddText').addEventListener('click', function(){
+    var el = { id:uid(), type:'text', x:280, y:220, w:400, h:100, text:'টেক্সট লিখুন', fontSize:32, color:'#111827', bold:false };
+    activeSlide().elements.push(el); selectElement(el.id); notifyChanged();
+  });
+  document.getElementById('btnAddRect').addEventListener('click', function(){
+    var el = { id:uid(), type:'rect', x:330, y:200, w:300, h:150, color:'#EA580C' };
+    activeSlide().elements.push(el); selectElement(el.id); notifyChanged();
+  });
+  document.getElementById('btnAddCircle').addEventListener('click', function(){
+    var el = { id:uid(), type:'circle', x:380, y:170, w:200, h:200, color:'#2563EB' };
+    activeSlide().elements.push(el); selectElement(el.id); notifyChanged();
+  });
+
+  document.getElementById('fontSizeSelect').addEventListener('change', function(e){
+    var el = findSelected(); if (el && el.type==='text'){ el.fontSize = parseInt(e.target.value); renderStage(); notifyChanged(); }
+  });
+  function findSelected(){ return activeSlide().elements.find(function(e){ return e.id===selectedElId; }); }
+
+  document.getElementById('transitionSelect').addEventListener('change', function(e){
+    activeSlide().transition = e.target.value; notifyChanged();
+  });
+
+  /* ===== popups: background / text color ===== */
+  function showPopup(popupEl, anchorBtn){
+    document.querySelectorAll('.popup').forEach(function(p){ p.style.display='none'; });
+    var r = anchorBtn.getBoundingClientRect();
+    popupEl.style.display = 'block';
+    popupEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth-200)) + 'px';
+    popupEl.style.top = (r.bottom+4) + 'px';
+    document.getElementById('popupOverlay').style.display = 'block';
+  }
+  function hidePopups(){ document.querySelectorAll('.popup').forEach(function(p){p.style.display='none';}); document.getElementById('popupOverlay').style.display='none'; }
+  document.getElementById('popupOverlay').addEventListener('click', hidePopups);
+  document.getElementById('popupOverlay').addEventListener('touchstart', hidePopups);
+
+  document.getElementById('btnBg').addEventListener('click', function(){ showPopup(document.getElementById('bgPopup'), this); });
+  document.getElementById('bgPopup').querySelectorAll('.swatch[data-bg]').forEach(function(sw){
+    sw.addEventListener('click', function(){ activeSlide().bg = sw.getAttribute('data-bg'); renderStage(); hidePopups(); notifyChanged(); });
+  });
+  document.getElementById('btnTextColor').addEventListener('click', function(){ showPopup(document.getElementById('textColorPopup'), this); });
+  document.getElementById('textColorPopup').querySelectorAll('.swatch[data-color]').forEach(function(sw){
+    sw.addEventListener('click', function(){
+      var el = findSelected(); if (el && el.type==='text'){ el.color = sw.getAttribute('data-color'); renderStage(); notifyChanged(); }
+      hidePopups();
+    });
+  });
+
+  /* ===== slides strip ===== */
+  var strip = document.getElementById('slidesStrip');
+  function renderSlidesStrip(){
+    strip.innerHTML = '';
+    slides.forEach(function(s, idx){
+      var t = document.createElement('div');
+      t.className = 'thumb' + (idx===activeSlideIdx ? ' active' : '');
+      var inner = document.createElement('div'); inner.className = 'thumbInner'; inner.style.background = s.bg;
+      s.elements.forEach(function(el){
+        var mini = document.createElement('div');
+        mini.style.position='absolute'; mini.style.left=el.x+'px'; mini.style.top=el.y+'px';
+        mini.style.width=el.w+'px'; mini.style.height=el.h+'px';
+        if (el.type==='text'){ mini.style.color = el.color||'#111827'; mini.style.fontSize=(el.fontSize||32)+'px'; mini.innerText = el.text||''; }
+        else { mini.style.background = el.color||'#999'; mini.style.borderRadius = el.type==='circle'?'50%':'4px'; }
+        inner.appendChild(mini);
+      });
+      t.appendChild(inner);
+      var num = document.createElement('div'); num.className='num'; num.innerText = (idx+1);
+      t.appendChild(num);
+
+      var moveLeft = document.createElement('button');
+      moveLeft.className = 'moveBtn moveLeft'; moveLeft.innerText = '◀'; moveLeft.disabled = (idx===0);
+      moveLeft.addEventListener('click', function(e){ e.stopPropagation(); moveSlide(idx, idx-1); });
+      t.appendChild(moveLeft);
+
+      var moveRight = document.createElement('button');
+      moveRight.className = 'moveBtn moveRight'; moveRight.innerText = '▶'; moveRight.disabled = (idx===slides.length-1);
+      moveRight.addEventListener('click', function(e){ e.stopPropagation(); moveSlide(idx, idx+1); });
+      t.appendChild(moveRight);
+
+      t.addEventListener('click', function(){ activeSlideIdx = idx; selectedElId=null; renderStage(); });
+      t.addEventListener('dblclick', function(){
+        if (slides.length<=1) return;
+        if (confirm('স্লাইড ' + (idx+1) + ' মুছে ফেলবেন?')){
+          slides.splice(idx,1);
+          activeSlideIdx = Math.max(0, Math.min(activeSlideIdx, slides.length-1));
+          renderStage(); notifyChanged();
+        }
+      });
+      strip.appendChild(t);
+    });
+    var addBtn = document.createElement('button');
+    addBtn.id = 'btnAddSlide'; addBtn.innerText = '+';
+    addBtn.addEventListener('click', function(){
+      slides.push(makeSlide()); activeSlideIdx = slides.length-1; selectedElId=null; renderStage(); notifyChanged();
+    });
+    strip.appendChild(addBtn);
+  }
+
+  function moveSlide(fromIdx, toIdx){
+    if (toIdx < 0 || toIdx >= slides.length || fromIdx === toIdx) return;
+    var moved = slides.splice(fromIdx, 1)[0];
+    slides.splice(toIdx, 0, moved);
+    if (activeSlideIdx === fromIdx) activeSlideIdx = toIdx;
+    else if (fromIdx < activeSlideIdx && toIdx >= activeSlideIdx) activeSlideIdx--;
+    else if (fromIdx > activeSlideIdx && toIdx <= activeSlideIdx) activeSlideIdx++;
+    renderStage();
+    notifyChanged();
+  }
+
+  /* ===== Play / Preview mode with transitions ===== */
+  document.getElementById('btnPlay').addEventListener('click', function(){
+    var overlay = document.getElementById('playOverlay');
+    var playStage = document.getElementById('playStage');
+    playStage.innerHTML = '';
+    slides.forEach(function(s, idx){
+      var d = document.createElement('div');
+      d.className = 'pslide ' + (s.transition==='fade'?'fade':(s.transition==='push'?'push':''));
+      d.style.background = s.bg;
+      s.elements.forEach(function(el){
+        var mini = document.createElement('div');
+        mini.style.position='absolute';
+        mini.style.left=(el.x/960*100)+'%'; mini.style.top=(el.y/540*100)+'%';
+        mini.style.width=(el.w/960*100)+'%'; mini.style.height=(el.h/540*100)+'%';
+        if (el.type==='text'){ mini.style.color=el.color||'#111827'; mini.style.fontSize=(el.fontSize||32)+'px'; mini.style.fontWeight=el.bold?'700':'400'; mini.innerText=el.text||''; }
+        else { mini.style.background = el.color||'#999'; mini.style.borderRadius = el.type==='circle'?'50%':'4px'; }
+        d.appendChild(mini);
+      });
+      playStage.appendChild(d);
+    });
+    var idx = 0;
+    var pslides = playStage.querySelectorAll('.pslide');
+    pslides[0].classList.add('showing');
+    overlay.style.display = 'flex';
+    overlay.onclick = function(e){
+      if (e.target.id === 'btnClosePlay') return;
+      idx++;
+      if (idx >= pslides.length){ overlay.style.display='none'; return; }
+      pslides.forEach(function(p){ p.classList.remove('showing'); });
+      setTimeout(function(){ pslides[idx].classList.add('showing'); }, 20);
+    };
+  });
+  document.getElementById('btnClosePlay').addEventListener('click', function(){ document.getElementById('playOverlay').style.display='none'; });
+
+  /* ===== Undo/Redo — snapshot-ভিত্তিক history (প্রতিটা mutation notifyChanged() কল করে, তাই এখানেই hook করা হলো) ===== */
+  var history = [], histIdx = -1;
+  function snapshot(){ return JSON.stringify(slides); }
+  function pushHistory(){
+    history = history.slice(0, histIdx + 1);
+    history.push(snapshot());
+    if (history.length > 50) history.shift();
+    histIdx = history.length - 1;
+  }
+  function restoreSnapshot(idx){
+    slides = JSON.parse(history[idx]);
+    activeSlideIdx = Math.min(activeSlideIdx, slides.length - 1);
+    selectedElId = null;
+    renderStage();
+  }
+  function markDirtyOnly(){ if (window.AndroidBridge && window.AndroidBridge.onContentChanged) window.AndroidBridge.onContentChanged(); }
+  document.getElementById('btnUndo').addEventListener('click', function(){ if (histIdx > 0){ histIdx--; restoreSnapshot(histIdx); markDirtyOnly(); } });
+  document.getElementById('btnRedo').addEventListener('click', function(){ if (histIdx < history.length - 1){ histIdx++; restoreSnapshot(histIdx); markDirtyOnly(); } });
+
+  function notifyChanged(){
+    pushHistory();
+    if (window.AndroidBridge && window.AndroidBridge.onContentChanged) window.AndroidBridge.onContentChanged();
+  }
+
+  /* ===== get/set full presentation state — Kotlin bridge ===== */
+  window.getPresentationState = function(){
+    return JSON.stringify({ slides: slides });
+  };
+  window.setPresentationState = function(json){
+    try {
+      var state = JSON.parse(json);
+      if (state && Array.isArray(state.slides) && state.slides.length){
+        slides = state.slides;
+        var maxId = 0;
+        slides.forEach(function(s){ (s.elements||[]).forEach(function(el){
+          var n = parseInt(String(el.id).replace('el',''),10); if (!isNaN(n)) maxId = Math.max(maxId,n);
+        }); });
+        elIdCounter = maxId+1;
+        activeSlideIdx = 0; selectedElId = null;
+        fitStage(); renderStage();
+        history = [snapshot()]; histIdx = 0; // ফাইল লোড হওয়ার পরের অবস্থাকেই undo-বেসলাইন ধরা হলো
+      }
+    } catch(e){}
+  };
+
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); return false; }, false);
+
+  fitStage(); renderStage();
+  history = [snapshot()]; histIdx = 0;
+  if (window.AndroidBridge && window.AndroidBridge.onEditorReady) window.AndroidBridge.onEditorReady();
+})();
+</script>
+</body>
+</html>
