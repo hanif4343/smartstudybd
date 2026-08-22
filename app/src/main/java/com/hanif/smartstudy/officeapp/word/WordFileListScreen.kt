@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.hanif.smartstudy.officeapp.word
 
 import androidx.activity.compose.BackHandler
