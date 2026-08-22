@@ -41,12 +41,7 @@ data class StudyItem(
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
-    @SerializedName("reviewedAt")    val reviewedAt   : String? = null,
-    // ── FIX (build error: "Unresolved reference: groupHeading" QuizModels.kt:126) —
-    // QuizItem/QBankItem-এ group_heading ফিল্ড আছে (উপরে/নিচে দেখো একই কমেন্ট), কিন্তু
-    // StudyItem ক্লাসে এটা যোগ করতে ভুলে যাওয়া হয়েছিল, যদিও QuizModels.kt-এর
-    // fromStudyItem() এটা ব্যবহার করে ──
-    @SerializedName("group_heading") val groupHeading : String? = null
+    @SerializedName("reviewedAt")    val reviewedAt   : String? = null
 )
 
 data class QuizItem(
@@ -89,6 +84,9 @@ data class QuizItem(
     // স্বাধীন (কোনো group_id/হেডিং নেই), আর কিছু লেখা থাকলে সেটাই গ্রুপ-হেডিং টেক্সট
     // (আর group_id ব্যবহার হবেই, কারণ হেডিং মানেই গ্রুপ করা কয়েকটা sub-question একসাথে)। ──
     @SerializedName("group_heading") val groupHeading : String? = null,
+    // ── PAPER COMPOSER (Admin App): এই গ্রুপের রেন্ডারিং-হিন্ট — দেখো QBankItem-এর
+    // একই ফিল্ডের বিস্তারিত কমেন্ট। ──
+    @SerializedName("format_style")  val formatStyle  : String? = null,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
@@ -135,6 +133,12 @@ data class QBankItem(
     // ── SIMPLIFIED — দেখো StudyItem-এর একই ফিল্ডের বিস্তারিত কমেন্ট। QBank-এর written
     // প্রশ্নপত্রেই (QBankExamPaperScreen) এটা সবচেয়ে বেশি প্রাসঙ্গিক। ──
     @SerializedName("group_heading") val groupHeading : String? = null,
+    // ── PAPER COMPOSER (Admin App): এই গ্রুপের রেন্ডারিং-হিন্ট — "table" (শব্দ|বিচ্ছেদ
+    // দুই-কলাম, যেমন সন্ধি বিচ্ছেদ), "highlight" (question-এর ভিতরের __word__ মার্কআপ
+    // বোল্ড/আন্ডারলাইন করে দেখানো, যেমন কারক নির্ণয়ে নির্দিষ্ট শব্দ চিহ্নিত করা),
+    // "fillblank" (ইংরেজি — answer বাক্যের ফাঁকে ইনলাইন বসানো), খালি/"plain" মানে
+    // এখনকার মতোই সাধারণ Q+A। দেখো QBankExamPaperScreen.kt-এর রেন্ডারিং লজিক। ──
+    @SerializedName("format_style")  val formatStyle  : String? = null,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
