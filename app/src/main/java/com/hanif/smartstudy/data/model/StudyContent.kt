@@ -38,6 +38,12 @@ data class StudyItem(
     @SerializedName("topic_id")      val topicId      : String? = null,
     @SerializedName("group_id")      val groupId      : String? = null,
     @SerializedName("sub_index")     val subIndex     : String? = null,
+    // 🐛 ফিক্স (build error: "Unresolved reference: groupHeading" — QuizModels.kt:129):
+    // QuizItem/QBankItem-এ groupHeading ফিল্ড আগে থেকেই ছিল, কিন্তু StudyItem-এ যোগ
+    // করা হয়নি — অথচ QuizModels.kt-এর fromStudyItem() এটা পড়ার চেষ্টা করছিল। Admin App-এর
+    // "Study" শিটেও group_id/group_heading কলাম থাকতে পারে (একই "হেডিং" ফিচার তিনটা শিটেই
+    // কাজ করে বলে), তাই এখানে যোগ করা হলো — বাকি সব শিটের প্যাটার্নের সাথে সামঞ্জস্যপূর্ণ। ──
+    @SerializedName("group_heading") val groupHeading : String? = null,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য। student-দের কাছে সম্পূর্ণ অদৃশ্য, UI/behavior-এ কোনো প্রভাব নেই। ──
     @SerializedName("reviewed")      val reviewed     : String? = null,
