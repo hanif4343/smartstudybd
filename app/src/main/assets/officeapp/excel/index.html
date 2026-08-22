@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SmartStudy Excel</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#F1F5F9;font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif;overscroll-behavior:none;}
+  #toolbar{
+    position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid #E2E8F0;
+    display:flex;align-items:center;gap:2px;padding:6px 8px;overflow-x:auto;white-space:nowrap;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+  }
+  .tb-btn{border:none;background:transparent;min-width:34px;height:34px;border-radius:6px;font-size:14px;color:#334155;cursor:pointer;padding:0 8px;}
+  .tb-btn.active{background:#DCFCE7;color:#16A34A;}
+  .tb-btn:active{background:#E2E8F0;}
+  .tb-sep{width:1px;height:22px;background:#E2E8F0;margin:0 4px;flex:none;}
+  #fxBar{
+    position:sticky;top:46px;z-index:49;background:#fff;border-bottom:1px solid #E2E8F0;
+    display:flex;align-items:center;gap:6px;padding:6px 8px;
+  }
+  #fxRef{font-weight:700;font-size:12px;color:#16A34A;min-width:34px;}
+  #fxInput{flex:1;height:32px;border:1px solid #E2E8F0;border-radius:6px;padding:0 8px;font-size:13px;}
+  #gridWrap{overflow:auto;padding-bottom:120px;-webkit-overflow-scrolling:touch;}
+  table#grid{border-collapse:collapse;background:#fff;}
+  table#grid th{
+    position:sticky;top:0;background:#F8FAFC;border:1px solid #E2E8F0;
+    font-size:11px;color:#64748B;min-width:78px;height:26px;z-index:5;
+  }
+  table#grid th.rowHead{position:sticky;left:0;top:auto;min-width:34px;z-index:6;background:#F8FAFC;}
+  table#grid th.corner{position:sticky;left:0;top:0;z-index:7;}
+  table#grid td{border:1px solid #E2E8F0;padding:0;height:30px;}
+  table#grid td input{
+    width:100%;height:30px;border:none;outline:none;padding:0 4px;font-size:12.5px;
+    background:transparent;color:#111827;
+  }
+  table#grid td.selected{outline:2px solid #16A34A;outline-offset:-2px;background:#F0FDF4;}
+  table#grid td.rangeSelected{background:#F0FDF4;}
+  table#grid td input.b{font-weight:700;}
+  table#grid td input.i{font-style:italic;}
+  table#grid th.rowHead,table#grid th:not(.corner){cursor:pointer;}
+  /* ── Generic small popup (row/col header menu) ── */
+  .popup{
+    position:fixed;z-index:997;background:#fff;border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,.25);padding:6px;display:none;min-width:180px;
+  }
+  .popup button.row{
+    display:flex;align-items:center;width:100%;text-align:left;border:none;background:none;
+    padding:9px 10px;font-size:13.5px;color:#1F2937;border-radius:6px;
+  }
+  .popup button.row:active{background:#F1F5F9;}
+  #popupOverlay{position:fixed;inset:0;z-index:996;display:none;}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button class="tb-btn" id="btnUndo" title="Undo">↺</button>
+  <button class="tb-btn" id="btnRedo" title="Redo">↻</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnAddRow">+ Row</button>
+  <button class="tb-btn" id="btnDelRow">- Row</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnAddCol">+ Col</button>
+  <button class="tb-btn" id="btnDelCol">- Col</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnBold"><b>B</b></button>
+  <button class="tb-btn" id="btnItalic"><i>I</i></button>
+  <button class="tb-btn" id="btnBorder">▢ Border</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnBg1" style="background:#FEF3C7;">🎨</button>
+  <button class="tb-btn" id="btnBg2" style="background:#DBEAFE;">🎨</button>
+  <button class="tb-btn" id="btnBgClear">🚫</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnRangeMode" title="একাধিক সেল বাছাই করে ফরম্যাট করুন">🔲 রেঞ্জ</button>
+</div>
+<div id="rowColMenu" class="popup">
+  <button class="row" data-a="insBefore">➕ আগে যোগ করুন</button>
+  <button class="row" data-a="insAfter">➕ পরে যোগ করুন</button>
+  <button class="row" data-a="del">🗑️ মুছে ফেলুন</button>
+</div>
+<div id="popupOverlay"></div>
+<div id="fxBar">
+  <span id="fxRef">A1</span>
+  <span style="color:#94A3B8;">fx</span>
+  <input id="fxInput" placeholder="মান অথবা =SUM(A1:A5)" />
+</div>
+<div id="gridWrap"><table id="grid"></table></div>
+
+<script>
+(function(){
+  var NUM_COLS = 12, NUM_ROWS = 30;
+  var cells = {};          // ref -> {raw, bold, italic, border, bg}
+  var activeRef = 'A1';
+  var computedCache = {};
+  var evalStack = new Set();
+
+  /* ===== ref helpers ===== */
+  function colLetter(idx){ var s=''; idx++; while(idx>0){ var r=(idx-1)%26; s=String.fromCharCode(65+r)+s; idx=Math.floor((idx-1)/26);} return s; }
+  function colIndex(letters){ var n=0; for (var i=0;i<letters.length;i++){ n=n*26+(letters.charCodeAt(i)-64); } return n-1; }
+  function parseRef(ref){ var m=ref.match(/^([A-Z]{1,2})(\d{1,4})$/); if(!m) return null; return {col:colIndex(m[1]), row:parseInt(m[2],10)-1}; }
+  function refOf(row,col){ return colLetter(col)+(row+1); }
+  function cellGet(ref){ return cells[ref] || (cells[ref] = {raw:'', bold:false, italic:false, border:false, bg:''}); }
+
+  /* ===== formula compiler: turns "SUM(A1:A5)+B2" into JS calling RANGE()/CELL() ===== */
+  function compileFormula(expr){
+    var strings = [];
+    expr = expr.replace(/"([^"]*)"/g, function(m){ strings.push(m); return '\u2063' + (strings.length-1) + '\u2063'; });
+    expr = expr.replace(/[A-Z]{1,2}\d{1,4}(?::[A-Z]{1,2}\d{1,4})?/g, function(m){
+      if (m.indexOf(':') >= 0){
+        var parts = m.split(':');
+        return "RANGE('" + parts[0] + "','" + parts[1] + "')";
+      }
+      return "CELL('" + m + "')";
+    });
+    expr = expr.replace(/\u2063(\d+)\u2063/g, function(m,i){ return strings[i]; });
+    return expr;
+  }
+
+  function toNum(v){ if (v==='' || v===null || v===undefined) return null; var n = parseFloat(v); return isNaN(n) ? null : n; }
+  function flatten(args){
+    var out = [];
+    args.forEach(function(a){ if (Array.isArray(a)) out = out.concat(a); else out.push(a); });
+    return out;
+  }
+
+  /* ===== spreadsheet functions available inside formulas ===== */
+  function SUM(){ var vals = flatten(Array.prototype.slice.call(arguments)).map(toNum).filter(function(v){return v!==null;});
+    return vals.reduce(function(a,b){return a+b;},0); }
+  function AVERAGE(){ var vals = flatten(Array.prototype.slice.call(arguments)).map(toNum).filter(function(v){return v!==null;});
+    return vals.length? vals.reduce(function(a,b){return a+b;},0)/vals.length : 0; }
+  function COUNT(){ var vals = flatten(Array.prototype.slice.call(arguments)).map(toNum).filter(function(v){return v!==null;});
+    return vals.length; }
+  function MAX(){ var vals = flatten(Array.prototype.slice.call(arguments)).map(toNum).filter(function(v){return v!==null;});
+    return vals.length? Math.max.apply(null, vals) : 0; }
+  function MIN(){ var vals = flatten(Array.prototype.slice.call(arguments)).map(toNum).filter(function(v){return v!==null;});
+    return vals.length? Math.min.apply(null, vals) : 0; }
+  function IF(cond, a, b){ return cond ? a : b; }
+  function AND(){ return Array.prototype.slice.call(arguments).every(Boolean); }
+  function OR(){ return Array.prototype.slice.call(arguments).some(Boolean); }
+  function NOT(a){ return !a; }
+  function parseCriteria(c){
+    c = String(c);
+    var m = c.match(/^(>=|<=|<>|>|<|=)?(.*)$/);
+    var op = m[1] || '=';
+    var raw = m[2];
+    var num = parseFloat(raw);
+    return { op: op, val: isNaN(num) ? raw : num };
+  }
+  function COUNTIF(range, criteria){
+    var arr = Array.isArray(range) ? range : [range];
+    var c = parseCriteria(criteria);
+    return arr.filter(function(v){
+      if (typeof c.val === 'number'){
+        var nv = toNum(v); if (nv===null) return false;
+        switch(c.op){ case '>=': return nv>=c.val; case '<=': return nv<=c.val; case '<>': return nv!=c.val;
+          case '>': return nv>c.val; case '<': return nv<c.val; default: return nv==c.val; }
+      }
+      return String(v) === c.val;
+    }).length;
+  }
+  function VLOOKUP(lookup, range, colIdx){
+    var rows = (range && range.__rows) ? range.__rows : [ Array.isArray(range) ? range : [range] ];
+    for (var i=0;i<rows.length;i++){
+      var first = rows[i][0];
+      if (String(first) === String(lookup)) return rows[i][colIdx-1];
+    }
+    return '#N/A';
+  }
+
+  function CELL(ref){ return getComputed(ref); }
+  function RANGE(a, b){
+    var ra = parseRef(a), rb = parseRef(b);
+    if (!ra || !rb) return [];
+    var r0=Math.min(ra.row,rb.row), r1=Math.max(ra.row,rb.row);
+    var c0=Math.min(ra.col,rb.col), c1=Math.max(ra.col,rb.col);
+    var rows = [];
+    for (var r=r0;r<=r1;r++){
+      var rowArr = [];
+      for (var c=c0;c<=c1;c++){ rowArr.push(getComputed(refOf(r,c))); }
+      rows.push(rowArr);
+    }
+    var flat = [];
+    rows.forEach(function(r){ flat = flat.concat(r); });
+    flat.__rows = rows;
+    return flat;
+  }
+
+  function getComputed(ref){
+    if (Object.prototype.hasOwnProperty.call(computedCache, ref)) return computedCache[ref];
+    if (evalStack.has(ref)) return '#REF!';
+    evalStack.add(ref);
+    var cell = cells[ref];
+    var result;
+    if (!cell || cell.raw === '' || cell.raw === undefined || cell.raw === null){
+      result = '';
+    } else if (String(cell.raw).charAt(0) === '='){
+      try {
+        var js = compileFormula(String(cell.raw).substring(1));
+        result = (new Function('SUM','AVERAGE','COUNT','COUNTIF','MAX','MIN','IF','AND','OR','NOT','VLOOKUP','CELL','RANGE',
+          'return (' + js + ')'))(SUM,AVERAGE,COUNT,COUNTIF,MAX,MIN,IF,AND,OR,NOT,VLOOKUP,CELL,RANGE);
+        if (typeof result === 'number' && isNaN(result)) result = '#VALUE!';
+      } catch(e){ result = '#ERR!'; }
+    } else {
+      var trimmed = String(cell.raw).trim();
+      result = (/^-?\d+(\.\d+)?$/.test(trimmed)) ? parseFloat(trimmed) : cell.raw;
+    }
+    evalStack.delete(ref);
+    computedCache[ref] = result;
+    return result;
+  }
+
+  function displayValue(v){
+    if (typeof v === 'number') return (Number.isInteger(v) ? v : Math.round(v*100)/100).toString();
+    return v===undefined||v===null ? '' : String(v);
+  }
+
+  /* ===== grid render ===== */
+  var gridEl = document.getElementById('grid');
+  function buildGrid(){
+    var html = '<tr><th class="corner"></th>';
+    for (var c=0;c<NUM_COLS;c++) html += '<th data-col="'+c+'">'+colLetter(c)+'</th>';
+    html += '</tr>';
+    for (var r=0;r<NUM_ROWS;r++){
+      html += '<tr><th class="rowHead" data-row="'+r+'">'+(r+1)+'</th>';
+      for (var c2=0;c2<NUM_COLS;c2++){
+        var ref = refOf(r,c2);
+        html += '<td data-ref="'+ref+'"><input data-ref="'+ref+'" /></td>';
+      }
+      html += '</tr>';
+    }
+    gridEl.innerHTML = html;
+    gridEl.querySelectorAll('input').forEach(function(inp){
+      inp.readOnly = rangeMode;
+      inp.addEventListener('focus', function(){ selectCell(inp.getAttribute('data-ref')); });
+      inp.addEventListener('blur', function(){ if (!rangeMode) commitCell(inp.getAttribute('data-ref'), inp.value); });
+      inp.addEventListener('keydown', function(e){ if (e.key==='Enter'){ inp.blur(); } });
+    });
+    gridEl.querySelectorAll('th[data-col]').forEach(function(th){
+      th.addEventListener('click', function(){ openHeaderMenu('col', parseInt(th.getAttribute('data-col')), th); });
+    });
+    gridEl.querySelectorAll('th.rowHead[data-row]').forEach(function(th){
+      th.addEventListener('click', function(){ openHeaderMenu('row', parseInt(th.getAttribute('data-row')), th); });
+    });
+    refreshAllDisplays();
+  }
+
+  function selectCell(ref){
+    if (rangeMode) return; // রেঞ্জ সিলেকশন এখন নিচের pointerdown/move/up (drag-select) হ্যান্ডেল করে
+    document.querySelectorAll('#grid td.selected').forEach(function(td){ td.classList.remove('selected'); });
+    var td = gridEl.querySelector('td[data-ref="'+ref+'"]');
+    if (td) td.classList.add('selected');
+    activeRef = ref;
+    document.getElementById('fxRef').textContent = ref;
+    var fx = document.getElementById('fxInput');
+    fx.value = cellGet(ref).raw;
+    var input = gridEl.querySelector('input[data-ref="'+ref+'"]');
+    if (input) input.value = cellGet(ref).raw;
+  }
+
+  function computeRangeCells(a, b){
+    var ra = parseRef(a), rb = parseRef(b);
+    if (!ra || !rb) return [a];
+    var r0=Math.min(ra.row,rb.row), r1=Math.max(ra.row,rb.row);
+    var c0=Math.min(ra.col,rb.col), c1=Math.max(ra.col,rb.col);
+    var out = [];
+    for (var r=r0;r<=r1;r++) for (var c=c0;c<=c1;c++) out.push(refOf(r,c));
+    return out;
+  }
+  function highlightRange(refs){
+    document.querySelectorAll('#grid td.selected,#grid td.rangeSelected').forEach(function(td){
+      td.classList.remove('selected'); td.classList.remove('rangeSelected');
+    });
+    refs.forEach(function(ref){
+      var td = gridEl.querySelector('td[data-ref="'+ref+'"]');
+      if (td) td.classList.add('rangeSelected');
+    });
+  }
+  function targetCells(){ return (rangeMode && rangeCells.length) ? rangeCells : [activeRef]; }
+
+  /* ===== Range drag-select — আঙুল/মাউস চেপে টেনে একাধিক সেল বাছাই (শুধু rangeMode চালু থাকলে) ===== */
+  var dragSelecting = false, dragStartRef = null;
+  gridEl.addEventListener('pointerdown', function(e){
+    if (!rangeMode) return;
+    var td = e.target.closest ? e.target.closest('td[data-ref]') : null;
+    if (!td) return;
+    dragSelecting = true;
+    dragStartRef = td.getAttribute('data-ref');
+    rangeCells = [dragStartRef];
+    highlightRange(rangeCells);
+    document.getElementById('fxRef').textContent = dragStartRef + ' (টেনে রেঞ্জ বাড়ান)';
+  });
+  gridEl.addEventListener('pointermove', function(e){
+    if (!dragSelecting) return;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    var td = el && el.closest ? el.closest('td[data-ref]') : null;
+    if (!td) return;
+    var ref = td.getAttribute('data-ref');
+    rangeCells = computeRangeCells(dragStartRef, ref);
+    highlightRange(rangeCells);
+    document.getElementById('fxRef').textContent = dragStartRef + ':' + ref + ' (' + rangeCells.length + ' সেল বাছাই হয়েছে)';
+  });
+  function endDragSelect(){ dragSelecting = false; }
+  gridEl.addEventListener('pointerup', endDragSelect);
+  gridEl.addEventListener('pointercancel', endDragSelect);
+  gridEl.addEventListener('pointerleave', endDragSelect);
+
+  function commitCell(ref, value){
+    cellGet(ref).raw = value;
+    recomputeAll();
+    refreshAllDisplays();
+    notifyChanged();
+  }
+
+  document.getElementById('fxInput').addEventListener('keydown', function(e){
+    if (e.key==='Enter'){ commitCell(activeRef, e.target.value); gridEl.querySelector('input[data-ref="'+activeRef+'"]').blur(); }
+  });
+  document.getElementById('fxInput').addEventListener('blur', function(e){ commitCell(activeRef, e.target.value); });
+
+  function recomputeAll(){ computedCache = {}; Object.keys(cells).forEach(function(ref){ getComputed(ref); }); }
+
+  function refreshAllDisplays(){
+    gridEl.querySelectorAll('input').forEach(function(inp){
+      var ref = inp.getAttribute('data-ref');
+      if (document.activeElement === inp) return; // এডিট করা সেলে raw দেখাবে, computed না
+      var cell = cells[ref];
+      inp.value = cell ? displayValue(getComputed(ref)) : '';
+      inp.className = (cell && cell.bold ? 'b ' : '') + (cell && cell.italic ? 'i ' : '');
+      var td = inp.parentElement;
+      td.style.border = (cell && cell.border) ? '2px solid #1F2937' : '';
+      td.style.background = (cell && cell.bg) ? cell.bg : '';
+    });
+  }
+
+  /* ===== toolbar actions (activeRef অথবা range-select মোডে থাকলে rangeCells সবগুলোতে প্রয়োগ) ===== */
+  document.getElementById('btnBold').addEventListener('click', function(){
+    var v = !cellGet(activeRef).bold;
+    targetCells().forEach(function(ref){ cellGet(ref).bold = v; });
+    refreshAllDisplays(); notifyChanged();
+  });
+  document.getElementById('btnItalic').addEventListener('click', function(){
+    var v = !cellGet(activeRef).italic;
+    targetCells().forEach(function(ref){ cellGet(ref).italic = v; });
+    refreshAllDisplays(); notifyChanged();
+  });
+  document.getElementById('btnBorder').addEventListener('click', function(){
+    var v = !cellGet(activeRef).border;
+    targetCells().forEach(function(ref){ cellGet(ref).border = v; });
+    refreshAllDisplays(); notifyChanged();
+  });
+  document.getElementById('btnBg1').addEventListener('click', function(){
+    targetCells().forEach(function(ref){ cellGet(ref).bg='#FEF3C7'; }); refreshAllDisplays(); notifyChanged();
+  });
+  document.getElementById('btnBg2').addEventListener('click', function(){
+    targetCells().forEach(function(ref){ cellGet(ref).bg='#DBEAFE'; }); refreshAllDisplays(); notifyChanged();
+  });
+  document.getElementById('btnBgClear').addEventListener('click', function(){
+    targetCells().forEach(function(ref){ cellGet(ref).bg=''; }); refreshAllDisplays(); notifyChanged();
+  });
+
+  var rangeMode = false, rangeStart = null, rangeCells = [];
+  document.getElementById('btnRangeMode').addEventListener('click', function(){
+    rangeMode = !rangeMode;
+    this.classList.toggle('active', rangeMode);
+    rangeStart = null; rangeCells = [];
+    highlightRange([]);
+    gridEl.querySelectorAll('input').forEach(function(inp){ inp.readOnly = rangeMode; });
+    if (!rangeMode) selectCell(activeRef);
+  });
+
+  /* ===== Row/Column insert-delete at a specific position ===== */
+  function shiftRows(fromRow, delta){ // delta=+1 নতুন সারির জন্য জায়গা তৈরি করে (নিচেরগুলো নিচে সরায়)
+    if (delta > 0){
+      for (var r = NUM_ROWS - 1; r >= fromRow + 1; r--){
+        for (var c=0;c<NUM_COLS;c++){
+          var src = refOf(r-1,c), dst = refOf(r,c);
+          if (cells[src]) cells[dst] = cells[src]; else delete cells[dst];
+        }
+      }
+      for (var c2=0;c2<NUM_COLS;c2++) delete cells[refOf(fromRow,c2)];
+    } else {
+      for (var r2 = fromRow; r2 < NUM_ROWS - 1; r2++){
+        for (var c3=0;c3<NUM_COLS;c3++){
+          var src2 = refOf(r2+1,c3), dst2 = refOf(r2,c3);
+          if (cells[src2]) cells[dst2] = cells[src2]; else delete cells[dst2];
+        }
+      }
+      for (var c4=0;c4<NUM_COLS;c4++) delete cells[refOf(NUM_ROWS-1,c4)];
+    }
+  }
+  function shiftCols(fromCol, delta){
+    if (delta > 0){
+      for (var c = NUM_COLS - 1; c >= fromCol + 1; c--){
+        for (var r=0;r<NUM_ROWS;r++){
+          var src = refOf(r,c-1), dst = refOf(r,c);
+          if (cells[src]) cells[dst] = cells[src]; else delete cells[dst];
+        }
+      }
+      for (var r2=0;r2<NUM_ROWS;r2++) delete cells[refOf(r2,fromCol)];
+    } else {
+      for (var c2 = fromCol; c2 < NUM_COLS - 1; c2++){
+        for (var r3=0;r3<NUM_ROWS;r3++){
+          var src2 = refOf(r3,c2+1), dst2 = refOf(r3,c2);
+          if (cells[src2]) cells[dst2] = cells[src2]; else delete cells[dst2];
+        }
+      }
+      for (var r4=0;r4<NUM_ROWS;r4++) delete cells[refOf(r4,NUM_COLS-1)];
+    }
+  }
+  function insertRowAt(idx){ NUM_ROWS++; shiftRows(idx, +1); buildGrid(); recomputeAll(); refreshAllDisplays(); notifyChanged(); }
+  function deleteRowAt(idx){ if (NUM_ROWS<=1) return; shiftRows(idx, -1); NUM_ROWS--; buildGrid(); recomputeAll(); refreshAllDisplays(); notifyChanged(); }
+  function insertColAt(idx){ if (NUM_COLS>=26) return; NUM_COLS++; shiftCols(idx, +1); buildGrid(); recomputeAll(); refreshAllDisplays(); notifyChanged(); }
+  function deleteColAt(idx){ if (NUM_COLS<=1) return; shiftCols(idx, -1); NUM_COLS--; buildGrid(); recomputeAll(); refreshAllDisplays(); notifyChanged(); }
+
+  document.getElementById('btnAddRow').addEventListener('click', function(){ insertRowAt(NUM_ROWS); });
+  document.getElementById('btnAddCol').addEventListener('click', function(){ insertColAt(NUM_COLS); });
+  document.getElementById('btnDelRow').addEventListener('click', function(){ deleteRowAt(NUM_ROWS-1); });
+  document.getElementById('btnDelCol').addEventListener('click', function(){ deleteColAt(NUM_COLS-1); });
+
+  /* ===== Row/Column header popup (মাঝখানে যেকোনো জায়গায় insert/delete) ===== */
+  var pendingHeader = null; // {type:'row'|'col', index:number}
+  var rowColMenu = document.getElementById('rowColMenu');
+  var popupOverlay = document.getElementById('popupOverlay');
+  function openHeaderMenu(type, index, anchorEl){
+    pendingHeader = { type: type, index: index };
+    var r = anchorEl.getBoundingClientRect();
+    var vw = window.innerWidth, vh = window.innerHeight;
+    rowColMenu.style.display = 'block';
+    var pw = rowColMenu.offsetWidth || 180, ph = rowColMenu.offsetHeight || 140;
+    rowColMenu.style.left = Math.max(8, Math.min(r.left, vw-pw-8)) + 'px';
+    rowColMenu.style.top = Math.max(8, Math.min(r.bottom+4, vh-ph-8)) + 'px';
+    popupOverlay.style.display = 'block';
+  }
+  function closeHeaderMenu(){ rowColMenu.style.display='none'; popupOverlay.style.display='none'; pendingHeader=null; }
+  popupOverlay.addEventListener('click', closeHeaderMenu);
+  popupOverlay.addEventListener('touchstart', closeHeaderMenu);
+  rowColMenu.querySelectorAll('button[data-a]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (!pendingHeader) return;
+      var a = btn.getAttribute('data-a');
+      if (pendingHeader.type === 'row'){
+        if (a==='insBefore') insertRowAt(pendingHeader.index);
+        else if (a==='insAfter') insertRowAt(pendingHeader.index+1);
+        else if (a==='del') deleteRowAt(pendingHeader.index);
+      } else {
+        if (a==='insBefore') insertColAt(pendingHeader.index);
+        else if (a==='insAfter') insertColAt(pendingHeader.index+1);
+        else if (a==='del') deleteColAt(pendingHeader.index);
+      }
+      closeHeaderMenu();
+    });
+  });
+
+  /* ===== Undo/Redo — snapshot-ভিত্তিক history (প্রতিটা mutation notifyChanged() কল করে, তাই এখানেই hook করা হলো) ===== */
+  var history = [], histIdx = -1;
+  function snapshot(){ return JSON.stringify({ cells: cells, numCols: NUM_COLS, numRows: NUM_ROWS }); }
+  function pushHistory(){
+    history = history.slice(0, histIdx + 1);
+    history.push(snapshot());
+    if (history.length > 50) history.shift();
+    histIdx = history.length - 1;
+  }
+  function restoreSnapshot(idx){
+    var st = JSON.parse(history[idx]);
+    cells = st.cells; NUM_COLS = st.numCols; NUM_ROWS = st.numRows;
+    buildGrid(); recomputeAll(); refreshAllDisplays();
+  }
+  function markDirtyOnly(){ if (window.AndroidBridge && window.AndroidBridge.onContentChanged) window.AndroidBridge.onContentChanged(); }
+  document.getElementById('btnUndo').addEventListener('click', function(){ if (histIdx > 0){ histIdx--; restoreSnapshot(histIdx); markDirtyOnly(); } });
+  document.getElementById('btnRedo').addEventListener('click', function(){ if (histIdx < history.length - 1){ histIdx++; restoreSnapshot(histIdx); markDirtyOnly(); } });
+
+  function notifyChanged(){
+    pushHistory();
+    if (window.AndroidBridge && window.AndroidBridge.onContentChanged) window.AndroidBridge.onContentChanged();
+  }
+
+  /* ===== get/set full sheet state — called from Kotlin ===== */
+  window.getSheetState = function(){
+    return JSON.stringify({ numCols: NUM_COLS, numRows: NUM_ROWS, cells: cells });
+  };
+  window.setSheetState = function(json){
+    try {
+      var state = JSON.parse(json);
+      if (state && state.cells){
+        NUM_COLS = state.numCols || NUM_COLS;
+        NUM_ROWS = state.numRows || NUM_ROWS;
+        cells = state.cells;
+        buildGrid();
+        recomputeAll();
+        refreshAllDisplays();
+        history = [snapshot()]; histIdx = 0; // ফাইল লোড হওয়ার পরের অবস্থাকেই undo-বেসলাইন ধরা হলো
+      }
+    } catch(e){}
+  };
+
+  /* ===== right-click / long-press context menu override (Android back-action stop) ===== */
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); return false; }, false);
+
+  buildGrid();
+  history = [snapshot()]; histIdx = 0;
+  if (window.AndroidBridge && window.AndroidBridge.onEditorReady) window.AndroidBridge.onEditorReady();
+})();
+</script>
+</body>
+</html>
