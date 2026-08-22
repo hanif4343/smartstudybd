@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SmartStudy Word</title>
+<style>
+  :root{
+    --margin-top: 25mm;
+    --margin-right: 20mm;
+    --margin-bottom: 25mm;
+    --margin-left: 25mm;
+    --page-w: 210mm;
+    --page-h: 297mm;
+    --accent:#2563EB;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;background:#E5E7EB;
+    font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif;
+    -webkit-user-select:text;user-select:text;
+    -webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;
+  }
+  /* ── Toolbar ── */
+  #toolbar{
+    position:sticky;top:0;z-index:50;
+    background:#fff;border-bottom:1px solid #E2E8F0;
+    display:flex;flex-wrap:nowrap;align-items:center;gap:2px;
+    padding:6px 8px;overflow-x:auto;white-space:nowrap;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+  }
+  #toolbar::-webkit-scrollbar{height:3px;}
+  .tb-btn{
+    border:none;background:transparent;min-width:34px;height:34px;
+    border-radius:6px;font-size:15px;color:#334155;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;padding:0 6px;
+  }
+  .tb-btn.active{background:#DBEAFE;color:var(--accent);}
+  .tb-btn:active{background:#E2E8F0;}
+  .tb-sep{width:1px;height:22px;background:#E2E8F0;margin:0 4px;flex:none;}
+  select.tb-select{
+    height:32px;border:1px solid #E2E8F0;border-radius:6px;background:#fff;
+    font-size:13px;color:#334155;padding:0 4px;margin:0 2px;
+  }
+  /* ── Page (A4) ── */
+  #pageWrap{ padding:16px 8px 120px; display:flex; justify-content:center; }
+  #page{
+    width:var(--page-w); min-height:var(--page-h);
+    background:#fff; box-shadow:0 2px 10px rgba(0,0,0,.15);
+    padding:var(--margin-top) var(--margin-right) var(--margin-bottom) var(--margin-left);
+    transform-origin: top center;
+  }
+  #editor{
+    outline:none; min-height:200px; font-size:14pt; line-height:1.6; color:#111827;
+  }
+  #editor table{border-collapse:collapse;width:100%;margin:8px 0;}
+  #editor table td,#editor table th{border:1px solid #333;padding:6px 8px;min-width:24px;}
+  #editor p{margin:0 0 8px 0;}
+  /* ── Custom context menu ── */
+  #ctxMenu{
+    position:fixed;z-index:999;background:#fff;border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,.25);padding:6px;display:none;min-width:170px;
+  }
+  #ctxMenu button{
+    display:flex;width:100%;text-align:left;border:none;background:none;
+    padding:10px 12px;font-size:14px;color:#1F2937;border-radius:6px;
+  }
+  #ctxMenu button:active{background:#F1F5F9;}
+  #ctxOverlay{position:fixed;inset:0;z-index:998;display:none;}
+  /* ── Generic small popup (Table tools / Color pickers) ── */
+  .popup{
+    position:fixed;z-index:997;background:#fff;border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,.25);padding:8px;display:none;min-width:190px;
+  }
+  .popup button.row{
+    display:flex;align-items:center;width:100%;text-align:left;border:none;background:none;
+    padding:9px 10px;font-size:13.5px;color:#1F2937;border-radius:6px;
+  }
+  .popup button.row:active{background:#F1F5F9;}
+  .swatchRow{display:flex;gap:6px;padding:6px 4px;flex-wrap:wrap;}
+  .swatch{
+    width:26px;height:26px;border-radius:6px;border:1px solid #E2E8F0;cursor:pointer;
+  }
+  .popup hr{border:none;border-top:1px solid #F1F5F9;margin:4px 0;}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button class="tb-btn" data-cmd="undo" title="Undo">↺</button>
+  <button class="tb-btn" data-cmd="redo" title="Redo">↻</button>
+  <div class="tb-sep"></div>
+  <select class="tb-select" id="fontSelect">
+    <option value="'Noto Sans Bengali',Arial">Noto Sans Bengali</option>
+    <option value="'SolaimanLipi',Arial">SolaimanLipi</option>
+    <option value="Arial">Arial</option>
+    <option value="'Times New Roman',serif">Times New Roman</option>
+    <option value="Calibri,Arial">Calibri</option>
+  </select>
+  <select class="tb-select" id="sizeSelect">
+    <option value="1">10pt</option>
+    <option value="2">12pt</option>
+    <option value="3" selected>14pt</option>
+    <option value="4">16pt</option>
+    <option value="5">18pt</option>
+    <option value="6">24pt</option>
+    <option value="7">32pt</option>
+  </select>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+  <button class="tb-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+  <button class="tb-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" data-cmd="justifyLeft" title="Left">⇤</button>
+  <button class="tb-btn" data-cmd="justifyCenter" title="Center">≡</button>
+  <button class="tb-btn" data-cmd="justifyRight" title="Right">⇥</button>
+  <button class="tb-btn" data-cmd="justifyFull" title="Justify">☰</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" data-cmd="insertUnorderedList" title="Bullets">•≡</button>
+  <button class="tb-btn" data-cmd="insertOrderedList" title="Numbered">1≡</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnTable" title="Insert Table">⊞</button>
+  <button class="tb-btn" id="btnTableTools" title="Table Tools">⊞▾</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnTextColor" title="Text Color"><span style="border-bottom:3px solid #DC2626;">A</span></button>
+  <button class="tb-btn" id="btnHighlight" title="Highlight">🖍️</button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btnBorder" title="Page Border">▢</button>
+</div>
+
+<div id="pageWrap">
+  <div id="page">
+    <div id="editor" contenteditable="true" spellcheck="false"></div>
+  </div>
+</div>
+
+<div id="tableToolsPopup" class="popup">
+  <button class="row" data-t="rowAbove">⬆️ উপরে সারি যোগ</button>
+  <button class="row" data-t="rowBelow">⬇️ নিচে সারি যোগ</button>
+  <button class="row" data-t="colLeft">⬅️ বামে কলাম যোগ</button>
+  <button class="row" data-t="colRight">➡️ ডানে কলাম যোগ</button>
+  <hr>
+  <button class="row" data-t="delRow">🗑️ সারি মুছুন</button>
+  <button class="row" data-t="delCol">🗑️ কলাম মুছুন</button>
+  <button class="row" data-t="delTable">🗑️ পুরো টেবিল মুছুন</button>
+  <hr>
+  <button class="row" data-t="toggleBorder">▢ বর্ডার অন/অফ</button>
+  <div class="swatchRow">
+    <div class="swatch" data-shade="" style="background:#fff;"></div>
+    <div class="swatch" data-shade="#FEF3C7" style="background:#FEF3C7;"></div>
+    <div class="swatch" data-shade="#DBEAFE" style="background:#DBEAFE;"></div>
+    <div class="swatch" data-shade="#DCFCE7" style="background:#DCFCE7;"></div>
+    <div class="swatch" data-shade="#FEE2E2" style="background:#FEE2E2;"></div>
+    <div class="swatch" data-shade="#E2E8F0" style="background:#E2E8F0;"></div>
+  </div>
+</div>
+
+<div id="textColorPopup" class="popup">
+  <div class="swatchRow">
+    <div class="swatch" data-color="#111827" style="background:#111827;"></div>
+    <div class="swatch" data-color="#DC2626" style="background:#DC2626;"></div>
+    <div class="swatch" data-color="#2563EB" style="background:#2563EB;"></div>
+    <div class="swatch" data-color="#16A34A" style="background:#16A34A;"></div>
+    <div class="swatch" data-color="#EA580C" style="background:#EA580C;"></div>
+    <div class="swatch" data-color="#7C3AED" style="background:#7C3AED;"></div>
+  </div>
+</div>
+
+<div id="highlightPopup" class="popup">
+  <div class="swatchRow">
+    <div class="swatch" data-hl="transparent" style="background:#fff;border:1px dashed #CBD5E1;"></div>
+    <div class="swatch" data-hl="#FEF08A" style="background:#FEF08A;"></div>
+    <div class="swatch" data-hl="#BBF7D0" style="background:#BBF7D0;"></div>
+    <div class="swatch" data-hl="#BFDBFE" style="background:#BFDBFE;"></div>
+    <div class="swatch" data-hl="#FBCFE8" style="background:#FBCFE8;"></div>
+    <div class="swatch" data-hl="#FED7AA" style="background:#FED7AA;"></div>
+  </div>
+</div>
+
+<div id="ctxOverlay"></div>
+<div id="ctxMenu">
+  <button data-a="cut">✂️ Cut</button>
+  <button data-a="copy">📋 Copy</button>
+  <button data-a="paste">📄 Paste</button>
+  <button data-a="bold"><b>B</b> Bold</button>
+  <button data-a="italic"><i>I</i> Italic</button>
+  <button data-a="table">⊞ Insert Table</button>
+  <button data-a="link">🔗 Insert Link</button>
+</div>
+
+<script>
+(function(){
+  var editor = document.getElementById('editor');
+  var page = document.getElementById('page');
+
+  /* ===== Toolbar exec ===== */
+  document.querySelectorAll('.tb-btn[data-cmd]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      editor.focus();
+      document.execCommand(btn.getAttribute('data-cmd'), false, null);
+      notifyChanged();
+    });
+  });
+  document.getElementById('fontSelect').addEventListener('change', function(e){
+    editor.focus();
+    document.execCommand('fontName', false, e.target.value);
+    notifyChanged();
+  });
+  document.getElementById('sizeSelect').addEventListener('change', function(e){
+    editor.focus();
+    document.execCommand('fontSize', false, e.target.value);
+    notifyChanged();
+  });
+  document.getElementById('btnTable').addEventListener('click', insertTablePrompt);
+  document.getElementById('btnBorder').addEventListener('click', function(){
+    if (window.AndroidBridge && window.AndroidBridge.openPageSetup) {
+      window.AndroidBridge.openPageSetup();
+    }
+  });
+
+  /* ===== Generic popup helper (Table Tools / Text Color / Highlight) ===== */
+  function showPopup(popupEl, anchorBtn){
+    hideCustomContextMenu();
+    document.querySelectorAll('.popup').forEach(function(p){ p.style.display='none'; });
+    var r = anchorBtn.getBoundingClientRect();
+    var vw = window.innerWidth, vh = window.innerHeight;
+    popupEl.style.display = 'block';
+    var pw = popupEl.offsetWidth || 200, ph = popupEl.offsetHeight || 120;
+    var left = Math.min(r.left, vw - pw - 8);
+    var top = Math.min(r.bottom + 4, vh - ph - 8);
+    popupEl.style.left = Math.max(8,left) + 'px';
+    popupEl.style.top = Math.max(8,top) + 'px';
+    ctxOverlay.style.display = 'block';
+  }
+  function hideAllPopups(){
+    document.querySelectorAll('.popup').forEach(function(p){ p.style.display='none'; });
+    ctxOverlay.style.display = 'none';
+  }
+
+  /* ===== Table tools ===== */
+  var lastRange = null; // সিলেকশন হারানোর আগে সংরক্ষণ (popup-এ ট্যাপ করলে ব্রাউজার focus সরে যায়)
+  editor.addEventListener('keyup', saveSelection);
+  editor.addEventListener('mouseup', saveSelection);
+  editor.addEventListener('touchend', saveSelection);
+  function saveSelection(){
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount) lastRange = sel.getRangeAt(0).cloneRange();
+  }
+  function restoreSelection(){
+    if (!lastRange) return;
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(lastRange);
+  }
+  function getCurrentCell(){
+    restoreSelection();
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    var node = sel.getRangeAt(0).startContainer;
+    if (node.nodeType === 3) node = node.parentNode;
+    while (node && node !== editor && node.tagName !== 'TD' && node.tagName !== 'TH') node = node.parentNode;
+    return (node && (node.tagName === 'TD' || node.tagName === 'TH')) ? node : null;
+  }
+  document.getElementById('btnTableTools').addEventListener('click', function(){
+    showPopup(document.getElementById('tableToolsPopup'), this);
+  });
+  document.getElementById('tableToolsPopup').querySelectorAll('button[data-t]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var cell = getCurrentCell();
+      if (!cell){ hideAllPopups(); return; }
+      var t = btn.getAttribute('data-t');
+      var row = cell.parentElement, table = row.closest('table');
+      if (t === 'rowAbove' || t === 'rowBelow'){
+        var idx = row.rowIndex + (t === 'rowBelow' ? 1 : 0);
+        var newRow = table.insertRow(idx);
+        for (var i=0;i<row.cells.length;i++){ var td=document.createElement('td'); td.innerHTML='&nbsp;'; newRow.appendChild(td); }
+      } else if (t === 'colLeft' || t === 'colRight'){
+        var colIdx = cell.cellIndex + (t === 'colRight' ? 1 : 0);
+        Array.prototype.forEach.call(table.rows, function(r){
+          var td = document.createElement('td'); td.innerHTML='&nbsp;';
+          if (colIdx >= r.cells.length) r.appendChild(td); else r.insertBefore(td, r.cells[colIdx]);
+        });
+      } else if (t === 'delRow'){
+        if (table.rows.length <= 1) table.remove(); else table.deleteRow(row.rowIndex);
+      } else if (t === 'delCol'){
+        if (table.rows[0].cells.length <= 1) table.remove();
+        else { var ci = cell.cellIndex; Array.prototype.forEach.call(table.rows, function(r){ if (r.cells[ci]) r.deleteCell(ci); }); }
+      } else if (t === 'delTable'){
+        table.remove();
+      } else if (t === 'toggleBorder'){
+        var noBorder = table.getAttribute('data-noborder') === '1';
+        table.querySelectorAll('td,th').forEach(function(td){ td.style.border = noBorder ? '' : 'none'; });
+        table.setAttribute('data-noborder', noBorder ? '0' : '1');
+      }
+      hideAllPopups();
+      notifyChanged();
+    });
+  });
+  document.getElementById('tableToolsPopup').querySelectorAll('.swatch[data-shade]').forEach(function(sw){
+    sw.addEventListener('click', function(){
+      var cell = getCurrentCell();
+      if (cell) cell.style.background = sw.getAttribute('data-shade');
+      hideAllPopups();
+      notifyChanged();
+    });
+  });
+
+  /* ===== Text color / Highlight ===== */
+  document.getElementById('btnTextColor').addEventListener('click', function(){
+    showPopup(document.getElementById('textColorPopup'), this);
+  });
+  document.getElementById('textColorPopup').querySelectorAll('.swatch[data-color]').forEach(function(sw){
+    sw.addEventListener('click', function(){
+      restoreSelection(); editor.focus();
+      document.execCommand('foreColor', false, sw.getAttribute('data-color'));
+      hideAllPopups(); notifyChanged();
+    });
+  });
+  document.getElementById('btnHighlight').addEventListener('click', function(){
+    showPopup(document.getElementById('highlightPopup'), this);
+  });
+  document.getElementById('highlightPopup').querySelectorAll('.swatch[data-hl]').forEach(function(sw){
+    sw.addEventListener('click', function(){
+      restoreSelection(); editor.focus();
+      document.execCommand('hiliteColor', false, sw.getAttribute('data-hl'));
+      hideAllPopups(); notifyChanged();
+    });
+  });
+
+  function insertTablePrompt(){
+    var rows = prompt('কতগুলো Row?', '3');
+    if(!rows) return;
+    var cols = prompt('কতগুলো Column?', '3');
+    if(!cols) return;
+    insertTable(parseInt(rows)||3, parseInt(cols)||3);
+  }
+  function insertTable(rows, cols){
+    var html = '<table>';
+    for (var r=0;r<rows;r++){
+      html += '<tr>';
+      for (var c=0;c<cols;c++){ html += '<td>&nbsp;</td>'; }
+      html += '</tr>';
+    }
+    html += '</table><p><br></p>';
+    editor.focus();
+    document.execCommand('insertHTML', false, html);
+    notifyChanged();
+  }
+  window.insertTable = insertTable; // callable from page-border dialog etc if needed
+
+  /* ===== Page setup (margins) — called from Kotlin ===== */
+  window.setPageSetup = function(topMm, rightMm, bottomMm, leftMm, pageSize){
+    var root = document.documentElement;
+    root.style.setProperty('--margin-top', topMm + 'mm');
+    root.style.setProperty('--margin-right', rightMm + 'mm');
+    root.style.setProperty('--margin-bottom', bottomMm + 'mm');
+    root.style.setProperty('--margin-left', leftMm + 'mm');
+    if (pageSize === 'legal') {
+      root.style.setProperty('--page-w', '216mm');
+      root.style.setProperty('--page-h', '356mm');
+    } else if (pageSize === 'a5') {
+      root.style.setProperty('--page-w', '148mm');
+      root.style.setProperty('--page-h', '210mm');
+    } else {
+      root.style.setProperty('--page-w', '210mm');
+      root.style.setProperty('--page-h', '297mm');
+    }
+  };
+
+  window.setPageBorder = function(styleCss){
+    // styleCss e.g. "3px double #000" or "" to remove
+    page.style.border = styleCss || '';
+    page.style.padding = styleCss ? 'calc(var(--margin-top) - 6px) calc(var(--margin-right) - 6px) calc(var(--margin-bottom) - 6px) calc(var(--margin-left) - 6px)' : '';
+  };
+
+  /* ===== Content get/set — called from Kotlin ===== */
+  window.getContent = function(){ return editor.innerHTML; };
+  window.setContent = function(html){ editor.innerHTML = html || ''; };
+  window.getPlainText = function(){ return editor.innerText; };
+
+  function notifyChanged(){
+    if (window.AndroidBridge && window.AndroidBridge.onContentChanged) {
+      window.AndroidBridge.onContentChanged();
+    }
+  }
+  editor.addEventListener('input', notifyChanged);
+
+  /* ===== Custom right-click / long-press context menu ===== */
+  var ctxMenu = document.getElementById('ctxMenu');
+  var ctxOverlay = document.getElementById('ctxOverlay');
+
+  function showCustomContextMenu(x, y){
+    var menuW = 190, menuH = 300;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var left = Math.min(x, vw - menuW - 8);
+    var top = Math.min(y, vh - menuH - 8);
+    ctxMenu.style.left = Math.max(8,left) + 'px';
+    ctxMenu.style.top = Math.max(8,top) + 'px';
+    ctxMenu.style.display = 'block';
+    ctxOverlay.style.display = 'block';
+  }
+  function hideCustomContextMenu(){
+    ctxMenu.style.display = 'none';
+    ctxOverlay.style.display = 'none';
+  }
+
+  // Right-click (desktop mouse via WebView) — Android back-action override
+  document.addEventListener('contextmenu', function(e){
+    e.preventDefault();
+    showCustomContextMenu(e.clientX, e.clientY);
+    return false;
+  }, false);
+
+  // Long-press for touch devices
+  var pressTimer = null;
+  editor.addEventListener('touchstart', function(e){
+    var t = e.touches[0];
+    pressTimer = setTimeout(function(){
+      showCustomContextMenu(t.clientX, t.clientY);
+    }, 480);
+  }, {passive:true});
+  editor.addEventListener('touchend', function(){ clearTimeout(pressTimer); });
+  editor.addEventListener('touchmove', function(){ clearTimeout(pressTimer); });
+
+  ctxOverlay.addEventListener('click', function(){ hideCustomContextMenu(); hideAllPopups(); });
+  ctxOverlay.addEventListener('touchstart', function(){ hideCustomContextMenu(); hideAllPopups(); });
+
+  ctxMenu.querySelectorAll('button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var a = btn.getAttribute('data-a');
+      editor.focus();
+      if (a === 'cut') document.execCommand('cut');
+      else if (a === 'copy') document.execCommand('copy');
+      else if (a === 'paste') document.execCommand('paste');
+      else if (a === 'bold') document.execCommand('bold');
+      else if (a === 'italic') document.execCommand('italic');
+      else if (a === 'table') insertTablePrompt();
+      else if (a === 'link') {
+        var url = prompt('লিংক (URL) দিন:', 'https://');
+        if (url) document.execCommand('createLink', false, url);
+      }
+      hideCustomContextMenu();
+      notifyChanged();
+    });
+  });
+
+  /* ===== Ready ===== */
+  if (window.AndroidBridge && window.AndroidBridge.onEditorReady) {
+    window.AndroidBridge.onEditorReady();
+  }
+})();
+</script>
+</body>
+</html>
