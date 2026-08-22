@@ -74,7 +74,7 @@ private fun buildHighlightedText(raw: String): AnnotatedString = buildAnnotatedS
 // "fillblank" ফরম্যাটে (ইংরেজি) question-এ blank-এর জায়গায় ___/…../.... থাকলে সেখানে
 // answer সরাসরি ইনলাইন (বোল্ড+আন্ডারলাইন) বসিয়ে দেখানো হয় — আলাদা "উত্তর:" বক্স লাগে না।
 // Blank marker না পাওয়া গেলে null ফেরত দেয়, তখন caller স্বাভাবিক Q+A-বক্স ফলব্যাক করবে।
-private val BLANK_REGEX = Regex("_{3,}|\\.{4,}|…{2,}")
+private val BLANK_REGEX = Regex("_{2,}|\\.{4,}|…{2,}")
 private fun buildFillBlankText(question: String, answer: String): AnnotatedString? {
     val m = BLANK_REGEX.find(question) ?: return null
     return buildAnnotatedString {
