@@ -3237,15 +3237,10 @@ function doPost(e) {
       // লিখতে পারবে। ফলে ভবিষ্যতে নতুন ফিল্ড client থেকে পাঠালে Sheet-এ ম্যানুয়ালি
       // কলাম বসানো লাগবে না, নিজে থেকেই প্রথম ব্যবহারেই তৈরি হয়ে যাবে। ──
       var bExpectedCols=["id","question","option1","option2","option3","option4","correct",
-        "subject","topic","explanation","technique","previousexam","questiontype",
+        "subject","sub_topic","topic","explanation","technique","previousexam","questiontype",
         "timestamp","audiencetags","questionpaper","visualurl","updatedat","notfirebase",
         "language","content","subjectid","topicid","groupid","subindex","audiencetagsids",
         "groupheading","formatstyle","added_by"];
-      // 🐛 ফিক্স: এই লিস্টে আগে "sub_topic"-ও ছিল — ইউজার Sheet থেকে ম্যানুয়ালি "sub_topic"
-      // কলাম ডিলিট করলেও এই AUTO-COLUMN-CREATION ব্লক প্রতিবার bulk_save_rows কলেই সেটা
-      // আবার তৈরি করে ফেলত (কলাম "না থাকলে বসিয়ে দাও" লজিক)। subject_id/topic_id দিয়ে
-      // এখন সঠিকভাবে লিংক হয় বলে এই legacy টেক্সট কলাম আর দরকার নেই — তাই লিস্ট থেকে সরানো
-      // হলো, এখন থেকে ডিলিট করলে ডিলিটই থাকবে, আর ফিরে আসবে না।
       for(var eci=0; eci<bExpectedCols.length; eci++){
         var ecName=bExpectedCols[eci];
         if(bColIndexByNormName[bKeyNorm(ecName)]===undefined){
@@ -3345,16 +3340,7 @@ function doPost(e) {
               "id":bId, "question":row.question||"",
               "option1":row.opt1||"", "option2":row.opt2||"", "option3":row.opt3||"",
               "option4":row.opt4||"", "correct":row.correct||"",
-              "subject":row.subject||"",
-              // 🐛 ফিক্স (subtopic কলাম বারবার ফিরে আসা): এখানে আগে "sub_topic":row.sub_topic
-              // লেখা হতো — নিচের AUTO-COLUMN-CREATION লিস্টেও "sub_topic" ছিল, যেটা প্রতি
-              // bulk_save_rows কলেই কলামটা না পেলে **নিজে থেকে আবার তৈরি করে ফেলত**। তাই
-              // ইউজার Sheet থেকে "sub_topic" কলাম ডিলিট করলেও পরের এন্ট্রিতেই আবার ফিরে
-              // আসত আর টপিক নাম ভরে যেত। subject_id/topic_id দিয়েই এখন সঠিকভাবে লিংক হয়,
-              // এই legacy টেক্সট কলাম আর দরকার নেই — তাই write বন্ধ করা হলো। "topic" কলাম
-              // (row.topic — buildSheetRow কখনো ভরেই না, সবসময় ফাঁকা) নিরীহ বলে অক্ষত রাখা
-              // হয়েছে, নতুন করে সমস্যা তৈরি করছে না। ──
-              "topic":row.topic||"",
+              "subject":row.subject||"", "sub_topic":row.sub_topic||"", "topic":row.topic||"",
               "explanation":row.explanation||"", "technique":row.technique||"",
               "previousexam":row.prevExam||"", "questiontype":row.qType||"MCQ",
               "timestamp":row.timestamp||new Date().toLocaleString(),
