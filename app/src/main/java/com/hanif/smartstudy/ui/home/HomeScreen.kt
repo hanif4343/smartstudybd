@@ -239,11 +239,14 @@ fun HomeScreen(
 
 // ═══════════════════════════════════════════════════════════
 // App feature (এডমিন-অনলি): "কোথায় কমতি হয়েছে" ছোট ড্যাশবোর্ড — Quiz/QBank/
-// Study প্রতিটার জন্য ২টা আলাদা সোর্সের count পাশাপাশি (CDN = manifest.json-এ
-// publish হওয়া count, App = এই মুহূর্তে ডিভাইসে cache হয়ে থাকা count)।
-// মিসম্যাচ হলে (CDN ≠ App) লাল রঙে হাইলাইট হয়, যাতে ঠিক কোন লেয়ারে কমতি
-// সেটা সহজে ধরা যায়।
-// ═══════════════════════════════════════════════════════════
+// Study প্রতিটার জন্য CDN (manifest.json-এ publish হওয়া count) বনাম App
+// (এই মুহূর্তে ডিভাইসে cache হয়ে থাকা count) পাশাপাশি। মিসম্যাচ হলে লাল রঙে
+// হাইলাইট হয়, যাতে publish-এ কোনো ঘাটতি সহজে ধরা যায়।
+// 🐛 ফিক্স (App hang/crash — "Sheet, CDN, App question count এর জন্য"):
+// আগে এখানে "Sheet" নামে তৃতীয় একটা কলামও ছিল, যেটা GAS দিয়ে Quiz/QBank/Study
+// তিনটা শিটেরই পুরো ডেটা পড়ে বের করা হতো — শিট বড় হয়ে যাওয়ায় (~১৪,০০০+ রো) এই
+// কলটাই hang-এর মূল কারণ ছিল, তাই সম্পূর্ণ সরিয়ে দেওয়া হলো। এখন শুধু হালকা
+// CDN (manifest.json) আর লোকাল App count — কোনো ভারী GAS কল আর লাগে না। ══════════
 @Composable
 private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
     val rows = listOf(
@@ -287,11 +290,11 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
             Divider()
 
             rows.forEach { (label, emoji, appCount) ->
-                val cdnCount   = state.cdnCounts[label]
-                // ── মিসম্যাচ চেক: CDN-কে সোর্স-অফ-ট্রুথ ধরা হচ্ছে, App তার
-                // চেয়ে কম হলে "কমতি" — cdnCount না এলে (এখনো লোড হয়নি /
-                // network fail / CDN কনফিগার নেই) কোনো হাইলাইট দেখানো হয় না ──
-                val appMismatch = state.cdnConfigured && cdnCount != null && appCount < cdnCount
+                val cdnCount = state.cdnCounts[label]
+                // ── মিসম্যাচ চেক: এখন Sheet নেই বলে CDN আর App-কে সরাসরি একে অপরের
+                // সাথে তুলনা করা হচ্ছে — দুটো না মিললেই (যেকোনো দিকে) হাইলাইট, কারণ
+                // এই দুটো এক থাকারই কথা (App-ই CDN থেকে content আনে) ──
+                val mismatch = state.cdnConfigured && cdnCount != null && cdnCount != appCount
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "$emoji $label",
@@ -304,7 +307,8 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
                         modifier = Modifier.weight(1f),
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = if (mismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         appCount.toString(),
@@ -312,7 +316,7 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         fontWeight = FontWeight.Bold,
-                        color = if (appMismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
+                        color = if (mismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
