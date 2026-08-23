@@ -606,6 +606,7 @@ fun MainScreen(
 // করলে সরাসরি এখানেই আসবে)। ফিচার রেডি হলে এই স্ক্রিনটা সরিয়ে আবার
 // VivaScreen() কল ফিরিয়ে দিলেই হবে।
 // ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VivaComingSoonScreen(onBack: () -> Unit) {
     Scaffold(
@@ -614,7 +615,7 @@ private fun VivaComingSoonScreen(onBack: () -> Unit) {
                 title = { Text("🎙️ Viva Mode", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান")
+                        Icon(androidx.compose.material.icons.Icons.Default.ArrowBack, contentDescription = "ফিরে যান")
                     }
                 }
             )
