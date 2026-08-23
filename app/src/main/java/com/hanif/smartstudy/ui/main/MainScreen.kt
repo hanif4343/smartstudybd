@@ -325,9 +325,9 @@ fun MainScreen(
         return
     }
     if (showViva) {
-        com.hanif.smartstudy.ui.viva.VivaScreen(
-            onBack = { showViva = false }
-        )
+        // ── AI Viva Mode এখনো ইনকমপ্লিট — যতক্ষণ না পুরোপুরি রেডি হয়,
+        // ততক্ষণ VivaScreen না খুলে "Coming Soon" প্লেসহোল্ডার দেখানো হচ্ছে ──
+        VivaComingSoonScreen(onBack = { showViva = false })
         return
     }
 
@@ -598,4 +598,53 @@ fun MainScreen(
         }
     }
     } // Box (focus overlay wrapper)
+}
+
+// ═══════════════════════════════════════════════════════════
+// AI Viva Mode — ফিচারটা এখনো ইনকমপ্লিট, তাই পুরো VivaScreen না দেখিয়ে
+// এই সাধারণ "Coming Soon" প্লেসহোল্ডার দেখানো হচ্ছে (Home কার্ড থেকে ট্যাপ
+// করলে সরাসরি এখানেই আসবে)। ফিচার রেডি হলে এই স্ক্রিনটা সরিয়ে আবার
+// VivaScreen() কল ফিরিয়ে দিলেই হবে।
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun VivaComingSoonScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("🎙️ Viva Mode", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ফিরে যান")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(24.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                Text("🚧", fontSize = 48.sp)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Coming Soon",
+                    fontFamily = NotoSansBengali,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize   = 20.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "AI Viva Mode এখনো তৈরি হচ্ছে — শীঘ্রই আসছে!",
+                    fontFamily = NotoSansBengali,
+                    fontSize   = 14.sp,
+                    textAlign  = androidx.compose.ui.text.style.TextAlign.Center,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }
