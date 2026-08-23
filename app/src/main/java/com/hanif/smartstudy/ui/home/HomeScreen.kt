@@ -239,10 +239,10 @@ fun HomeScreen(
 
 // ═══════════════════════════════════════════════════════════
 // App feature (এডমিন-অনলি): "কোথায় কমতি হয়েছে" ছোট ড্যাশবোর্ড — Quiz/QBank/
-// Study প্রতিটার জন্য ৩টা আলাদা সোর্সের count পাশাপাশি (Sheet = আসল Google
-// Sheet-এ raw row count, CDN = manifest.json-এ publish হওয়া count, App =
-// এই মুহূর্তে ডিভাইসে cache হয়ে থাকা count)। মিসম্যাচ হলে (Sheet ≠ CDN বা
-// Sheet ≠ App) লাল রঙে হাইলাইট হয়, যাতে ঠিক কোন লেয়ারে কমতি সেটা সহজে ধরা যায়।
+// Study প্রতিটার জন্য ২টা আলাদা সোর্সের count পাশাপাশি (CDN = manifest.json-এ
+// publish হওয়া count, App = এই মুহূর্তে ডিভাইসে cache হয়ে থাকা count)।
+// মিসম্যাচ হলে (CDN ≠ App) লাল রঙে হাইলাইট হয়, যাতে ঠিক কোন লেয়ারে কমতি
+// সেটা সহজে ধরা যায়।
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
@@ -264,7 +264,7 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "🛠️ Admin — প্রশ্ন সংখ্যা (Sheet vs CDN vs App)",
+                    "🛠️ Admin — প্রশ্ন সংখ্যা (CDN vs App)",
                     fontWeight = FontWeight.ExtraBold,
                     fontSize   = 13.sp,
                     color      = MaterialTheme.colorScheme.onSurface
@@ -281,20 +281,17 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
             // ── কলাম হেডার ──
             Row(Modifier.fillMaxWidth()) {
                 Text("", modifier = Modifier.weight(1.3f))
-                Text("Sheet", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("CDN",   modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("App",   modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
             Divider()
 
             rows.forEach { (label, emoji, appCount) ->
-                val sheetCount = state.sheetCounts[label]
                 val cdnCount   = state.cdnCounts[label]
-                // ── মিসম্যাচ চেক: Sheet-ই সোর্স-অফ-ট্রুথ ধরা হচ্ছে, CDN/App তার
-                // চেয়ে কম হলে "কমতি" — sheetCount না এলে (এখনো লোড হয়নি /
-                // network fail) কোনো হাইলাইট দেখানো হয় না ──
-                val cdnMismatch  = sheetCount != null && cdnCount != null && cdnCount < sheetCount
-                val appMismatch  = sheetCount != null && appCount < sheetCount
+                // ── মিসম্যাচ চেক: CDN-কে সোর্স-অফ-ট্রুথ ধরা হচ্ছে, App তার
+                // চেয়ে কম হলে "কমতি" — cdnCount না এলে (এখনো লোড হয়নি /
+                // network fail / CDN কনফিগার নেই) কোনো হাইলাইট দেখানো হয় না ──
+                val appMismatch = state.cdnConfigured && cdnCount != null && appCount < cdnCount
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "$emoji $label",
@@ -303,19 +300,11 @@ private fun AdminContentCountsCard(state: HomeUiState, onRefresh: () -> Unit) {
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        sheetCount?.toString() ?: "…",
-                        modifier = Modifier.weight(1f),
-                        fontSize = 12.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
                         if (!state.cdnConfigured) "—" else (cdnCount?.toString() ?: "…"),
                         modifier = Modifier.weight(1f),
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        fontWeight = FontWeight.Bold,
-                        color = if (cdnMismatch) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         appCount.toString(),
