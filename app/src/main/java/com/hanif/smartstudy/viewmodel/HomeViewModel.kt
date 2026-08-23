@@ -35,10 +35,9 @@ data class HomeUiState(
     val unreadNotifCount   : Int                    = 0,
     val isLoadingNotifs    : Boolean                = false,
     // ── App feature (এডমিন-অনলি): Home-এ "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
-    // Sheet (আসল Google Sheet-এ raw row count), CDN (manifest.json-এ publish
-    // হওয়া count), App (এই মুহূর্তে ডিভাইসে cache/lazy-load হওয়া count) —
-    // তিনটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার count, key = "Quiz"|"QBank"|"Study" ──
-    val sheetCounts        : Map<String, Int>  = emptyMap(),
+    // CDN (manifest.json-এ publish হওয়া count), App (এই মুহূর্তে ডিভাইসে
+    // cache/lazy-load হওয়া count) — দুইটা আলাদা সোর্স থেকে Quiz/QBank/Study
+    // প্রতিটার count, key = "Quiz"|"QBank"|"Study" ──
     val cdnCounts          : Map<String, Int>  = emptyMap(),
     val cdnConfigured      : Boolean           = true,   // false হলে UI-তে "CDN কনফিগার নেই" দেখাবে
     val isLoadingAdminCounts: Boolean          = false
@@ -123,23 +122,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * App feature (এডমিন-অনলি Home ড্যাশবোর্ড, "কোন জায়গায় কমতি হয়েছে"):
-     * তিনটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার প্রশ্ন-সংখ্যা —
-     * ১) Sheet  — GAS `countOrphanQuestions` action (আসল Google Sheet raw row count)
-     * ২) CDN    — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST
-     *             দিয়ে গ্রুপ করে count যোগ করা হয়) — CDN কনফিগার না থাকলে
-     *             (BuildConfig.CDN_WORKER_URL খালি) cdnConfigured=false হবে
-     * ৩) App    — এই মুহূর্তে ডিভাইসে cache/lazy-load হয়ে থাকা content (HomeUiState.content)
+     * দুইটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার প্রশ্ন-সংখ্যা —
+     * ১) CDN — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST
+     *          দিয়ে গ্রুপ করে count যোগ করা হয়) — CDN কনফিগার না থাকলে
+     *          (BuildConfig.CDN_WORKER_URL খালি) cdnConfigured=false হবে
+     * ২) App — এই মুহূর্তে ডিভাইসে cache/lazy-load হয়ে থাকা content (HomeUiState.content)
      */
     fun loadAdminContentCounts() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingAdminCounts = true)
 
-            val sheetCountsDeferred = async {
-                when (val r = com.hanif.smartstudy.data.remote.GasContentService.getSheetQuestionCounts()) {
-                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> r.data
-                    is com.hanif.smartstudy.data.remote.ApiResult.Error   -> emptyMap()
-                }
-            }
             val cdnConfigured = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
             val cdnCountsDeferred = async {
                 if (!cdnConfigured) return@async emptyMap<String, Int>()
@@ -157,11 +149,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 out
             }
 
-            val sheetCounts = sheetCountsDeferred.await()
-            val cdnCounts   = cdnCountsDeferred.await()
+            val cdnCounts = cdnCountsDeferred.await()
 
             _uiState.value = _uiState.value.copy(
-                sheetCounts          = sheetCounts,
                 cdnCounts            = cdnCounts,
                 cdnConfigured        = cdnConfigured,
                 isLoadingAdminCounts = false
