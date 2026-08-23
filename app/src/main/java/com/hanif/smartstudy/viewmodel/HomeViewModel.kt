@@ -8,7 +8,6 @@ import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.data.repository.DataState
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,10 +34,12 @@ data class HomeUiState(
     val unreadNotifCount   : Int                    = 0,
     val isLoadingNotifs    : Boolean                = false,
     // ── App feature (এডমিন-অনলি): Home-এ "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
-    // CDN (manifest.json-এ publish হওয়া count), App (এই মুহূর্তে ডিভাইসে
-    // cache/lazy-load হওয়া count) — দুইটা আলাদা সোর্স থেকে Quiz/QBank/Study
-    // প্রতিটার count, key = "Quiz"|"QBank"|"Study" ──
-    val cdnCounts          : Map<String, Int>  = emptyMap(),
+    // CDN (manifest.json-এ publish হওয়া count) বনাম App (এই মুহূর্তে ডিভাইসে
+    // cache/lazy-load হওয়া count) — key = "Quiz"|"QBank"|"Study"।
+    // 🐛 ফিক্স: আগে এখানে "Sheet" (আসল Google Sheet raw row count, GAS দিয়ে) নামে
+    // আরেকটা সোর্সও ছিল — বড় শিটে (~১৪,০০০+ রো) সেই GAS কল-ই ছিল app hang-এর মূল
+    // কারণ, তাই সম্পূর্ণ সরিয়ে দেওয়া হলো (ব্যবহারকারীর সিদ্ধান্তে) — শুধু CDN/App থাকছে। ──
+    val cdnCounts           : Map<String, Int>  = emptyMap(),
     val cdnConfigured      : Boolean           = true,   // false হলে UI-তে "CDN কনফিগার নেই" দেখাবে
     val isLoadingAdminCounts: Boolean          = false
 )
@@ -122,34 +123,39 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * App feature (এডমিন-অনলি Home ড্যাশবোর্ড, "কোন জায়গায় কমতি হয়েছে"):
-     * দুইটা আলাদা সোর্স থেকে Quiz/QBank/Study প্রতিটার প্রশ্ন-সংখ্যা —
-     * ১) CDN — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST
-     *          দিয়ে গ্রুপ করে count যোগ করা হয়) — CDN কনফিগার না থাকলে
-     *          (BuildConfig.CDN_WORKER_URL খালি) cdnConfigured=false হবে
+     * ১) CDN — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST দিয়ে
+     *          গ্রুপ করে count যোগ করা হয়) — কনফিগার না থাকলে cdnConfigured=false
      * ২) App — এই মুহূর্তে ডিভাইসে cache/lazy-load হয়ে থাকা content (HomeUiState.content)
-     */
+     *
+     * 🐛 ফিক্স (App hang/crash — "Sheet, CDN, App question count এর জন্য"):
+     * আগে এখানে GAS-এর `countOrphanQuestions` অ্যাকশনও কল হতো, যেটা Quiz/QBank/Study
+     * তিনটা শিটেরই **পুরো ডেটা** (getDataRange().getValues()) পড়ত — শিট এখন ~১৪,০০০+
+     * রো-তে পৌঁছে যাওয়ায় এই একটা কলই GAS-সাইডে অনেক সময় নিতো (readTimeout ২৮০ সেকেন্ড
+     * পর্যন্ত সেট করা ছিল ঠিক এই কারণেই), আর এটা Home-এ যতবার আসা হতো ততবার অটো-চলত —
+     * এটাই মূল hang-এর উৎস ছিল। ব্যবহারকারীর সিদ্ধান্তে Sheet count সম্পূর্ণ সরিয়ে দেওয়া
+     * হলো — শুধু CDN (হালকা manifest.json) আর App (লোকাল, নেটওয়ার্কই লাগে না) রইলো, তাই
+     * এখন এই ড্যাশবোর্ড সবসময় দ্রুত। ── */
     fun loadAdminContentCounts() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingAdminCounts = true)
 
             val cdnConfigured = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
-            val cdnCountsDeferred = async {
-                if (!cdnConfigured) return@async emptyMap<String, Int>()
-                val manifest = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return@async emptyMap<String, Int>()
-                val out = mutableMapOf("Quiz" to 0, "QBank" to 0, "Study" to 0)
-                for ((topicId, entry) in manifest.topics) {
-                    val sheetName = when {
-                        topicId.startsWith("QZ") -> "Quiz"
-                        topicId.startsWith("QB") -> "QBank"
-                        topicId.startsWith("ST") -> "Study"
-                        else -> null
-                    } ?: continue
-                    out[sheetName] = (out[sheetName] ?: 0) + entry.count
+            val cdnCounts = if (!cdnConfigured) emptyMap() else {
+                val manifest = com.hanif.smartstudy.data.remote.CdnService.fetchManifest()
+                if (manifest == null) emptyMap() else {
+                    val out = mutableMapOf("Quiz" to 0, "QBank" to 0, "Study" to 0)
+                    for ((topicId, entry) in manifest.topics) {
+                        val sheetName = when {
+                            topicId.startsWith("QZ") -> "Quiz"
+                            topicId.startsWith("QB") -> "QBank"
+                            topicId.startsWith("ST") -> "Study"
+                            else -> null
+                        } ?: continue
+                        out[sheetName] = (out[sheetName] ?: 0) + entry.count
+                    }
+                    out
                 }
-                out
             }
-
-            val cdnCounts = cdnCountsDeferred.await()
 
             _uiState.value = _uiState.value.copy(
                 cdnCounts            = cdnCounts,
