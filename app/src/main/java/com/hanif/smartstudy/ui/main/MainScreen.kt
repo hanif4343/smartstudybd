@@ -1,6 +1,8 @@
 package com.hanif.smartstudy.ui.main
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.platform.LocalContext
 import com.hanif.smartstudy.ui.shared.OfflineBanner
 import com.hanif.smartstudy.util.ConnectivityObserver
@@ -615,7 +617,7 @@ private fun VivaComingSoonScreen(onBack: () -> Unit) {
                 title = { Text("🎙️ Viva Mode", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(androidx.compose.material.icons.Icons.Default.ArrowBack, contentDescription = "ফিরে যান")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "ফিরে যান")
                     }
                 }
             )
