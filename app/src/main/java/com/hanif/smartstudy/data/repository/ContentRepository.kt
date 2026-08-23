@@ -59,6 +59,14 @@ class ContentRepository(private val context: Context) {
         // আগে থেকেই থাকা BG_REFRESH_MIN_GAP_MS প্যাটার্নটাই এখানে প্রয়োগ করা হলো।
         @Volatile private var _lastRefSyncAt: Long = 0L
         private const val REF_SYNC_MIN_GAP_MS = 10 * 60_000L // ১০ মিনিটে একবারের বেশি না
+
+        // ── FIX (Speed Plan Task 3): CDN manifest.json-এর জন্য ৫-মিনিট TTL
+        // in-memory cache — একই ধরনের প্যাটার্ন যেভাবে উপরে reference sync-এর
+        // জন্য REF_SYNC_MIN_GAP_MS ব্যবহার হয়েছে, শুধু ছোট TTL (CDN সস্তা/দ্রুত,
+        // GAS-এর মতো cold-start নেই) ──
+        @Volatile private var _manifestCache: com.hanif.smartstudy.data.remote.CdnService.Manifest? = null
+        @Volatile private var _manifestCachedAt: Long = 0L
+        private const val MANIFEST_TTL_MS = 5 * 60_000L
     }
 
     /**
@@ -225,6 +233,17 @@ class ContentRepository(private val context: Context) {
      * Subject-list visit-কে ব্লকিং নেটওয়ার্ক কল থেকে বাঁচায়। force=true দিলে (যেমন
      * pull-to-refresh) গ্যাপ উপেক্ষা করে সবসময় GAS থেকে টাটকা ডেটা আনবে।
      */
+    /**
+     * force=false (ডিফল্ট) হলে — Room-এ ইতিমধ্যে subjects/topics ডেটা থাকলে ও শেষ সফল
+     * sync REF_SYNC_MIN_GAP_MS-এর মধ্যে হয়ে থাকলে নতুন CDN কল স্কিপ করে সরাসরি true
+     * রিটার্ন করে (Room-এর ডেটাই "যথেষ্ট ফ্রেশ" ধরা হয়)। force=true দিলে (যেমন
+     * pull-to-refresh) গ্যাপ উপেক্ষা করে সবসময় CDN থেকে টাটকা ডেটা আনবে।
+     *
+     * FIX (Speed Plan Task 3, "Gas diye kuno read noy — never"): আগে GAS
+     * `getReferenceData` কল হতো (cold-start/latency-প্রবণ)। এখন সম্পূর্ণ CDN-only —
+     * ব্যর্থ হলে (network/CDN down) কোনো GAS fallback হয় না, Room-এর পুরনো ডেটা
+     * অপরিবর্তিত থাকে + local notification দেখানো হয়।
+     */
     suspend fun syncReferenceData(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
             return@withContext false
@@ -238,19 +257,43 @@ class ContentRepository(private val context: Context) {
             }
             // Room এখনো খালি — গ্যাপের মধ্যে থাকলেও প্রথমবারের জন্য fetch করতেই হবে
         }
-        val data = com.hanif.smartstudy.data.remote.GasContentService.fetchReferenceData()
-            ?: return@withContext false
-        if (data.isEmpty()) return@withContext false
+        if (!isOnline()) return@withContext false
+
+        val subjects = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.SubjectRef>("reference/subjects.json")
+        if (subjects == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects তালিকা আনা যায়নি")
+            return@withContext false
+        }
+        val topics = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.TopicRef>("reference/topics.json")
+            ?: run {
+                com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Topics তালিকা আনা যায়নি")
+                return@withContext false
+            }
+        // ── tags/posts/institutions ছোট, non-critical reference — একটার fetch
+        // ব্যর্থ হলেও পুরো sync আটকে দেওয়ার দরকার নেই, শুধু সেই অংশটা Room-এ
+        // আগের মতোই থেকে যাবে (খালি লিস্টে ওভাররাইট না করে) ──
+        val tags = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.TagRef>("reference/tags.json")
+        val posts = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.PostRef>("reference/posts.json")
+        val institutions = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.InstitutionRef>("reference/institutions.json")
+        if (tags == null || posts == null || institutions == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "কিছু reference তালিকা (tags/posts/institutions) আনা যায়নি")
+        }
+
         refDao.replaceAll(
-            subjects     = data.subjects.map { it.toEntity() },
-            topics       = data.topics.map { it.toEntity() },
-            subtopics    = data.subtopics.map { it.toEntity() },
-            tags         = data.tags.map { it.toEntity() },
-            posts        = data.posts.map { it.toEntity() },
-            institutions = data.institutions.map { it.toEntity() }
+            subjects     = subjects.map { it.toEntity() },
+            topics       = topics.map { it.toEntity() },
+            subtopics    = emptyList(), // GAS-এ কখনো আলাদা "Subtopics" শিট ছিলই না (REF_TABS দেখো) — topics-ই সাব-টপিক লেভেল
+            tags         = tags?.map { it.toEntity() } ?: refDao.getAllTags(),
+            posts        = posts?.map { it.toEntity() } ?: refDao.getAllPosts(),
+            institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
         )
         _lastRefSyncAt = now
-        Log.d("Repo", "syncReferenceData: subjects=${data.subjects.size} topics=${data.topics.size} subtopics=${data.subtopics.size}")
+        Log.d("Repo", "syncReferenceData (CDN): subjects=${subjects.size} topics=${topics.size}")
         true
     }
 
@@ -275,23 +318,29 @@ class ContentRepository(private val context: Context) {
         refDao.getTopicByName(subjectId, topicName)?.topicId
 
     /**
-     * Phase 6 — "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: GAS `getAllExamAppearances` থেকে পুরো
-     * Exam_Appearances টেবিল টেনে Room-এ replace করে। শুধু Google Sheet ডেটা-সোর্স মোডে
-     * কাজ করে। GAS-এ action না থাকলে বা নেটওয়ার্ক ব্যর্থ হলে false রিটার্ন করবে — Room-এর
-     * exam_appearances টেবিল খালিই থাকবে, POST browse mode-এ তখন "কোনো প্রশ্ন নেই" দেখাবে
-     * (crash হবে না)।
+     * "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: CDN-এর বাল্ক `exam-appearances.json`
+     * থেকে পুরো Exam_Appearances টেবিল টেনে Room-এ replace করে।
+     *
+     * FIX (Speed Plan Task 3): আগে GAS `getAllExamAppearances` ব্যবহার হতো —
+     * এখন CDN-only, কোনো GAS fallback নেই। ব্যর্থ হলে Room-এর পুরনো টেবিল
+     * অপরিবর্তিত থাকে + local notification।
      */
     suspend fun syncExamAppearances(): Boolean = withContext(Dispatchers.IO) {
         if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
             return@withContext false
         }
-        val appearances = com.hanif.smartstudy.data.remote.GasContentService.fetchAllExamAppearances()
-            ?: return@withContext false
+        if (!isOnline()) return@withContext false
+        val appearances = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.ExamAppearanceRef>("exam-appearances.json")
+        if (appearances == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Exam Appearances তালিকা আনা যায়নি")
+            return@withContext false
+        }
         refDao.deleteAllExamAppearances()
         if (appearances.isNotEmpty()) {
             refDao.upsertExamAppearances(appearances.map { it.toEntity() })
         }
-        Log.d("Repo", "syncExamAppearances: ${appearances.size}")
+        Log.d("Repo", "syncExamAppearances (CDN): ${appearances.size}")
         true
     }
 
@@ -408,44 +457,84 @@ class ContentRepository(private val context: Context) {
      *
      * @return নতুন প্রশ্ন যোগ হয়েছে কিনা
      */
+    /**
+     * একটা Topic-এর পুরো প্রশ্ন-সেট CDN থেকে এনে Room-এ upsert করে।
+     *
+     * FIX (Speed Plan Task 3, "Gas diye kuno read noy — never"): আগে GAS
+     * `getQuestionsPage` দিয়ে ৫০-৫০ ব্যাচে (cursor-ভিত্তিক pagination) আনা হতো —
+     * এখন CDN-এ প্রতিটা topic-এর পুরো JSON একটাই ফাইলে থাকে বলে পুরোটা একবারেই
+     * আসে, pagination আর দরকার নেই। manifest-এর hash Room-এ (`lastHash`) সেভ করা
+     * hash-এর সাথে মিললে network call-ই স্কিপ হয় (CDN ফাইল immutable-per-hash)।
+     *
+     * CDN fetch ব্যর্থ হলে (network/timeout/misconfigured) — **কোনো GAS fallback
+     * নেই** — Room-এ যা আছে তাই থেকে যায় (caller সেটাই দেখাবে), শুধু local
+     * notification দেখানো হয়।
+     *
+     * @return নতুন প্রশ্ন যোগ হয়েছে কিনা
+     */
     suspend fun cacheNextTopicBatch(sheet: String, topicId: String): Boolean = withContext(Dispatchers.IO) {
+        val sheetPath = when (sheet) {
+            "Quiz" -> "quiz"; "QBank" -> "qbank"; "Study" -> "study"
+            else -> return@withContext false
+        }
         val sync = topicSyncDao.get(topicId)
-        // ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না, স্থায়ীভাবে ফাঁকা"):
-        // আগে শুধু sync.hasMore==false দেখেই "ইতিমধ্যে সম্পূর্ণ" ধরে নিয়ে নেটওয়ার্ক কল
-        // স্কিপ করা হতো — কিন্তু সাময়িক ব্যর্থতাতেও (দেখো GasContentService.
-        // QuestionsPageResult.ok-এর কমেন্ট) আগে hasMore=false লিখে ফেলা হতো, ফলে সেই
-        // topic Room-এ ০ প্রশ্ন নিয়েই "সম্পূর্ণ" আটকে থাকত। এখন hasMore=false হলেও
-        // যদি Room-এ আসলে এই topicId-এর কোনো প্রশ্নই cache না থাকে (সন্দেহজনক —
-        // "সম্পূর্ণ" অথচ "০ প্রশ্ন" একসাথে অস্বাভাবিক), তাহলে সেটাকে আগের কোনো ব্যর্থ
-        // ফেচের stale/corrupt state ধরে আবার ফেচ করার চেষ্টা করা হয় (self-heal —
-        // আগে থেকেই এই বাগে আটকে থাকা ডিভাইসেও কাজ করবে, শুধু নতুন ইনস্টলে না)।
         val cachedCount = dao.countByTopicId(sheet.uppercase(), topicId)
         if (sync != null && !sync.hasMore && cachedCount > 0) return@withContext false
-        val cursor = if (cachedCount > 0) sync?.nextCursor else null
-        val now = System.currentTimeMillis()
-        when (sheet) {
-            "Quiz" -> {
-                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQuizPage(topicId, cursor, 50)
-                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                // ⚠️ শুধু genuine সফল (ok=true) রেসপন্সেই sync-state লিখি — নাহলে
-                // নেটওয়ার্ক/GAS ব্যর্থতাও "সম্পূর্ণ, ০ প্রশ্ন" হিসেবে স্থায়ী হয়ে যেত।
-                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
-                page.items.isNotEmpty()
-            }
-            "QBank" -> {
-                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, null, cursor, 50)
-                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
-                page.items.isNotEmpty()
-            }
-            "Study" -> {
-                val page = com.hanif.smartstudy.data.remote.GasContentService.fetchStudyPage(topicId, cursor, 50)
-                if (page.items.isNotEmpty()) dao.upsertAll(page.items.map { it.toEntity(now) })
-                if (page.ok) topicSyncDao.upsert(TopicSyncEntity(topicId, page.nextCursor, page.hasMore, now))
-                page.items.isNotEmpty()
-            }
-            else -> false
+        if (!isOnline()) return@withContext false
+
+        val manifest = getCachedManifest()
+        if (manifest == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Manifest আনা যায়নি")
+            return@withContext false
         }
+        val entry = manifest.topics[topicId]
+        if (entry == null) {
+            // manifest-এ এই topicId নেই — হয় সত্যিই কোনো প্রশ্ন নেই (delete/move হয়ে
+            // গেছে), অথবা এখনো publish হয়নি। কোনো error না — শুধু কিছু cache হয়নি।
+            return@withContext false
+        }
+        val hash = entry.hash ?: ""
+        // ── hash অপরিবর্তিত + Room-এ ইতিমধ্যে প্রশ্ন আছে মানে এই ভার্সন আগেই
+        // cache করা — network call পুরোপুরি স্কিপ ──
+        if (hash.isNotBlank() && sync?.lastHash == hash && cachedCount > 0) {
+            if (sync.hasMore) topicSyncDao.upsert(sync.copy(hasMore = false))
+            return@withContext false
+        }
+
+        val now = System.currentTimeMillis()
+        val items: List<*>? = when (sheet) {
+            "Quiz"  -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.QuizItem>(sheetPath, topicId, hash)
+            "QBank" -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.QBankItem>(sheetPath, topicId, hash)
+            "Study" -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.StudyItem>(sheetPath, topicId, hash)
+            else    -> null
+        }
+        if (items == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "$topicId আনা যায়নি")
+            return@withContext false
+        }
+        val entities = when (sheet) {
+            "Quiz"  -> (items as List<com.hanif.smartstudy.data.model.QuizItem>).map { it.toEntity(now) }
+            "QBank" -> (items as List<com.hanif.smartstudy.data.model.QBankItem>).map { it.toEntity(now) }
+            "Study" -> (items as List<com.hanif.smartstudy.data.model.StudyItem>).map { it.toEntity(now) }
+            else    -> emptyList()
+        }
+        if (entities.isNotEmpty()) dao.upsertAll(entities)
+        topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, hash))
+        entities.isNotEmpty()
+    }
+
+    // ── CDN manifest — ৫-মিনিট TTL in-memory cache, একাধিক topic-এর জন্য বারবার
+    // নেটওয়ার্ক কল না করে একবারই আনা হয় (App খোলা/pull-to-refresh/periodic নীতি
+    // অনুযায়ী)। ব্যর্থ হলে null রিটার্ন করে, পুরনো cached manifest থাকলেও সেটা
+    // stale হতে পারে বলে reuse না করে caller-কে জানানো হয় (caller Room cache
+    // থেকে দেখাবে) ──
+    private suspend fun getCachedManifest(): com.hanif.smartstudy.data.remote.CdnService.Manifest? {
+        val now = System.currentTimeMillis()
+        _manifestCache?.let { if (now - _manifestCachedAt < MANIFEST_TTL_MS) return it }
+        val fresh = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return _manifestCache
+        _manifestCache = fresh
+        _manifestCachedAt = now
+        return fresh
     }
 
     /** এই মুহূর্তে Topic-টা লোকালি ১০০% আছে কিনা (hasMore==false মানে আর ফেচ করার কিছু নেই) */
