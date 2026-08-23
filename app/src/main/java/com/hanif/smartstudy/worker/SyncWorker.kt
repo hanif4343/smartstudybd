@@ -19,7 +19,15 @@ import java.util.concurrent.TimeUnit
 
 /**
  * SyncWorker:
- * 1. Pending offline queue সরাসরি Firebase এ sync করে (কোনো GAS নেই)
+ * 1. Pending offline queue sync করে —
+ *    - quiz_answer / xp_update / study_progress: সরাসরি Firebase-এ (এই তিনটা
+ *      এখনো Firebase-native node, GAS/Sheet-এ নেই)
+ *    - admin_edit_question / admin_add_question / admin_delete_question /
+ *      admin_reorder_* / admin_delete_subject_topic / admin_move_*: সব
+ *      Google Sheet (GAS)-এ, Firebase-এ কখনো না — কারণ Quiz/QBank/Study
+ *      কনটেন্টের একমাত্র সোর্স-অফ-ট্রুথ এখন Sheet (FIX: আগে edit/add/delete
+ *      সরাসরি Firebase-এ যেত, যেটা GAS/CDN থেকে disconnected ছিল এবং ডিলিট করা
+ *      পুরনো Firebase node আবার "পুনরুজ্জীবিত" করে ফেলত)
  * 2. Content (Study/Quiz/QBank) refresh করে cache-এ
  */
 class SyncWorker(
@@ -47,6 +55,17 @@ class SyncWorker(
 
         Log.d(TAG, "SyncWorker started")
         var allSuccess = true
+
+        // ── FIX (Speed Plan Task 1, one-time): fix-এর আগে জমে থাকা পুরনো
+        // admin_add/edit/delete pending action (যেগুলো আগে সরাসরি Firebase-এ
+        // লিখত) একবার purge করে দাও — এই flag ছাড়া প্রতিবার worker রান হলে
+        // আবার purge চেষ্টা করতো, তাই legacyAdminQueuePurged দিয়ে একবারই। ──
+        val prefs = applicationContext.getSharedPreferences("sync_worker_prefs", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("legacy_admin_queue_purged_v1", false)) {
+            queue.purgeLegacyDirectFirebaseAdminActions()
+            prefs.edit().putBoolean("legacy_admin_queue_purged_v1", true).apply()
+            Log.i(TAG, "One-time purge: cleared legacy direct-Firebase admin actions from pending queue")
+        }
 
         // ── 1. Pending queue sync ──
         val pending = queue.getAll()
@@ -294,6 +313,14 @@ class SyncWorker(
         }
     }
 
+    // ── FIX (Speed Plan Task 1): আগে এটা সরাসরি Firebase-এ PATCH করত — কিন্তু
+    //    Quiz/QBank/Study কনটেন্টের আসল সোর্স এখন Google Sheet (GAS), Firebase
+    //    না। এর ফলে অফলাইনে/GAS-fail হলে করা edit পরে replay হওয়ার সময় সরাসরি
+    //    Firebase-এ লেখা হতো — যেটা কখনো CDN/GAS-এ প্রতিফলিত হতো না, উল্টো ডিলিট
+    //    করা পুরনো Firebase node আবার জ্যান্ত হয়ে যেত। এখন MenuViewModel-এর
+    //    adminUpdateField()-এর মতোই GasContentService.updateFields() ব্যবহার
+    //    করে — success হলে GAS নিজেই dirty-topic মার্ক করে CDN publish
+    //    pipeline-এ পাঠিয়ে দেয়, তাই আলাদা করে touchMeta()/Firebase কল লাগে না। ──
     @Suppress("UNCHECKED_CAST")
     private suspend fun syncAdminEdit(payload: Map<*, *>): Boolean {
         return try {
@@ -302,35 +329,30 @@ class SyncWorker(
             val fields     = payload["fields"] as? Map<String, String> ?: return false
             if (questionId.isBlank() || fields.isEmpty()) return false
 
-            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
-            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val url    = "$base/$sheet/$questionId.json?auth=$secret"
-
-            val jsonObj = com.google.gson.JsonObject().apply {
-                fields.forEach { (k, v) -> addProperty(k, v) }
-                addProperty("updatedAt", System.currentTimeMillis())
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .updateFields(sheet, questionId, fields)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.d(TAG, "syncAdminEdit (GAS) $sheet/$questionId → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminEdit (GAS) failed: ${r.message}")
+                    false
+                }
             }
-            val body = jsonObj.toString()
-                .toRequestBody("application/json".toMediaType())
-            val resp = client.newCall(
-                okhttp3.Request.Builder().url(url).patch(body).build()
-            ).execute()
-            val code = resp.code
-            val respBody = resp.body?.string() ?: ""
-            resp.close()
-            Log.d(TAG, "syncAdminEdit $sheet/$questionId → $code $respBody")
-            val ok = resp.isSuccessful
-            // অফলাইনে করা admin edit sync হলে meta touch করো, নইলে অন্য ডিভাইস বুঝবে না নতুন কনটেন্ট আছে
-            if (ok) touchMeta(secret, base)
-            ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminEdit error: ${e.message}")
             false
         }
     }
 
-    // ── অফলাইনে/fail অবস্থায় যোগ করা নতুন প্রশ্ন — net আসলে ব্যাকগ্রাউন্ডে
-    //    সরাসরি push করে, আর লোকাল temp id-টাকে আসল Firebase key দিয়ে বদলে দেয় ──
+    // ── FIX (Speed Plan Task 1): আগে এটা সরাসরি Firebase-এ POST করে নতুন row
+    //    বানাত, যেটা GAS/CDN-এর সাথে সম্পূর্ণ disconnected — GAS-side dirty-topic
+    //    ট্র্যাকিং কখনো জানতোই না নতুন প্রশ্ন যোগ হয়েছে, ফলে CDN-এ কখনো publish-ও
+    //    হতো না, শুধু "ভুতুড়ে" Firebase row থেকে যেত। এখন MenuViewModel-এর মতোই
+    //    GasContentService.addQuestion() ব্যবহার করে — GAS নিজেই sheet-এ row
+    //    বানায়, dirty মার্ক করে, আর রিটার্ন করা আসল id দিয়ে লোকাল temp id
+    //    (localId) রিপ্লেস হয়। ──
     @Suppress("UNCHECKED_CAST")
     private suspend fun syncAdminAdd(payload: Map<*, *>): Boolean {
         return try {
@@ -339,44 +361,35 @@ class SyncWorker(
             val fields  = payload["fields"] as? Map<String, String> ?: return false
             if (fields.isEmpty()) return false
 
-            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
-            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val url    = "$base/$sheet.json?auth=$secret"
-
-            val jsonObj = com.google.gson.JsonObject().apply {
-                fields.forEach { (k, v) -> addProperty(k, v) }
-                addProperty("createdAt", System.currentTimeMillis())
-                addProperty("updatedAt", System.currentTimeMillis())
-            }
-            val resp = client.newCall(
-                Request.Builder().url(url)
-                    .post(jsonObj.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-            ).execute()
-            val respBody = resp.body?.string() ?: ""
-            val ok = resp.isSuccessful
-            resp.close()
-            if (ok) {
-                val newId = try { org.json.JSONObject(respBody).optString("name", "") } catch (e: Exception) { "" }
-                if (newId.isNotBlank()) {
-                    com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
-                        .replaceLocalIdAndPersist(sheet, localId, newId)
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .addQuestion(sheet, fields)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val newId = r.data
+                    if (newId.isNotBlank()) {
+                        com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                            .replaceLocalIdAndPersist(sheet, localId, newId)
+                    }
+                    Log.d(TAG, "syncAdminAdd (GAS) $sheet localId=$localId → newId=$newId")
+                    true
                 }
-                touchMeta(secret, base)
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminAdd (GAS) failed: ${r.message}")
+                    false
+                }
             }
-            Log.d(TAG, "syncAdminAdd $sheet localId=$localId → $ok")
-            ok
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminAdd error: ${e.message}")
             false
         }
     }
 
-    // ── অফলাইনে/fail অবস্থায় ডিলিট করা প্রশ্ন — net আসলে ব্যাকগ্রাউন্ডে Firebase
-    //    থেকেও সেই row (প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা সব) মুছে দেয়। localId (এখনো
-    //    Firebase-এ কখনো পাঠানোই হয়নি এমন প্রশ্ন) হলে এখানে আসার আগেই
-    //    PendingQueue.removePendingForQuestion() দিয়ে বাদ দেওয়া হয়ে গেছে,
-    //    তাই এই ফাংশন শুধু আসল Firebase row-এর জন্যই কল হয় ──
+    // ── FIX (Speed Plan Task 1): আগে এটা সরাসরি Firebase-এ DELETE করত, যেটা
+    //    এখন-অব্যবহৃত Firebase Quiz/QBank/Study node-কে "পুনরুজ্জীবিত" করতে পারত
+    //    (আসল সোর্স Google Sheet-এ কখনো ডিলিট হতোই না)। localId (কখনো GAS-এ
+    //    সিঙ্কই হয়নি) হলে এখানে আসার আগেই PendingQueue.removePendingForQuestion()
+    //    দিয়ে বাদ পড়ে যায়, তাই এই ফাংশন শুধু আসল sheet-row-এর জন্যই কল হয় —
+    //    এখন MenuViewModel-এর adminDeleteRow()-এর মতোই GasContentService
+    //    .deleteQuestion() ব্যবহার করে। ──
     @Suppress("UNCHECKED_CAST")
     private suspend fun syncAdminDelete(payload: Map<*, *>): Boolean {
         return try {
@@ -384,19 +397,17 @@ class SyncWorker(
             val questionId = payload["questionId"]?.toString() ?: return false
             if (questionId.isBlank()) return false
 
-            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
-            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val url    = "$base/$sheet/$questionId.json?auth=$secret"
-
-            val resp = client.newCall(
-                Request.Builder().url(url).delete().build()
-            ).execute()
-            val code = resp.code
-            resp.close()
-            val ok = resp.isSuccessful
-            Log.d(TAG, "syncAdminDelete $sheet/$questionId → $code")
-            if (ok) touchMeta(secret, base)
-            ok
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                .deleteQuestion(sheet, questionId)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.d(TAG, "syncAdminDelete (GAS) $sheet/$questionId → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminDelete (GAS) failed: ${r.message}")
+                    false
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminDelete error: ${e.message}")
             false
@@ -590,18 +601,6 @@ class SyncWorker(
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminReorderSubTopic error: ${e.message}")
             false
-        }
-    }
-
-    // অফলাইনে করা admin edit sync হওয়ার পর "/meta/updatedAt" আপডেট করে দেয়, যাতে অন্য
-    // ডিভাইসের lightweight check এই edit-টা ধরতে পারে (touchMetaUpdatedAt এর ছোট সংস্করণ)।
-    private suspend fun touchMeta(secret: String, base: String) {
-        try {
-            val url  = "$base/meta/updatedAt.json?auth=$secret"
-            val body = System.currentTimeMillis().toString().toRequestBody("application/json".toMediaType())
-            client.newCall(Request.Builder().url(url).put(body).build()).execute().close()
-        } catch (e: Exception) {
-            Log.w(TAG, "touchMeta failed: ${e.message}")
         }
     }
 
