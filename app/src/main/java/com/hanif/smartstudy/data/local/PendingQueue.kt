@@ -302,6 +302,23 @@ class PendingQueue(private val context: Context) {
         save(queue)
     }
 
+    // ── FIX (Speed Plan Task 1, one-time): SyncWorker-এর syncAdminAdd/Edit/Delete
+    //    আগে সরাসরি Firebase-এ লিখত (GAS/Sheet-এ না)। সেই বাগ থাকা অবস্থায় queue-তে
+    //    জমে থাকা পুরনো admin_add/edit/delete action এখন (ফিক্সের পরে) replay হলে
+    //    GAS/Sheet-এ গিয়ে পড়বে — কিন্তু ওই এন্ট্রিগুলো ব্যবহারকারী ইতিমধ্যে ম্যানুয়ালি
+    //    রিকনসাইল করে ফেলেছেন (Firebase node ডিলিট করে), তাই এগুলো আর replay হওয়া
+    //    উচিত না। SyncWorker একবার এই ফাংশন কল করে পুরনো তিনটা টাইপ সরিয়ে দেবে —
+    //    এর পরে নতুন enqueue হওয়া action গুলো স্বাভাবিকভাবেই GAS-এ sync হবে। ──
+    suspend fun purgeLegacyDirectFirebaseAdminActions() {
+        val queue = getAll().toMutableList()
+        val before = queue.size
+        queue.removeAll {
+            it.type == "admin_add_question" || it.type == "admin_edit_question" ||
+            it.type == "admin_delete_question"
+        }
+        if (queue.size != before) save(queue)
+    }
+
     suspend fun count(): Int = getAll().size
 
     suspend fun clear() {
