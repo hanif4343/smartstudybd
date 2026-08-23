@@ -799,33 +799,6 @@ object GasContentService {
         }
 
     /**
-     * App feature: Home-এ এডমিন-অনলি "কোথায় কমতি" ড্যাশবোর্ড — GAS-এর
-     * `countOrphanQuestions` action কল করে Quiz/QBank/Study প্রতিটা sheet-এ
-     * এখন **আসলেই কতগুলো প্রশ্ন-রো আছে** (raw total, blank/orphan topic_id
-     * সহ) সেটা রিটার্ন করে। key: "Quiz"|"QBank"|"Study" → total count।
-     */
-    suspend fun getSheetQuestionCounts(): ApiResult<Map<String, Int>> =
-        withContext(Dispatchers.IO) {
-            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
-            try {
-                val obj = callGetActionRaw(mapOf("action" to "countOrphanQuestions"))
-                    ?: return@withContext ApiResult.Error("Network error")
-                if (obj.get("result")?.asString == "success") {
-                    val bySheet = obj.getAsJsonObject("bySheet")
-                    val out = mutableMapOf<String, Int>()
-                    for (key in listOf("Quiz", "QBank", "Study")) {
-                        out[key] = bySheet?.getAsJsonObject(key)?.get("total")?.asInt ?: 0
-                    }
-                    ApiResult.Success(out)
-                } else {
-                    ApiResult.Error(obj.get("message")?.asString ?: "গণনা ব্যর্থ হয়েছে")
-                }
-            } catch (e: Exception) {
-                ApiResult.Error(e.message ?: "Network error")
-            }
-        }
-
-    /**
      * adminRenameSubjectOrTopic() এর জন্য — একাধিক sheet-এ subject/sub_topic rename।
      * GAS-এর renameField subject-স্কোপড না (দেখো ফাইলের ওপরের কমেন্ট) — oldSubTopic দেওয়া
      * থাকলে sub_topic কলামেই rename হয়, subject মিলিয়ে filter হয় না।
