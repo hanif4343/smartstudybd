@@ -12,15 +12,16 @@ import java.util.concurrent.TimeUnit
 
 /**
  * ══════════════════════════════════════════════════════════════════════════
- * CDN Worker (Cloudflare, private-GitHub প্রক্সি) থেকে প্রশ্ন-কনটেন্ট পড়ার
- * সার্ভিস — GAS_CDN_PLANNING.md-এর Phase ২-৩ (Worker + Publish pipeline)
- * অনুযায়ী। এটাই read path-এর নতুন প্রাইমারি সোর্স হবে; GAS `getQuestionsPage`
- * fallback হিসেবে থেকে যায় (দেখো ContentRepository.cacheNextTopicBatch —
- * CDN ব্যর্থ হলে/কনফিগার না থাকলে সাইলেন্টলি সেই পুরনো পাথে চলে যায়)।
+ * CDN Worker (Cloudflare, private-GitHub প্রক্সি) থেকে সব read (প্রশ্ন-কনটেন্ট +
+ * reference data + exam-appearances) পড়ার সার্ভিস।
  *
- * ⚠️ BuildConfig-এ CDN_WORKER_URL/CDN_APP_SECRET সেট করা না থাকলে (এখনো
- * টেস্ট/deploy না হওয়া অবস্থায়) isConfigured()=false, পুরো ক্লাস silently
- * no-op — অ্যাপ ভাঙবে না, শুধু GAS পাথই ব্যবহার হবে।
+ * FIX (Speed Plan): "Gas diye kuno read noy — never" সিদ্ধান্ত অনুযায়ী CDN-ই
+ * একমাত্র read সোর্স, GAS আর read fallback হিসেবে ব্যবহার হয় না। CDN
+ * fetch ব্যর্থ হলে (network/timeout/৪xx/৫xx/misconfigured) ContentRepository
+ * সরাসরি Room cache থেকে দেখায় + local notification দেখায় (দেখো
+ * ContentRepository.notifyCdnFailure) — GAS-এ কোনো retry হয় না। GAS শুধু
+ * write path-এ (add/edit/delete/move/reorder) ব্যবহার হয়, সেটার জন্য
+ * GasContentService আলাদাই থাকে।
  * ══════════════════════════════════════════════════════════════════════════
  */
 object CdnService {
@@ -59,7 +60,12 @@ object CdnService {
         val version       : Int = 0,
         val schemaVersion : Int = 1,
         val publishedAt   : Long = 0L,
-        val topics        : Map<String, TopicManifestEntry> = emptyMap()
+        val topics        : Map<String, TopicManifestEntry> = emptyMap(),
+        // FIX (Speed Plan Task 2/3): প্রতিটা subject-এর মোট প্রশ্নসংখ্যা এখন
+        // manifest-এই আগে থেকে আসে (GAS doPublish_-এ যোগ করা হয়েছে) — Subject
+        // list-এ প্রতিটা topic আলাদা করে না ডাউনলোড করেই instant "মোট প্রশ্ন"
+        // দেখানো যায় (আগে এটা hardcoded 0 থাকত)।
+        val subjectTotals : Map<String, Int> = emptyMap()
     )
 
     @PublishedApi internal fun requestBuilder(path: String): Request.Builder =
@@ -86,10 +92,43 @@ object CdnService {
     }
 
     /**
+     * ── FIX (Speed Plan Task 3): reference ডেটা (subjects/topics/tags/posts/
+     * institutions) এবং বাল্ক exam-appearances — এখন সব CDN থেকেই আসে, GAS
+     * `getReferenceData`/`getAllExamAppearances` আর read-path-এ ব্যবহার হয় না।
+     * এই ফাইলগুলো manifest-এর মতো cache-busting hash query লাগে না (রেফারেন্স
+     * ডেটা প্রতিবার publish-এ আপডেট হয়, Worker-সাইডে ছোট TTL cache যথেষ্ট) — তাই
+     * সরাসরি ফাইলনাম দিয়ে GET করা হয়।
+     * @return null মানে fetch ব্যর্থ (network/404/parse) — caller Room cache
+     * থেকে দেখাবে, কোনো GAS fallback নেই।
+     */
+    suspend inline fun <reified T> fetchReferenceJson(fileName: String): List<T>? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            try {
+                val resp = client.newCall(requestBuilder("/$fileName").get().build()).execute()
+                val body = resp.body?.string() ?: ""
+                resp.close()
+                if (!resp.isSuccessful || body.isBlank()) {
+                    Log.w(TAG, "fetchReferenceJson<$fileName>: HTTP ${resp.code}")
+                    return@withContext null
+                }
+                val arr = JsonParser.parseString(body).asJsonArray
+                arr.mapNotNull { el ->
+                    try { if (el.isJsonObject) gson.fromJson(el, T::class.java) else null }
+                    catch (e: Exception) { null }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "fetchReferenceJson<$fileName> error: ${e.message}")
+                null
+            }
+        }
+
+    /**
      * একটা Topic-এর পুরো JSON ফাইল — sheetPath: "quiz"|"qbank"|"study", hash
      * manifest থেকে পাওয়া (cache-busting query param — Worker-এর immutable
      * forever-cache লজিক এটার ওপর নির্ভর করে, দেখো worker.js)।
-     * @return null মানে fetch ব্যর্থ (network/parse) — caller GAS-এ fallback করবে
+     * @return null মানে fetch ব্যর্থ (network/parse) — caller-কে Room cache
+     * থেকে দেখাতে হবে, কোনো GAS fallback নেই (Read path পুরোপুরি CDN-only)।
      */
     suspend inline fun <reified T> fetchTopicJson(sheetPath: String, topicId: String, hash: String): List<T>? =
         withContext(Dispatchers.IO) {
