@@ -42,7 +42,9 @@ import androidx.room.RoomDatabase
     // সংখ্যা দেখাতো। এখন per-sheet কলাম আলাদা, দেখো ReferenceModels.kt/QuizViewModel.
     // navigateToSubjectLazy()। fallbackToDestructiveMigration() থাকায় migration SQL
     // লাগে না।
-    version = 14,
+    // v15: TopicSyncEntity-তে lastHash কলাম যোগ (Speed Plan Task 3 — CDN hash-based
+    // skip-fetch, দেখো TopicSyncEntity.kt-এর কমেন্ট)।
+    version = 15,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
