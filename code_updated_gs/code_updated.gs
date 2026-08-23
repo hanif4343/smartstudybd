@@ -100,9 +100,28 @@ function markTopicsDirty(topicIdSet) {
    (getNextId()-এর ১৫ সেকেন্ডের চেয়ে একটু বেশি, কারণ moveQuestions/deleteByIds
    বড় sheet-এ কিছুটা সময় নিতে পারে)।
    ══════════════════════════════════════════════════════════════════════════ */
+// ── notifyAdminPublishFailure_ — Publish ব্যর্থ হলে ADMIN_PHONE-এ FCM push
+// পাঠায় (adminNotify action যেভাবে করে ঠিক সেই একই sendFCMToPhone_ ব্যবহার
+// করে) — এখন এই notification পাওয়ার জন্য Publish ট্যাব খুলে বসে থাকতে হবে
+// না, বিশেষ করে auto-scheduled publish (publishScheduled) ব্যর্থ হলে এটাই
+// একমাত্র সংকেত। notification পাঠানো ব্যর্থ হলেও (ADMIN_PHONE সেট নেই,
+// token নেই ইত্যাদি) মূল publish ফ্লো কখনো এর কারণে ভাঙবে না। ──
+function notifyAdminPublishFailure_(message) {
+  try {
+    var adminPhone = (PropertiesService.getScriptProperties().getProperty("ADMIN_PHONE")||"").toString().replace(/^'+/,'').trim();
+    if (!adminPhone) return;
+    sendFCMToPhone(adminPhone, "🚨 CDN Publish ব্যর্থ!", (message||"").toString().substring(0,150), {type:"publish_failed", url:"publish"});
+  } catch (notifyErr) { /* নোটিফিকেশন ব্যর্থ হলেও মূল publish ফ্লো অক্ষত থাকবে */ }
+}
+
 function withWriteLock(fn) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  try {
+    lock.waitLock(30000);
+  } catch (lockErr) {
+    logError_("withWriteLock", "Lock timeout/failure: " + lockErr);
+    throw lockErr; // আগের মতোই ছড়িয়ে যাবে, শুধু আগে একটা লগ থেকে যাচ্ছে
+  }
   try {
     return fn();
   } finally {
@@ -151,6 +170,7 @@ function publishDirtyTopics() {
     return doPublish_();
   } catch (pubErr) {
     Logger.log("publishDirtyTopics FATAL error: " + pubErr);
+    notifyAdminPublishFailure_("Publish crash (unexpected): " + pubErr);
     return { status: "error", result: "error", message: "Publish ব্যর্থ (unexpected): " + pubErr };
   } finally {
     props.deleteProperty("isPublishing");
@@ -311,6 +331,7 @@ function doPublish_() {
           "Publish " + topicId + " (" + questions.length + " questions)", knownSha);
         if (!putResult.success) {
           results.errors.push(topicId + ": GitHub commit ব্যর্থ — " + putResult.error);
+          logError_("publishDirtyTopics/ghPutFile_", topicId + ": " + putResult.error);
           results.failed++;
           return;
         }
@@ -323,10 +344,15 @@ function doPublish_() {
 
       } catch (topicErr) {
         results.errors.push(topicId + ": " + topicErr);
+        logError_("publishDirtyTopics/topicErr", topicId + ": " + topicErr);
         results.failed++;
       }
     });
   });
+
+  if (results.failed > 0) {
+    notifyAdminPublishFailure_(results.failed + "টা Topic publish হতে ব্যর্থ হয়েছে (মোট " + results.published + "টা সফল)। বিস্তারিত _SystemLogs শিটে।");
+  }
 
   // ── Reference ডেটা (Subjects/Topics তালিকা) — প্রতিবার publish-এ রিফ্রেশ,
   // এটা ছোট ডেটা বলে আলাদা dirty-tracking না করে সবসময় আপডেট করাই সহজ ──
@@ -357,6 +383,8 @@ function doPublish_() {
     manifest.publishedAt = Date.now();
     var manifestPut = ghPutFile_(ghOwner, ghRepo, ghBranch, "manifest.json", JSON.stringify(manifest), ghToken, "Update manifest (v" + manifest.version + ")");
     if (!manifestPut.success) {
+      logError_("publishDirtyTopics/manifestCommit", "manifest.json commit ব্যর্থ: " + manifestPut.error + " (topics published: " + results.published + ")");
+      notifyAdminPublishFailure_("manifest.json commit ব্যর্থ (topics published: " + results.published + "): " + manifestPut.error);
       return { status: "error", result: "error", message: "Topic ফাইল publish হলেও manifest.json commit ব্যর্থ: " + manifestPut.error, published: results.published, failed: results.failed };
     }
   }
@@ -405,13 +433,79 @@ function publishScheduled() {
 
 /* ── GitHub Contents API helpers (write path, GAS UrlFetchApp দিয়ে) ── */
 
+// ── logError_ — Logger.log() ব্রাউজার/এক্সিকিউশন বন্ধ হলেই হারিয়ে যায়, তাই
+// ক্রিটিক্যাল এরর (GitHub publish ব্যর্থতা, lock timeout ইত্যাদি) একটা
+// স্থায়ী "_SystemLogs" শিটে জমা রাখা হচ্ছে — sheet না থাকলে প্রথমবার কল হলেই
+// নিজে থেকে তৈরি হয়ে যায়। লগিং নিজেই ব্যর্থ হলেও (quota/permission ইত্যাদি)
+// চুপচাপ ignore হয় — মূল ফ্লো কখনো এই কারণে ভাঙবে না। ──
+function logError_(context, message) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName("_SystemLogs");
+    if (!sh) {
+      sh = ss.insertSheet("_SystemLogs");
+      sh.appendRow(["timestamp", "context", "message"]);
+    }
+    sh.appendRow([new Date().toLocaleString('bn-BD'), context, (message||"").toString().substring(0, 500)]);
+  } catch (logErr) { /* logging ব্যর্থ হলেও মূল ফ্লো অক্ষত থাকবে */ }
+}
+
+// ── fetchWithRetry_ — GitHub API মাঝেমধ্যে rate-limit (403/429) বা সাময়িক
+// সার্ভার সমস্যা (502/503/504) দিতে পারে, যেটা সাথে সাথে আবার চেষ্টা করলেই
+// প্রায়ই ঠিক হয়ে যায়। শুধু এই transient কোডগুলোতেই retry হয় (১s, ২s, ৩s
+// ব্যাকঅফ) — 404 (ইচ্ছাকৃতভাবে "ফাইল নেই" বোঝাতে ব্যবহার হয়, ghGetFile_ দেখো)
+// বা অন্য client error (400/401/422) রিট্রাই করা হয় না, কারণ বারবার একই
+// ভুলই হবে। নেটওয়ার্ক এক্সসেপশন হলেও শেষ চেষ্টায় ব্যর্থ হলে exception-ই
+// ছড়িয়ে যায় (কল করা কোড আগের মতোই catch করে)। ──
+function fetchWithRetry_(url, options, maxRetries) {
+  var retries = maxRetries || 3;
+  var lastResp = null;
+  for (var i = 0; i < retries; i++) {
+    try {
+      var resp = UrlFetchApp.fetch(url, options);
+      var code = resp.getResponseCode();
+      if (code < 400 || code === 404) return resp;
+      if ([403, 429, 502, 503, 504].indexOf(code) === -1) return resp; // অন্য client error রিট্রাই করে লাভ নেই
+      lastResp = resp;
+    } catch (e) {
+      if (i === retries - 1) throw e;
+    }
+    if (i < retries - 1) Utilities.sleep(1000 * (i + 1));
+  }
+  return lastResp;
+}
+
 function sheetLowerName_(sheetName) {
   return sheetName === "Quiz" ? "quiz" : sheetName === "QBank" ? "qbank" : sheetName === "Study" ? "study" : sheetName.toLowerCase();
 }
 
+// ── ghListFileCommits_ — একটা নির্দিষ্ট ফাইলের (এখানে manifest.json) সাম্প্রতিক
+// commit history আনে — Rollback ফিচারের জন্য "কোন কোন পুরনো ভার্সনে ফেরা যায়"
+// তার তালিকা বানাতে ব্যবহার হয়। প্রতিটা commit-এর sha দিয়েই ghGetFile_() কল
+// করলে ঠিক ওই মুহূর্তের ফাইল-কনটেন্ট পাওয়া যায় (GitHub Contents API-তে
+// branch-এর জায়গায় commit sha-ও ref হিসেবে দেওয়া যায়)। ──
+function ghListFileCommits_(owner, repo, branch, path, token, limit) {
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/commits?path=" + encodeURIComponent(path) + "&sha=" + branch + "&per_page=" + (limit||15);
+  var resp = fetchWithRetry_(url, {
+    method: "get",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200) return { success: false, error: "HTTP " + code + ": " + resp.getContentText() };
+  var commits = JSON.parse(resp.getContentText());
+  return { success: true, commits: commits.map(function(c){
+    return { sha: c.sha, date: c.commit && c.commit.author ? c.commit.author.date : "", message: c.commit ? c.commit.message : "" };
+  })};
+}
+
 function ghGetFile_(owner, repo, branch, path, token) {
   var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path + "?ref=" + branch;
-  var resp = UrlFetchApp.fetch(url, {
+  var resp = fetchWithRetry_(url, {
     method: "get",
     headers: {
       "Authorization": "Bearer " + token,
@@ -446,7 +540,7 @@ function ghPutFile_(owner, repo, branch, path, contentStr, token, message, known
   };
   if (sha) payload.sha = sha;
 
-  var resp = UrlFetchApp.fetch(url, {
+  var resp = fetchWithRetry_(url, {
     method: "put",
     contentType: "application/json",
     headers: {
@@ -472,7 +566,7 @@ function ghDeleteFile_(owner, repo, branch, path, token, knownSha) {
     return { success: true }; // knownSha explicitly null/falsy — tree-তেই ছিল না, মানে আগে থেকেই নেই
   }
   var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path;
-  var resp = UrlFetchApp.fetch(url, {
+  var resp = fetchWithRetry_(url, {
     method: "delete",
     contentType: "application/json",
     headers: {
@@ -492,7 +586,7 @@ function ghDeleteFile_(owner, repo, branch, path, token, knownSha) {
  *  স্বয়ংক্রিয়ভাবে fallback করে (ghPutFile_-এ knownSha=undefined মানেই সেটা)। */
 function ghGetTree_(owner, repo, branch, token) {
   var url = "https://api.github.com/repos/" + owner + "/" + repo + "/git/trees/" + branch + "?recursive=1";
-  var resp = UrlFetchApp.fetch(url, {
+  var resp = fetchWithRetry_(url, {
     method: "get",
     headers: {
       "Authorization": "Bearer " + token,
@@ -888,6 +982,182 @@ function syncNFRows(sheetName, folderName){
 /* ══════════════════════════════════════════════════════════
    doGet
 ══════════════════════════════════════════════════════════ */
+// ── runRebuildIndexCore — rebuildIndex action-এর আসল লজিক, রিইউজযোগ্য ফাংশনে
+// বের করে আনা হলো (আগে এটা শুধু action==="rebuildIndex" HTTP handler-এর ভিতরেই
+// ছিল, ম্যানুয়ালি কল করতে হতো)। এখন এই একই ফাংশন moveQuestions/moveTopic/
+// deleteByIds/deleteByReferenceId-এর শেষে automatic-ভাবেও কল হয় (নিচে দেখো),
+// আর installAutoReindexTrigger()-এর periodic safety-net trigger থেকেও। ──
+function runRebuildIndexCore() {
+  var ribResults={};
+  var ribSheets=[{name:"Quiz",prefix:"subject_id"},{name:"QBank",prefix:"subject_id"},{name:"Study",prefix:"subject_id"}];
+  var ribSs=SpreadsheetApp.getActiveSpreadsheet();
+  var ribTopicsSh=ribSs.getSheetByName("Topics");
+  var ribTopicsData=ribTopicsSh?ribTopicsSh.getDataRange().getValues():[];
+  var ribTopicsHdr=ribTopicsData[0]||[];
+  var ribNumTopicRows=Math.max(ribTopicsData.length-1,0); // header বাদে ডেটা-রো সংখ্যা
+
+  // ── FIX (bug: Quiz/Study-তে প্রশ্ন 0 দেখাতো যদিও QBank-এ ঠিক দেখাতো) ──
+  // আগে row_start/row_count Topics-এ মাত্র ১টা কলাম-জোড়া ছিল, আর নিচের লুপে
+  // একটাই shared ribIndexMap (শুধু topic_id দিয়ে key করা) Quiz→QBank→Study
+  // তিনটা শিট প্রসেস করতো। কোনো topic_id একাধিক শিটে (যেমন Quiz আর QBank দুটোতেই)
+  // থাকলে পরের শিট আগেরটার index চুপচাপ ওভাররাইট করে দিতো — ফলে Quiz browse
+  // করার সময় getQuestionsPage ভুল sheet-এর row-range Quiz ট্যাবে apply করতে
+  // যেতো (range Quiz ট্যাবের বাইরে পড়লে getRange() এরর দেয়, ক্লায়েন্টে সেটাই
+  // "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" হয়ে দেখা যায়)।
+  // এখন প্রতিটা শিটের জন্য আলাদা row_start_<sheet>/row_count_<sheet> কলাম-জোড়া
+  // রাখা হচ্ছে, তাই কোনো ওভাররাইট হয় না — একই topic_id তিন শিটেই থাকলেও
+  // প্রতিটার নিজের সঠিক row-range নিজের কলামে থাকে। ──
+  var ribColPairs={}; // sheetName -> {rsCol, rcCol}
+  for (var rp=0;rp<ribSheets.length;rp++){
+    var ribPName=ribSheets[rp].name;
+    var ribRsColName="row_start_"+ribPName.toLowerCase();
+    var ribRcColName="row_count_"+ribPName.toLowerCase();
+    var ribRsC=ribTopicsHdr.indexOf(ribRsColName), ribRcC=ribTopicsHdr.indexOf(ribRcColName);
+    if (ribTopicsSh && ribRsC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRsColName); ribRsC=ribTopicsHdr.length; ribTopicsHdr.push(ribRsColName); }
+    if (ribTopicsSh && ribRcC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRcColName); ribRcC=ribTopicsHdr.length; ribTopicsHdr.push(ribRcColName); }
+    ribColPairs[ribPName]={rsCol:ribRsC,rcCol:ribRcC};
+  }
+  // ⚠️ legacy generic row_start/row_count কলাম থাকলেও রেখে দেওয়া হলো (পুরনো ক্লায়েন্ট/
+  // স্ক্রিপ্ট এখনো পড়তে পারে বলে), কিন্তু নতুন লজিক এখন এগুলোর ওপর নির্ভর করে না।
+  var ribLegacyRsCol=ribTopicsHdr.indexOf("row_start"), ribLegacyRcCol=ribTopicsHdr.indexOf("row_count");
+
+  // ── QUOTA/স্পিড ফিক্স ("অটোমেশনের জন্য লিমিট খাব না তো?"): আগে প্রতিটা Topic-রো,
+  // প্রতিটা কলামের জন্য আলাদা getRange().setValue() কল হতো — মানে টপিক-সংখ্যা × sheet ×
+  // কলাম-সংখ্যা যতগুলো, ততগুলো আলাদা Sheets API কল (কয়েকশো/হাজার টপিক থাকলে এটাই সবচেয়ে
+  // ধীর অংশ ছিল, GAS-এর ৬-মিনিট/এক্সিকিউশন লিমিটে ধাক্কা খাওয়ার ঝুঁকি তৈরি করতো)। এখন সব
+  // মান আগে মেমোরিতে (in-memory array) জমিয়ে শেষে কলাম-প্রতি মাত্র ১টা batch setValues()
+  // কল করা হয় — টপিক-সংখ্যা যতই হোক না কেন, মোট কল-সংখ্যা এখন ধ্রুবক (কয়েক-ডজন, sheet ও
+  // কলাম-সংখ্যার ওপর নির্ভর করে, টপিক-সংখ্যার ওপর না)। ──
+  var ribColBuffers={}; // colIndex -> array[ribNumTopicRows] of value (pre-filled "")
+  function ribGetBuffer(colIdx){
+    if (!ribColBuffers[colIdx]) {
+      var buf=new Array(ribNumTopicRows);
+      for (var bi=0;bi<ribNumTopicRows;bi++) buf[bi]="";
+      ribColBuffers[colIdx]=buf;
+    }
+    return ribColBuffers[colIdx];
+  }
+
+  for (var rs=0;rs<ribSheets.length;rs++) {
+    var ribShName=ribSheets[rs].name;
+    var ribSh=ribSs.getSheetByName(ribShName);
+    if (!ribSh || ribSh.getLastRow()<2) continue;
+    var ribRange=ribSh.getDataRange();
+    var ribData=ribRange.getValues();
+    var ribHdr=ribData[0];
+    var ribSubCol=ribHdr.indexOf("subject_id"), ribTopCol=ribHdr.indexOf("topic_id");
+    if (ribSubCol<0) { ribResults[ribShName]="subject_id column missing — skip"; continue; }
+    // sort by subject_id, topic_id (header বাদে)
+    var ribSortCols=[{column:ribSubCol+1,ascending:true}];
+    if (ribTopCol>=0) ribSortCols.push({column:ribTopCol+1,ascending:true});
+    ribSh.getRange(2,1,ribSh.getLastRow()-1,ribSh.getLastColumn()).sort(ribSortCols);
+    // re-read after sort, build contiguous ranges per topic_id — এই শিটের নিজস্ব ম্যাপে
+    var ribIndexMap={}; // topic_id -> {start,count} — শুধু এই sheet-এর জন্য, আলাদা প্রতিবার
+    var ribData2=ribSh.getDataRange().getValues();
+    var curTopic=null, curStart=2, curCount=0;
+    for (var i5=1;i5<ribData2.length;i5++){
+      var tId=ribTopCol>=0?(ribData2[i5][ribTopCol]||"").toString():"";
+      if (tId!==curTopic) {
+        if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
+        curTopic=tId; curStart=i5+1; curCount=0;
+      }
+      curCount++;
+    }
+    if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
+    ribResults[ribShName]="sorted, "+(ribData2.length-1)+" rows";
+
+    // এই শিটের row_start_<sheet>/row_count_<sheet> মান memory-buffer-এ বসাও (এখনো
+    // কোনো Sheets API কল না — সব শেষে একসাথে ফ্লাশ হবে)
+    if (ribTopicsSh) {
+      var ribPair=ribColPairs[ribShName];
+      var ribTIdCol=ribTopicsHdr.indexOf("topic_id");
+      var ribRsBuf=ribGetBuffer(ribPair.rsCol), ribRcBuf=ribGetBuffer(ribPair.rcCol);
+      var ribLegacyRsBuf=ribLegacyRsCol>=0?ribGetBuffer(ribLegacyRsCol):null;
+      var ribLegacyRcBuf=ribLegacyRcCol>=0?ribGetBuffer(ribLegacyRcCol):null;
+      for (var t2=1;t2<ribTopicsData.length;t2++){
+        var ribTid=(ribTopicsData[t2][ribTIdCol]||"").toString();
+        var ribEntry=ribIndexMap[ribTid];
+        var bufIdx=t2-1;
+        if (ribEntry) {
+          ribRsBuf[bufIdx]=ribEntry.start;
+          ribRcBuf[bufIdx]=ribEntry.count;
+          // legacy কলাম থাকলে সর্বশেষ প্রসেস হওয়া শিট দিয়ে রেফারেন্সের জন্য আপডেট (backward-compat only)
+          if (ribLegacyRsBuf) ribLegacyRsBuf[bufIdx]=ribEntry.start;
+          if (ribLegacyRcBuf) ribLegacyRcBuf[bufIdx]=ribEntry.count;
+        } else {
+          // এই sheet-এ এই topic_id-এর কোনো রো নেই — "" রাখা হলো (ribGetBuffer-এর ডিফল্ট),
+          // নইলে পুরনো row_start_quiz স্টেল/ভুল range নিয়ে fast-path ভুলভাবে ট্রিগার হতে পারে
+          ribRsBuf[bufIdx]=""; ribRcBuf[bufIdx]="";
+        }
+      }
+    }
+  }
+
+  // ── একদম শেষে — কলাম-প্রতি মাত্র ১টা batch write (ধ্রুবক সংখ্যক API কল) ──
+  if (ribTopicsSh && ribNumTopicRows>0) {
+    Object.keys(ribColBuffers).forEach(function(colIdxStr){
+      var colIdx=parseInt(colIdxStr,10);
+      var buf=ribColBuffers[colIdx];
+      ribTopicsSh.getRange(2,colIdx+1,ribNumTopicRows,1).setValues(buf.map(function(v){return [v];}));
+    });
+  }
+  return ribResults;
+}
+
+// ── AUTO-REINDEX — QUOTA-নিরাপদ ডিজাইন ("অটোমেশনের জন্য লিমিট খাব না তো?") ──
+// moveQuestions/moveTopic/deleteByIds/deleteByReferenceId — প্রথমে এই ৪টা action
+// প্রতিটার শেষেই সরাসরি runRebuildIndexCore() (ভারী, পুরো ৩-শিট সর্ট) সিঙ্ক্রোনাসলি
+// কল করতো। সমস্যা: admin একই সেশনে বারবার move করলে প্রতিবারই এই ভারী কাজ পুরো
+// শেষ না হওয়া পর্যন্ত move/delete-এর রেসপন্সই আটকে থাকতো (ধীর UX), আর বড়
+// ডেটাসেটে GAS-এর প্রতি-এক্সিকিউশন ৬-মিনিট লিমিটে ধাক্কা খাওয়ার ঝুঁকি ছিল।
+//
+// এখন সেই ৪টা action শুধু markReindexNeeded_() কল করে — এটা PropertiesService-এ
+// একটা "dirty" ফ্ল্যাগ বসায়, নিজে কোনো ভারী কাজ করে না (এক-মিলিসেকেন্ডের কম) —
+// তাই move/delete-এর রেসপন্স সাথে সাথেই ফেরত যায়, কোনো অপেক্ষা নেই।
+//
+// আসল ভারী কাজ (runRebuildIndexCore, batch-write করা, দেখো ওপরের কমেন্ট) শুধু
+// পর্যায়ক্রমিক ট্রিগারে (প্রতি ১৫ মিনিটে একবার) চলে, আর তাও শুধু ফ্ল্যাগ সেট থাকলেই —
+// একই ১৫-মিনিট উইন্ডোতে ১০টা move হলেও রিইনডেক্স চলে মাত্র ১বার (debounce)। ফলে দিনে
+// সর্বোচ্চ ৯৬টা ট্রিগার-এক্সিকিউশন (২৪×৪), তার বেশিরভাগই ফ্ল্যাগ না থাকলে সাথে সাথে
+// বেরিয়ে যায় (প্রায় ফ্রি) — Apps Script-এর দৈনিক রানটাইম কোটার (consumer অ্যাকাউন্টে
+// সাধারণত ~৯০ মিনিট/দিন) কাছাকাছিও যাবে না।
+//
+// ⚠️ ONE-TIME SETUP (এটা কোডে বসিয়ে দিলেই অটো চলে না — একবার ম্যানুয়ালি রান
+// করতে হবে): Apps Script এডিটরে এই ফাইল খুলে, ফাংশন ড্রপডাউন থেকে
+// "installAutoReindexTrigger" বেছে নিয়ে ▶ Run বাটনে একবার ক্লিক করো (প্রথমবার
+// authorization চাইতে পারে, allow করে দিও)। এরপর থেকে সারাজীবন প্রতি ১৫ মিনিটে
+// নিজে থেকেই চেক করবে, কোনো ম্যানুয়াল rebuildIndex আর লাগবে না। দ্বিতীয়বার রান
+// করলে আগের ট্রিগার মুছে নতুন বসায় — ডুপ্লিকেট জমবে না। ──
+var REINDEX_FLAG_KEY_ = "NEEDS_REINDEX";
+
+function markReindexNeeded_() {
+  try { PropertiesService.getScriptProperties().setProperty(REINDEX_FLAG_KEY_, "1"); }
+  catch (flagErr) { logError_("markReindexNeeded_", flagErr); }
+}
+
+function installAutoReindexTrigger() {
+  var triggers=ScriptApp.getProjectTriggers();
+  for (var i=0;i<triggers.length;i++){
+    if (triggers[i].getHandlerFunction()==="autoRebuildIndexTriggered") ScriptApp.deleteTrigger(triggers[i]);
+  }
+  ScriptApp.newTrigger("autoRebuildIndexTriggered").timeBased().everyMinutes(15).create();
+  Logger.log("✅ Auto-reindex trigger installed — প্রতি ১৫ মিনিটে চেক করবে, দরকার হলেই (dirty ফ্ল্যাগ থাকলে) রিইনডেক্স চলবে।");
+}
+
+function autoRebuildIndexTriggered() {
+  try {
+    var props=PropertiesService.getScriptProperties();
+    if (props.getProperty(REINDEX_FLAG_KEY_)!=="1") return; // কিছু বদলায়নি — সস্তায় সাথে সাথে বেরিয়ে যাও
+    // ফ্ল্যাগ আগেই ক্লিয়ার করা হচ্ছে (রিইনডেক্স চলাকালীন নতুন move এলে সেটা মিস না হয় —
+    // মিস হলেও ক্ষতি নেই, পরের ১৫-মিনিট সাইকেলেই ধরা পড়বে যেহেতু move নিজেই আবার ফ্ল্যাগ সেট করবে)
+    props.deleteProperty(REINDEX_FLAG_KEY_);
+    var result=runRebuildIndexCore();
+    Logger.log("autoRebuildIndexTriggered: "+JSON.stringify(result));
+  } catch (err) {
+    logError_("autoRebuildIndexTriggered", "reindex failed: "+err);
+  }
+}
+
 function doGet(e) {
  try {
   var action = e.parameter.action;
@@ -1603,90 +1873,19 @@ function doGet(e) {
   // (bulk add/rename এর পরে) — প্রতিটা ছোট এডিটে না, কারণ পুরো শিট re-sort
   // করে বলে খরচ আছে (কিন্তু এটা batch অপারেশন, admin-triggered, ইউজার-facing
   // read খরচের সাথে সম্পর্কহীন)। ──
+  //
+  // ── AUTO-REINDEX (FIX "রিইনডেক্স ভুলে যাওয়া লাগে না"): এই লজিকটা এখন
+  // runRebuildIndexCore()-এ বের করে আনা হলো যাতে moveQuestions/moveTopic/
+  // deleteByIds/deleteByReferenceId — এই চারটা action, যেগুলো টপিকের প্রশ্ন-
+  // সংখ্যা বদলে দেয়, তারা প্রতিটাই নিজে থেকে (কারো মনে রাখা ছাড়াই) শেষে এটা
+  // কল করে row_count/row_start সবসময় সঠিক রাখে। এছাড়াও নিচে
+  // installAutoReindexTrigger() দিয়ে একটা পর্যায়ক্রমিক (safety-net) টাইম-
+  // ট্রিগার বসানো যায় — single-question add/edit endpoint (doPost, "type"
+  // ভিত্তিক, action ভিত্তিক না) কোনো dirty-marking করে না বলে সেটার জন্য এই
+  // নিরাপত্তা-জাল দরকার। ──
   if (action==="rebuildIndex") {
-    var ribResults={};
-    var ribSheets=[{name:"Quiz",prefix:"subject_id"},{name:"QBank",prefix:"subject_id"},{name:"Study",prefix:"subject_id"}];
-    var ribSs=SpreadsheetApp.getActiveSpreadsheet();
-    var ribTopicsSh=ribSs.getSheetByName("Topics");
-    var ribTopicsData=ribTopicsSh?ribTopicsSh.getDataRange().getValues():[];
-    var ribTopicsHdr=ribTopicsData[0]||[];
-
-    // ── FIX (bug: Quiz/Study-তে প্রশ্ন 0 দেখাতো যদিও QBank-এ ঠিক দেখাতো) ──
-    // আগে row_start/row_count Topics-এ মাত্র ১টা কলাম-জোড়া ছিল, আর নিচের লুপে
-    // একটাই shared ribIndexMap (শুধু topic_id দিয়ে key করা) Quiz→QBank→Study
-    // তিনটা শিট প্রসেস করতো। কোনো topic_id একাধিক শিটে (যেমন Quiz আর QBank দুটোতেই)
-    // থাকলে পরের শিট আগেরটার index চুপচাপ ওভাররাইট করে দিতো — ফলে Quiz browse
-    // করার সময় getQuestionsPage ভুল sheet-এর row-range Quiz ট্যাবে apply করতে
-    // যেতো (range Quiz ট্যাবের বাইরে পড়লে getRange() এরর দেয়, ক্লায়েন্টে সেটাই
-    // "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" হয়ে দেখা যায়)।
-    // এখন প্রতিটা শিটের জন্য আলাদা row_start_<sheet>/row_count_<sheet> কলাম-জোড়া
-    // রাখা হচ্ছে, তাই কোনো ওভাররাইট হয় না — একই topic_id তিন শিটেই থাকলেও
-    // প্রতিটার নিজের সঠিক row-range নিজের কলামে থাকে। ──
-    var ribColPairs={}; // sheetName -> {rsCol, rcCol}
-    for (var rp=0;rp<ribSheets.length;rp++){
-      var ribPName=ribSheets[rp].name;
-      var ribRsColName="row_start_"+ribPName.toLowerCase();
-      var ribRcColName="row_count_"+ribPName.toLowerCase();
-      var ribRsC=ribTopicsHdr.indexOf(ribRsColName), ribRcC=ribTopicsHdr.indexOf(ribRcColName);
-      if (ribTopicsSh && ribRsC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRsColName); ribRsC=ribTopicsHdr.length; ribTopicsHdr.push(ribRsColName); }
-      if (ribTopicsSh && ribRcC<0) { ribTopicsSh.getRange(1,ribTopicsHdr.length+1).setValue(ribRcColName); ribRcC=ribTopicsHdr.length; ribTopicsHdr.push(ribRcColName); }
-      ribColPairs[ribPName]={rsCol:ribRsC,rcCol:ribRcC};
-    }
-    // ⚠️ legacy generic row_start/row_count কলাম থাকলেও রেখে দেওয়া হলো (পুরনো ক্লায়েন্ট/
-    // স্ক্রিপ্ট এখনো পড়তে পারে বলে), কিন্তু নতুন লজিক এখন এগুলোর ওপর নির্ভর করে না।
-    var ribLegacyRsCol=ribTopicsHdr.indexOf("row_start"), ribLegacyRcCol=ribTopicsHdr.indexOf("row_count");
-
-    for (var rs=0;rs<ribSheets.length;rs++) {
-      var ribShName=ribSheets[rs].name;
-      var ribSh=ribSs.getSheetByName(ribShName);
-      if (!ribSh || ribSh.getLastRow()<2) continue;
-      var ribRange=ribSh.getDataRange();
-      var ribData=ribRange.getValues();
-      var ribHdr=ribData[0];
-      var ribSubCol=ribHdr.indexOf("subject_id"), ribTopCol=ribHdr.indexOf("topic_id");
-      if (ribSubCol<0) { ribResults[ribShName]="subject_id column missing — skip"; continue; }
-      // sort by subject_id, topic_id (header বাদে)
-      var ribSortCols=[{column:ribSubCol+1,ascending:true}];
-      if (ribTopCol>=0) ribSortCols.push({column:ribTopCol+1,ascending:true});
-      ribSh.getRange(2,1,ribSh.getLastRow()-1,ribSh.getLastColumn()).sort(ribSortCols);
-      // re-read after sort, build contiguous ranges per topic_id — এই শিটের নিজস্ব ম্যাপে
-      var ribIndexMap={}; // topic_id -> {start,count} — শুধু এই sheet-এর জন্য, আলাদা প্রতিবার
-      var ribData2=ribSh.getDataRange().getValues();
-      var curTopic=null, curStart=2, curCount=0;
-      for (var i5=1;i5<ribData2.length;i5++){
-        var tId=ribTopCol>=0?(ribData2[i5][ribTopCol]||"").toString():"";
-        if (tId!==curTopic) {
-          if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
-          curTopic=tId; curStart=i5+1; curCount=0;
-        }
-        curCount++;
-      }
-      if (curTopic) ribIndexMap[curTopic]={start:curStart,count:curCount};
-      ribResults[ribShName]="sorted, "+(ribData2.length-1)+" rows";
-
-      // এই শিটের row_start_<sheet>/row_count_<sheet> কলামে বসাও (topic_id ম্যাচ করে)
-      if (ribTopicsSh) {
-        var ribPair=ribColPairs[ribShName];
-        var ribTIdCol=ribTopicsHdr.indexOf("topic_id");
-        for (var t2=1;t2<ribTopicsData.length;t2++){
-          var ribTid=(ribTopicsData[t2][ribTIdCol]||"").toString();
-          var ribEntry=ribIndexMap[ribTid];
-          if (ribEntry) {
-            ribTopicsSh.getRange(t2+1,ribPair.rsCol+1).setValue(ribEntry.start);
-            ribTopicsSh.getRange(t2+1,ribPair.rcCol+1).setValue(ribEntry.count);
-            // legacy কলাম থাকলে সর্বশেষ প্রসেস হওয়া শিট দিয়ে রেফারেন্সের জন্য আপডেট (backward-compat only)
-            if (ribLegacyRsCol>=0) ribTopicsSh.getRange(t2+1,ribLegacyRsCol+1).setValue(ribEntry.start);
-            if (ribLegacyRcCol>=0) ribTopicsSh.getRange(t2+1,ribLegacyRcCol+1).setValue(ribEntry.count);
-          } else {
-            // এই sheet-এ এই topic_id-এর কোনো রো নেই — আগের স্টেল ভ্যালু মুছে দাও,
-            // নইলে পুরনো row_start_quiz স্টেল/ভুল range নিয়ে fast-path ভুলভাবে ট্রিগার হতে পারে
-            ribTopicsSh.getRange(t2+1,ribPair.rsCol+1).setValue("");
-            ribTopicsSh.getRange(t2+1,ribPair.rcCol+1).setValue("");
-          }
-        }
-      }
-    }
-    return json({status:"success",result:"success",message:"Index rebuilt (per-sheet)",details:ribResults});
+    var ribOut=runRebuildIndexCore();
+    return json({status:"success",result:"success",message:"Index rebuilt (per-sheet)",details:ribOut});
   }
 
   // ── getQuestionsPage — subject_id(+topic_id) অনুযায়ী ঠিক ৫০টা (বা limit)
@@ -1962,6 +2161,11 @@ function doGet(e) {
     }
     markTopicsDirty(dbiDirty);
     // Firebase already updated directly from app - DO NOT sync (would overwrite with array)
+
+    // ── AUTO-REINDEX hook — দেখো moveQuestions-এর একই কমেন্ট। deleteByIds
+    // এক-এক করে রো মোছে বলে row_start/row_count পুরোপুরি বাসি হয়ে যায়, তাই এখানেও দরকার। ──
+    markReindexNeeded_();
+
     return json({result:"success",deleted:deleted,sheet:shName2,examAppearancesDeleted:eaDeleted});
     });
   }
@@ -1983,7 +2187,26 @@ function doGet(e) {
     if (!driiTopicsSh) return json({status:"error",result:"error",message:"Topics sheet নেই"});
     var driiTData=driiTopicsSh.getDataRange().getValues(), driiTHdr=driiTData[0];
     var driiTIdCol=driiTHdr.indexOf("topic_id"), driiSubCol=driiTHdr.indexOf("subject_id");
-    var driiRsCol=driiTHdr.indexOf("row_start"), driiRcCol=driiTHdr.indexOf("row_count");
+
+    // sheet নাম বের করা (subject_id/topic_id-এর প্রিফিক্স থেকে) — কলাম রিজলভ
+    // করার *আগে* বের করতে হবে, কারণ row_start/row_count এখন sheet-scoped
+    var driiSheetName=driiId.indexOf("QZ")===0?"Quiz":driiId.indexOf("QB")===0?"QBank":driiId.indexOf("ST")===0?"Study":"";
+    var driiSh=driiSs.getSheetByName(driiSheetName);
+    if (!driiSh) return json({status:"error",result:"error",message:"Sheet not found for id: "+driiId});
+
+    // ── FIX (গুরুতর ডেটা-সেফটি বাগ — "ভুল রেঞ্জ ডিলিট হয়ে যেতে পারতো"):
+    // আগে এখানে জেনেরিক legacy row_start/row_count কলাম পড়া হতো, যেটাতে
+    // rebuildIndex সবসময় সবচেয়ে শেষে প্রসেস হওয়া sheet-এর (Study) row-range
+    // বসিয়ে দিতো (দেখো runRebuildIndexCore()-এর কমেন্ট) — মানে কোনো Quiz/QBank
+    // topic_id ডিলিট করতে গেলে legacy কলামে থাকা Study sheet-এর row-range
+    // ভুলবশত Quiz/QBank sheet-এ apply হয়ে সম্পূর্ণ ভুল/অসম্পর্কিত রো ডিলিট
+    // হয়ে যাওয়ার ঝুঁকি ছিল (getQuestionsPage-এ একই বাগের জন্য আগেই sheet-scoped
+    // কলাম যোগ হয়েছিল, কিন্তু এই action-এ তখন মিস হয়ে গিয়েছিল)। এখন driiSheetName
+    // অনুযায়ী সঠিক row_start_<sheet>/row_count_<sheet> কলাম পড়া হয় (per-sheet
+    // কলাম না থাকলে/পুরনো rebuildIndex চললে legacy-তে fallback করে)। ──
+    var driiSheetKey=driiSheetName.toLowerCase();
+    var driiRsCol=driiTHdr.indexOf("row_start_"+driiSheetKey), driiRcCol=driiTHdr.indexOf("row_count_"+driiSheetKey);
+    if (driiRsCol<0||driiRcCol<0) { driiRsCol=driiTHdr.indexOf("row_start"); driiRcCol=driiTHdr.indexOf("row_count"); }
     if (driiRsCol<0||driiRcCol<0) return json({status:"error",result:"error",message:"Index নেই — আগে action=rebuildIndex চালাও"});
 
     // ── কোন কোন topic-row (Topics ট্যাবে) এই delete-এ প্রভাবিত হবে, আর
@@ -2005,11 +2228,6 @@ function doGet(e) {
     var driiRangeEnd=Math.max.apply(null,driiEnds);
     var driiRangeCount=driiRangeEnd-driiRangeStart+1;
 
-    // sheet নাম বের করা (subject_id/topic_id-এর প্রিফিক্স থেকে)
-    var driiSheetName=driiId.indexOf("QZ")===0?"Quiz":driiId.indexOf("QB")===0?"QBank":driiId.indexOf("ST")===0?"Study":"";
-    var driiSh=driiSs.getSheetByName(driiSheetName);
-    if (!driiSh) return json({status:"error",result:"error",message:"Sheet not found for id: "+driiId});
-
     // ── ডিলিট করার আগে ওই রেঞ্জের সব question id ধরে রাখা (Exam_Appearances cleanup-এর জন্য) ──
     var driiHdr=driiSh.getRange(1,1,1,driiSh.getLastColumn()).getValues()[0];
     var driiIdCol=driiHdr.indexOf("id");
@@ -2030,7 +2248,8 @@ function doGet(e) {
       }
     }
 
-    // ── Topics ইনডেক্স আপডেট: মুছে-যাওয়া topic-row(গুলো) বাদ, বাকিদের row_start শিফট ──
+    // ── Topics ইনডেক্স আপডেট: মুছে-যাওয়া topic-row(গুলো) বাদ, বাকিদের row_start শিফট
+    // (এখন driiRsCol/driiRcCol উপরে sheet-scoped resolve হয়েছে বলে এই শিফটও সঠিক sheet-এ হয়) ──
     var driiRemoveTopicIds={}; driiAffectedTopicRows.forEach(function(i){ driiRemoveTopicIds[driiTData[i][driiTIdCol]]=true; });
     for (var dr=driiTData.length-1;dr>=1;dr--){
       var dTid=(driiTData[dr][driiTIdCol]||"").toString();
@@ -2057,6 +2276,13 @@ function doGet(e) {
     var driiDirty={};
     driiAffectedTopicRows.forEach(function(i){ driiDirty[(driiTData[i][driiTIdCol]||"").toString()]=1; });
     markTopicsDirty(driiDirty);
+
+    // ── AUTO-REINDEX hook (FIX "রিইনডেক্স ভুলে যাওয়া লাগে না"): manual shift
+    // উপরে শুধু এই sheet-এর row_start_<sheet> ঠিক করে — অন্য sheet-এ যদি একই
+    // topic_id-এর আলাদা row_count_<sheet> থাকে সেটা আর legacy কলাম, দুটোই পুরো
+    // reindex ছাড়া বাসি থেকে যেত। try/catch দিয়ে গার্ড করা — reindex ব্যর্থ হলেও
+    // মূল delete response আটকাবে না (পরের periodic auto-trigger-এই ঠিক হয়ে যাবে)। ──
+    markReindexNeeded_();
 
     return json({status:"success",result:"success",deleted:driiRangeCount,examAppearancesDeleted:driiEaDeleted,sheet:driiSheetName});
     });
@@ -2116,6 +2342,11 @@ function doGet(e) {
     var mqFbSynced=true;
     if (mqUpdAtCol>=0 && mqTouchedRows.length) mqFbSynced=syncToFirebase(mqShName,mqShName);
     markTopicsDirty(mqDirty);
+
+    // ── AUTO-REINDEX hook (FIX "রিইনডেক্স ভুলে যাওয়া লাগে না"): move করলে
+    // পুরনো+নতুন দুই টপিকেরই সঠিক প্রশ্ন-সংখ্যা/রেঞ্জ চাই — এখন এখানেই সাথে সাথে
+    // পুরো index রিবিল্ড হয়ে যায়, আলাদা করে rebuildIndex চালানো লাগে না। ──
+    markReindexNeeded_();
 
     return json({status:"success",result:"success",moved:mqMoved,sheet:mqShName,firebaseSynced:mqFbSynced});
     });
@@ -2192,6 +2423,9 @@ function doGet(e) {
     markTopicDirty(mtTopicId);
     markTopicDirty(mtEffectiveTopicId);
 
+    // ── AUTO-REINDEX hook — দেখো moveQuestions-এর একই কমেন্ট ──
+    markReindexNeeded_();
+
     return json({status:"success",result:"success",moved:mtMoved,sheet:mtSheetName,mergedInto:mtMergeTopicId||null,firebaseSynced:mtFbSynced});
     });
   }
@@ -2217,6 +2451,111 @@ function doGet(e) {
       gdcCount = Object.keys(gdcUniq).length;
     }
     return json({status:"success",result:"success",dirtyCount:gdcCount});
+  }
+
+  // ── getPublishStats — CDN-এ এই মুহূর্তে বাস্তবে কতগুলো প্রশ্ন/টপিক আছে তা
+  // দেখানোর জন্য (read-only) — সর্বশেষ publish-এর manifest.json সরাসরি
+  // GitHub থেকে পড়ে গুনে ফেরত দেয়, কোনো নতুন publish ট্রিগার করে না। এটাই
+  // "real-time" যতটা সম্ভব হতে পারে (CDN আসলে যা আছে ঠিক তাই দেখাবে, dirty
+  // থাকা টপিকগুলো এখনো এই সংখ্যায় যোগ হবে না যতক্ষণ না পরের Publish হয়)। ──
+  if (action==="getPublishStats") {
+    var gpsProps = PropertiesService.getScriptProperties();
+    var gpsOwner = gpsProps.getProperty("GH_OWNER");
+    var gpsRepo = gpsProps.getProperty("GH_REPO");
+    var gpsBranch = gpsProps.getProperty("GH_BRANCH") || "main";
+    var gpsToken = gpsProps.getProperty("GITHUB_WRITE_TOKEN");
+    if (!gpsOwner || !gpsRepo || !gpsToken) {
+      return json({status:"error",result:"error",message:"GitHub config (GH_OWNER/GH_REPO/GITHUB_WRITE_TOKEN) সেট করা নেই"});
+    }
+    var gpsManifestGet = ghGetFile_(gpsOwner, gpsRepo, gpsBranch, "manifest.json", gpsToken);
+    if (!gpsManifestGet.exists) {
+      return json({status:"success",result:"success",totalQuestions:0,topicCount:0,version:0,publishedAt:null,message:"এখনো কখনো Publish হয়নি"});
+    }
+    try {
+      var gpsManifest = JSON.parse(gpsManifestGet.content);
+      var gpsTopics = gpsManifest.topics || {};
+      var gpsTotalQ = 0, gpsTopicCount = 0;
+      // ── প্রতিটা topic_id-এর prefix দিয়েই কোন Sheet-এর (Quiz/QBank/Study)
+      // বোঝা যায় — publishDirtyTopics-এ ঠিক এই একই prefix-detection ব্যবহার
+      // হয় (QZ→Quiz, QB→QBank, ST→Study), তাই এখানেও সামঞ্জস্যপূর্ণ রাখা হলো। ──
+      var gpsBySheet = {
+        Quiz:  {questions:0, topics:0},
+        QBank: {questions:0, topics:0},
+        Study: {questions:0, topics:0},
+      };
+      for (var gpsT in gpsTopics) {
+        if (!gpsTopics.hasOwnProperty(gpsT)) continue;
+        var gpsCount = gpsTopics[gpsT].count || 0;
+        gpsTotalQ += gpsCount; gpsTopicCount++;
+        var gpsSheetName = gpsT.indexOf("QZ")===0 ? "Quiz" : gpsT.indexOf("QB")===0 ? "QBank" : gpsT.indexOf("ST")===0 ? "Study" : null;
+        if (gpsSheetName) { gpsBySheet[gpsSheetName].questions += gpsCount; gpsBySheet[gpsSheetName].topics++; }
+      }
+      return json({status:"success",result:"success",totalQuestions:gpsTotalQ,topicCount:gpsTopicCount,bySheet:gpsBySheet,version:gpsManifest.version||0,publishedAt:gpsManifest.publishedAt||null});
+    } catch (gpsErr) {
+      return json({status:"error",result:"error",message:"manifest.json parse ব্যর্থ: "+gpsErr});
+    }
+  }
+
+  // ── listManifestHistory — manifest.json-এর সাম্প্রতিক কয়েকটা commit (কে,
+  // কবে, কোন ভার্সন) দেখায় — Rollback করার আগে "কোনটায় ফিরবো" বেছে নেওয়ার
+  // জন্য (read-only, কিছু বদলায় না)। ──
+  if (action==="listManifestHistory") {
+    var lmhProps = PropertiesService.getScriptProperties();
+    var lmhOwner = lmhProps.getProperty("GH_OWNER"), lmhRepo = lmhProps.getProperty("GH_REPO");
+    var lmhBranch = lmhProps.getProperty("GH_BRANCH") || "main", lmhToken = lmhProps.getProperty("GITHUB_WRITE_TOKEN");
+    if (!lmhOwner || !lmhRepo || !lmhToken) {
+      return json({status:"error",result:"error",message:"GitHub config সেট করা নেই"});
+    }
+    var lmhResult = ghListFileCommits_(lmhOwner, lmhRepo, lmhBranch, "manifest.json", lmhToken, 15);
+    if (!lmhResult.success) return json({status:"error",result:"error",message:lmhResult.error});
+    // ── প্রতিটা commit-এর manifest content থেকে version/publishedAt/topicCount
+    // বের করে দেখানো হচ্ছে, যাতে UI-তে শুধু sha না, "v41 · ৩২০ Topic" এর মতো
+    // অর্থবহ কিছু দেখানো যায় — কিন্তু ১৫টা কমিটের প্রতিটার জন্য আলাদা GET কল
+    // (fetchWithRetry_-সহ) একটু ধীর হতে পারে, তাই শুধু সাম্প্রতিক কয়েকটাতেই
+    // (৮টা) সীমাবদ্ধ রাখা হলো, বাকিগুলো শুধু sha/date/message-সহ ফেরত যায় ──
+    var lmhEnriched = lmhResult.commits.map(function(c, idx){
+      if (idx >= 8) return c;
+      try {
+        var lmhFile = ghGetFile_(lmhOwner, lmhRepo, c.sha, "manifest.json", lmhToken);
+        if (lmhFile.exists) {
+          var lmhM = JSON.parse(lmhFile.content);
+          c.version = lmhM.version || 0;
+          c.topicCount = Object.keys(lmhM.topics||{}).length;
+        }
+      } catch (lmhErr) { /* এই একটা commit-এর detail না পেলেও বাকিগুলো দেখানো হবে */ }
+      return c;
+    });
+    return json({status:"success",result:"success",commits:lmhEnriched});
+  }
+
+  // ── rollbackManifest — manifest.json-কে আগের কোনো commit-এর অবস্থায়
+  // ফিরিয়ে দেয় (নতুন একটা commit হিসেবেই, history মুছে যায় না — এটাই GitHub-এ
+  // "revert" করার নিরাপদ উপায়)। ⚠️ এটা শুধু manifest.json ফেরায় — পুরনো
+  // manifest যেসব topic ফাইলের কথা বলে, সেই topic JSON ফাইলগুলো GitHub-এই
+  // থেকে যায় (কখনো ডিলিট হয় না), তাই ফেরানোর পর সেগুলোও ঠিকই সেই মুহূর্তের
+  // কনটেন্ট দেখাবে — সম্পূর্ণ নিরাপদ। withWriteLock-এর ভিতরে, audit trail-এর
+  // জন্য _SystemLogs-এ এন্ট্রি থাকে (destructive-ঘেঁষা action বলে)। ──
+  if (action==="rollbackManifest") {
+    return withWriteLock(function(){
+      var rmSha = (e.parameter.sha||"").toString().trim();
+      if (!rmSha) return json({status:"error",result:"error",message:"sha দেওয়া হয়নি"});
+      var rmProps = PropertiesService.getScriptProperties();
+      var rmOwner = rmProps.getProperty("GH_OWNER"), rmRepo = rmProps.getProperty("GH_REPO");
+      var rmBranch = rmProps.getProperty("GH_BRANCH") || "main", rmToken = rmProps.getProperty("GITHUB_WRITE_TOKEN");
+      if (!rmOwner || !rmRepo || !rmToken) {
+        return json({status:"error",result:"error",message:"GitHub config সেট করা নেই"});
+      }
+      var rmOldFile = ghGetFile_(rmOwner, rmRepo, rmSha, "manifest.json", rmToken);
+      if (!rmOldFile.exists) return json({status:"error",result:"error",message:"এই commit-এ manifest.json পাওয়া যায়নি"});
+      var rmPut = ghPutFile_(rmOwner, rmRepo, rmBranch, "manifest.json", rmOldFile.content, rmToken, "Rollback manifest.json to " + rmSha.substring(0,7));
+      if (!rmPut.success) {
+        logError_("rollbackManifest", "commit ব্যর্থ: " + rmPut.error);
+        notifyAdminPublishFailure_("Manifest rollback ব্যর্থ: " + rmPut.error);
+        return json({status:"error",result:"error",message:rmPut.error});
+      }
+      logError_("rollbackManifest", "manifest.json rolled back to " + rmSha.substring(0,7));
+      return json({status:"success",result:"success",message:"manifest.json ফিরিয়ে দেওয়া হয়েছে"});
+    });
   }
 
   // ── markAllTopicsDirty — "ধাপ ৮: পুরোটা স্কেল করা"-এর জন্য। Phase ১ deploy
@@ -2281,6 +2620,57 @@ function doGet(e) {
       coqResult[sheetName] = { total: total, blank: blank, orphan: orphan, ok: total - blank - orphan };
     });
     return json({status:"success",result:"success",bySheet:coqResult});
+  }
+
+  // ── deleteOrphanQuestions — countOrphanQuestions যা গোনে তার মধ্যে **শুধু
+  // "orphan"** ক্যাটাগরি (topic_id দেওয়া আছে কিন্তু সেই topic_id Topics
+  // reference-শিটে অস্তিত্বই নেই — পুরনো টপিক মুছে/rename হয়ে যাওয়ায় প্রশ্নটা
+  // "এতিম" হয়ে গেছে) — এটাই একমাত্র জিনিস এখানে মোছা হয়। ⚠️ "blank"
+  // ক্যাটাগরি (topic_id একদম ফাঁকা) ইচ্ছাকৃতভাবে **কখনো মোছা হয় না** — এগুলো
+  // আসল প্রশ্ন, শুধু এখনো Subject/Topic বসানো বাকি (Admin App-এর Review ট্যাবে
+  // এগুলোই ঠিক করা হয়) — bulk delete করলে ভালো প্রশ্ন হারিয়ে যাবে। sheet
+  // param না দিলে Quiz/QBank/Study তিনটাতেই চালানো হয়। withWriteLock-এর
+  // ভিতরে, প্রতিটা সফল ডিলিটের পর _SystemLogs-এ এন্ট্রি থাকে (audit trail,
+  // destructive action বলে)। ──
+  if (action==="deleteOrphanQuestions") {
+    return withWriteLock(function(){
+      var doqSs = SpreadsheetApp.getActiveSpreadsheet();
+      var doqTopicsSh = doqSs.getSheetByName("Topics");
+      var doqValidIds = {};
+      if (doqTopicsSh) {
+        var doqTData = doqTopicsSh.getDataRange().getValues(), doqTHdr = doqTData[0];
+        var doqTIdCol = doqTHdr.indexOf("topic_id");
+        if (doqTIdCol >= 0) {
+          for (var dt=1; dt<doqTData.length; dt++) {
+            var dtid = (doqTData[dt][doqTIdCol]||"").toString();
+            if (dtid) doqValidIds[dtid] = 1;
+          }
+        }
+      }
+      var doqSheets = e.parameter.sheet ? [e.parameter.sheet] : ["Quiz","QBank","Study"];
+      var doqTotalDeleted = 0;
+      var doqBySheet = {};
+      doqSheets.forEach(function(sheetName){
+        var sh = doqSs.getSheetByName(sheetName);
+        if (!sh) { doqBySheet[sheetName]=0; return; }
+        var data = sh.getDataRange().getValues(), hdr = data[0];
+        var topicIdCol = hdr.indexOf("topic_id");
+        if (topicIdCol < 0) { doqBySheet[sheetName]=0; return; }
+        var deleted = 0;
+        // নিচ থেকে উপরে ডিলিট — নাহলে deleteRow-এর পর বাকি রো-গুলোর index শিফট হয়ে যাবে
+        for (var r=data.length-1; r>=1; r--) {
+          var tid = (data[r][topicIdCol]||"").toString();
+          if (tid && !doqValidIds[tid]) {
+            sh.deleteRow(r+1);
+            deleted++;
+          }
+        }
+        doqBySheet[sheetName]=deleted;
+        doqTotalDeleted += deleted;
+      });
+      if (doqTotalDeleted>0) logError_("deleteOrphanQuestions", "Deleted "+doqTotalDeleted+" orphan rows: "+JSON.stringify(doqBySheet));
+      return json({status:"success",result:"success",deletedCount:doqTotalDeleted,bySheet:doqBySheet});
+    });
   }
 
   // ── adminNotify ──
@@ -2839,6 +3229,28 @@ function doPost(e) {
         return arr;
       }
 
+      // ── AUTO-COLUMN-CREATION (FIX: "group_heading/format_style Sheet-এ কলাম না
+      // থাকলে সাইলেন্টলি হারিয়ে যাওয়া"): bFieldMap-এ ব্যবহৃত সব কলাম-নাম নিচে তালিকা
+      // করা আছে — যেগুলো Sheet-এর header-এ এখনো নেই, সেগুলো এখানেই স্বয়ংক্রিয়ভাবে
+      // নতুন কলাম হিসেবে যোগ হয়ে যায় (header সেলে নাম বসিয়ে, in-memory bRawHdr/
+      // bColIndexByNormName চওড়া করে) — এরপর buildRowArray() ওই কলামেও ঠিকমতো
+      // লিখতে পারবে। ফলে ভবিষ্যতে নতুন ফিল্ড client থেকে পাঠালে Sheet-এ ম্যানুয়ালি
+      // কলাম বসানো লাগবে না, নিজে থেকেই প্রথম ব্যবহারেই তৈরি হয়ে যাবে। ──
+      var bExpectedCols=["id","question","option1","option2","option3","option4","correct",
+        "subject","sub_topic","topic","explanation","technique","previousexam","questiontype",
+        "timestamp","audiencetags","questionpaper","visualurl","updatedat","notfirebase",
+        "language","content","subjectid","topicid","groupid","subindex","audiencetagsids",
+        "groupheading","formatstyle","added_by"];
+      for(var eci=0; eci<bExpectedCols.length; eci++){
+        var ecName=bExpectedCols[eci];
+        if(bColIndexByNormName[bKeyNorm(ecName)]===undefined){
+          var newColIdx=bRawHdr.length;
+          bSh.getRange(1,newColIdx+1).setValue(ecName);
+          bRawHdr.push(ecName);
+          bColIndexByNormName[bKeyNorm(ecName)]=newColIdx;
+        }
+      }
+
       var bLock=LockService.getScriptLock(); bLock.waitLock(15000);
       var bAdded=0, bSkipped=0;
       var bDirtyTopics={};   // ── CDN dirty-tracking: নতুন প্রশ্নে topic_id দেওয়া
@@ -2940,6 +3352,14 @@ function doPost(e) {
               "subjectid":row.subject_id||"", "topicid":row.topic_id||"",
               "groupid":row.group_id||"",
               "subindex":row.sub_index||"", "audiencetagsids":row.audienceTagsIds||"",
+              // 🐛 ফিক্স (Single Entry > QBank > Written — "পরীক্ষার খাতা" PaperComposer):
+              // buildSheetRow() ক্লায়েন্ট থেকে group_heading ও format_style পাঠাচ্ছিল, কিন্তু
+              // এই bFieldMap-এ কোনো key-ই ছিল না — ফলে এই দুইটা মান সবসময় সাইলেন্টলি ফাঁকা
+              // যাচ্ছিল (heading/table/highlight/fillblank সবকিছুই ডাটাবেজে হারিয়ে যাচ্ছিল)।
+              // এখন mapping যোগ করা হলো, আর ওপরের AUTO-COLUMN-CREATION ব্লক নিশ্চিত করে
+              // Sheet-এ এই কলাম দুটো না থাকলেও প্রথম ব্যবহারেই নিজে থেকে তৈরি হয়ে যাবে —
+              // তাই আর কখনোই সাইলেন্টলি হারানোর ঝুঁকি নেই। ──
+              "groupheading":row.group_heading||"", "formatstyle":row.format_style||"",
               // 🆕 Added by — কোন ফিচার এই প্রশ্ন যোগ করলো (Bulk_Text/Bulk_OCR/Single_OCR/
               // Single_Text ইত্যাদি, ফ্রন্টএন্ড params.source দিয়ে পাঠায়)। row.editId থাকলে
               // (মানে এটা নতুন ইনসার্ট না, বিদ্যমান রো-র উপর edit/resubmit — যেমন ArchivePage)
@@ -3262,5 +3682,5 @@ function pullFirebaseToSheet_(sheetName) {
   if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   if (rows.length > 0) sh.getRange(2, 1, rows.length, headerRow.length).setValues(rows);
 
-  Logger.log("✅ " + sheetName + " ব্যাকআপ সম্পন্ন — " + rows.length + " রো (Firebase → Sheet, read-only)।");
+  Logger.log("✅ " + sheetName + " ব্যাকআপ  সম্পন্ন — " + rows.length + " রো (Firebase → Sheet, read-only)।");
 }
