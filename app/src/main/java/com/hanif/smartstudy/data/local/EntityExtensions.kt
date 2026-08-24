@@ -146,6 +146,52 @@ fun ExamAppearanceRef.toEntity() = ExamAppearanceEntity(
     year          = year ?: ""
 )
 
+// ── Room Entity → QuizItem/QBankItem/StudyItem (Speed Plan Task 3.5) ──────────
+// ⚠️ QuestionEntity-তে groupHeading/formatStyle/important/updatedAt/newId কলাম
+// নেই (Room schema-তে কখনো যোগ করা হয়নি) — তাই এই তিনটা reverse-conversion-এ
+// সেগুলো null/id-ই বসে। প্রভাব: multi-part গ্রুপ-হেডিং রেন্ডারিং ও QBank-এর
+// ম্যানুয়াল "important" ফ্ল্যাগ — getContent() (Search/Weak-topics/Random-quiz)
+// দিয়ে আসা প্রশ্নে এই দুইটা ফিচার কাজ নাও করতে পারে, কিন্তু groupId/subIndex
+// (যেটার ওপর গ্রুপিং লজিকের মূল অংশ নির্ভর করে) ঠিকই থাকে। সরাসরি topic-open
+// (cacheNextTopicBatch) পাথে এই সমস্যা নেই, কারণ সেটা সরাসরি CDN JSON থেকে
+// QuizItem/QBankItem/StudyItem পার্স করে, Room round-trip করে না।
+
+fun QuestionEntity.toQuizItem() = QuizItem(
+    id = fbKey, newId = fbKey, subject = subject, subTopic = subTopic, question = question,
+    optionA = optionA, optionB = optionB, optionC = optionC, optionD = optionD,
+    answer = answer, explanation = explanation,
+    explanationVisibility = if (explanationIsPublic) "public" else "private",
+    questionType = questionType, technique = technique, audienceTags = audienceTags,
+    imageUrl = imageUrl, visualUrl = visualUrl,
+    subjectId = subjectId, topicId = topicId, groupId = groupId,
+    subIndex = if (subIndex != 0) subIndex.toString() else "",
+    reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
+)
+
+fun QuestionEntity.toQBankItem() = QBankItem(
+    id = fbKey, newId = fbKey, subject = subject, subTopic = subTopic, question = question,
+    optionA = optionA, optionB = optionB, optionC = optionC, optionD = optionD,
+    answer = answer, explanation = explanation,
+    explanationVisibility = if (explanationIsPublic) "public" else "private",
+    technique = technique, questionType = questionType, audienceTags = audienceTags,
+    year = year, examName = examName, imageUrl = imageUrl, visualUrl = visualUrl,
+    questionPaperUrls = questionPaperUrls,
+    subjectId = subjectId, topicId = topicId, subtopicId = subtopicId, groupId = groupId,
+    subIndex = if (subIndex != 0) subIndex.toString() else "",
+    reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
+)
+
+fun QuestionEntity.toStudyItem() = StudyItem(
+    id = fbKey, newId = fbKey, subject = subject, subTopic = subTopic, question = question,
+    answer = answer, correct = answer, explanation = explanation,
+    explanationVisibility = if (explanationIsPublic) "public" else "private",
+    technique = technique, questionType = questionType, audienceTags = audienceTags,
+    visualUrl = visualUrl,
+    subjectId = subjectId, topicId = topicId, groupId = groupId,
+    subIndex = if (subIndex != 0) subIndex.toString() else "",
+    reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
+)
+
 // ── Room Entity → QuestionItem (domain model) ─────────────────────────────────
 
 fun QuestionEntity.toQuestionItem() = QuestionItem(
