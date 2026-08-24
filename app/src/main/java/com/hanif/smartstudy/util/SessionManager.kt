@@ -88,6 +88,19 @@ class SessionManager(private val context: Context) {
         // মাস্টার টগলের পেছনে — ডিফল্ট বন্ধ (আগের UI-ই দেখা যাবে), Settings থেকে অন
         // করলে সব একসাথে চালু হয়। দেখো getSmartTypingEnabled()/setSmartTypingEnabled()।
         val KEY_SMART_TYPING_ON = booleanPreferencesKey("smart_typing_enabled")
+
+        // ── FIX (Speed Plan Task 4): "Unused feature hold rakhar jonno Menu toggle" —
+        // Challenge Zone (⚔️ চ্যালেঞ্জ + 🏆 চ্যাম্পিয়নশিপ/WeekendBattle একই বটম-ট্যাবে,
+        // দেখো MainScreen.kt BottomTab.CHALLENGE), Study Buddy, আর Typing Race
+        // (TypingPracticeScreen-এর ভিতরের "রেস" বাটন) — একা ইউজার হলে এগুলো
+        // ব্যবহার না-ও হতে পারে, কিন্তু ভবিষ্যতে দরকার হতে পারে বলে কোড মুছে ফেলা
+        // হয়নি। এই ৩টা টগল দিয়ে হোল্ড/আনহোল্ড করা যায় — ডিফল্ট **বন্ধ** (single-user
+        // প্রেক্ষাপটে কম battery/network/UI-clutter)। বন্ধ থাকলে সংশ্লিষ্ট নেভিগেশন
+        // entry point-ই দেখা যায় না, ফলে সেই স্ক্রিনের ViewModel/listener কখনো
+        // তৈরিই হয় না (Compose-এর lazy viewModel() creation-এর কারণে)।
+        val KEY_CHALLENGES_ENABLED   = booleanPreferencesKey("live_feature_challenges_enabled")
+        val KEY_BUDDY_ENABLED        = booleanPreferencesKey("live_feature_buddy_enabled")
+        val KEY_TYPING_RACE_ENABLED  = booleanPreferencesKey("live_feature_typing_race_enabled")
         
         // Reminder Keys (Updated for DataStore Consistency)
         val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
@@ -265,6 +278,28 @@ class SessionManager(private val context: Context) {
 
     suspend fun setSmartTypingEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_SMART_TYPING_ON] = on }
+    }
+
+    // ── Speed Plan Task 4: লাইভ ফিচার হোল্ড/আনহোল্ড টগল — ডিফল্ট false (হোল্ড করা) ──
+    fun getChallengesEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_CHALLENGES_ENABLED] ?: false
+    }
+    suspend fun setChallengesEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_CHALLENGES_ENABLED] = on }
+    }
+
+    fun getBuddyEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_BUDDY_ENABLED] ?: false
+    }
+    suspend fun setBuddyEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_BUDDY_ENABLED] = on }
+    }
+
+    fun getTypingRaceEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_RACE_ENABLED] ?: false
+    }
+    suspend fun setTypingRaceEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_TYPING_RACE_ENABLED] = on }
     }
 
     // ── Phase ৩: Roadmap Wizard ──
