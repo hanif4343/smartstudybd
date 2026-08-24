@@ -3682,5 +3682,5 @@ function pullFirebaseToSheet_(sheetName) {
   if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
   if (rows.length > 0) sh.getRange(2, 1, rows.length, headerRow.length).setValues(rows);
 
-  Logger.log("✅ " + sheetName + " ব্যাকআপ  সম্পন্ন — " + rows.length + " রো (Firebase → Sheet, read-only)।");
+  Logger.log("✅ " + sheetName + " ব্যাকআপ সম্পন্ন — " + rows.length + " রো (Firebase → Sheet, read-only)।");
 }
