@@ -214,6 +214,66 @@ fun SettingsScreen(
                 }
             }
 
+            // ── লাইভ ফিচার হোল্ড/আনহোল্ড (Speed Plan Task 4) — একা ইউজার হলে
+            // Challenge/WeekendBattle/Buddy/TypingRace ফিচার হয়তো ব্যবহার হয় না,
+            // কিন্তু কোড মুছে ফেলা হয়নি — এখান থেকে হোল্ড করে রাখা যায়, পরে দরকার
+            // হলে আবার অন করলেই আগের মতো কাজ করবে। Off থাকলে সংশ্লিষ্ট মেনু/ট্যাব
+            // entry point-ই দেখা যায় না ──
+            SettingsCard("🎮 লাইভ ফিচার (হোল্ড/আনহোল্ড)") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        "ব্যবহার না করলে বন্ধ রাখুন — battery/network বাঁচবে, মেনুও পরিষ্কার থাকবে",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("⚔️ চ্যালেঞ্জ ও উইকেন্ড ব্যাটল", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (state.challengesEnabled) "চালু আছে" else "বন্ধ (হোল্ড করা)",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(checked = state.challengesEnabled, onCheckedChange = { vm.setChallengesEnabled(it) })
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("🤝 Study Buddy", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (state.buddyEnabled) "চালু আছে" else "বন্ধ (হোল্ড করা)",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(checked = state.buddyEnabled, onCheckedChange = { vm.setBuddyEnabled(it) })
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("🏁 Typing Race", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (state.typingRaceEnabled) "চালু আছে" else "বন্ধ (হোল্ড করা)",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(checked = state.typingRaceEnabled, onCheckedChange = { vm.setTypingRaceEnabled(it) })
+                    }
+                }
+            }
+
             // ── Typing Settings (Phase ১: Neonlipi-স্টাইল কাস্টমাইজেশন) ──
             SettingsCard("⌨️ টাইপিং সেটিংস") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
