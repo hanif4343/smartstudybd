@@ -177,6 +177,11 @@ data class MenuUiState(
     val smartTypingEnabled : Boolean         = false,
     val typingTargetWpm    : Int             = 40,
     val typingSoundPreset  : String          = "off",   // "off" | "soft" | "mechanical"
+
+    // ── লাইভ ফিচার হোল্ড/আনহোল্ড (SettingsScreen "🎮 লাইভ ফিচার") — Speed Plan Task 4 ──
+    val challengesEnabled  : Boolean         = false,
+    val buddyEnabled       : Boolean         = false,
+    val typingRaceEnabled  : Boolean         = false,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -350,6 +355,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val typingTargetWpm = session.getTypingTargetWpm()
             val typingSoundPr   = session.getTypingSoundPreset()
 
+            // ── Speed Plan Task 4: লাইভ ফিচার টগল ──
+            val challengesOn  = session.getChallengesEnabled()
+            val buddyOn       = session.getBuddyEnabled()
+            val typingRaceOn  = session.getTypingRaceEnabled()
+
             val aiKeys = session.getAiApiKeys()
 
             val weakTopics = prefs.all.entries
@@ -410,7 +420,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     geminiApiKey   = aiKeys.gemini,
                     smartTypingEnabled = smartTypingOn,
                     typingTargetWpm    = typingTargetWpm,
-                    typingSoundPreset  = typingSoundPr
+                    typingSoundPreset  = typingSoundPr,
+                    challengesEnabled  = challengesOn,
+                    buddyEnabled       = buddyOn,
+                    typingRaceEnabled  = typingRaceOn
                 )
             }
 
@@ -532,6 +545,30 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setSmartTypingEnabled(on)
             _state.update { it.copy(smartTypingEnabled = on) }
+        }
+    }
+
+    // ── লাইভ ফিচার হোল্ড/আনহোল্ড (Speed Plan Task 4) — off করলে সংশ্লিষ্ট নেভিগেশন
+    // entry point (bottom-tab/MenuRow/বাটন) লুকানো থাকে, ফলে সেই স্ক্রিনের
+    // ViewModel/Firebase listener কখনো তৈরিই হয় না (Compose viewModel() lazy) ──
+    fun setChallengesEnabled(on: Boolean) {
+        viewModelScope.launch {
+            session.setChallengesEnabled(on)
+            _state.update { it.copy(challengesEnabled = on) }
+        }
+    }
+
+    fun setBuddyEnabled(on: Boolean) {
+        viewModelScope.launch {
+            session.setBuddyEnabled(on)
+            _state.update { it.copy(buddyEnabled = on) }
+        }
+    }
+
+    fun setTypingRaceEnabled(on: Boolean) {
+        viewModelScope.launch {
+            session.setTypingRaceEnabled(on)
+            _state.update { it.copy(typingRaceEnabled = on) }
         }
     }
 
