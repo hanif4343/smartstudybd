@@ -31,9 +31,17 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
         private const val WORK_NAME    = "notification_poll"
         private const val CHANNEL_FCM  = "smart_study_channel"
         private const val TAG          = "NotifPoll"
+        private const val PRUNE_OLDER_THAN_MS = 7L * 24 * 60 * 60 * 1000 // ৭ দিনের পুরনো read নোটিফিকেশন prune
 
+        // ── FIX (Speed Plan Task 5): এটা FCM push-এর *safety-net* মাত্র (Doze
+        // mode/battery-optimization/OEM (Xiaomi-Huawei ধরনের) aggressive kill-এ
+        // মাঝেমধ্যে FCM মিস হতে পারে বলেই এই backup poller পুরোপুরি বাদ দেওয়া হয়নি)
+        // — আসল ডেলিভারি SmartStudyFirebaseService (FCM onMessageReceived) দিয়েই
+        // instant হয়। তাই আগের ১৫-মিনিট (দিনে ৯৬ বার/ইউজার) অতিরিক্ত ঘনঘন ছিল —
+        // এখন ৬০ মিনিট (দিনে ২৪ বার), bandwidth ৪ গুণ কমে যায়, তবু কয়েক ঘণ্টার
+        // বেশি একটা notification miss থাকবে না।
         fun schedule(context: Context) {
-            val req = PeriodicWorkRequestBuilder<NotificationPollWorker>(15, TimeUnit.MINUTES)
+            val req = PeriodicWorkRequestBuilder<NotificationPollWorker>(60, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -42,7 +50,7 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE, // ⚠️ আগে KEEP ছিল — interval বদলালেও পুরনো ইনস্টলে কখনো নতুন ৬০-মিনিট শিডিউল প্রয়োগ হতো না, UPDATE দিয়ে বিদ্যমান ডিভাইসেও নতুন interval বসবে
                 req
             )
         }
@@ -126,6 +134,13 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
                 }
             }
 
+            // ── FIX (Speed Plan Task 5): "Notifications/{phone} node কখনো prune
+            // হয় না, সময়ের সাথে বড়ই হতে থাকে" — read=true হয়ে যাওয়া আর
+            // PRUNE_OLDER_THAN_MS-এর চেয়ে পুরনো এন্ট্রি এখানেই ডিলিট করে দেওয়া হয়,
+            // তাই প্রতিবার poll-এ যে payload ডাউনলোড হয় সেটা bounded থাকে, সময়ের
+            // সাথে না বেড়ে ──
+            pruneOldReadNotifications(obj, firebaseBase, phone, fbAuth)
+
             session.setLastNotifCheck(now)
             Log.d(TAG, "Poll done for $phone")
         } catch (e: Exception) {
@@ -133,6 +148,30 @@ class NotificationPollWorker(appContext: Context, params: WorkerParameters)
         }
 
         Result.success()
+    }
+
+    /** read=true + PRUNE_OLDER_THAN_MS-এর চেয়ে পুরনো এন্ট্রি ডিলিট — node bounded রাখতে */
+    private fun pruneOldReadNotifications(obj: JsonObject, base: String, phone: String, auth: String) {
+        val cutoff = System.currentTimeMillis() - PRUNE_OLDER_THAN_MS
+        obj.entrySet().forEach { (key, value) ->
+            if (!value.isJsonObject) return@forEach
+            val notif = value.asJsonObject
+            if (notif.get("read")?.asBoolean != true) return@forEach // অপঠিত এন্ট্রি কখনো prune না
+            val keyTime = key.replace("notif_", "").toLongOrNull() ?: 0L
+            val notifTime = if (keyTime > 0) keyTime else {
+                notif.get("time")?.asString?.let {
+                    try { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).parse(it)?.time } catch (e: Exception) { null }
+                } ?: 0L
+            }
+            if (notifTime in 1 until cutoff) {
+                try {
+                    val url = "$base/Notifications/$phone/$key.json$auth"
+                    client.newCall(Request.Builder().url(url).delete().build()).execute().close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "prune $key failed: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun showLocalNotification(title: String, body: String, extras: Map<String, String> = emptyMap()) {
