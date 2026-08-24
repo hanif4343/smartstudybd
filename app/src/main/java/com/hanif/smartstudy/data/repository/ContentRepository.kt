@@ -44,9 +44,6 @@ class ContentRepository(private val context: Context) {
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
         @Volatile private var _memCache: AppContent? = null
-        @Volatile private var _lastBgRefreshAt: Long = 0L
-        private val mutex = Mutex()
-        private const val BG_REFRESH_MIN_GAP_MS = 15 * 60_000L // ১৫ মিনিটে একবারের বেশি Firebase hit না করার জন্য (আগে 60_000L ছিল, এবং callback থাকলে এই গ্যাপটাই বাইপাস হয়ে যেত — এটাই মূল bandwidth সমস্যা ছিল)
         fun getMemCache(): AppContent? = _memCache
         fun clearMemCache() { _memCache = null }
 
@@ -609,159 +606,44 @@ class ContentRepository(private val context: Context) {
         }
     }
 
-    // ── Delta/Incremental sync ──────────────────────────────────────────────────
-    // meta/updatedAt বেড়েছে মানে কোথাও কিছু বদলেছে — কিন্তু সেটা ধরতে পুরো ১০ হাজার
-    // প্রশ্ন আবার ডাউনলোড করার দরকার নেই। এখানে শুধু "updatedAt > lastSync" এমন row
-    // গুলো আনা হয় (delta), আর সেগুলো দিয়ে existing cache/Room patch করা হয়।
-    // মাঝে মাঝে (FULL_RESYNC_INTERVAL_MS পার হলে) পুরো refetch হয় — যাতে কেউ প্রশ্ন
-    // মুছে ফেললে (delta query যেটা ধরতে পারে না) সেটাও সব ডিভাইসে ঠিক হয়ে যায়।
-    private suspend fun applyIncrementalOrFullSync(
-        cached: AppContent,
-        remoteUpdatedAt: Long,
-        onBackgroundUpdate: ((AppContent) -> Unit)?
-    ) {
-        val lastFullSync = cache.getLastFullSync()
-        val now = System.currentTimeMillis()
-        val needsFullResync = lastFullSync == 0L || (now - lastFullSync) > ContentCache.FULL_RESYNC_INTERVAL_MS
-
-        if (needsFullResync) {
-            Log.d("Repo", "Periodic full resync due (deletion/edge-case reconcile)")
-            when (val fresh = ContentFetchService.fetchAllContent(context)) {
-                is ContentResult.Success -> {
-                    val toSave = fresh.data.copy(remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now)
-                    _memCache = toSave
-                    cache.saveContent(toSave)
-                    cache.markFullSyncDone(toSave.fetchedAt)
-                    syncToRoom(toSave)
-                    onBackgroundUpdate?.invoke(toSave)
-                }
-                is ContentResult.Error -> Log.w("Repo", "Full resync failed: ${fresh.message}")
-            }
-            return
-        }
-
-        val sinceQuiz  = (cache.getQuizLastSync()  - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-        val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-        val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-
-        when (val delta = ContentFetchService.fetchIncrementalContent(context, sinceQuiz, sinceQBank, sinceStudy)) {
-            is ContentResult.Success -> {
-                val d = delta.data
-                val hasQuestionChanges = d.quiz.isNotEmpty() || d.qbank.isNotEmpty() || d.study.isNotEmpty()
-                Log.d("Repo", "Delta sync: quiz+${d.quiz.size} qbank+${d.qbank.size} study+${d.study.size}")
-
-                val merged = cached.copy(
-                    quiz          = mergeById(cached.quiz,  d.quiz)  { it.id },
-                    qbank         = mergeById(cached.qbank, d.qbank) { it.id },
-                    study         = mergeById(cached.study, d.study) { it.id },
-                    subjectOrder  = d.subjectOrder,
-                    subTopicOrder = d.subTopicOrder,
-                    modelTests    = d.modelTests,
-                    fetchedAt     = now,
-                    remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
-                )
-                _memCache = merged
-                cache.saveContent(merged)
-                // পরের delta query যাতে একই পুরনো since দিয়ে না চলে — checkpoint সবসময় এগিয়ে রাখি
-                cache.setSyncCheckpoints(now, now, now)
-
-                if (hasQuestionChanges) {
-                    // Room-এ শুধু বদলানো/নতুন row গুলোই upsert করি — পুরো ১০ হাজার row আবার লেখার দরকার নেই
-                    syncToRoom(AppContent(quiz = d.quiz, qbank = d.qbank, study = d.study))
-                }
-                onBackgroundUpdate?.invoke(merged)
-            }
-            is ContentResult.Error -> Log.w("Repo", "Delta sync failed: ${delta.message}")
-        }
-    }
-
-    /** existing list-এ changed/new item গুলো id দিয়ে merge করে — id মিললে replace, না মিললে যোগ */
-    private fun <T> mergeById(existing: List<T>, changed: List<T>, idOf: (T) -> String?): List<T> {
-        if (changed.isEmpty()) return existing
-        val map = LinkedHashMap<String, T>()
-        existing.forEach { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
-        changed.forEach  { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
-        return map.values.toList()
-    }
+    // ── FIX (Speed Plan Task 3.5): আগে এখানে applyIncrementalOrFullSync()/mergeById()
+    // ফাংশন ছিল — GAS delta/full-resync লজিক, শুধু getContent()-এর পুরনো
+    // background-refresh পাথ থেকেই কল হতো। getContent() এখন Room-only (উপরে দেখো),
+    // এই ফাংশনগুলোর আর কোনো caller নেই বলে সরিয়ে ফেলা হলো (dead code, GAS
+    // fetchAllContent/fetchIncrementalContent রেফারেন্স করত যেটা "কখনো GAS read
+    // না" নিয়মের সাথে সাংঘর্ষিক ছিল)।
 
     // ── Stale-While-Revalidate ─────────────────────────────────────────────────
-    // Cache থাকলে সাথে সাথে return, background এ Firebase থেকে fresh data আনো।
-    // Callback দিয়ে নতুন data এলে ViewModel update করতে পারবে।
+    // FIX (Speed Plan Task 3.5, "Room a o same korbe — topic by topic"):
+    // আগে এই ফাংশন প্রথমবার GAS দিয়ে ~১৪,০০০ রো (Quiz+QBank+Study পুরো sheet)
+    // একবারে টেনে আনত, তারপর ডিস্ক/মেমরি-cache করত। এখন সম্পূর্ণ ভিন্ন মডেল —
+    // GAS/CDN-এ কোনো "bulk fetch" নেই, শুধু Room-এ **এখন পর্যন্ত যতটুকু cache
+    // হয়েছে** (ইউজার যেসব topic ভিজিট করেছে, cacheNextTopicBatch() দিয়ে CDN
+    // থেকে ধীরে ধীরে জমা হয়েছে) সেটাই রিটার্ন করে। ব্লকিং নেই, নেটওয়ার্ক কল নেই —
+    // Room read সবসময় instant।
+    //
+    // ⚠️ Trade-off (ইচ্ছাকৃত, ব্যবহারকারীর সিদ্ধান্ত অনুযায়ী): Search/Weak-topics/
+    // Random-quiz-এর মতো ফিচার যেগুলো "সব প্রশ্ন" আশা করে, সেগুলো এখন শুধু
+    // এখনো-cache-হওয়া topic-গুলোর প্রশ্নই দেখবে — নতুন install-এ শুরুতে খালি/কম
+    // থাকবে, ইউজার যত বেশি টপিক ব্রাউজ করবে তত সম্পূর্ণ হতে থাকবে। এটা প্রথম
+    // দেখায় "silent incomplete result" মনে হতে পারে বলেই এই ট্রেড-অফটা এখানে
+    // স্পষ্ট করে লেখা হলো — কিন্তু এটাই ইচ্ছাকৃত সিদ্ধান্ত: আগেভাগে সব একসাথে
+    // আনলে app স্লো হয়ে যেত, যেটা এড়ানোর জন্যই পুরো এই মাইগ্রেশন।
+    //
+    // `forceRefresh`/`onBackgroundUpdate` প্যারামিটার দুটো signature-compatibility-র
+    // জন্য রাখা হয়েছে (caller-দের কোড না বদলাতে) — কিন্তু এখন আর কোনো effect নেই,
+    // কারণ background network refresh-এর ধারণাটাই আর নেই (Room read synchronous)।
     suspend fun getContent(
         forceRefresh: Boolean = false,
         onBackgroundUpdate: ((AppContent) -> Unit)? = null
-    ): DataState<AppContent> {
-
-        // ── Step 1: Cache থেকে instant data ──────────────────────────────
-        val cached = _memCache?.takeIf { !it.isEmpty() }
-            ?: cache.loadContent()?.takeIf { !it.isEmpty() }
-
-        if (cached != null && !forceRefresh) {
-            _memCache = cached
-            Log.d("Repo", "Cache hit: quiz=${cached.quiz.size} — background refresh শুরু")
-
-            // ── Step 2: Background এ Firebase check ───────────────────────
-            // FIX (মূল bandwidth bug): আগে শর্ত ছিল
-            //   (onBackgroundUpdate != null || now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS)
-            // — মানে callback দেওয়া থাকলে (Home/Quiz screen থেকে সবসময় দেওয়া হয়) গ্যাপ চেকটাই
-            // বাইপাস হয়ে যেত, আর প্রতিবার getContent() কল হলেই (স্ক্রিন খোলা, subject বদলানো,
-            // ট্যাব সুইচ করা ইত্যাদি) পুরো Quiz+QBank+Study আবার ডাউনলোড হতো। এখন গ্যাপ সবসময়
-            // মানা হয়, callback থাকুক বা না থাকুক। এছাড়া full fetchAllContent() করার আগে
-            // ছোট "/meta/updatedAt" চেক করা হয় — সার্ভারে আসলে নতুন কিছু না থাকলে পুরো
-            // কনটেন্ট আবার টানা হয় না।
-            val now = System.currentTimeMillis()
-            if (isOnline() && now - _lastBgRefreshAt > BG_REFRESH_MIN_GAP_MS) {
-                _lastBgRefreshAt = now
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt(context)
-                        val serverHasNewer = remoteUpdatedAt == 0L || remoteUpdatedAt > cached.remoteUpdatedAt
-                        if (!serverHasNewer) {
-                            Log.d("Repo", "Background: meta unchanged, skipping refetch")
-                            return@launch
-                        }
-                        applyIncrementalOrFullSync(cached, remoteUpdatedAt, onBackgroundUpdate)
-                    } catch (e: Exception) {
-                        Log.e("Repo", "Background refresh error: ${e.message}")
-                    }
-                }
-            }
-
-            return DataState.Success(cached, fromCache = true)
-        }
-
-        // ── Step 3: Cache নেই — Offline check ────────────────────────────
-        if (!isOnline()) {
-            return DataState.Error("ইন্টারনেট সংযোগ নেই এবং কোনো cache নেই")
-        }
-
-        // ── Step 4: প্রথমবার — Firebase থেকে fetch (mutex দিয়ে একবারই) ──
-        return mutex.withLock {
-            // Double check — অন্য coroutine এর মধ্যে fetch হয়ে গেছে কিনা
-            _memCache?.takeIf { !it.isEmpty() }?.let {
-                return@withLock DataState.Success(it, fromCache = true)
-            }
-
-            Log.d("Repo", "First load: Firebase থেকে fetch করছি...")
-            when (val result = ContentFetchService.fetchAllContent(context)) {
-                is ContentResult.Success -> {
-                    Log.d("Repo", "Firebase OK: quiz=${result.data.quiz.size} study=${result.data.study.size} qbank=${result.data.qbank.size}")
-                    _memCache = result.data
-                    cache.saveContent(result.data)
-                    // পুরো fetch সফল — এখন থেকে পরের sync গুলো delta/incremental হবে,
-                    // তাই checkpoint "এখন" এ সেট করে রাখি।
-                    cache.markFullSyncDone(result.data.fetchedAt)
-                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        syncToRoom(result.data)
-                    }
-                    DataState.Success(result.data)
-                }
-                is ContentResult.Error -> {
-                    Log.e("Repo", "Firebase error: ${result.message}")
-                    DataState.Error(result.message)
-                }
-            }
-        }
+    ): DataState<AppContent> = withContext(Dispatchers.IO) {
+        val quiz  = dao.getAll("QUIZ").map  { it.toQuizItem() }
+        val qbank = dao.getAll("QBANK").map { it.toQBankItem() }
+        val study = dao.getAll("STUDY").map { it.toStudyItem() }
+        val now = System.currentTimeMillis()
+        val content = AppContent(quiz = quiz, qbank = qbank, study = study, fetchedAt = now, remoteUpdatedAt = now)
+        _memCache = content
+        DataState.Success(content, fromCache = true)
     }
 
     fun getXpInfo(): XpInfo {
