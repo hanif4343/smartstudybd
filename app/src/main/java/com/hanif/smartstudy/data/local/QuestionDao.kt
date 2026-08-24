@@ -15,6 +15,13 @@ interface QuestionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(question: QuestionEntity)
 
+    // ── FIX (Speed Plan Task 3.5): "getContent() progressive হবে" — এখন পর্যন্ত
+    // Room-এ যতটুকু cache হয়েছে (যেসব topic ইউজার ভিজিট করেছে) তার সবটা একসাথে —
+    // পুরো sheet না, শুধু যা আছে তাই। CDN থেকে নতুন topic যোগ হতে থাকলে এই লিস্টও
+    // ধীরে ধীরে বড় হবে, কোনো bulk GAS/CDN fetch ছাড়াই।
+    @Query("SELECT * FROM questions WHERE sheet = :sheet")
+    suspend fun getAll(sheet: String): List<QuestionEntity>
+
     // ── Subject list (distinct) ───────────────────────────────────────────────
     @Query("SELECT DISTINCT subject FROM questions WHERE sheet = :sheet AND subject != '' ORDER BY subject")
     suspend fun getSubjects(sheet: String): List<String>
