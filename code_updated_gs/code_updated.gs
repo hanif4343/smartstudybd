@@ -354,12 +354,34 @@ function doPublish_() {
     notifyAdminPublishFailure_(results.failed + "টা Topic publish হতে ব্যর্থ হয়েছে (মোট " + results.published + "টা সফল)। বিস্তারিত _SystemLogs শিটে।");
   }
 
-  // ── Reference ডেটা (Subjects/Topics তালিকা) — প্রতিবার publish-এ রিফ্রেশ,
-  // এটা ছোট ডেটা বলে আলাদা dirty-tracking না করে সবসময় আপডেট করাই সহজ ──
+  // ── Reference ডেটা — প্রতিবার publish-এ রিফ্রেশ, এটা ছোট ডেটা বলে আলাদা
+  // dirty-tracking না করে সবসময় আপডেট করাই সহজ।
+  // FIX (Speed Plan Task 2): আগে শুধু subjects.json/topics.json publish হতো।
+  // App-এর read path পুরোপুরি CDN-only করার প্ল্যানে QBank-এর পদবী/প্রতিষ্ঠান/
+  // সাল-ভিত্তিক ব্রাউজ ফিচারও (এখন পর্যন্ত partial-Room-sync-নির্ভর) CDN থেকে
+  // চলার কথা — তাই Tags/Posts/Institutions/Exam_Appearances ও এখন publish হচ্ছে।
+  // (Headings শিট শুধু admin-এর নিজের documentation, CDN-এ দরকার নেই বলে বাদ।) ──
   if (results.published > 0) {
     try {
       ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/subjects.json", JSON.stringify(sheetToJsonArray_(subjectsSh)), ghToken, "Update reference/subjects.json");
       ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/topics.json", JSON.stringify(sheetToJsonArray_(topicsSh)), ghToken, "Update reference/topics.json");
+
+      var tagsSh = ss.getSheetByName("Tags");
+      if (tagsSh) {
+        ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/tags.json", JSON.stringify(sheetToJsonArray_(tagsSh)), ghToken, "Update reference/tags.json");
+      }
+      var postsSh = ss.getSheetByName("Posts");
+      if (postsSh) {
+        ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/posts.json", JSON.stringify(sheetToJsonArray_(postsSh)), ghToken, "Update reference/posts.json");
+      }
+      var institutionsSh = ss.getSheetByName("Institutions");
+      if (institutionsSh) {
+        ghPutFile_(ghOwner, ghRepo, ghBranch, "reference/institutions.json", JSON.stringify(sheetToJsonArray_(institutionsSh)), ghToken, "Update reference/institutions.json");
+      }
+      var examAppearancesSh = ss.getSheetByName("Exam_Appearances");
+      if (examAppearancesSh) {
+        ghPutFile_(ghOwner, ghRepo, ghBranch, "exam-appearances.json", JSON.stringify(sheetToJsonArray_(examAppearancesSh)), ghToken, "Update exam-appearances.json");
+      }
     } catch (refErr) {
       Logger.log("Reference data publish error (non-fatal): " + refErr);
     }
@@ -376,6 +398,21 @@ function doPublish_() {
     sanityWarning = "⚠️ Sheet-এ মোট " + totalInSheets + "টি প্রশ্ন, কিন্তু manifest-এ মোট " + totalInManifest +
       "টি — অমিল থাকতে পারে কোনো টপিক এখনো কখনো publish হয়নি বলে (স্বাভাবিক, প্রথমবার সব dirty মার্ক করলে ঠিক হয়ে যাবে), অথবা কোনো bug-এর ইঙ্গিত।";
   }
+
+  // ── FIX (Speed Plan Task 2): প্রতিটা subject-এর মোট প্রশ্নসংখ্যা manifest-এই
+  // আগে থেকে যোগ করে রাখা হচ্ছে (topicsMap দিয়ে প্রতিটা topic কোন subject-এর,
+  // সেটা রিজলভ করে count যোগ করে) — যাতে App-এ Subject list খোলার সময় প্রতিটা
+  // topic আলাদা করে ডাউনলোড না করেই, শুধু manifest থেকেই সঠিক "মোট প্রশ্ন"
+  // instant দেখানো যায় (আগে এই সংখ্যা locally hardcoded 0 রাখা হতো)। ──
+  var subjectTotals = {};
+  for (var stid in manifest.topics) {
+    if (!manifest.topics.hasOwnProperty(stid)) continue;
+    var stMeta = topicsMap[stid];
+    var stSubjectId = stMeta ? stMeta.subjectId : null;
+    if (!stSubjectId) continue;
+    subjectTotals[stSubjectId] = (subjectTotals[stSubjectId] || 0) + (manifest.topics[stid].count || 0);
+  }
+  manifest.subjectTotals = subjectTotals;
 
   // ── manifest.json commit (অন্তত ১টা সফল হলেই) ──
   if (results.published > 0) {
@@ -421,14 +458,36 @@ function doPublish_() {
   };
 }
 
-/** সময়-ভিত্তিক trigger থেকে কল করার জন্য (Apps Script এডিটর → Triggers →
- *  Add Trigger → publishScheduled → Time-driven → Day timer)। manual
- *  "Publish Now" ছাড়াও safety-net হিসেবে দৈনিক একবার চালানো যায়, যাতে
- *  ভুলে Publish Now চাপতে ভুলে গেলেও দিনে একবার ঠিক হয়ে যায়। */
+/** সময়-ভিত্তিক trigger থেকে কল করার জন্য — publishDirtyTopics() নিজে থেকেই
+ *  কিছুই করে না যদি _DirtyTopics খালি থাকে (সস্তায় সাথে সাথে বেরিয়ে যায়),
+ *  তাই ঘনঘন চালানো নিরাপদ। "Publish Now" বাটন ছাড়াও এটাই মূল mechanism —
+ *  edit করার পর কয়েক মিনিটের মধ্যেই CDN আপডেট হয়ে যায়, ম্যানুয়ালি Publish Now
+ *  চাপার দরকার পড়ে না। */
 function publishScheduled() {
   var result = publishDirtyTopics();
   Logger.log("publishScheduled result: " + JSON.stringify(result));
   return result;
+}
+
+// ── FIX (Speed Plan Task 2): আগে এই trigger বসাতে Apps Script এডিটরে গিয়ে
+// Triggers ট্যাব থেকে ম্যানুয়ালি "Add Trigger → publishScheduled → Day timer"
+// (দিনে ১ বার) সেট করতে হতো — GAS/CDN read-only আর্কিটেকচারে এত বড় গ্যাপ
+// (edit করার পর সারাদিন CDN স্টেল থাকতে পারে) মেনে নেওয়া যায় না। এখন
+// installAutoReindexTrigger()-এর মতোই একটা self-installing trigger — একবার
+// রান করলেই প্রতি ১০ মিনিটে (দিনে ~১৪৪ বার, dirty না থাকলে প্রতিটা রান প্রায়
+// বিনামূল্যে/সস্তা) নিজে থেকে চেক করে publish করবে।
+//
+// ⚠️ ONE-TIME SETUP: Apps Script এডিটরে এই ফাইল খুলে, ফাংশন ড্রপডাউন থেকে
+// "installAutoPublishTrigger" বেছে নিয়ে ▶ Run বাটনে একবার ক্লিক করো (প্রথমবার
+// authorization চাইতে পারে, allow করে দিও)। দ্বিতীয়বার রান করলে আগের trigger
+// মুছে নতুন বসায় — ডুপ্লিকেট জমবে না। ──
+function installAutoPublishTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "publishScheduled") ScriptApp.deleteTrigger(triggers[i]);
+  }
+  ScriptApp.newTrigger("publishScheduled").timeBased().everyMinutes(10).create();
+  Logger.log("✅ Auto-publish trigger installed — প্রতি ১০ মিনিটে চেক করবে, dirty topic থাকলেই CDN-এ publish হবে।");
 }
 
 /* ── GitHub Contents API helpers (write path, GAS UrlFetchApp দিয়ে) ── */
