@@ -197,7 +197,7 @@ fun MainScreen(
             }
             DeepLinkAction.Type.TECHNIQUES -> { currentTab = BottomTab.MENU  }
             DeepLinkAction.Type.MENU       -> { currentTab = BottomTab.MENU  }
-            DeepLinkAction.Type.CHALLENGE  -> { currentTab = BottomTab.CHALLENGE }
+            DeepLinkAction.Type.CHALLENGE  -> { if (menuState.challengesEnabled) currentTab = BottomTab.CHALLENGE }
             DeepLinkAction.Type.ROUTINE    -> {
                 currentTab = BottomTab.MENU
                 pendingRoutineItemId = action.routineItemId
@@ -249,6 +249,16 @@ fun MainScreen(
     // পাইপলাইন, এই পরিবর্তনে সেটা অপ্রভাবিত থাকে — পড়ার তাগাদা আগের মতোই আসতে থাকবে। ──
     val focusNudgeTabs = remember { setOf(BottomTab.HOME, BottomTab.CHALLENGE) }
 
+    // ── Speed Plan Task 4: "চ্যালেঞ্জ" ফিচার হোল্ড করা থাকা অবস্থায় যদি
+    // currentTab আগে থেকেই CHALLENGE-এ সেট থাকে (যেমন সেটিংস থেকে ঠিক এখনই
+    // অফ করা হলো, অথবা deep-link race condition), তাহলে HOME-এ ফিরিয়ে দাও —
+    // নাহলে ব্যবহারকারী একটা bottom-tab-এ আটকে যাবে যেটার আইকনই আর দেখা যায় না ──
+    LaunchedEffect(menuState.challengesEnabled, currentTab) {
+        if (currentTab == BottomTab.CHALLENGE && !menuState.challengesEnabled) {
+            currentTab = BottomTab.HOME
+        }
+    }
+
     // ── Home-এর "Typing" টাইল বা Menu-এর "Typing Practice" রো থেকে সরাসরি
     // showTyping=true হয়ে যেত — bottom-tab নাজ (nudge) সিস্টেম বাইপাস হয়ে
     // যাচ্ছিল। এখন ফোকাস মোড অন্য কোনো সাবজেক্টে সক্রিয় থাকলে (টাইপিং নিজেই
@@ -278,7 +288,19 @@ fun MainScreen(
         TypingPracticeScreen(
             onBack     = { showTyping = false },
             onResult   = { r -> if (r.wpm >= 40) unlockAchievement("typing_40wpm") },
-            onOpenRace = { showTyping = false; showTypingRace = true },
+            onOpenRace = {
+                // Speed Plan Task 4: "Typing Race" হোল্ড করা থাকলে (ডিফল্ট) রেসে
+                // না নিয়ে গিয়ে একটা ছোট বার্তা দেখাও — TypingRaceScreen/
+                // TypingRaceRepository/Firebase listener কখনো তৈরিই হবে না
+                if (menuState.typingRaceEnabled) {
+                    showTyping = false; showTypingRace = true
+                } else {
+                    android.widget.Toast.makeText(
+                        context, "Typing Race এখন বন্ধ আছে — Settings → লাইভ ফিচার থেকে চালু করুন",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
             // ── পর্ব ৩/৫.৩ — পুরনো স্ক্রিনের ভেতরের "⌨️ নতুন Normal Typing স্ক্রিন"
             // বাটনে ট্যাপ করলে এখানে চলে আসবে, নতুন স্বতন্ত্র স্ক্রিনে ──
             onOpenNormalTyping = { showTyping = false; showNormalTyping = true },
@@ -337,7 +359,13 @@ fun MainScreen(
     Scaffold(
         bottomBar = {
             NavigationBar {
-                BottomTab.entries.forEach { tab ->
+                // Speed Plan Task 4: হোল্ড করা থাকলে (ডিফল্ট) "চ্যালেঞ্জ" ট্যাবই
+                // bottom nav-এ দেখানো হয় না — ChallengeZone/ChallengeViewModel/
+                // WeekendBattleViewModel কখনো তৈরিই হবে না
+                val visibleTabs = BottomTab.entries.filter {
+                    it != BottomTab.CHALLENGE || menuState.challengesEnabled
+                }
+                visibleTabs.forEach { tab ->
                     NavigationBarItem(
                         selected = currentTab == tab,
                         onClick  = {
