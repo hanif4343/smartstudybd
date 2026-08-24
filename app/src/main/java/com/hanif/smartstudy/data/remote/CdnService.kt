@@ -40,9 +40,15 @@ object CdnService {
     private val WORKER_URL: String by lazy { BuildConfig.CDN_WORKER_URL.trimEnd('/') }
     private val APP_SECRET: String by lazy { BuildConfig.CDN_APP_SECRET }
 
+    // FIX (স্লো-অ্যাপ ডায়াগনসিস): আগে connectTimeout=10s/readTimeout=15s ছিল —
+    // Worker misconfigured/unreachable হলে প্রতিটা CDN কল ~২৫ সেকেন্ড পর্যন্ত
+    // আটকে থাকত (তারপর Room fallback)। এখন ৫s/৬s — misconfigured অবস্থায়ও
+    // দ্রুত fail করে Room cache-এ চলে যাবে, ব্যবহারকারীকে দীর্ঘ hang সহ্য
+    // করতে হবে না। Worker সত্যিই ঠিকঠাক থাকলে এই কমানো টাইমআউটে কোনো সমস্যা
+    // হবে না (CDN response সাধারণত < ১ সেকেন্ডে আসার কথা)।
     @PublishedApi internal val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(6, TimeUnit.SECONDS)
         .build()
 
     @PublishedApi internal val gson = CaseInsensitiveGson.instance
