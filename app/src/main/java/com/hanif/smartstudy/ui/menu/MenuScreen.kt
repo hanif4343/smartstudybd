@@ -372,7 +372,12 @@ fun MainMenuScreen(
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
-                MenuRow("🤝 Study Buddy",  "একসাথে পড়ো, একে অপরকে তাগাদা দাও", Icons.Default.Diversity1) { onNavigate(MenuNav.STUDY_BUDDY) }
+                // Speed Plan Task 4: হোল্ড করা থাকলে (ডিফল্ট) এই এন্ট্রি-পয়েন্টই
+                // দেখানো হয় না — StudyBuddyScreen/BuddyViewModel/Firebase listener
+                // কখনো তৈরিই হবে না (Compose viewModel() lazy creation)
+                if (state.buddyEnabled) {
+                    MenuRow("🤝 Study Buddy",  "একসাথে পড়ো, একে অপরকে তাগাদা দাও", Icons.Default.Diversity1) { onNavigate(MenuNav.STUDY_BUDDY) }
+                }
             }
 
             MenuGroup("🛠 Tools") {
