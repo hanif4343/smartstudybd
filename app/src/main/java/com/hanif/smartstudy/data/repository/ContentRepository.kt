@@ -11,6 +11,9 @@ import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.TopicSyncEntity
 import com.hanif.smartstudy.data.local.toEntity
 import com.hanif.smartstudy.data.local.toQuestionItem
+import com.hanif.smartstudy.data.local.toQuizItem
+import com.hanif.smartstudy.data.local.toQBankItem
+import com.hanif.smartstudy.data.local.toStudyItem
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.ExamCountdown
 import com.hanif.smartstudy.data.model.GoalProgress
