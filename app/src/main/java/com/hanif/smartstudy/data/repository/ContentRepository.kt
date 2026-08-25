@@ -262,8 +262,10 @@ class ContentRepository(private val context: Context) {
         val subjects = com.hanif.smartstudy.data.remote.CdnService
             .fetchReferenceJson<com.hanif.smartstudy.data.model.SubjectRef>("reference/subjects.json")
         if (subjects == null) {
-            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects তালিকা আনা যায়নি")
-            return@withContext false
+        val cfg = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
+        val url = com.hanif.smartstudy.BuildConfig.CDN_WORKER_URL
+        com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects আনা যায়নি [cfg=$cfg url=${url.take(20)}]")
+        return@withContext false
         }
         val topics = com.hanif.smartstudy.data.remote.CdnService
             .fetchReferenceJson<com.hanif.smartstudy.data.model.TopicRef>("reference/topics.json")
