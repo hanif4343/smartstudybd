@@ -34,6 +34,12 @@ object CdnService {
     // inline ফাংশন থেকে ব্যবহার করা যায়। ──
     @PublishedApi internal const val TAG = "CdnService"
 
+    // ── TEMP DIAGNOSTIC (root-cause খোঁজার জন্য সাময়িক) — শেষ CDN fetch ব্যর্থ
+    // হলে কী কারণে হলো (HTTP কোড / exception) সেটা এখানে রাখা হয়, যাতে
+    // ContentRepository notification-এর গায়েই দেখাতে পারে। সমস্যা ধরা পড়ে
+    // গেলে এই ভ্যারিয়েবল আর এটাকে সেট করা লাইনগুলো ফেরত মুছে ফেলা উচিত। ──
+    @PublishedApi internal var lastDiag: String = "none"
+
     // ⚠️ app/build.gradle-এ buildConfigField হিসেবে যোগ করা হয়েছে (GAS_URL/
     // GAS_SECRET-এর একই secretField() প্যাটার্নে) — env var সেট না থাকলে খালি
     // স্ট্রিং, isConfigured()=false, GAS fallback পাথেই চলবে।
@@ -87,11 +93,13 @@ object CdnService {
             val body = resp.body?.string() ?: ""
             resp.close()
             if (!resp.isSuccessful || body.isBlank()) {
+                lastDiag = "HTTP_${resp.code}"
                 Log.w(TAG, "fetchManifest: HTTP ${resp.code}")
                 return@withContext null
             }
             gson.fromJson(body, Manifest::class.java)
         } catch (e: Exception) {
+            lastDiag = "EXC_${e.javaClass.simpleName}_${e.message}"
             Log.w(TAG, "fetchManifest error: ${e.message}")
             null
         }
@@ -115,6 +123,7 @@ object CdnService {
                 val body = resp.body?.string() ?: ""
                 resp.close()
                 if (!resp.isSuccessful || body.isBlank()) {
+                    lastDiag = "HTTP_${resp.code}"
                     Log.w(TAG, "fetchReferenceJson<$fileName>: HTTP ${resp.code}")
                     return@withContext null
                 }
@@ -124,6 +133,7 @@ object CdnService {
                     catch (e: Exception) { null }
                 }
             } catch (e: Exception) {
+                lastDiag = "EXC_${e.javaClass.simpleName}_${e.message}"
                 Log.w(TAG, "fetchReferenceJson<$fileName> error: ${e.message}")
                 null
             }
@@ -145,6 +155,7 @@ object CdnService {
                 val body = resp.body?.string() ?: ""
                 resp.close()
                 if (!resp.isSuccessful || body.isBlank()) {
+                    lastDiag = "HTTP_${resp.code}"
                     Log.w(TAG, "fetchTopicJson<$sheetPath/$topicId>: HTTP ${resp.code}")
                     return@withContext null
                 }
@@ -154,6 +165,7 @@ object CdnService {
                     catch (e: Exception) { null }
                 }
             } catch (e: Exception) {
+                lastDiag = "EXC_${e.javaClass.simpleName}_${e.message}"
                 Log.w(TAG, "fetchTopicJson<$sheetPath/$topicId> error: ${e.message}")
                 null
             }
