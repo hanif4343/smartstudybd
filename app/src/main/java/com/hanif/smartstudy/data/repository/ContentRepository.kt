@@ -262,15 +262,13 @@ class ContentRepository(private val context: Context) {
         val subjects = com.hanif.smartstudy.data.remote.CdnService
             .fetchReferenceJson<com.hanif.smartstudy.data.model.SubjectRef>("reference/subjects.json")
         if (subjects == null) {
-        val cfg = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
-        val url = com.hanif.smartstudy.BuildConfig.CDN_WORKER_URL
-        com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects আনা যায়নি [cfg=$cfg url=${url.take(20)}]")
-        return@withContext false
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects আনা যায়নি [${com.hanif.smartstudy.data.remote.CdnService.lastDiag}]")
+            return@withContext false
         }
         val topics = com.hanif.smartstudy.data.remote.CdnService
             .fetchReferenceJson<com.hanif.smartstudy.data.model.TopicRef>("reference/topics.json")
             ?: run {
-                com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Topics তালিকা আনা যায়নি")
+                com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Topics আনা যায়নি [${com.hanif.smartstudy.data.remote.CdnService.lastDiag}]")
                 return@withContext false
             }
         // ── tags/posts/institutions ছোট, non-critical reference — একটার fetch
