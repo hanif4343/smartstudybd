@@ -12,6 +12,15 @@
 ══════════════════════════════════════════════════════════
 */
 
+// 🆕 ডিপ্লয়মেন্ট-ভেরিফিকেশন মার্কার — নিচে doGet()-এ ?action=version হ্যান্ডলার
+// এই ভ্যারিয়েবলটা রিটার্ন করে। কোড আপডেট করার পর "Deploy → Manage deployments →
+// Edit (পেন্সিল আইকন) → Version: New version → Deploy" ঠিকভাবে করা হয়েছে কিনা
+// নিশ্চিত হতে চাইলে GAS_URL-এর শেষে ?action=version জুড়ে ব্রাউজারে খুললেই এই
+// build-নামটা দেখা যাবে (secret লাগবেনা) — যদি পুরনো মান দেখা যায় বা এরর আসে,
+// তার মানে নতুন কোড এখনো লাইভ হয়নি (নতুন "deployment" বানানো হয়ে থাকলে সেটার
+// আলাদা URL হয়, পুরনো URL-এই পুরনো কোড থেকে যায় — এই কারণেই এই মার্কার)।
+var GAS_BUILD_VERSION = "2026-08-27-fresh-project-v1";
+
 function getProps() {
   var p = PropertiesService.getScriptProperties();
   return {
@@ -380,7 +389,32 @@ function doPublish_() {
       }
       var examAppearancesSh = ss.getSheetByName("Exam_Appearances");
       if (examAppearancesSh) {
-        ghPutFile_(ghOwner, ghRepo, ghBranch, "exam-appearances.json", JSON.stringify(sheetToJsonArray_(examAppearancesSh)), ghToken, "Update exam-appearances.json");
+        // 🔬 DIAG (exam-appearances.json বার বার GitHub-এ commit না হওয়ার কারণ
+        // খোঁজার জন্য সাময়িক ইনস্ট্রুমেন্টেশন): আগে এই কলের রেজাল্ট কোথাও
+        // দেখা যেত না (ghPutFile_ ব্যর্থ হলেও silently ignore হতো)। এখন রেজাল্ট
+        // (rows/bytes/success/error) একটা Script Property-তে সেভ হয়, যেটা
+        // GAS_URL+"?action=examDiag" খুলে ব্রাউজারেই সরাসরি দেখা যাবে —
+        // Apps Script Executions লগে ঢোকার দরকার নেই। রুট কারণ পাওয়া গেলে
+        // এই ব্লক আর examDiag action দুটোই ফেরত মুছে ফেলা উচিত। ──
+        var eaData = sheetToJsonArray_(examAppearancesSh);
+        var eaJson = JSON.stringify(eaData);
+        var eaResult;
+        try {
+          eaResult = ghPutFile_(ghOwner, ghRepo, ghBranch, "exam-appearances.json", eaJson, ghToken, "Update exam-appearances.json");
+        } catch (eaErr) {
+          eaResult = { success: false, error: "EXCEPTION: " + eaErr };
+        }
+        try {
+          PropertiesService.getScriptProperties().setProperty("LAST_EXAM_APPEARANCES_DIAG", JSON.stringify({
+            rows: eaData.length,
+            bytes: eaJson.length,
+            result: eaResult,
+            at: new Date().toString()
+          }));
+        } catch (propErr) {
+          Logger.log("exam-appearances diag property write failed: " + propErr);
+        }
+        Logger.log("exam-appearances publish: rows=" + eaData.length + " bytes=" + eaJson.length + " result=" + JSON.stringify(eaResult));
       }
     } catch (refErr) {
       Logger.log("Reference data publish error (non-fatal): " + refErr);
@@ -1220,6 +1254,21 @@ function autoRebuildIndexTriggered() {
 function doGet(e) {
  try {
   var action = e.parameter.action;
+
+  // ── version — secret ছাড়াই, ব্রাউজারে সরাসরি GAS_URL+"?action=version" খুলে
+  // ডিপ্লয়মেন্ট আপডেট হয়েছে কিনা যাচাই। দেখো ওপরের GAS_BUILD_VERSION কমেন্ট। ──
+  if (action==="version") {
+    return json({ build: GAS_BUILD_VERSION, now: new Date().toString() });
+  }
+
+  // ── examDiag — secret ছাড়াই, ব্রাউজারে সরাসরি GAS_URL+"?action=examDiag"
+  // খুলে সবশেষ exam-appearances.json publish attempt-এর ফলাফল (rows/bytes/
+  // success-error) দেখা যায়। দেখো doPublish_()-এর ভেতরের DIAG কমেন্ট। ──
+  if (action==="examDiag") {
+    var eaDiagRaw = PropertiesService.getScriptProperties().getProperty("LAST_EXAM_APPEARANCES_DIAG");
+    return json(eaDiagRaw ? JSON.parse(eaDiagRaw) : { message: "এখনো কোনো publish attempt রেকর্ড হয়নি" });
+  }
+
   var cfg    = getProps();
 
   // ── SECRET_KEY VALIDATION ──
@@ -3240,6 +3289,84 @@ function doPost(e) {
       return txt("User not found");
     }
 
+    // ── update_fields — একসাথে একাধিক কলাম (Question/Opt1-4/Correct/Explanation/
+    //    Technique ইত্যাদি) এক id-এর জন্য এক কলে আপডেট। 🐛 ফিক্স (Admin App-এর
+    //    InlineEditModal-এ "Edit ব্যর্থ, ফিল্ড: opt1, opt3" জাতীয় random ফিল্ড
+    //    ব্যর্থ হওয়া): আগে ক্লায়েন্ট প্রতিটা ফিল্ডের জন্য আলাদা "updateField" কল
+    //    parallel-এ পাঠাতো (৮টা ফিল্ড = ৮টা আলাদা রিকোয়েস্ট) — প্রতিটা কল নিজে থেকেই
+    //    withWriteLock() (script-wide lock, ৩০সে wait) নিতো, পুরো শিট আবার
+    //    getDataRange().getValues() দিয়ে পড়তো, আর নিজে থেকেই একটা করে syncToFirebase()
+    //    (পুরো শিট আবার Firebase-এ পাঠানো) চালাতো। Quiz-এর মতো বড় শিটে (হাজার হাজার
+    //    রো) একটা syncToFirebase()-ই কয়েক সেকেন্ড লাগতে পারে — ৮টা parallel কল একই
+    //    lock-এর জন্য সিরিয়ালি অপেক্ষা করলে মোট সময় ৩০সে ছাড়িয়ে যেত, তখন যেই
+    //    ২-৩টা কল শেষে ছিল সেগুলো lock timeout খেয়ে ব্যর্থ হতো — এলোমেলো, ভিন্ন
+    //    ভিন্ন ফিল্ড (মান "a"/"the" ইত্যাদির সাথে এর কোনো সম্পর্ক নেই, নিছক টাইমিং)।
+    //    এখন সব ফিল্ড একটা মাত্র POST-এ আসে, একবারই lock নেওয়া হয়, একবারই শিট পড়া
+    //    হয়, প্রতিটা ফিল্ড লেখা হয় লুপে, শেষে একবারই syncToFirebase() — তাই লক
+    //    কনটেনশনই তৈরি হয় না। দেখো src/core/sheetSave.js-এর updateFieldsInSheet(). ──
+    if(params.type==="update_fields"){
+      return withWriteLock(function(){
+      var ufShName=(params.sheet||"").toString();
+      var ufShMap={quiz:"Quiz",qbank:"QBank",study:"Study",users:"Users",typing:"Typing"};
+      ufShName=ufShMap[ufShName.toLowerCase()]||ufShName;
+      var ufSheet=ss.getSheetByName(ufShName);
+      if(!ufSheet)return json({result:"error",error:"Sheet not found: "+ufShName});
+      var ufRows=ufSheet.getDataRange().getValues();
+      var ufHdrRaw=ufRows[0]||[];
+      var ufHdr=ufHdrRaw.map(function(h){return h.toString().toLowerCase().trim();});
+      var ufNorm2=function(s){return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");};
+      var ufHdrNorm=ufHdrRaw.map(function(h){return ufNorm2(h);});
+      var ufIdC=ufHdr.indexOf("id"); if(ufIdC===-1)ufIdC=ufHdr.indexOf("phone");
+      var ufTopicIdC=ufHdr.indexOf("topic_id");
+      var ufAtC=ufHdrNorm.indexOf("updatedat");
+      var ufEditedByC=ufHdrNorm.indexOf("editedby");
+      var ufReviewC=ufHdrNorm.indexOf("review");
+      var ufTargetId=(params.id||"").toString().trim();
+      var ufFields=params.fields||{};
+      var ufEditSource=(params.editSource||"Admin App").toString().trim();
+      if(ufIdC===-1)return json({result:"error",error:"Column not found: id"});
+      if(!ufTargetId)return json({result:"error",error:"id missing"});
+      var ufAltMap={"opt1":["opt1","option1"],"opt2":["opt2","option2"],"opt3":["opt3","option3"],"opt4":["opt4","option4"]};
+      var ufResolveCol=function(fld){
+        var fldNorm=ufNorm2(fld);
+        var c=ufHdrNorm.indexOf(fldNorm);
+        if(c===-1&&ufAltMap[fld]){for(var ai=0;ai<ufAltMap[fld].length;ai++){c=ufHdrNorm.indexOf(ufNorm2(ufAltMap[fld][ai]));if(c!==-1)break;}}
+        if(c===-1){for(var fc=0;fc<ufHdrNorm.length;fc++){if(ufHdrNorm[fc].indexOf(fldNorm)!==-1){c=fc;break;}}}
+        if(c===-1&&(fld==="sub_topic"||fld==="subtopic"))c=ufHdrNorm.indexOf("topic");
+        return c;
+      };
+      for(var ur=1;ur<ufRows.length;ur++){
+        if(ufRows[ur][ufIdC].toString().trim()===ufTargetId){
+          var ufFailed=[], ufReviewLabels=[], ufNewTopicIdVal=null;
+          for(var fld in ufFields){
+            if(!ufFields.hasOwnProperty(fld))continue;
+            var fldLc=fld.toString().toLowerCase().trim();
+            var col=ufResolveCol(fldLc);
+            if(col===-1){ ufFailed.push(fld); continue; }
+            var content=(ufFields[fld]==null?"":ufFields[fld]);
+            ufSheet.getRange(ur+1,col+1).setValue(content);
+            if(ufTopicIdC>=0&&col===ufTopicIdC) ufNewTopicIdVal=content.toString();
+            var rl=reviewLabelForField(fldLc);
+            if(rl&&ufReviewLabels.indexOf(rl)===-1) ufReviewLabels.push(rl);
+          }
+          if(ufAtC!==-1) ufSheet.getRange(ur+1,ufAtC+1).setValue(Date.now());
+          if(ufEditedByC!==-1) ufSheet.getRange(ur+1,ufEditedByC+1).setValue(ufEditSource+" - "+new Date().toLocaleString('bn-BD'));
+          if(ufReviewC!==-1&&ufReviewLabels.length){
+            var ufPrevReview=(ufRows[ur][ufReviewC]||"").toString().trim();
+            var ufNextReview=ufPrevReview;
+            ufReviewLabels.forEach(function(l){ if(ufNextReview.indexOf(l)===-1) ufNextReview=ufNextReview?(ufNextReview+", "+l):l; });
+            ufSheet.getRange(ur+1,ufReviewC+1).setValue(ufNextReview);
+          }
+          syncToFirebase(ufShName,ufShName);
+          var ufDirtyTopicId=ufNewTopicIdVal!==null?ufNewTopicIdVal:(ufTopicIdC>=0?(ufRows[ur][ufTopicIdC]||"").toString():"");
+          if(ufDirtyTopicId) markTopicDirty(ufDirtyTopicId);
+          return json({result:"success",failed:ufFailed});
+        }
+      }
+      return json({result:"error",error:"ID not found: "+ufTargetId});
+      });
+    }
+
     // ── bulk_save_rows — একসাথে অনেক রো Google Sheet-এ সেভ (Save Location = "Google Sheet"
     //    বেছে নিলে QBank→Quiz কনভার্টার, AI Import/OCR direct-submit, বাল্ক আপলোডার — সবাই এই
     //    endpoint ব্যবহার করে)। প্রতিটা রো আলাদাভাবে duplicate-check হয়, শেষে একবারই Firebase sync হয়। ──
@@ -3742,4 +3869,29 @@ function pullFirebaseToSheet_(sheetName) {
   if (rows.length > 0) sh.getRange(2, 1, rows.length, headerRow.length).setValues(rows);
 
   Logger.log("✅ " + sheetName + " ব্যাকআপ সম্পন্ন — " + rows.length + " রো (Firebase → Sheet, read-only)।");
+}
+function checkExamDiag() {
+  var raw = PropertiesService.getScriptProperties().getProperty("LAST_EXAM_APPEARANCES_DIAG");
+  Logger.log(raw || "❌ কোনো ডেটা সেভ হয়নি");
+}
+function testUpdateFieldsDirectly() {
+  var testId = "QB-00117";
+  var testSheet = "QBank";
+
+  var fakeEvent = {
+    postData: {
+      contents: JSON.stringify({
+        secret: PropertiesService.getScriptProperties().getProperty("SECRET_KEY"),
+        type: "update_fields",
+        sheet: testSheet,
+        id: testId,
+        fields: { explanation: "🔬DIAG_TEST_" + Date.now() },
+        editSource: "DiagnosticTest"
+      })
+    },
+    parameter: {}
+  };
+
+  var result = doPost(fakeEvent);
+  Logger.log("RESULT: " + result.getContent());
 }
