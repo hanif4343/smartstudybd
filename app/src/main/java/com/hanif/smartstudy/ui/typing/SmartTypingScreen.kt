@@ -268,10 +268,10 @@ fun SmartTypingScreen(
             else -> null
         }
     }
-    val currentKeyForBox: String? = remember(nextTypeChar, state.frozenWordResults, passageWords) {
-        if (nextTypeChar != null && nextTypeChar != ' ') nextTypeChar.toString()
-        else passageWords.getOrNull(state.frozenWordResults.size + 1)?.firstOrNull()?.toString()
-    }
+    // ── raw পরের কী — স্পেস/চন্দ্রবিন্দুর ডিসপ্লে-গ্লিফ CurrentKeyAndAllKeysBox-এর
+    // ভেতরে practiceKeyGlyph() দিয়ে হয়, এখানে raw মান রাখাই ঠিক (highlighting/
+    // stat-lookup-এর জন্য) ──
+    val currentKeyForBox: String? = remember(nextTypeChar) { nextTypeChar?.toString() }
 
     Scaffold(
         topBar = {
@@ -364,7 +364,10 @@ fun SmartTypingScreen(
 
             // ── CURRENT KEY + ALL KEYS ──
             if (allUnlockedKeys.isNotEmpty()) {
-                CurrentKeyAndAllKeysBox(allKeys = allUnlockedKeys, currentKey = currentKeyForBox, statSnapshot = keyStatSnapshot)
+                CurrentKeyAndAllKeysBox(
+                    allKeys = allUnlockedKeys, currentKey = currentKeyForBox, statSnapshot = keyStatSnapshot,
+                    keyProgress = if (state.sessionMode == "curriculum") curriculumProgress else emptyList()
+                )
             }
 
             // ── AI Adaptive Session — ফেজ ১ শেষে ট্রানজিশন কার্ড ──
@@ -430,7 +433,27 @@ fun SmartTypingScreen(
                         }
                     }
                 }
-                Text(annotated, fontSize = 18.sp, fontFamily = NotoSansBengali, lineHeight = 30.sp, modifier = Modifier.padding(16.dp))
+                // ── ফিক্সড-হাইট + অটো-স্ক্রল (NormalTypingScreen-এর মতোই) — টেক্সটবক্স
+                // যাতে সবসময় একই জায়গায় থাকে, লম্বা প্যাসেজে নিচে না সরে যায় ──
+                val passageScrollState = rememberScrollState()
+                var passageLayout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                Text(
+                    annotated, fontSize = 18.sp, fontFamily = NotoSansBengali, lineHeight = 30.sp,
+                    modifier = Modifier
+                        .heightIn(max = 150.dp)
+                        .verticalScroll(passageScrollState)
+                        .padding(16.dp),
+                    onTextLayout = { passageLayout = it }
+                )
+                LaunchedEffect(resolvedCount, passageLayout) {
+                    val layout = passageLayout ?: return@LaunchedEffect
+                    val textLen = layout.layoutInput.text.length
+                    if (textLen == 0) return@LaunchedEffect
+                    val offset = resolvedCount.coerceIn(0, textLen - 1)
+                    val line = layout.getLineForOffset(offset)
+                    val lineTop = layout.getLineTop(line).toInt()
+                    passageScrollState.animateScrollTo(lineTop.coerceAtLeast(0))
+                }
             }
 
             // ── ব্যাকস্পেস-লক + Blind Mode চিপ ──
@@ -449,30 +472,22 @@ fun SmartTypingScreen(
             }
 
             // ── ইনপুট ফিল্ড ──
-            OutlinedTextField(
+            TypingInputField(
                 value = state.userInput,
-                onValueChange = { if (!state.isFinished) vm.onInputChange(it) },
-                modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { keyEvent ->
-                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        keyEvent.key == Key.Escape && state.isStarted && !state.isFinished -> { vm.finishSession(); true }
-                        keyEvent.key == Key.R && keyEvent.isCtrlPressed -> { vm.restartCurrentPassage(); true }
-                        else -> false
-                    }
-                },
-                placeholder = { Text("এখানে type করা শুরু করুন...", fontFamily = NotoSansBengali) },
-                enabled = !state.isFinished,
-                keyboardOptions = KeyboardOptions.Default,
-                minLines = 4
+                isFinished = state.isFinished,
+                isBackspaceBlocked = state.backspaceLocked,
+                onValueChange = { vm.onInputChange(it) },
+                onEscape = if (state.isStarted && !state.isFinished) { { vm.finishSession() } } else null,
+                onRestart = { vm.restartCurrentPassage() }
             )
 
             if (state.isStarted && !state.isFinished) {
                 RhythmMeter(score = state.rhythmScore)
                 LessonProgressBar(resolvedCount = resolvedCount, totalCount = state.passage.length)
                 ProTipBanner(accuracyPct = if (state.totalKeystrokes > 0) state.correctKeystrokes * 100 / state.totalKeystrokes else 100)
-                if (state.sessionMode == "curriculum" && curriculumProgress.isNotEmpty()) {
-                    PerCharacterCoachCards(curriculumProgress)
-                }
+                // ── "🎯 এগুলোতে ফোকাস করো" এখন ALL KEYS-এর পাশের (i) বাটনে (দেখো
+                // CurrentKeyAndAllKeysBox/KeyBoxInfoDialog) — এখানে আলাদা বড় সেকশন
+                // হিসেবে আর দেখানো হয় না, মূল স্ক্রিনে জায়গা বাঁচাতে ──
                 Button(
                     onClick = { vm.finishSession() }, modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
