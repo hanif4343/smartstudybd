@@ -218,10 +218,29 @@ fun NormalTypingScreen(
                         }
                     }
                 }
+                // ── ফিক্সড-হাইট + ভেতরে স্ক্রল — প্যাসেজ যত লম্বাই হোক, কার্ডের উচ্চতা
+                // পাল্টায় না, তাই নিচের ইনপুট-বক্স সবসময় একই জায়গায় থাকে (আগে লম্বা
+                // প্যাসেজে টেক্সটবক্স নিচে সরে যেত)। টাইপ করার সাথে সাথে বর্তমান লাইন
+                // পর্যন্ত অটো-স্ক্রল হয় (getLineForOffset দিয়ে বের করা হয়) ──
+                val passageScrollState = rememberScrollState()
+                var passageLayout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
                 Text(
                     annotated, fontSize = 18.sp, fontFamily = NotoSansBengali, lineHeight = 30.sp,
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier
+                        .heightIn(max = 150.dp)
+                        .verticalScroll(passageScrollState)
+                        .padding(16.dp),
+                    onTextLayout = { passageLayout = it }
                 )
+                LaunchedEffect(resolvedCount, passageLayout) {
+                    val layout = passageLayout ?: return@LaunchedEffect
+                    val textLen = layout.layoutInput.text.length
+                    if (textLen == 0) return@LaunchedEffect
+                    val offset = resolvedCount.coerceIn(0, textLen - 1)
+                    val line = layout.getLineForOffset(offset)
+                    val lineTop = layout.getLineTop(line).toInt()
+                    passageScrollState.animateScrollTo(lineTop.coerceAtLeast(0))
+                }
             }
 
             // ── ব্যাকস্পেস-লক (কমপ্যাক্ট চিপ) ──
@@ -237,27 +256,13 @@ fun NormalTypingScreen(
             }
 
             // ── ইনপুট ফিল্ড ──
-            OutlinedTextField(
+            TypingInputField(
                 value = state.userInput,
-                onValueChange = { if (!state.isFinished) vm.onInputChange(it) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when {
-                            keyEvent.key == Key.Escape && state.isStarted && !state.isFinished -> {
-                                vm.finishSession(); true
-                            }
-                            keyEvent.key == Key.R && keyEvent.isCtrlPressed -> {
-                                vm.restartCurrentPassage(); true
-                            }
-                            else -> false
-                        }
-                    },
-                placeholder = { Text("এখানে type করা শুরু করুন...", fontFamily = NotoSansBengali) },
-                enabled = !state.isFinished,
-                keyboardOptions = KeyboardOptions.Default,
-                minLines = 4
+                isFinished = state.isFinished,
+                isBackspaceBlocked = state.backspaceLocked,
+                onValueChange = { vm.onInputChange(it) },
+                onEscape = if (state.isStarted && !state.isFinished) { { vm.finishSession() } } else null,
+                onRestart = { vm.restartCurrentPassage() }
             )
 
             // ── ম্যানুয়াল Submit ──
