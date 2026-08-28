@@ -239,14 +239,11 @@ fun ExamTypingScreen(
                         fontSize = 11.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.error)
                 }
 
-                OutlinedTextField(
+                TypingInputField(
                     value = state.userInput,
-                    onValueChange = { if (!state.isFinished) vm.onInputChange(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("এখানে type করা শুরু করুন...", fontFamily = NotoSansBengali) },
-                    enabled = !state.isFinished,
-                    keyboardOptions = KeyboardOptions.Default,
-                    minLines = 4
+                    isFinished = state.isFinished,
+                    isBackspaceBlocked = examMode == "govtmock" || state.backspaceLocked,
+                    onValueChange = { vm.onInputChange(it) }
                 )
 
                 if (state.isStarted && !state.isFinished) {
