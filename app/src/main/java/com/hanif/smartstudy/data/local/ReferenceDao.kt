@@ -191,6 +191,25 @@ interface ReferenceDao {
     @Query("SELECT * FROM exam_appearances WHERE institutionId = :institutionId")
     suspend fun getAppearancesForInstitution(institutionId: String): List<ExamAppearanceEntity>
 
+    // ── FIX ("সাল ট্যাবে ডেটা আসেনি"): সাল-মোড আগে পুরনো `questions.year` raw
+    // কলাম থেকে গোনা হতো (দেখো QuestionDao.getYearCounts/getPagedByYear) — কিন্তু
+    // পদবী/প্রতিষ্ঠান-মোড ইতিমধ্যে নতুন Posts/Institutions/Exam_Appearances
+    // রেফারেন্স-টেবিলে migrate হয়ে গেছে, যেখানে বছরটা প্রতিটা appearance-রো-তে থাকে
+    // (একই প্রশ্ন একাধিক বছরে/প্রতিষ্ঠানে appear করতে পারে), প্রশ্নের নিজের
+    // `year` কলামে না — ফলে সেটা এখন প্রায়ই খালি, আর পুরনো কোয়েরি সবসময় ০ পেত।
+    // এই দুটো নতুন কোয়েরি ঠিক rebuildQBankPosts/Institutions-এর প্যাটার্নেই
+    // exam_appearances থেকে সাল গোনে ও প্রতিটা সালের questionId লিস্ট বের করে। ──
+    @Query("""
+        SELECT year as subject, COUNT(DISTINCT questionId) as count FROM exam_appearances
+        WHERE year != ''
+        GROUP BY year
+        ORDER BY year DESC
+    """)
+    suspend fun getAppearanceYearCounts(): List<SubjectCount>
+
+    @Query("SELECT DISTINCT questionId FROM exam_appearances WHERE year = :year")
+    suspend fun getAppearanceQuestionIdsForYear(year: String): List<String>
+
     @Query("DELETE FROM exam_appearances")
     suspend fun deleteAllExamAppearances()
 
