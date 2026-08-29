@@ -13,9 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +36,7 @@ import java.util.Calendar
  *   • ব্যাজ            → bestWpm + streak থ্রেশহোল্ড (TypingProfileDialog-এর
  *                        অ্যাচিভমেন্ট-লজিকের সাথে সঙ্গতিপূর্ণ রাখা হয়েছে)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TypingProgressScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
@@ -94,11 +93,10 @@ fun TypingProgressScreen(onBack: () -> Unit) {
             Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
                 Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("WPM ট্রেন্ড (সাম্প্রতিক সেশন)", fontSize = 12.5.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
-                        Text("সেরা $bestWpm", fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Text("সেরা $bestWpm WPM", fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(6.dp))
                     if (history.size < 2) {
                         Box(Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.Center) {
                             Text(
@@ -108,7 +106,12 @@ fun TypingProgressScreen(onBack: () -> Unit) {
                             )
                         }
                     } else {
-                        WpmTrendChart(history.reversed())   // chronological (পুরনো → নতুন)
+                        // ── WpmTrendChart আগে থেকেই TypingPracticeScreen.kt-এ সংজ্ঞায়িত (একই
+                        // package, তাই internal-এ অ্যাক্সেসযোগ্য) — এটা newest-first history
+                        // নিয়ে নিজেই chronological reverse করে, তাই এখানে .reversed() দেওয়া
+                        // হয়নি (ডুপ্লিকেট কম্পোজেবল বানিয়ে conflicting-overloads বিল্ড এরর
+                        // হয়েছিল, তাই সেটা সরিয়ে শেয়ার্ড কম্পোনেন্টটাই পুনর্ব্যবহার করা হলো) ──
+                        WpmTrendChart(history)
                     }
                 }
             }
@@ -179,29 +182,6 @@ private fun BadgePill(modifier: Modifier = Modifier, emoji: String, label: Strin
                 color = if (unlocked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.padding(top = 4.dp)
             )
-        }
-    }
-}
-
-@Composable
-private fun WpmTrendChart(chronological: List<TypingHistoryEntry>) {
-    val maxWpm = (chronological.maxOfOrNull { it.wpm } ?: 1).coerceAtLeast(1)
-    val lineColor = Color(0xFF6366F1)
-    Canvas(Modifier.fillMaxWidth().height(90.dp)) {
-        val w = size.width
-        val h = size.height
-        val stepX = if (chronological.size > 1) w / (chronological.size - 1) else w
-        val path = Path()
-        chronological.forEachIndexed { i, entry ->
-            val x = stepX * i
-            val y = h - (entry.wpm.toFloat() / maxWpm) * h * 0.85f - 6f
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        drawPath(path, color = lineColor, style = Stroke(width = 4f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-        chronological.forEachIndexed { i, entry ->
-            val x = stepX * i
-            val y = h - (entry.wpm.toFloat() / maxWpm) * h * 0.85f - 6f
-            drawCircle(color = lineColor, radius = 5f, center = Offset(x, y))
         }
     }
 }
