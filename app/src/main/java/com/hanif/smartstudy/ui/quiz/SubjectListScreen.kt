@@ -100,7 +100,13 @@ fun SubjectListScreen(
     // ছোট ইমুজি-এডিট ডায়ালগ খোলে (দেখো নিচে AdminEmojiEditDialog)। ──
     emojiOverrides : Map<String, String> = emptyMap(),
     refType        : String              = "subjects",
-    onEmojiChange  : (id: String, emoji: String) -> Unit = { _, _ -> }
+    onEmojiChange  : (id: String, emoji: String) -> Unit = { _, _ -> },
+    // ── Pull-to-refresh (সব ইউজার) + Admin "Force Full Resync" ──
+    isRefreshing     : Boolean    = false,
+    onRefresh        : () -> Unit = {},
+    onForceFullResync: () -> Unit = {},
+    forceResyncMsg   : String?    = null,
+    onDismissForceResyncMsg: () -> Unit = {}
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -377,7 +383,10 @@ private fun AdminMenuButton(
     onToggleReorder: () -> Unit,
     onRenameClick  : () -> Unit,
     onDeleteClick  : () -> Unit,
-    onMoveClick    : (() -> Unit)? = null
+    onMoveClick    : (() -> Unit)? = null,
+    // ── "🔄 Force Full Resync" — শুধু Admin-এর ড্রপডাউনে, দেখো
+    // QuizViewModel.forceFullResync()/ContentRepository.forceFullResync() এর কমেন্ট ──
+    onForceResyncClick: (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -415,6 +424,13 @@ private fun AdminMenuButton(
                     text = { Text("📦 Move to Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
                         color = Color(0xFF0EA5E9)) },
                     onClick = { expanded = false; onMoveClick() }
+                )
+            }
+            if (onForceResyncClick != null) {
+                DropdownMenuItem(
+                    text = { Text("🔄 Force Full Resync (Cache Clear)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF7C3AED)) },
+                    onClick = { expanded = false; onForceResyncClick() }
                 )
             }
             DropdownMenuItem(
