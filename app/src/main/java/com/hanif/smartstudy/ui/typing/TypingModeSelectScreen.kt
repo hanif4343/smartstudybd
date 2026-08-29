@@ -56,6 +56,12 @@ fun TypingModeSelectScreen(
     val ctx = LocalContext.current
     val session = remember { SessionManager(ctx) }
     var showProgress by remember { mutableStateOf(false) }
+    // ── প্লেসমেন্ট-টেস্ট — একবারই দেখানো হয় (নতুন ইউজার), সম্পূর্ণ হওয়া পর্যন্ত
+    // Home-এর বাকি অংশ রেন্ডার করা হয় না ──
+    var placementChecked by remember { mutableStateOf(false) }
+    var showPlacement by remember { mutableStateOf(false) }
+    // প্লেসমেন্ট-টেস্ট শেষ হলে ++ করে Continue-কার্ডের ডেটা রি-লোড করানো হয় ──
+    var refreshKey by remember { mutableStateOf(0) }
 
     // ── Continue কার্ড + সাপ্তাহিক স্ট্যাটের জন্য real ডেটা ──
     var stage by remember { mutableStateOf(1) }
@@ -68,7 +74,10 @@ fun TypingModeSelectScreen(
     var weekAvgAcc by remember { mutableStateOf(0) }
     var weekMinutes by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refreshKey) {
+        placementChecked = false
+        showPlacement = !session.hasCompletedTypingPlacement()
+        placementChecked = true
         stage = CurriculumProvider.getCurrentStage(ctx, "bn")
         unlockedKeyCount = BijoyCurriculum.stagesFor("bn").take(stage).flatten().size
         weakestKey = TypingKeyStatStore.getWeakest(ctx, "bn", minSamples = 10, limit = 1)
@@ -87,6 +96,15 @@ fun TypingModeSelectScreen(
         TypingProgressScreen(onBack = { showProgress = false })
         return
     }
+
+    if (showPlacement) {
+        TypingPlacementTestScreen(onComplete = {
+            showPlacement = false
+            refreshKey++   // Continue-কার্ডের ডেটা (নতুন স্টেজসহ) রিফ্রেশ করবে
+        })
+        return
+    }
+    if (!placementChecked) return   // এক ফ্রেম-এর জন্য blank — flash এড়াতে
 
     Scaffold(
         topBar = {
