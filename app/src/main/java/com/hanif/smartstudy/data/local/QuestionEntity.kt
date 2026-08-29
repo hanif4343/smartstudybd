@@ -60,6 +60,19 @@ data class QuestionEntity(
     // একই groupId শেয়ার করে — খালি groupId মানে standalone প্রশ্ন
     val groupId     : String = "",
     val subIndex    : Int    = 0,
+    // ── FIX ("Sheet er group heading nai" — QBank exam-paper স্ক্রিনে multi-part
+    // প্রশ্নের হেডিং (যেমন "১. এক কথায় প্রকাশ করুন") মাঝেমধ্যে দেখা যেত না):
+    // এই তিনটা কলাম আগে Room schema-তে কখনো যোগ হয়নি (দেখো EntityExtensions.kt-এর
+    // আগের ⚠️ কমেন্ট) — অথচ groupId/subIndex ছিল। ফলে Room round-trip হওয়া
+    // (এখন পদবী/প্রতিষ্ঠান/সাল — সবগুলো মোডই getRoomQuestionsByIds() দিয়ে যায়) যেকোনো
+    // প্রশ্নের groupHeading/formatStyle/important চুপচাপ "" /false হয়ে যেত, যদিও
+    // Sheet-এ Admin ঠিকই টাইপ করেছিল। এখন এই তিনটা কলাম যোগ করে toEntity()/
+    // toQuestionItem()/toQuizItem()/toQBankItem()/toStudyItem() সবগুলোতে ওয়্যার করা
+    // হলো (দেখো EntityExtensions.kt) — নতুন কলাম বলে Room schema migration লাগবে
+    // (fallbackToDestructiveMigration ইতিমধ্যে অন থাকলে সমস্যা নেই, নাহলে DB version bump করতে হবে)। ──
+    val groupHeading: String = "",
+    val formatStyle : String = "",
+    val important   : Boolean = false,
     // ── Review System (Admin-only) — Admin App-এ প্রতিটা প্রশ্ন 'রিভিউ করা হয়েছে' মার্ক
     // করার জন্য (Only-Admin ফিচার, student-দের UI/behavior-এ প্রভাব নেই)। ──
     val reviewed    : Boolean = false,
