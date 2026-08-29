@@ -181,7 +181,7 @@ fun NormalTypingScreen(
             StatsRow(
                 elapsedSec = state.elapsedSec, resolvedCount = resolvedCount, passage = state.passage,
                 isStarted = state.isStarted, correctKeystrokes = state.correctKeystrokes,
-                totalKeystrokes = state.totalKeystrokes, showAccuracy = false
+                totalKeystrokes = state.totalKeystrokes, showAccuracy = false, heroStyle = true
             )
 
             // ── প্যাসেজ প্রদর্শন (সঠিক=সবুজ, ভুল=লাল, বর্তমান শব্দ=নীল ব্যাকগ্রাউন্ড) ──
