@@ -1779,11 +1779,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val entry = _state.value.qbankDesignationsUnderInstitution.find { it.name == designation } ?: return
         val institution = _state.value.qbankSelectedInstitution ?: return
         timerJob?.cancel()
+        // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ৪-৫ সেকেন্ড 'ডেটা আসেনি' দেখায়, তারপর
+        // নিজে থেকেই ঠিক হয়ে যায়" — একই root cause যেটা আগে selectQBankYear()-এ
+        // ফিক্স হয়েছিল, দেখো ওই ফাংশনের কমেন্ট): আগে এখানে isLoading কখনো true সেট
+        // হতো না আর state.questions-ও ক্লিয়ার হতো না, তাই ensureRoomQuestionsByIds
+        // (নেটওয়ার্ক, ৪-৫ সেকেন্ড লাগতে পারে) শেষ না হওয়া পর্যন্ত UI স্টেল/খালি
+        // questions নিয়েই "ডেটা আসেনি" এরর দেখিয়ে দিত। এখন isLoading=true +
+        // questions খালি করে স্পিনার দেখানো হয়, ডেটা এলে তবেই এরর/লিস্ট দেখাবে। ──
         _state.update {
             it.copy(
                 navPath = NavPath(institution, designation),
                 currentPage = 0,
-                qbankSearchQuery = ""
+                qbankSearchQuery = "",
+                isLoading = true,
+                questions = emptyList(),
+                totalQuestions = 0,
+                error = null
             )
         }
         viewModelScope.launch {
@@ -1824,22 +1835,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** সাল-মোড: year কলাম ধরে group করা তালিকা — subject/subTopic নির্বিশেষে */
-    private suspend fun rebuildQBankYears(content: AppContent) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-        val filtered = content.forUser(user, adminTag)
-        val items    = filtered.qbank.map { QuestionItem.fromQBankItem(it) }
-        val progressMap = loadProgressMap()
-        val mode = StudyMode.QBANK
+    // ── FIX ("সাল ট্যাবে ডেটা আসেনি"): এই ফাংশন আগে পুরনো raw `questions.year`
+    // কলাম (QuestionItem.year, content.qbank থেকে) দিয়ে গোনা হতো। কিন্তু QBank
+    // ইতিমধ্যে Posts/Institutions/Exam_Appearances রেফারেন্স-টেবিলে migrate হয়ে
+    // গেছে (দেখো rebuildQBankPosts/rebuildQBankInstitutions-এর ওপরের কমেন্ট) —
+    // নতুন এন্ট্রিগুলোর বছর প্রশ্নের নিজের কলামে না, প্রতিটা exam_appearances রো-তে
+    // থাকে (একই প্রশ্ন একাধিক বছরে appear করতে পারে)। ফলে পুরনো raw-column
+    // কোয়েরি সবসময় ফাঁকা ফেরত দিত। এখন এটাও exam_appearances থেকেই গোনে,
+    // ঠিক পদবী/প্রতিষ্ঠান-মোডের প্যাটার্নেই — `content` প্যারামিটার আর লাগে না
+    // (রাখা হয়েছে caller সাইট (setQBankFilterMode) না ভাঙার জন্য, ব্যবহার হয় না)। ──
+    private suspend fun rebuildQBankYears(@Suppress("UNUSED_PARAMETER") content: AppContent) {
+        repo.syncExamAppearances()
 
-        val years = items
-            .filter { it.year.isNotBlank() }
-            .groupBy { it.year }
-            .map { (yr, qs) ->
+        val years = repo.getRoomAppearanceYearCounts()
+            .map { yc ->
                 SubjectEntry(
-                    name   = yr,
-                    totalQ = qs.size,
-                    doneQ  = qs.count { progressMap.contains("${mode.name}:${it.id}") }
+                    name   = yc.subject,   // subject কলামেই বছর বসানো (SubjectCount reuse, দেখো ReferenceDao)
+                    totalQ = yc.count,
+                    doneQ  = 0,
+                    linkedQuestionIds = emptyList()  // ভারী হতে পারে বলে লিস্ট-লেভেলে না এনে ট্যাপ করলে আনা হয় (নিচে selectQBankYear)
                 )
             }
             .sortedByDescending { it.name }   // সাম্প্রতিক সাল আগে
@@ -1847,29 +1861,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(qbankYears = years, isLoading = false) }
     }
 
-    /** সাল-মোডের depth0 → একটা সাল বাছাই — flat প্রশ্ন-লিস্ট, Room-first pagination
-     *  (ঠিক navigateToSubTopic()-এর মতোই প্যাটার্ন, শুধু subject/subTopic pair এর
-     *  বদলে শুধু year দিয়ে cross-subject ফিল্টার হয়) */
+    /** সাল-মোডের depth0 → একটা সাল বাছাই — appearance-linked questionId দিয়ে সরাসরি
+     *  ফ্ল্যাট প্রশ্ন-লিস্ট, ঠিক selectQBankInstitutionUnderPost()/
+     *  selectQBankDesignationUnderInstitution()-এর প্যাটার্নেই (Exam_Appearances
+     *  migration-এর অংশ, দেখো rebuildQBankYears-এর কমেন্ট — পুরনো raw
+     *  questions.year-ভিত্তিক পেজিনেশন-লজিক বাদ দেওয়া হলো কারণ সেটা নতুন এন্ট্রির
+     *  জন্য সবসময় খালি ফেরত দিত)। */
     fun selectQBankYear(year: String) {
         timerJob?.cancel()
-        // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ২-৩ সেকেন্ড 'কোনো প্রশ্ন নেই' দেখায়,
-        // পরে নিজে থেকেই ঠিক হয়ে যায়"): এই ফাংশন আগে isLoading কখনোই true সেট করত না।
-        // Room-এ এই year প্রথমবার cache না থাকলে নিচের else শাখায় repo.getContent()
-        // (নেটওয়ার্ক/Firebase থেকে) দিয়ে ফলব্যাক লোড হয় যেটাতে ২-৩ সেকেন্ড লাগতে পারে —
-        // ততক্ষণ questions খালিই থাকত আর vmState.isLoading=false থাকায় UI সরাসরি
-        // "কোনো প্রশ্ন পাওয়া যায়নি" এরর দেখিয়ে দিত (দেখো QuestionListScreen.kt-এর
-        // pagedQuestions.isEmpty() ব্লক), যদিও প্রশ্ন আসলে লোড হচ্ছিলই — ডেটা এলে ঠিক
-        // হয়ে যেত বলে "নিজে থেকেই ঠিক" মনে হতো। এখন isLoading=true সেট করে দেওয়া হলো,
-        // তাই লোড শেষ না হওয়া পর্যন্ত স্পিনার দেখাবে, ভুল করে "নেই" দেখাবে না।
-        // পাশাপাশি token দিয়ে stale/race গার্ডও যোগ করা হলো (নিচে দেখো) যাতে পুরনো
-        // সালের রেসপন্স নতুন সাল সিলেক্ট করার পর এসে ওভাররাইট করতে না পারে। ──
         val myToken = ++qbankYearLoadToken
+        // ── FIX ("সালের ভিতর ঢুকলে ৪-৫ সেকেন্ড 'ডেটা আসেনি' দেখায়, পরে ঠিক হয়ে
+        // যায়" — একই root cause selectQBankDesignationUnderInstitution/
+        // selectQBankInstitutionUnderPost-এও ছিল, ওদের কমেন্ট দেখো): isLoading=true
+        // + questions খালি করে স্পিনার দেখানো হয়, নেটওয়ার্ক-কল শেষ না হওয়া পর্যন্ত
+        // ভুল করে এরর দেখাবে না। token দিয়ে stale/race গার্ডও রাখা হলো, যাতে পুরনো
+        // সালের রেসপন্স নতুন সাল সিলেক্ট করার পর এসে ওভাররাইট করতে না পারে। ──
         _state.update {
             it.copy(
                 qbankSelectedYear = year,
                 // navPath কে শুধু ডিসপ্লে/ডেপথ-ট্র্যাকিং এর জন্য একটা placeholder pair
-                // দেওয়া হলো ("সাল", year) — এটা আসল কোনো subject/subTopic না, তাই
-                // এখান থেকে Room query হয় না (নিচে আলাদাভাবে year দিয়েই হয়)
+                // দেওয়া হলো ("সাল", year) — আসল কোনো subject/subTopic না, তাই এখান
+                // থেকে raw Room subject/subTopic query হয় না (নিচে linkedQuestionIds দিয়েই হয়)
                 navPath = NavPath("সাল", year),
                 currentPage = 0,
                 qbankSearchQuery = "",
@@ -1880,105 +1892,46 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val sheet = StudyMode.QBANK.name
-            val user  = session.getCurrentUser()
+            val user     = session.getCurrentUser()
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val bookmarks = _state.value.bookmarkedIds
 
-            val roomCount = repo.getRoomYearTotalCount(sheet, year, tag)
+            val ids = repo.getRoomAppearanceQuestionIdsForYear(year)
             if (myToken != qbankYearLoadToken) return@launch
-            if (roomCount > 0) {
-                loadQBankYearQuestionsFromRoom(year, tag, page = 0)
-                if (BuildConfig.REALTIME_DATA) {
-                    launch(Dispatchers.IO) {
-                        val content = (repo.getContent() as? DataState.Success)?.data
-                        // ── FIX: এই ব্যাকগ্রাউন্ড রিফ্রেশ শুধু "আরও নতুন" ডেটা থাকলেই
-                        // ওভাররাইট করবে — খালি/stale রেসপন্স দিয়ে Room থেকে ইতিমধ্যে
-                        // সঠিকভাবে দেখানো প্রশ্নগুলো মুছে ফেলবে না, আর token স্টেল হলেও
-                        // (ততক্ষণে ইউজার অন্য সাল/স্ক্রিনে চলে গেলে) কিছু লিখবে না। ──
-                        if (content != null && myToken == qbankYearLoadToken) {
-                            loadQBankYearQuestionsFallback(content, year, allowEmptyOverwrite = false)
-                        }
-                    }
-                }
-            } else {
-                val content = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-                if (myToken != qbankYearLoadToken) return@launch
-                loadQBankYearQuestionsFallback(content, year, allowEmptyOverwrite = true)
-            }
-        }
-    }
 
-    /** Room DB থেকে সাল-ভিত্তিক পেজিনেটেড প্রশ্ন — goToPage() থেকেও কল হয় */
-    private suspend fun loadQBankYearQuestionsFromRoom(year: String, tag: String, page: Int) {
-        _state.update { it.copy(questionsLoading = true) }
-        val sheet = StudyMode.QBANK.name
-        val total = repo.getRoomYearTotalCount(sheet, year, tag)
-        val items = repo.getRoomPagedQuestionsByYear(sheet, year, tag, page, PAGE_SIZE)
-        val bookmarks = _state.value.bookmarkedIds
+            // ── FIX ("০/০ প্রশ্ন" বাগ, একই প্যাটার্ন): Room-এ না-থাকা linkedQuestionId
+            // গুলো আগে GAS থেকে টার্গেটেড এনে ক্যাশ করে নাও, তারপর Room থেকে পড়ো ──
+            repo.ensureRoomQuestionsByIds(StudyMode.QBANK.name, ids)
+            if (myToken != qbankYearLoadToken) return@launch
 
-        val questions = items.map { q ->
-            q.copy(
-                isBookmarked = bookmarks.contains(q.id),
-                isWeakTopic  = isWeak(q.subTopic),
-                isStudyDone  = isStudyDone(q.id)
-            )
-        }.sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
+            val items = repo.getRoomQuestionsByIds(StudyMode.QBANK.name, ids, tag)
+                .map { q ->
+                    q.copy(
+                        isBookmarked = bookmarks.contains(q.id),
+                        isWeakTopic  = isWeak(q.subTopic),
+                        isStudyDone  = isStudyDone(q.id)
+                    )
+                }.sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
 
-        _state.update {
-            it.copy(
-                questions        = questions,
-                totalQuestions   = total,
-                currentPage      = page,
-                questionsLoading = false,
-                isLoading        = false,
-                isQuizActive     = true,
-                showResult       = false,
-                result           = null,
-                answeredCount    = 0,
-                timerSec         = 0,
-                error            = if (total == 0) "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" else null
-            )
-        }
-        startTimer(total)
-    }
-
-    /** Room-এ QBank সিঙ্ক না হয়ে থাকলে Firebase/AppContent থেকে সরাসরি ফলব্যাক (পেজিনেশন ছাড়া)
-     *  @param allowEmptyOverwrite false হলে items খালি এলে state.questions ওভাররাইট করবে না —
-     *  ব্যাকগ্রাউন্ড রিফ্রেশে (Room-এ ইতিমধ্যে ডেটা দেখানো অবস্থায়) ব্যবহার হয়, যাতে একটা
-     *  সাময়িক/stale খালি রেসপন্স আগে থেকেই ঠিকভাবে দেখানো প্রশ্নগুলো মুছে না ফেলে। */
-    private suspend fun loadQBankYearQuestionsFallback(content: AppContent, year: String, allowEmptyOverwrite: Boolean = true) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-        val filtered = content.forUser(user, adminTag)
-        val bookmarks = _state.value.bookmarkedIds
-        val items = filtered.qbank.filter { it.year == year }
-            .map { QuestionItem.fromQBankItem(it) }
-            .map {
+            if (myToken != qbankYearLoadToken) return@launch
+            _state.update {
                 it.copy(
-                    isBookmarked = bookmarks.contains(it.id),
-                    isWeakTopic  = isWeak(it.subTopic),
-                    isStudyDone  = isStudyDone(it.id)
+                    questions      = items,
+                    totalQuestions = items.size,
+                    currentPage    = 0,
+                    isQuizActive   = true,
+                    showResult     = false,
+                    result         = null,
+                    answeredCount  = 0,
+                    timerSec       = 0,
+                    isLoading      = false,
+                    error          = if (items.isEmpty()) "কোনো প্রশ্ন পাওয়া যায়নি" else null
                 )
             }
-            .sortedBy { isMastered(it.id, StudyMode.QBANK) || it.isStudyDone }
-        if (items.isEmpty() && !allowEmptyOverwrite) return
-        _state.update {
-            it.copy(
-                questions      = items,
-                totalQuestions = items.size,
-                currentPage    = 0,
-                isQuizActive   = true,
-                showResult     = false,
-                result         = null,
-                answeredCount  = 0,
-                timerSec       = 0,
-                isLoading      = false,
-                error          = if (items.isEmpty()) "কোনো প্রশ্ন পাওয়া যায়নি — ইন্টারনেট চেক করো" else null
-            )
+            startTimer(items.size)
         }
-        startTimer(items.size)
     }
 
     // ═════════════════════════════════════════════════════════
@@ -2053,6 +2006,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun selectQBankInstitutionUnderPost(institutionName: String) {
         val entry = _state.value.qbankInstitutionsUnderPost.find { it.name == institutionName } ?: return
         timerJob?.cancel()
+        // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ৪-৫ সেকেন্ড 'ডেটা আসেনি' দেখায়, তারপর
+        // নিজে থেকেই ঠিক হয়ে যায়" — দেখো selectQBankDesignationUnderInstitution/
+        // selectQBankYear-এর একই ফিক্সের কমেন্ট, root cause অভিন্ন): isLoading=true +
+        // questions খালি না করায় ensureRoomQuestionsByIds নেটওয়ার্ক-কল চলাকালীন UI
+        // স্টেল/খালি অবস্থায় ভুল করে "ডেটা আসেনি" দেখিয়ে দিত। ──
         _state.update {
             it.copy(
                 // শুধু ডেপথ/ডিসপ্লে প্লেসহোল্ডার (YEAR মোডের "সাল" প্যাটার্নেই) — আসল
@@ -2060,7 +2018,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 // query হয় না (নিচে entry.linkedQuestionIds দিয়েই সরাসরি হয়)
                 navPath = NavPath("পদ", institutionName),
                 currentPage = 0,
-                qbankSearchQuery = ""
+                qbankSearchQuery = "",
+                isLoading = true,
+                questions = emptyList(),
+                totalQuestions = 0,
+                error = null
             )
         }
         viewModelScope.launch {
@@ -2468,16 +2430,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val safePage = page.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
         if (safePage == _state.value.currentPage) return
 
-        // ── QBank সাল-মোড: subject/subTopic pair নেই, শুধু year দিয়ে cross-subject পেজিনেশন ──
-        val year = _state.value.qbankSelectedYear
-        if (year != null) {
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-            val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
-            viewModelScope.launch { loadQBankYearQuestionsFromRoom(year, tag, safePage) }
-            return
-        }
+        // ── QBank সাল-মোড: Exam_Appearances migration-এর পর (দেখো selectQBankYear())
+        // এই লিস্টও পদ-মোডের মতোই linkedQuestionId দিয়ে একবারেই সম্পূর্ণ ফ্ল্যাট লোড
+        // হয় (raw questions.year কলামের Room subject/subTopic পেজিনেশন আর না), তাই
+        // এখানে আলাদা কিছু করার নেই — নিচের সাধারণ subject/subTopic পেজিনেশন কোড
+        // ভুল করে চালিয়ে দিলে ভুল ফলাফল (বা খালি) দিত বলে আগেভাগেই রিটার্ন। ──
+        if (_state.value.qbankSelectedYear != null) return
 
         // ── Phase 6: QBank পদ-মোড — navPath = NavPath("পদ", institutionName) একটা
         // placeholder (দেখো selectQBankInstitutionUnderPost), আসল subject/subTopic pair
