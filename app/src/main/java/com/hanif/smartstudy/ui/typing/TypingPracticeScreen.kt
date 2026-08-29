@@ -4011,6 +4011,44 @@ internal fun MiniStatChip(text: String, color: Color = Color.Unspecified) {
     }
 }
 
+/**
+ * 🔥 কী-হিটম্যাপ — প্রতিটা আনলক-হওয়া কী একটা রঙিন স্কয়ার হিসেবে, রঙ ঠিক হয় সেই
+ * কী-এর accuracy দিয়ে (সবুজ ≥৯০%, কমলা ≥৭০%, লাল তার নিচে, ধূসর = এখনো কোনো
+ * ডেটা নেই)। ৬টা করে সারিতে ভাঙা হয় (ছোট মোবাইল স্ক্রিনে ভালো ফিট করে)।
+ */
+@Composable
+internal fun KeyHeatmapGrid(keys: List<String>, stats: Map<String, Pair<Int, Int>>, dimmed: Boolean = false) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "🔥 কী-হিটম্যাপ", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+            color = if (dimmed) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        keys.chunked(6).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { ch ->
+                    val (acc, samples) = stats[ch] ?: (0 to 0)
+                    val bg = when {
+                        samples == 0 -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        acc >= 90 -> GreenOk.copy(alpha = 0.75f)
+                        acc >= 70 -> AmberMid.copy(alpha = 0.75f)
+                        else -> RedWrong.copy(alpha = 0.8f)
+                    }
+                    Box(
+                        Modifier.weight(1f).aspectRatio(1f).background(bg, RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            practiceKeyGlyph(ch) ?: ch, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                            fontFamily = NotoSansBengali, color = Color.White
+                        )
+                    }
+                }
+                repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
 @Composable
 internal fun StatBox(icon: String, value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -4032,6 +4070,11 @@ internal fun ResultCard(
     // সেশন-শেষের রিপোর্টেও (সংক্ষিপ্ত আকারে, সর্বোচ্চ ৩টা) দেখানো হয়, ঠিক
 	// "typing-redesign-demo.html"-এর রিপোর্ট স্ক্রিনের মতো ──
     weakKeyProgress: List<Pair<String, Int>> = emptyList(),
+    // ── 🔥 কী-হিটম্যাপ — allUnlockedKeys + keyStatSnapshot (char -> accPct/samples)
+    // থাকলে "পরবর্তী পদক্ষেপ"-এর উপরে একটা রঙিন গ্রিড দেখাবে (সবুজ=ভালো, লাল=দুর্বল,
+    // ধূসর=এখনো ডেটা নেই) — "typing-redesign-demo.html"-এর হিটম্যাপের রিয়েল-ডেটা ভার্সন ──
+    heatmapKeys: List<String> = emptyList(),
+    heatmapStats: Map<String, Pair<Int, Int>> = emptyMap(),
     // ── ভুল-শব্দ দিয়ে AI-জেনারেটেড পরের প্যাসেজ — sessionMistakeWords খালি না
     // থাকলে আর এই ল্যাম্বডা দেওয়া থাকলেই বাটনটা দেখাবে (opt-in, ডিফল্ট "পরের
     // Passage" আচরণ বদলায় না) ──
@@ -4133,6 +4176,11 @@ internal fun ResultCard(
             if (result.syncLossCount > 0) {
                 Text("🔄 ${result.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ — ধীরে টাইপ করার চেষ্টা করো",
                     fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
+            }
+
+            // ── 🔥 কী-হিটম্যাপ ──
+            if (heatmapKeys.isNotEmpty()) {
+                KeyHeatmapGrid(heatmapKeys, heatmapStats, dimmed = isNewBest)
             }
 
             // ── 🎯 পরবর্তী পদক্ষেপ — যে কী-গুলোতে এখনো যথেষ্ট প্র্যাকটিস হয়নি, সর্বোচ্চ ৩টা ──
