@@ -3918,7 +3918,12 @@ internal fun StatsRow(
     // (Neonlipi রেফারেন্সের ACCURACY/SCORE বক্সের সমতুল্য) — Normal Typing-এ (showAccuracy
     // = false) আগের মতোই Progress% থাকে, কোনো regression নেই ──
     totalKeystrokes: Int = 0,
-    showAccuracy: Boolean = false
+    showAccuracy: Boolean = false,
+    // ── রিডিজাইন — "typing-redesign-demo.html"-এর লাইভ টাইপিং স্ক্রিনের মতো "hero"
+    // স্টাইল: WPM একাই বড় করে কেন্দ্রে, বাকি সব ছোট চিপে। আপাতত শুধু Smart Typing
+    // স্ক্রিনে চালু করা হয়েছে (heroStyle=true) — বাকি স্ক্রিনে ডিফল্ট false, তাই আগের
+    // কার্ড-স্টাইল অপরিবর্তিত থাকছে, কোনো regression নেই ──
+    heroStyle: Boolean = false
 ) {
     val mins = elapsedSec / 60
     val secs = elapsedSec % 60
@@ -3929,6 +3934,40 @@ internal fun StatsRow(
         (correctKeystrokes / 5.0 / (elapsedSec / 60.0)).toInt()
     } else 0
     val liveAccuracy = if (totalKeystrokes > 0) correctKeystrokes * 100 / totalKeystrokes else 100
+
+    if (heroStyle) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("$liveWpm", fontSize = 46.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Indigo600)
+            Text(
+                "WPM", fontSize = 10.sp, letterSpacing = 2.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MiniStatChip("%02d:%02d".format(mins, secs))
+                if (showAccuracy) {
+                    MiniStatChip(
+                        "Accuracy $liveAccuracy%",
+                        if (liveAccuracy >= 90) GreenOk else if (liveAccuracy >= 70) AmberMid else RedWrong
+                    )
+                } else if (freeTypingMode) {
+                    MiniStatChip(if (isStarted) "চলছে" else "—")
+                } else {
+                    MiniStatChip("${(progress * 100).toInt()}%")
+                }
+                MiniStatChip(if (freeTypingMode) "$resolvedCount অক্ষর" else "$resolvedCount/${passage.length}")
+            }
+            if (!freeTypingMode) {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(0.85f).height(5.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Indigo600, trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
+            }
+        }
+        return
+    }
 
     // ── আগে গাঢ় নেভি (0xFF1E1B4B) ব্যাকগ্রাউন্ড ছিল — চোখে লাগতো। এখন হালকা,
     // নিরপেক্ষ ব্যাকগ্রাউন্ড (কোনো ভারী কালার ছাড়া) ব্যবহার করা হচ্ছে ──
@@ -3962,6 +4001,17 @@ internal fun StatsRow(
 }
 
 @Composable
+internal fun MiniStatChip(text: String, color: Color = Color.Unspecified) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(
+            text, fontSize = 11.5.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else color,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
 internal fun StatBox(icon: String, value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 14.sp)
@@ -3977,6 +4027,15 @@ internal fun ResultCard(
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
     showSmartFeatures: Boolean = false,
+    // ── রিডিজাইন: "🎯 পরবর্তী পদক্ষেপ" — এখনো unlock-থ্রেশহোল্ডে না পৌঁছানো কী-গুলো
+    // (curriculumProgress থেকে), আগে এটা শুধু ALL KEYS-এর (i) বাটনে ছিল — এখন
+    // সেশন-শেষের রিপোর্টেও (সংক্ষিপ্ত আকারে, সর্বোচ্চ ৩টা) দেখানো হয়, ঠিক
+	// "typing-redesign-demo.html"-এর রিপোর্ট স্ক্রিনের মতো ──
+    weakKeyProgress: List<Pair<String, Int>> = emptyList(),
+    // ── ভুল-শব্দ দিয়ে AI-জেনারেটেড পরের প্যাসেজ — sessionMistakeWords খালি না
+    // থাকলে আর এই ল্যাম্বডা দেওয়া থাকলেই বাটনটা দেখাবে (opt-in, ডিফল্ট "পরের
+    // Passage" আচরণ বদলায় না) ──
+    onAiMistakeDrill: (() -> Unit)? = null,
     onRetry      : () -> Unit,
     onNextPassage: () -> Unit
 ) {
@@ -4074,6 +4133,50 @@ internal fun ResultCard(
             if (result.syncLossCount > 0) {
                 Text("🔄 ${result.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ — ধীরে টাইপ করার চেষ্টা করো",
                     fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
+            }
+
+            // ── 🎯 পরবর্তী পদক্ষেপ — যে কী-গুলোতে এখনো যথেষ্ট প্র্যাকটিস হয়নি, সর্বোচ্চ ৩টা ──
+            val incompleteKeys = remember(weakKeyProgress) {
+                weakKeyProgress.filter { it.second < CurriculumProvider.UNLOCK_MIN_CORRECT }.take(3)
+            }
+            if (incompleteKeys.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "🎯 পরবর্তী পদক্ষেপ", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                        color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    incompleteKeys.forEach { (ch, count) ->
+                        val remaining = (CurriculumProvider.UNLOCK_MIN_CORRECT - count).coerceAtLeast(0)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(RedWrong.copy(alpha = if (isNewBest) 0.15f else 0.08f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(shape = RoundedCornerShape(6.dp), color = RedWrong.copy(alpha = 0.2f)) {
+                                Text(practiceKeyGlyph(ch) ?: ch, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                            Text(
+                                "গড়ের চেয়ে বেশি ভুল হচ্ছে — বাকি $remaining বার সঠিক চাপ লাগবে", fontSize = 10.5.sp,
+                                fontFamily = NotoSansBengali, modifier = Modifier.weight(1f),
+                                color = if (isNewBest) Color(0xFFCBD5E1) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 🤖 ভুল-শব্দ দিয়ে AI প্র্যাকটিস — শুধু তখনই দেখাবে যখন এই সেশনে সত্যিকারের
+            // ভুল-শব্দ জমা হয়েছে (sessionMistakeWords) এবং caller AI-ড্রিল সাপোর্ট করে ──
+            if (onAiMistakeDrill != null && sessionMistakeWords.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = onAiMistakeDrill, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEC4899))
+                ) {
+                    Text("🤖 ভুল শব্দ দিয়ে AI প্র্যাকটিস (${sessionMistakeWords.distinct().size}টা শব্দ)",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
+                }
             }
 
             // ── এই সেশনে ভুল হওয়া শব্দের তালিকা এখন আর সরাসরি দেখানো হয় না — sessionMistakeWords
