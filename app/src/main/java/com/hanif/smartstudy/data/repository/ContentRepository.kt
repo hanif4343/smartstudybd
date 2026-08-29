@@ -308,6 +308,9 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomAppearancesForQuestion(questionId: String) = refDao.getAppearancesForQuestion(questionId)
     suspend fun getRoomAppearancesForPost(postId: String)          = refDao.getAppearancesForPost(postId)
     suspend fun getRoomAppearancesForInstitution(institutionId: String) = refDao.getAppearancesForInstitution(institutionId)
+    // ── FIX ("সাল ট্যাবে ডেটা আসেনি") — দেখো ReferenceDao.getAppearanceYearCounts এর নোট ──
+    suspend fun getRoomAppearanceYearCounts()                     = refDao.getAppearanceYearCounts()
+    suspend fun getRoomAppearanceQuestionIdsForYear(year: String) = refDao.getAppearanceQuestionIdsForYear(year)
 
     // ── Admin "Move" ডায়ালগে Subject/Topic নাম বেছে/টাইপ করলে, ব্যাকগ্রাউন্ড sync কলের
     // আগে আসল id বের করতে লাগে (GAS action-গুলো id-ভিত্তিক, নাম-ভিত্তিক না) ──
