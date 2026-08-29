@@ -187,6 +187,30 @@ fun SubjectListScreen(
             }
         }
 
+        // 🔬 DIAG (২০২৬-০৮-২৯ — "পদবী ট্যাবে Subject কার্ড দেখাচ্ছে" রিপোর্টের রুট
+        // কারণ ধরার জন্য সাময়িক): শুধু Admin-কে দেখানো হয়, ছোট gray ক্যাপশন —
+        // এই মুহূর্তে SubjectListScreen আসলে কোন state ফিল্ড থেকে কতগুলো এন্ট্রি
+        // পেয়েছে (mode + count + প্রথম কয়েকটা নাম) সরাসরি দেখায়। যেই কার্ডগুলো
+        // দেখা যাচ্ছে (২-কলাম গ্রিড, "টি অধ্যায়" লেবেল সহ কিনা) সেটার সাথে এই
+        // ক্যাপশনের mode/count মিলিয়ে দেখলেই বোঝা যাবে সমস্যাটা (ক) এই বিল্ডে আদৌ
+        // আছে কিনা, নাকি (খ) পুরনো/আন-রিবিল্ট APK-এর প্রভাব — কারণ কোডে
+        // qbankFilterMode অনুযায়ী subLabelOverride সবসময় "টি পদবী"/"টি প্রতিষ্ঠান"/
+        // "টি প্রশ্ন" দেখানোর কথা, "টি অধ্যায়" (chapters ফলব্যাক) কখনোই না —
+        // সেটা দেখা গেলে বুঝতে হবে এই আপডেটেড কোড এখনো ডিভাইসে রান হচ্ছে না।
+        // রুট কারণ কনফার্ম হয়ে গেলে এই ব্লক ফেরত মুছে ফেলা উচিত। ──
+        if (showQBankFilterBar && isAdmin) {
+            item {
+                Text(
+                    "🔬 DIAG mode=$qbankFilterMode count=${subjects.size} " +
+                        "sample=${subjects.take(3).joinToString(", ") { it.name }}",
+                    fontSize = 9.sp,
+                    color = Color.Gray,
+                    fontFamily = NotoSansBengali,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+        }
+
         // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
         if (mode == StudyMode.STUDY && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
             item {
