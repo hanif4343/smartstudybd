@@ -195,7 +195,7 @@ fun ExamTypingScreen(
                 StatsRow(
                     elapsedSec = state.elapsedSec, resolvedCount = resolvedCount, passage = state.passage,
                     isStarted = state.isStarted, correctKeystrokes = state.correctKeystrokes,
-                    totalKeystrokes = state.totalKeystrokes, showAccuracy = true
+                    totalKeystrokes = state.totalKeystrokes, showAccuracy = true, heroStyle = true
                 )
 
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
