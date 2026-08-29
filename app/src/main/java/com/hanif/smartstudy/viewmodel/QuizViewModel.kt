@@ -260,11 +260,19 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val user     = session.getCurrentUser()
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
         val tagsById = repo.getRoomTags().associateBy({ it.tagId }, { it.name })
+        // ── FIX ("যেই সাবজেক্ট ফাঁকা সেটা দেখানোর দরকার কী?"): এই sheet-এ অন্তত একটা
+        // topic-এ সত্যিই প্রশ্ন আছে এমন subjectId গুলোর সেট — দেখো ContentRepository.
+        // getRoomSubjectIdsWithContent()/ReferenceDao-এর নোট। এটা দিয়েই খালি সাবজেক্ট
+        // (যেমন "English Grammar" যেটার Quiz sheet-এ আসলে কোনো প্রশ্নই নেই, শুধু
+        // QBank-এ আছে) Quiz-এর লিস্ট থেকে বাদ পড়বে — subject.sheet ট্যাগ যাই থাকুক না
+        // কেন, ব্যাকএন্ড ডেটার সেই অসামঞ্জস্য এখানেই এখন client-সাইডে ঢেকে দেওয়া হলো। ──
+        val subjectIdsWithContent = repo.getRoomSubjectIdsWithContent(sheet)
 
         fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
             rows
                 .filter { s ->
                     com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
+                        && subjectIdsWithContent.contains(s.subjectId)
                 }
                 .map { s ->
                     // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
@@ -342,15 +350,34 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     StudyMode.QBANK -> t.rowCountQbank
                     StudyMode.STUDY -> t.rowCountStudy
                 }
+                // ── FIX ("সাবজেক্ট/টপিক দেখাচ্ছে যেখানে আসলে কোনো প্রশ্নই নেই" — যেমন
+                // "English Grammar > Article" Quiz-মোডে "211 প্রশ্ন" দেখাতো, ভিতরে ঢুকলে
+                // "কোনো প্রশ্ন পাওয়া যায়নি"): এই টপিকের rowCountQuiz আসলে সত্যিই ০ (এই
+                // টপিকে Quiz sheet-এ সত্যিই কোনো প্রশ্ন নেই — শুধু QBank-এ আছে), কিন্তু
+                // ঠিক নিচের ফলব্যাক-শর্তটাই (perSheetCount > 0 হলে সেটা, নাহলে legacy
+                // t.rowCount) একটা GENUINE শূন্যকে "না-জানা" ধরে নিয়ে t.rowCount
+                // (legacy কলাম, যেটা rebuildIndex-এর পুরনো ভার্সনে Quiz→QBank→Study
+                // ক্রমে সবার শেষে যেই sheet প্রসেস হতো তারই কাউন্ট বহন করত) দিয়ে ওভাররাইট
+                // করে দিত — ফলে আসল ০-কে ভুল করে QBank/Study-এর বড় সংখ্যা (211, 198…)
+                // বানিয়ে দেখাতো। legacy fallback শুধু তখনই ব্যবহার করা ঠিক, যখন তিনটা
+                // per-sheet কলামই একসাথে ০ (মানে rebuildIndex-এর নতুন ভার্সনই এখনো এই
+                // topic row-টায় চলেনি, তাই per-sheet ডেটা সত্যিই অনুপস্থিত) — একটা sheet-এ
+                // সত্যিকারের ০ (অন্য sheet-এ ডেটা থাকা সত্ত্বেও) কখনোই override হবে না। ──
+                val allPerSheetZero = t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0
                 SubTopicEntry(
                     name      = t.name,
                     subject   = subjectName,
-                    totalQ    = if (perSheetCount > 0) perSheetCount else t.rowCount,
+                    totalQ    = if (allPerSheetZero) t.rowCount else perSheetCount,
                     doneQ     = 0,
                     subjectId = t.subjectId,
                     topicId   = t.topicId
                 )
-            }.sortedBy { it.name }
+            }
+            // ── FIX ("যেই টপিক ফাঁকা সেটা দেখানোর দরকার কী?"): totalQ=০ এমন টপিক
+            // (বর্তমান sheet-এ সত্যিই কোনো প্রশ্ন নেই) এখন লিস্ট থেকেই বাদ — শুধু
+            // সংখ্যাটা ঠিক দেখানো না, পুরো এন্ট্রিটাই আর দেখাবে না। ──
+            .filter { it.totalQ > 0 }
+            .sortedBy { it.name }
             Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
             _state.update { it.copy(subTopics = subTopics, isLoading = false) }
         }
