@@ -154,6 +154,7 @@ fun QBankExamPaperScreen(
     institutionName : String,
     postName        : String,
     questions       : List<QuestionItem>,
+    isAdmin         : Boolean = false,
     onBack          : () -> Unit,
     onBookmark      : (String) -> Unit,
     onReport        : (globalIndex: Int, issue: String) -> Unit
@@ -276,6 +277,7 @@ fun QBankExamPaperScreen(
                 ExamSerialCard(
                     serialNo     = idx + 1,
                     serial       = serial.items,
+                    isAdmin      = isAdmin,
                     onBookmark   = onBookmark,
                     onSpeak      = { text, key -> TtsManager.speak(text, key) },
                     onReportTap  = { q -> reportTarget = q }
@@ -302,11 +304,27 @@ fun QBankExamPaperScreen(
 private fun ExamSerialCard(
     serialNo    : Int,
     serial      : List<QuestionItem>,
+    isAdmin     : Boolean = false,
     onBookmark  : (String) -> Unit,
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit
 ) {
     val labels = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ")
+    // 🔬 DIAG (২০২৬-০৮-২৯ — "group heading Sheet-এ ভরা আছে, তাও দেখাচ্ছে না" রিপোর্টের
+    // রুট কারণ ধরার জন্য সাময়িক): শুধু Admin-কে দেখানো হয় — এই serial-টা multi-part
+    // (size>1) হলে সরাসরি বলে দেয় runtime-এ QuestionItem.groupHeading আসলে কী মান
+    // নিয়ে এসেছে (ফাঁকা স্ট্রিং হলে "<EMPTY>", নাহলে আসল টেক্সট)। এতে এক নজরেই বোঝা
+    // যাবে সমস্যাটা (ক) নেটওয়ার্ক/Room-এ ডেটা না পৌঁছানো, নাকি (খ) UI রেন্ডারিং-এর কোনো
+    // আলাদা বাগ — root cause কনফার্ম হয়ে গেলে এই ব্লক ফেরত মুছে ফেলা উচিত। ──
+    if (isAdmin && serial.size > 1) {
+        Text(
+            "🔬 DIAG groupId=${serial.first().groupId} groupHeading=" +
+                (serial.first().groupHeading.ifBlank { "<EMPTY>" }) +
+                " formatStyle=${serial.first().formatStyle.ifBlank { "<none>" }}",
+            fontSize = 8.sp, color = Color(0xFFB00020),
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         // ── সিরিয়াল-নম্বর ব্যাজ — একক প্রশ্ন হোক বা মাল্টি-পার্ট গ্রুপ, সবসময় থাকে
         // (গণিত/সাধারণ জ্ঞানে হেডিং না থাকলেও অন্তত এই নম্বরটা দিয়ে প্রশ্ন শুরু হয়) ──
