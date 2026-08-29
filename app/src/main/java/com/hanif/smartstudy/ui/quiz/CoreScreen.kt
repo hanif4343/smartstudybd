@@ -364,7 +364,9 @@ fun CoreScreen(
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
                 qbankSearchQuery        = state.qbankSearchQuery,
-                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
+                isRefreshing = state.isRefreshing,
+                onRefresh    = { viewModel.refreshCurrentMode() }
             )
         }
 
@@ -424,7 +426,9 @@ fun CoreScreen(
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
                 qbankSearchQuery        = state.qbankSearchQuery,
-                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
+                isRefreshing = state.isRefreshing,
+                onRefresh    = { viewModel.refreshCurrentMode() }
             )
         }
 
@@ -462,7 +466,9 @@ fun CoreScreen(
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
                 qbankSearchQuery        = state.qbankSearchQuery,
-                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
+                isRefreshing = state.isRefreshing,
+                onRefresh    = { viewModel.refreshCurrentMode() }
             )
         }
 
@@ -530,7 +536,9 @@ fun CoreScreen(
                 qbankFilterMode         = state.qbankFilterMode,
                 onQBankFilterModeChange = { viewModel.setQBankFilterMode(it) },
                 qbankSearchQuery        = state.qbankSearchQuery,
-                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) }
+                onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
+                isRefreshing = state.isRefreshing,
+                onRefresh    = { viewModel.refreshCurrentMode() }
             )
         }
     }
