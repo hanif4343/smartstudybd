@@ -67,6 +67,12 @@ data class QuizUiState(
     val weakTopics    : List<WeakTopic>  = emptyList(),
     val contentLoaded : Boolean          = false,
     val highlightQuestionId : String?    = null,
+    // ── Pull-to-refresh (সব ইউজার) + Admin "Force Full Resync" — দেখো
+    // QuizViewModel.refreshCurrentMode()/forceFullResync()। isRefreshing PullToRefreshBox-এর
+    // isRefreshing প্যারামিটারে যায় (আলাদা isLoading থেকে — isLoading প্রথমবার/স্ক্রিন-বদলের
+    // full-screen স্পিনার দেখায়, isRefreshing শুধু pull-gesture-এর সময়কার ছোট ইন্ডিকেটর)।
+    val isRefreshing   : Boolean         = false,
+    val forceResyncMsg : String?         = null,   // Admin force-resync শেষ হলে সংক্ষিপ্ত ফিডব্যাক (Snackbar-এর মতো)
     // ── Admin: ইনলাইন ক্রম সাজানো (Subject/SubTopic list screen-এই ▲▼ বাটন) ──
     val isAdmin        : Boolean         = false,
     val isReorderMode  : Boolean         = false,   // ▲▼ বাটন দেখানো হবে কিনা (admin টগল করে)
@@ -231,6 +237,67 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // দেখানোর সময় তালিকা খালি থাকতো যতক্ষণ না ইউজার চিপে আলাদাভাবে ট্যাপ করতো ──
             if (newMode == StudyMode.QBANK) rebuildQBankPosts()
             _state.update { it.copy(isLoading = false) }
+        }
+    }
+
+    /**
+     * ── Pull-to-refresh (সব ইউজার): Subject/QBank লিস্ট স্ক্রিনে টেনে-নামালে কল হয়।
+     * শুধু reference টেবিল (subjects/topics/tags/posts/institutions + QBank হলে
+     * exam_appearances) টাটকা করে — cache-gate (REF_SYNC_MIN_GAP_MS) উপেক্ষা করে
+     * (force=true), কিন্তু আসল প্রশ্নের কনটেন্ট (Room `questions` টেবিল) স্পর্শ করে
+     * না বলে হালকা/দ্রুত। forceFullResync()-এর মতো ভারী না, তাই Admin-Student
+     * উভয়ের জন্যই নিরাপদ। বর্তমানে যেই টপ-লেভেল লিস্ট (Subject/পদবী/প্রতিষ্ঠান/সাল)
+     * দেখানো হচ্ছে সেটাই আবার বিল্ড হয়। ──
+     */
+    fun refreshCurrentMode() {
+        if (_state.value.isRefreshing) return
+        viewModelScope.launch {
+            _state.update { it.copy(isRefreshing = true) }
+            repo.syncReferenceData(force = true)
+            if (_state.value.mode == StudyMode.QBANK) repo.syncExamAppearances()
+            rebuildCurrentTopLevelList()
+            _state.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    /**
+     * ── Admin-only "🔄 Force Full Resync": Cache clear করে CDN থেকে সবকিছু টাটকা
+     * টেনে আনার বাটন — স্কিমা-মাইগ্রেশনের পর পুরনো ক্যাশড প্রশ্ন-কনটেন্ট (যেমন নতুন
+     * যোগ হওয়া groupHeading ফিল্ড) রিফ্রেশ হচ্ছে কিনা যাচাই করার জন্য দরকার হয়
+     * (দেখো ContentRepository.forceFullResync()-এর কমেন্ট)। ভারী/ধীর — শুধু Admin।
+     */
+    fun forceFullResync() {
+        if (!_state.value.isAdmin) return
+        if (_state.value.isRefreshing) return
+        viewModelScope.launch {
+            _state.update { it.copy(isRefreshing = true, forceResyncMsg = null) }
+            val ok = repo.forceFullResync()
+            rebuildCurrentTopLevelList()
+            _state.update {
+                it.copy(
+                    isRefreshing = false,
+                    forceResyncMsg = if (ok) "✅ ক্যাশ মুছে CDN থেকে টাটকা ডেটা আনা হয়েছে"
+                                     else "❌ রিফ্রেশ ব্যর্থ হয়েছে — ইন্টারনেট চেক করো"
+                )
+            }
+        }
+    }
+
+    /** forceResyncMsg ব্যানার/Snackbar কয়েক সেকেন্ড পর বা ইউজার dismiss করলে মুছে ফেলার জন্য */
+    fun clearForceResyncMsg() {
+        _state.update { it.copy(forceResyncMsg = null) }
+    }
+
+    /** refreshCurrentMode()/forceFullResync() দুটোতেই একই "বর্তমান টপ-লেভেল লিস্ট
+     *  আবার বিল্ড করো" লজিক লাগে — এখানে একবারই লেখা, ডুপ্লিকেট এড়াতে। */
+    private suspend fun rebuildCurrentTopLevelList() {
+        when (_state.value.mode) {
+            StudyMode.QUIZ, StudyMode.STUDY -> rebuildSubjectsLazy(_state.value.mode)
+            StudyMode.QBANK -> when (_state.value.qbankFilterMode) {
+                QBankFilterMode.DESIGNATION, QBankFilterMode.POST -> rebuildQBankPosts()
+                QBankFilterMode.INSTITUTION -> rebuildQBankInstitutions()
+                QBankFilterMode.YEAR        -> rebuildQBankYears(AppContent())
+            }
         }
     }
 
