@@ -267,6 +267,7 @@ fun CoreScreen(
                 // এখানে যেহেতু একটাই স্ক্রিন-স্লট — বর্তমানে প্রতি institution সাধারণত
                 // এক টাইপেরই হয়, তবে ভবিষ্যতে মিশ্র হলে MCQ অংশও এখানেই যোগ করা যাবে) ──
                 questions       = state.questions.filter { it.questionType.equals("written", ignoreCase = true) },
+                isAdmin         = state.isAdmin,
                 onBack          = {
                     val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
