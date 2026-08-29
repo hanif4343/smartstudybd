@@ -210,7 +210,12 @@ data class SubjectEntry(
     // QuizViewModel এখনো Room Subjects ম্যাপ থেকে resolve না করে থাকে (backward-compat)।
     // ⚠️ এখনো UI-তে ব্যবহৃত হচ্ছে না — SubjectListScreen.kt-এর onSubject callback এখনো
     // নাম-ভিত্তিক (QuizViewModel.kt/CoreScreen.kt আপডেট না হওয়া পর্যন্ত এটাই নিরাপদ পথ)।
-    val subjectId    : String = ""
+    val subjectId    : String = "",
+    // ── QBank সাল-মোড (Exam_Appearances migration): এই সালে appear করা সব
+    // প্রশ্নের fbKey লিস্ট — ট্যাপ করলে সরাসরি repo.getRoomQuestionsByIds() দিয়ে
+    // flat প্রশ্ন-লিস্ট দেখানো হয়, ঠিক SubTopicEntry.linkedQuestionIds (পদ-মোড)-এর
+    // মতোই প্যাটার্ন, কোনো raw questions.year কলাম ম্যাচিং লাগে না ──
+    val linkedQuestionIds : List<String> = emptyList()
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
 }
