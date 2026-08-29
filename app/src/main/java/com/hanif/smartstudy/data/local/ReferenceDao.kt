@@ -24,6 +24,35 @@ interface ReferenceDao {
     @Query("SELECT * FROM subjects WHERE sheet = :sheet ORDER BY name")
     suspend fun getSubjectsBySheet(sheet: String): List<SubjectEntity>
 
+    // ── FIX ("যেই টপিক/সাবজেক্ট ফাঁকা সেটা দেখানোর দরকার কী?"): আগে "০ প্রশ্ন" নিয়েই
+    // টপিক/সাবজেক্ট লিস্টে দেখানো হতো (numeric bug ফিক্সের পর অন্তত সংখ্যাটা সঠিক
+    // ছিল, কিন্তু ফাঁকা এন্ট্রি তবু দেখা যেত)। এই তিনটা কোয়েরি — প্রতি sheet-এর জন্য
+    // একটা করে (SQL-এ কলাম-নাম প্যারামিটারাইজ করা যায় না বলে ৩টা আলাদা) — ওই
+    // subjectId গুলো ফেরত দেয় যাদের অন্তত একটা topic-এ বর্তমান sheet-এ সত্যিই প্রশ্ন
+    // আছে (navigateToSubjectLazy-এর ঠিক একই fallback-লজিক — তিনটা per-sheet কলামই
+    // ০ হলে legacy rowCount দিয়ে বিচার করে, যাতে rebuildIndex-এর পুরনো ভার্সনের ডেটার
+    // জন্যও সঠিক থাকে)। rebuildSubjectsLazy() এই সেট দিয়ে খালি সাবজেক্ট বাদ দেয়। ──
+    @Query("""
+        SELECT DISTINCT subjectId FROM topics
+        WHERE rowCountQuiz > 0
+           OR (rowCountQuiz = 0 AND rowCountQbank = 0 AND rowCountStudy = 0 AND rowCount > 0)
+    """)
+    suspend fun getSubjectIdsWithContentQuiz(): List<String>
+
+    @Query("""
+        SELECT DISTINCT subjectId FROM topics
+        WHERE rowCountQbank > 0
+           OR (rowCountQuiz = 0 AND rowCountQbank = 0 AND rowCountStudy = 0 AND rowCount > 0)
+    """)
+    suspend fun getSubjectIdsWithContentQbank(): List<String>
+
+    @Query("""
+        SELECT DISTINCT subjectId FROM topics
+        WHERE rowCountStudy > 0
+           OR (rowCountQuiz = 0 AND rowCountQbank = 0 AND rowCountStudy = 0 AND rowCount > 0)
+    """)
+    suspend fun getSubjectIdsWithContentStudy(): List<String>
+
     // ── Admin Subject/Topic ডিলিট ইনস্ট্যান্ট দেখানোর জন্য — নাম দিয়ে subjectId
     // রিজলভ করতে হয় (deleteByIds/deleteReferenceId-এর id-ভিত্তিক API নাম নেয় না) ──
     @Query("SELECT * FROM subjects WHERE sheet = :sheet AND name = :name LIMIT 1")
