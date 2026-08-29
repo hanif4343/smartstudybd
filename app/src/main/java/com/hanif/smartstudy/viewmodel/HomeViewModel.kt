@@ -41,7 +41,12 @@ data class HomeUiState(
     // কারণ, তাই সম্পূর্ণ সরিয়ে দেওয়া হলো (ব্যবহারকারীর সিদ্ধান্তে) — শুধু CDN/App থাকছে। ──
     val cdnCounts           : Map<String, Int>  = emptyMap(),
     val cdnConfigured      : Boolean           = true,   // false হলে UI-তে "CDN কনফিগার নেই" দেখাবে
-    val isLoadingAdminCounts: Boolean          = false
+    val isLoadingAdminCounts: Boolean          = false,
+    // ── Admin-only "🔄 Force Full Resync" (Home হেডারের top-right) — দেখো
+    // ContentRepository.forceFullResync()-এর কমেন্ট। isRefreshingAll পুরো বাটনে
+    // স্পিনার দেখায়, forceResyncMsg শেষ হলে ছোট ফিডব্যাক (কয়েক সেকেন্ড পর/ট্যাপে বন্ধ)। ──
+    val isRefreshingAll    : Boolean           = false,
+    val forceResyncMsg     : String?           = null
 )
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
@@ -163,6 +168,35 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 isLoadingAdminCounts = false
             )
         }
+    }
+
+    /**
+     * ── Admin-only "🔄 Force Full Resync" (Home হেডারের top-right বাটন): Room-এর
+     * `questions` টেবিল + `topic_sync` কার্সার + সব reference টেবিল খালি করে CDN থেকে
+     * পুরোপুরি টাটকা টেনে আনে। দেখো ContentRepository.forceFullResync()-এর বিস্তারিত
+     * কমেন্ট। AppDatabase singleton (getInstance) বলে এই HomeViewModel-এর নিজের
+     * ContentRepository ইনস্ট্যান্স দিয়ে কল করলেও effect পুরো অ্যাপ-জুড়েই প্রযোজ্য হয়
+     * (Quiz/QBank/Study ভিউমডেল অন্য instance হলেও একই Room DB শেয়ার করে) — সেই সাথে
+     * loadHomeData(forceRefresh=true) দিয়ে Home-এর নিজের ক্যাশও রিফ্রেশ হয়। ──
+     */
+    fun forceFullResync() {
+        if (_uiState.value.isRefreshingAll) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshingAll = true, forceResyncMsg = null)
+            val ok = repo.forceFullResync()
+            loadHomeData(forceRefresh = true)
+            loadAdminContentCounts()
+            _uiState.value = _uiState.value.copy(
+                isRefreshingAll = false,
+                forceResyncMsg  = if (ok) "✅ ক্যাশ মুছে CDN থেকে টাটকা ডেটা আনা হয়েছে"
+                                  else "❌ রিফ্রেশ ব্যর্থ হয়েছে — ইন্টারনেট চেক করো"
+            )
+        }
+    }
+
+    /** forceResyncMsg ব্যানার dismiss/auto-hide করার জন্য */
+    fun clearForceResyncMsg() {
+        _uiState.value = _uiState.value.copy(forceResyncMsg = null)
     }
 
     // ── 🔔 Notification inbox লোড করো — home load-এর সময়েও (শুধু badge count এর
