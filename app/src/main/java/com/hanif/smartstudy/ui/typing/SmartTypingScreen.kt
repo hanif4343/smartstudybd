@@ -134,6 +134,23 @@ fun SmartTypingScreen(
         }
     }
 
+    // ── 🤖 ভুল-শব্দ দিয়ে AI পরের প্যাসেজ — এই সেশনে যে শব্দগুলোতে ভুল হয়েছিল
+    // (sessionMistakeWords), সেগুলো AI-কে দিয়ে একটা নতুন প্র্যাকটিস-প্যাসেজ বানানো
+    // হয় (TypingAdaptiveContentProvider — আগে শুধু "AI Adaptive Session" মোডে
+    // ব্যবহার হতো, এখন যেকোনো মোডের ResultCard থেকেও, opt-in বাটনে)। "keydrill"
+    // ট্যাগে চালু করা হয় (curriculum না) — কারণ curriculum মোডের কী-আনলক লজিক
+    // ধরে নেয় প্যাসেজে শুধু এখন-পর্যন্ত-আনলক-করা কী থাকবে, AI-টেক্সটে অন্য কী
+    // চলে আসতে পারে, যেটা curriculum-এর ধাপ-ভিত্তিক ডিজাইন ভেঙে ফেলবে ──
+    fun startAiMistakeDrillSession() {
+        val mistakes = sessionMistakeWords.distinct()
+        sessionMistakeWords = emptyList()
+        if (mistakes.isEmpty()) { startCurriculumSession(curriculumTrack); return }
+        scope.launch {
+            val res = TypingAdaptiveContentProvider.getBlendedPassage(ctx, mistakes, curriculumTrack, "medium", null)
+            vm.startSession("keydrill", listOf(PassageInfo(res.passage, "ai")), budgetSec = 300, language = curriculumTrack)
+        }
+    }
+
     fun startBigramDrillSession() {
         scope.launch {
             val slowPairs = TypingKeyStatStore.getSlowestPairsGlobal(ctx, curriculumTrack, minCount = 3, limit = 6)
@@ -359,7 +376,7 @@ fun SmartTypingScreen(
             StatsRow(
                 elapsedSec = state.elapsedSec, resolvedCount = resolvedCount, passage = state.passage,
                 isStarted = state.isStarted, correctKeystrokes = state.correctKeystrokes,
-                totalKeystrokes = state.totalKeystrokes, showAccuracy = true
+                totalKeystrokes = state.totalKeystrokes, showAccuracy = true, heroStyle = true
             )
 
             // ── CURRENT KEY + ALL KEYS ──
@@ -531,6 +548,8 @@ fun SmartTypingScreen(
                         ResultCard(
                             result = r, bestWpm = bestWpm, showSmartFeatures = true,
                             sessionMistakeWords = sessionMistakeWords,
+                            weakKeyProgress = if (state.sessionMode == "curriculum") curriculumProgress else emptyList(),
+                            onAiMistakeDrill = { startAiMistakeDrillSession() },
                             onRetry = { vm.restartCurrentPassage() },
                             onNextPassage = {
                                 sessionMistakeWords = emptyList()
