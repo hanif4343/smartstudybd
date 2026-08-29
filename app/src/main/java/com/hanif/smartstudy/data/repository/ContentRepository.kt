@@ -300,6 +300,15 @@ class ContentRepository(private val context: Context) {
     // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
     suspend fun getRoomSubjectsRef()                     = refDao.getAllSubjects()
     suspend fun getRoomSubjectsRefBySheet(sheet: String)  = refDao.getSubjectsBySheet(sheet)
+    // ── FIX ("ফাঁকা টপিক/সাবজেক্ট দেখানোর দরকার কী?") — দেখো ReferenceDao-এর
+    // getSubjectIdsWithContentQuiz/Qbank/Study এর নোট। sheet স্ট্রিং ("Quiz"/"QBank"/
+    // "Study") অনুযায়ী সঠিক কোয়েরিটা বেছে নেওয়া হয় এখানে। ──
+    suspend fun getRoomSubjectIdsWithContent(sheet: String): Set<String> = when (sheet) {
+        "Quiz"  -> refDao.getSubjectIdsWithContentQuiz()
+        "QBank" -> refDao.getSubjectIdsWithContentQbank()
+        "Study" -> refDao.getSubjectIdsWithContentStudy()
+        else    -> emptyList()
+    }.toSet()
     suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
     suspend fun getRoomSubTopicsForTopic(topicId: String)  = refDao.getSubTopicsForTopic(topicId)
     suspend fun getRoomTags()                             = refDao.getAllTags()
