@@ -44,7 +44,11 @@ import androidx.room.RoomDatabase
     // লাগে না।
     // v15: TopicSyncEntity-তে lastHash কলাম যোগ (Speed Plan Task 3 — CDN hash-based
     // skip-fetch, দেখো TopicSyncEntity.kt-এর কমেন্ট)।
-    version = 15,
+    // v16: QuestionEntity-তে groupHeading/formatStyle/important কলাম যোগ হলো — FIX
+    // ("Sheet er group heading nai"): এই তিনটা আগে কখনো Room-এ persist হতো না, দেখো
+    // QuestionEntity.kt-এর কমেন্ট। fallbackToDestructiveMigration() থাকায় migration
+    // SQL লাগে না — পরের syncTopic/getRoomQuestionsByIds কলেই আবার সঠিকভাবে পপুলেট হবে।
+    version = 16,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
