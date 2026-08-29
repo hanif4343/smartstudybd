@@ -357,6 +357,34 @@ class ContentRepository(private val context: Context) {
     }
 
     /**
+     * ── Admin-only "🔄 Force Full Resync" — দেখো QuizViewModel.forceFullResync()।
+     * সাধারণ ইউজারের pull-to-refresh (syncReferenceData(force=true)) শুধু reference
+     * টেবিল (subjects/topics/tags/posts/institutions) রিফ্রেশ করে — আসল প্রশ্নের
+     * কনটেন্ট (Room `questions` টেবিল) স্পর্শ করে না, কারণ ensureRoomQuestionsByIds/
+     * cacheNextTopicBatch শুধু "Room-এ নেই" এমন id-ই নতুন করে আনে — একবার ক্যাশ হয়ে
+     * গেলে সেই প্রশ্নের কনটেন্ট (groupHeading-এর মতো নতুন যোগ হওয়া ফিল্ড সহ) আর
+     * রিফ্রেশ হয় না, স্কিমা-মাইগ্রেশনের পরও পুরনো ক্যাশড রো stale থেকে যেতে পারে।
+     *
+     * এই ফাংশন `questions` টেবিল (পুরোটা) + `topic_sync` কার্সার/হ্যাশ টেবিল
+     * (নাহলে hash-based skip-fetch লজিক "কিছু বদলায়নি" ধরে নিয়ে আবার স্কিপ করে
+     * দিতে পারে) + সব reference টেবিল — সব খালি করে, তারপর reference/exam-appearances
+     * পুনরায় fetch করে। প্রশ্নগুলো নিজে-নিজে আর ফেচ হয় না (ভারী/সব-সাবজেক্ট) —
+     * পরের বার যেই Topic/Post/Institution/Year খোলা হবে, স্বাভাবিক
+     * progressive-fill/getQuestionsByIds পথেই আবার টাটকা আসবে।
+     *
+     * ⚠️ ভারী/ধীর হতে পারে (পুরো reference + exam-appearances পুনরায় ডাউনলোড) —
+     * তাই এটা শুধু Admin-কে (debug/support প্রয়োজনে) দেখানো উচিত, সাধারণ ইউজারকে না।
+     */
+    suspend fun forceFullResync(): Boolean = withContext(Dispatchers.IO) {
+        dao.deleteAll()
+        topicSyncDao.clearAll()
+        val refOk = syncReferenceData(force = true)
+        val appOk = syncExamAppearances()
+        Log.d("Repo", "forceFullResync: refOk=$refOk appOk=$appOk")
+        refOk
+    }
+
+    /**
      * একগুচ্ছ questionId (Exam_Appearances থেকে পাওয়া) দিয়ে সরাসরি সেই নির্দিষ্ট প্রশ্নগুলো
      * Room থেকে টেনে আনে (audience-filtered) — "পদ অনুযায়ী ব্রাউজ"-এ Post+Institution
      * বাছাইয়ের পর ফ্ল্যাট প্রশ্ন-লিস্ট দেখানোর জন্য।
