@@ -36,6 +36,9 @@ fun QuizItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEnt
     topicId      = topicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    groupHeading = groupHeading ?: "",
+    formatStyle  = formatStyle ?: "",
+    important    = important == true,
     reviewed     = reviewed?.lowercase()?.trim() == "true",
     reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
@@ -67,6 +70,9 @@ fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     subtopicId   = subtopicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    groupHeading = groupHeading ?: "",
+    formatStyle  = formatStyle ?: "",
+    important    = important == true,
     reviewed     = reviewed?.lowercase()?.trim() == "true",
     reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
@@ -89,6 +95,7 @@ fun StudyItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEn
     topicId      = topicId ?: "",
     groupId      = groupId ?: "",
     subIndex     = subIndex?.toIntOrNull() ?: 0,
+    groupHeading = groupHeading ?: "",   // StudyItem-এ formatStyle/important নেই (দেখো StudyContent.kt)
     reviewed     = reviewed?.lowercase()?.trim() == "true",
     reviewedAt   = reviewedAt?.toLongOrNull() ?: 0L,
     syncedAt     = syncedAt
@@ -147,14 +154,11 @@ fun ExamAppearanceRef.toEntity() = ExamAppearanceEntity(
 )
 
 // ── Room Entity → QuizItem/QBankItem/StudyItem (Speed Plan Task 3.5) ──────────
-// ⚠️ QuestionEntity-তে groupHeading/formatStyle/important/updatedAt/newId কলাম
-// নেই (Room schema-তে কখনো যোগ করা হয়নি) — তাই এই তিনটা reverse-conversion-এ
-// সেগুলো null/id-ই বসে। প্রভাব: multi-part গ্রুপ-হেডিং রেন্ডারিং ও QBank-এর
-// ম্যানুয়াল "important" ফ্ল্যাগ — getContent() (Search/Weak-topics/Random-quiz)
-// দিয়ে আসা প্রশ্নে এই দুইটা ফিচার কাজ নাও করতে পারে, কিন্তু groupId/subIndex
-// (যেটার ওপর গ্রুপিং লজিকের মূল অংশ নির্ভর করে) ঠিকই থাকে। সরাসরি topic-open
-// (cacheNextTopicBatch) পাথে এই সমস্যা নেই, কারণ সেটা সরাসরি CDN JSON থেকে
-// QuizItem/QBankItem/StudyItem পার্স করে, Room round-trip করে না।
+// ── FIX ("Sheet er group heading nai"): groupHeading/formatStyle/important এখন
+// QuestionEntity-তে persist হয় (দেখো QuestionEntity.kt/AppDatabase.kt v16 কমেন্ট),
+// তাই এই তিনটা reverse-conversion-এও সঠিকভাবে ফেরত বসানো হলো। updatedAt/newId
+// এখনো নেই (delta-sync/admin-edit key resolve ছাড়া অন্য কোথাও দরকার হয় না বলে
+// রাখা হয়নি) — fbKey-ই newId হিসেবে ব্যবহার হয়, যা আগেও ছিল। ──
 
 fun QuestionEntity.toQuizItem() = QuizItem(
     id = fbKey, newId = fbKey, subject = subject, subTopic = subTopic, question = question,
@@ -162,9 +166,10 @@ fun QuestionEntity.toQuizItem() = QuizItem(
     answer = answer, explanation = explanation,
     explanationVisibility = if (explanationIsPublic) "public" else "private",
     questionType = questionType, technique = technique, audienceTags = audienceTags,
-    imageUrl = imageUrl, visualUrl = visualUrl,
+    imageUrl = imageUrl, visualUrl = visualUrl, important = important,
     subjectId = subjectId, topicId = topicId, groupId = groupId,
     subIndex = if (subIndex != 0) subIndex.toString() else "",
+    groupHeading = groupHeading, formatStyle = formatStyle,
     reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
 )
 
@@ -175,9 +180,10 @@ fun QuestionEntity.toQBankItem() = QBankItem(
     explanationVisibility = if (explanationIsPublic) "public" else "private",
     technique = technique, questionType = questionType, audienceTags = audienceTags,
     year = year, examName = examName, imageUrl = imageUrl, visualUrl = visualUrl,
-    questionPaperUrls = questionPaperUrls,
+    questionPaperUrls = questionPaperUrls, important = important,
     subjectId = subjectId, topicId = topicId, subtopicId = subtopicId, groupId = groupId,
     subIndex = if (subIndex != 0) subIndex.toString() else "",
+    groupHeading = groupHeading, formatStyle = formatStyle,
     reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
 )
 
@@ -189,6 +195,7 @@ fun QuestionEntity.toStudyItem() = StudyItem(
     visualUrl = visualUrl,
     subjectId = subjectId, topicId = topicId, groupId = groupId,
     subIndex = if (subIndex != 0) subIndex.toString() else "",
+    groupHeading = groupHeading,   // StudyItem-এ formatStyle/important নেই
     reviewed = reviewed.toString(), reviewedAt = if (reviewedAt != 0L) reviewedAt.toString() else ""
 )
 
@@ -219,6 +226,9 @@ fun QuestionEntity.toQuestionItem() = QuestionItem(
     subtopicId   = subtopicId,
     groupId      = groupId,
     subIndex     = subIndex,
+    groupHeading = groupHeading,
+    formatStyle  = formatStyle,
+    isImportant  = important,
     reviewed     = reviewed,
     reviewedAt   = reviewedAt,
     // ── FIX: আগে এখানে sourceSheet সেট করা হতো না, তাই Room-first fast-path
