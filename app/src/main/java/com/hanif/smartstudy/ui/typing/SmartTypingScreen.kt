@@ -81,6 +81,9 @@ fun SmartTypingScreen(
     var curriculumStage by remember { mutableStateOf(1) }
     var curriculumProgress by remember { mutableStateOf(listOf<Pair<String, Int>>()) }
     var keyStatSnapshot by remember { mutableStateOf(mapOf<String, Pair<Int, Int>>()) }
+    // ── XP/লেভেল-আপ সেলিব্রেশন — সেশন শেষে লেভেল বাড়লে এখানে সেট হয়, একটা ছোট
+    // Dialog দেখানো হয় (দেখো নিচের finish-session LaunchedEffect) ──
+    var levelUpTo by remember { mutableStateOf<Int?>(null) }
     var blindMode by remember { mutableStateOf(false) }
     var showKeyAnalysis by remember { mutableStateOf(false) }
     var keyAnalysisList by remember { mutableStateOf(listOf<TypingKeyStatStore.KeyAnalysis>()) }
@@ -259,6 +262,11 @@ fun SmartTypingScreen(
         }
         keyStatSnapshot = loadKeyStatSnapshot(ctx, curriculumTrack)
         keyAnalysisList = TypingKeyStatStore.getKeyAnalysis(ctx, curriculumTrack)
+        // ── XP/লেভেল — সরল ফর্মুলা: সঠিক অক্ষর + WPM বোনাস + উচ্চ-Accuracy বোনাস।
+        // লিডারবোর্ড না (ব্যাকএন্ড লাগবে), শুধু ব্যক্তিগত প্রগ্রেস-সেলিব্রেশন ──
+        val xpEarned = r.correctChars + (r.wpm * 2) + (if (r.accuracy >= 95) 30 else 0)
+        val (lvlBefore, lvlAfter) = session.addTypingXp(xpEarned)
+        if (lvlAfter > lvlBefore) levelUpTo = lvlAfter
         weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
             .getTopWeakWords(session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest", "bn", limit = 10)
             .map { it.targetWord }
@@ -549,6 +557,7 @@ fun SmartTypingScreen(
                             result = r, bestWpm = bestWpm, showSmartFeatures = true,
                             sessionMistakeWords = sessionMistakeWords,
                             weakKeyProgress = if (state.sessionMode == "curriculum") curriculumProgress else emptyList(),
+                            heatmapKeys = allUnlockedKeys, heatmapStats = keyStatSnapshot,
                             onAiMistakeDrill = { startAiMistakeDrillSession() },
                             onRetry = { vm.restartCurrentPassage() },
                             onNextPassage = {
@@ -561,6 +570,31 @@ fun SmartTypingScreen(
                                 }
                             }
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 🎉 Level Up! — সেশন শেষে XP-লেভেল বাড়লে ফুল-রেজাল্ট পপ-আপের উপরে এই ছোট
+    // সেলিব্রেশন ডায়ালগ দেখানো হয় (রিটেনশন গেমিফিকেশন লেয়ার, লিডারবোর্ড না —
+    // এটার জন্য ব্যাকএন্ড লাগবে, আপাতত সম্পূর্ণ লোকাল/ব্যক্তিগত) ──
+    levelUpTo?.let { lvl ->
+        Dialog(onDismissRequest = { levelUpTo = null }) {
+            Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(
+                    Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("🎉", fontSize = 44.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Level Up!", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+                    Text(
+                        "এখন আপনি লেভেল $lvl", fontSize = 14.sp, fontFamily = NotoSansBengali,
+                        color = Color(0xFF6366F1), fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp)
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = { levelUpTo = null }, shape = RoundedCornerShape(14.dp)) {
+                        Text("দারুণ! 🎊", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                     }
                 }
             }
