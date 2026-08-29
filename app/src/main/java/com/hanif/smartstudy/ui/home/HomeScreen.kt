@@ -170,10 +170,32 @@ fun HomeScreen(
     ) {
         HomeHeaderBar(
             state         = state,
+            isAdmin       = isAdmin,
             onOpenMenu    = onOpenMenu,
             onSearchClick = onSearchClick,
-            onBellClick   = { showNotifSheet = true; viewModel.loadNotifications() }
+            onBellClick   = { showNotifSheet = true; viewModel.loadNotifications() },
+            onForceResyncClick = { viewModel.forceFullResync() }
         )
+
+        // ── Force-resync ফিডব্যাক ব্যানার — ৩ সেকেন্ড পর অথবা ট্যাপে বন্ধ হয়ে যায় ──
+        state.forceResyncMsg?.let { msg ->
+            LaunchedEffect(msg) {
+                kotlinx.coroutines.delay(3000)
+                viewModel.clearForceResyncMsg()
+            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.clearForceResyncMsg() },
+                color = if (msg.startsWith("✅")) Color(0xFF059669).copy(alpha = 0.12f) else Color(0xFFEF4444).copy(alpha = 0.12f)
+            ) {
+                Text(
+                    msg, fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold,
+                    color = if (msg.startsWith("✅")) Color(0xFF059669) else Color(0xFFEF4444),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+        }
 
         if (state.isOffline) OfflineBanner()
 
@@ -353,7 +375,14 @@ fun AdNativePlaceholder() {
 // নতুন Home header — ছবি ২ রেফারেন্স অনুযায়ী: ☰ + avatar + "Welcome back, নাম" + 🔔 + 🔍
 // ═══════════════════════════════════════════════════════════
 @Composable
-private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchClick: () -> Unit, onBellClick: () -> Unit) {
+private fun HomeHeaderBar(
+    state: HomeUiState,
+    isAdmin: Boolean = false,
+    onOpenMenu: () -> Unit,
+    onSearchClick: () -> Unit,
+    onBellClick: () -> Unit,
+    onForceResyncClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -381,6 +410,23 @@ private fun HomeHeaderBar(state: HomeUiState, onOpenMenu: () -> Unit, onSearchCl
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             Text("পড়তে থাকো, এগিয়ে যেতে থাকো!", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+        }
+        // ── Admin-only "🔄 Force Full Resync" — একদম top-right, বেল/সার্চেরও আগে,
+        // যাতে সবচেয়ে বেশি চোখে পড়ে (Room cache clear + CDN থেকে টাটকা টানার বাটন,
+        // দেখো HomeViewModel.forceFullResync()) — student-দের এই বাটন দেখা যায় না ──
+        if (isAdmin) {
+            IconButton(onClick = onForceResyncClick, modifier = Modifier.size(34.dp), enabled = !state.isRefreshingAll) {
+                if (state.isRefreshingAll) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF7C3AED))
+                } else {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Force Full Resync",
+                        tint = Color(0xFF7C3AED),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
         // 🔔 — নোটিফিকেশন ইনবক্স খোলে (Firebase "Notifications/{phone}" থেকে);
         // অপঠিত থাকলে লাল ব্যাজে সংখ্যা দেখায়
