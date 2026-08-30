@@ -35,6 +35,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.model.BijoyCurriculum
+import com.hanif.smartstudy.data.repository.TypingLeaderboardRepository
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.CurriculumProvider
 import com.hanif.smartstudy.util.SessionManager
@@ -74,8 +75,11 @@ fun SmartTypingScreen(
 ) {
     val ctx = LocalContext.current
     val session = remember { SessionManager(ctx) }
+    val leaderboardRepo = remember { TypingLeaderboardRepository() }
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsState()
+    val isAdmin = remember { session.getCurrentUser()?.isAdmin() == true }
+    var showStageAdmin by remember { mutableStateOf(false) }
 
     var curriculumTrack by remember { mutableStateOf("bn") }
     var curriculumStage by remember { mutableStateOf(1) }
@@ -115,7 +119,7 @@ fun SmartTypingScreen(
         curriculumTrack = track
         scope.launch {
             refreshCurriculum(track)
-            val drillText = CurriculumProvider.buildDrillPassage(track, curriculumStage)
+            val drillText = CurriculumProvider.buildDrillPassageSmart(ctx, track, curriculumStage)
             if (drillText.isNotBlank()) {
                 vm.startSession("curriculum", listOf(PassageInfo(drillText, "all")), budgetSec = 300, language = track)
             }
@@ -263,10 +267,22 @@ fun SmartTypingScreen(
         keyStatSnapshot = loadKeyStatSnapshot(ctx, curriculumTrack)
         keyAnalysisList = TypingKeyStatStore.getKeyAnalysis(ctx, curriculumTrack)
         // ── XP/লেভেল — সরল ফর্মুলা: সঠিক অক্ষর + WPM বোনাস + উচ্চ-Accuracy বোনাস।
-        // লিডারবোর্ড না (ব্যাকএন্ড লাগবে), শুধু ব্যক্তিগত প্রগ্রেস-সেলিব্রেশন ──
+        // (আগে এখানে বলা ছিল লিডারবোর্ড ব্যাকএন্ড লাগবে বলে বাদ, কিন্তু আবিষ্কার হলো
+        // TypingRaceRepository আগে থেকেই RTDB ব্যবহার করছে — তাই এখন লিডারবোর্ডও যোগ
+        // করা হলো, নতুন কোনো ইনফ্রা লাগেনি) ──
         val xpEarned = r.correctChars + (r.wpm * 2) + (if (r.accuracy >= 95) 30 else 0)
         val (lvlBefore, lvlAfter) = session.addTypingXp(xpEarned)
         if (lvlAfter > lvlBefore) levelUpTo = lvlAfter
+        // ── নতুন personal-best হলেই লিডারবোর্ডে জমা দেওয়া হয় (repo নিজেই ডুপ্লিকেট/
+        // পুরনো-স্কোর write এড়ায়, দেখো TypingLeaderboardRepository.submitScore) —
+        // এখানে session.getTypingBestWpm() সরাসরি কল করা হয়েছে, নিচের `bestWpm`
+        // state var (UI-তে দেখানোর জন্য) না, কারণ এই ব্লকটা সেই var-এর declaration-এর
+        // আগে চলে (Kotlin-এ লোকাল ভ্যারিয়েবল forward-reference করা যায় না) ──
+        val myPhone = session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() }
+        if (myPhone != null && r.wpm > session.getTypingBestWpm()) {
+            val myName = session.getCurrentUser()?.displayName() ?: "ব্যবহারকারী"
+            leaderboardRepo.submitScore(curriculumTrack, myPhone, myName, r.wpm, r.accuracy)
+        }
         weakWordDashboard = AppDatabase.getInstance(ctx).typingMistakeDao()
             .getTopWeakWords(session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "guest", "bn", limit = 10)
             .map { it.targetWord }
@@ -297,6 +313,13 @@ fun SmartTypingScreen(
     // ভেতরে practiceKeyGlyph() দিয়ে হয়, এখানে raw মান রাখাই ঠিক (highlighting/
     // stat-lookup-এর জন্য) ──
     val currentKeyForBox: String? = remember(nextTypeChar) { nextTypeChar?.toString() }
+
+    // ── এডমিন স্টেজ-কনটেন্ট এডিটর — শুধু এডমিনদের জন্য, ALL KEYS বক্সের ধারে-কাছে
+    // একটা ✏️ বাটন থেকে খোলে (নিচে দেখো) ──
+    if (showStageAdmin) {
+        CurriculumStageAdminScreen(onBack = { showStageAdmin = false }, initialTrack = curriculumTrack, initialStage = curriculumStage)
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -425,6 +448,22 @@ fun SmartTypingScreen(
             // ── প্যাসেজ প্রদর্শন ──
             val onSurfaceColor = MaterialTheme.colorScheme.onSurface
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                // ── এডমিন-অনলি ✏️ এডিট বাটন — এই স্টেজের প্র্যাকটিস-কনটেন্ট সরাসরি
+                // এডিট করে Google Sheet-এ সেভ করা যায় (দেখো CurriculumStageAdminScreen.kt) ──
+                if (isAdmin && state.sessionMode == "curriculum") {
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp), horizontalArrangement = Arrangement.End) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant,
+                            onClick = { showStageAdmin = true }
+                        ) {
+                            Text(
+                                "✏️ এডিট", fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
                 val liveSplit = remember(state.userInput) { splitTypedWords(state.userInput) }
                 val annotated = remember(state.passage, state.frozenWordResults, liveSplit, blindMode) {
                     buildAnnotatedString {
