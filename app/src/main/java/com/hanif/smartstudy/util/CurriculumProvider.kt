@@ -57,6 +57,27 @@ object CurriculumProvider {
         return dao.get(userId(context), track)?.currentStage ?: 1
     }
 
+    /** প্লেসমেন্ট-টেস্টের ফলাফল অনুযায়ী সরাসরি একটা স্টেজে বসিয়ে দেয় (normal
+     *  checkAndAdvance()-এর unlock-শর্ত এখানে প্রযোজ্য না — এটা শুধু ইউজারের
+     *  বিদ্যমান দক্ষতা অনুযায়ী শুরুর বিন্দু ঠিক করার জন্য, এক-লাফে এগিয়ে দিতে) */
+    suspend fun setStage(context: Context, track: String, stage: Int) {
+        val dao = AppDatabase.getInstance(context).curriculumProgressDao()
+        val clamped = stage.coerceIn(1, BijoyCurriculum.totalStages(track))
+        dao.upsert(CurriculumProgressEntity(userId(context), track, clamped, System.currentTimeMillis()))
+    }
+
+    /** buildDrillPassage()-এর "স্মার্ট" ভার্সন — আগে CurriculumStageContentProvider-এ
+     *  চেক করে দেখে এই track+stage-এ এডমিন কোনো curated কনটেন্ট (Google Sheet
+     *  "CurriculumStages" ট্যাব) বসিয়েছে কিনা; থাকলে তার থেকে এলোমেলোভাবে একটা
+     *  বেছে নেয় (একাধিক ভ্যারিয়েন্ট থাকলে), না থাকলে আগের সিন্থেটিক জেনারেশনেই
+     *  (buildDrillPassage) ফিরে যায় — তাই কোনো স্টেজে এডমিন কিছু না বসালেও কিছু
+     *  ভাঙে না, প্র্যাকটিস স্বাভাবিকভাবেই চলতে থাকে। */
+    suspend fun buildDrillPassageSmart(context: Context, track: String, stage: Int, wordCount: Int = 12): String {
+        val curated = CurriculumStageContentProvider.getStageContent(context, track, stage)
+        if (curated.isNotEmpty()) return curated.random()
+        return buildDrillPassage(track, stage, wordCount)
+    }
+
     /** বর্তমান স্টেজ পর্যন্ত আনলক হওয়া সব ক্যারেক্টার দিয়ে একটা সিন্থেটিক প্র্যাকটিস
      *  টেক্সট বানায় — শুরুর স্টেজগুলোতে সাধারণ Sheet-পুলের কনটেন্ট ব্যবহার করা যায় না
      *  (তাতে এখনো-আনলক-না-হওয়া অক্ষরও থাকে), তাই ছোট ছোট এলোমেলো সিলেবল/শব্দ-প্যাটার্ন
