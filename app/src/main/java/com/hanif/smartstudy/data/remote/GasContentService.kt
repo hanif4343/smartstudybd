@@ -569,6 +569,18 @@ object GasContentService {
     }
 
     /**
+     * Google Sheet মোডে "CurriculumStages" ট্যাব — Typing-এর একই প্যাটার্নে getSheetRows
+     * দিয়ে Firebase বাইপাস করে সরাসরি sheet থেকে পড়ে (headers: id, track, stage, content,
+     * updatedAt)। দেখো util/CurriculumStageContentProvider.kt।
+     */
+    suspend fun fetchCurriculumStageContent(): List<com.hanif.smartstudy.data.model.TypingSheetStageContent> {
+        if (!isConfigured()) return emptyList()
+        val result = fetchSheetRows<com.hanif.smartstudy.data.model.TypingSheetStageContent>("CurriculumStages")
+        if (result.error != null) Log.w(TAG, "fetchCurriculumStageContent: ${result.error}")
+        return result.items
+    }
+
+    /**
      * fetchUser() (RemoteServices.kt) Firebase quota/permission-এ ব্যর্থ হলে fallback —
      * GAS "getSheetRows" (tab=Users) দিয়ে সরাসরি Google Sheet থেকে ওই phone-এর row খুঁজে
      * User বানায় (role/status/xp সহ)। এতে Firebase read-quota শেষ হয়ে গেলেও admin
