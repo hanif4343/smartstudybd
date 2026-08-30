@@ -39,6 +39,10 @@ data class RoadmapPlan(
 class SessionManager(private val context: Context) {
     private val gson = Gson()
 
+    // ── XP → লেভেল রূপান্তর — প্রতি ৫০০ XP-তে ১ লেভেল, সহজ/অনুমানযোগ্য রাখা হয়েছে
+    // (কোনো exponential curve না, যাতে ইউজার সহজে বুঝতে পারে পরের লেভেলে যেতে কত বাকি) ──
+    fun typingLevelForXp(xp: Int): Int = (xp / 500) + 1
+
     companion object {
         val KEY_USER_JSON        = stringPreferencesKey("ss_user")
         val KEY_DARK_MODE        = booleanPreferencesKey("dark_mode")
@@ -101,6 +105,14 @@ class SessionManager(private val context: Context) {
         val KEY_CHALLENGES_ENABLED   = booleanPreferencesKey("live_feature_challenges_enabled")
         val KEY_BUDDY_ENABLED        = booleanPreferencesKey("live_feature_buddy_enabled")
         val KEY_TYPING_RACE_ENABLED  = booleanPreferencesKey("live_feature_typing_race_enabled")
+        // ── Typing-ব্রাঞ্চ merge (Speed Plan-এর একই নীতি অনুসরণ করে): Leaderboard
+        // Firebase RTDB-তে persistent listener ব্যবহার করত (submitScore + observeTop),
+        // যেটা quota-খরুচে — তাই TypingRace-এর মতোই এটাও হোল্ড/আনহোল্ড টগলের আওতায়
+        // আনা হলো, ডিফল্ট **বন্ধ**। বন্ধ থাকলে Home-এ লিংকই দেখা যাবে না, আর সেশন-শেষে
+        // submitScore()-ও কল হবে না (দেখো SmartTypingScreen.kt)। উপরন্তু observeTop()
+        // এখন persistent listener না, one-shot fetch (get().await()) — RTDB-তে চালু
+        // থাকা কানেকশন-সংখ্যা/bandwidth অনেক কম লাগে ──
+        val KEY_TYPING_LEADERBOARD_ENABLED = booleanPreferencesKey("live_feature_typing_leaderboard_enabled")
         
         // Reminder Keys (Updated for DataStore Consistency)
         val KEY_REMINDER_ON      = booleanPreferencesKey("reminder_on")
@@ -163,6 +175,11 @@ class SessionManager(private val context: Context) {
         // Streak
         val KEY_STREAK_COUNT     = intPreferencesKey("streak_count")
         val KEY_STREAK_LAST_DATE = stringPreferencesKey("streak_last_date")
+        // Typing placement test — নতুন ইউজার প্রথমবার Smart Typing খুললে ৩০-সেকেন্ডের
+        // একটা শর্ট টেস্ট দেয়, তার WPM/Accuracy দেখে সঠিক কারিকুলাম-স্টেজে বসানো হয়
+        // (Keybr/TypingClub-স্টাইল স্কিল-চেক — সবাইকে জোর করে স্টেজ ১ থেকে শুরু করানো হয় না)
+        val KEY_TYPING_PLACEMENT_DONE = booleanPreferencesKey("typing_placement_done")
+        val KEY_TYPING_XP = intPreferencesKey("typing_xp")
         // Achievements (JSON set of earned ids)
         val KEY_ACHIEVEMENTS     = stringPreferencesKey("achievements")
         // Pending sync count
@@ -300,6 +317,13 @@ class SessionManager(private val context: Context) {
     }
     suspend fun setTypingRaceEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_TYPING_RACE_ENABLED] = on }
+    }
+
+    fun getTypingLeaderboardEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_LEADERBOARD_ENABLED] ?: false
+    }
+    suspend fun setTypingLeaderboardEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_TYPING_LEADERBOARD_ENABLED] = on }
     }
 
     // ── Phase ৩: Roadmap Wizard ──
@@ -793,6 +817,30 @@ class SessionManager(private val context: Context) {
 
     fun getStreak(): Int = runBlocking {
         context.dataStore.data.first()[KEY_STREAK_COUNT] ?: 0
+    }
+
+    // ── টাইপিং XP/লেভেল — লিডারবোর্ড না (সেটার জন্য ব্যাকএন্ড দরকার), শুধু
+    // সেশন-শেষে ছোট্ট "Level Up!" সেলিব্রেশনের জন্য (রিটেনশন গেমিফিকেশন লেয়ার) ──
+    fun getTypingXp(): Int = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_XP] ?: 0
+    }
+
+    /** নতুন XP যোগ করে, রিটার্ন করে (আগের লেভেল, নতুন লেভেল) — caller এটা দিয়ে
+     *  বুঝতে পারে level-up হলো কিনা */
+    suspend fun addTypingXp(amount: Int): Pair<Int, Int> {
+        val before = getTypingXp()
+        val after = before + amount.coerceAtLeast(0)
+        context.dataStore.edit { it[KEY_TYPING_XP] = after }
+        return typingLevelForXp(before) to typingLevelForXp(after)
+    }
+
+    // ── টাইপিং প্লেসমেন্ট-টেস্ট — একবার সম্পূর্ণ হয়ে গেলে আর দেখানো হয় না ──
+    fun hasCompletedTypingPlacement(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_PLACEMENT_DONE] ?: false
+    }
+
+    suspend fun setTypingPlacementCompleted() {
+        context.dataStore.edit { it[KEY_TYPING_PLACEMENT_DONE] = true }
     }
 
     // ── Achievements ──────────────────────────────────────────
