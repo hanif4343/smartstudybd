@@ -48,16 +48,28 @@ object BijoyCurriculum {
         listOf("্")   // স্টেজ ৫৮ — হসন্ত/বিরাম চিহ্ন (Hasanta/Virama)
     )
 
-    /** ইংরেজি ৩০ স্টেজ — স্ট্যান্ডার্ড টাচ-টাইপিং ক্রম (home row আগে, তারপর বাকি রো,
-     *  তারপর সংখ্যা, শেষে চিহ্ন) — এটার জন্য কোনো Neonlipi স্ক্রিনশট রেফারেন্স ছিল না,
-     *  তাই সম্পূর্ণ নিজে ডিজাইন করা। */
+    /** ইংরেজি — Bangla-র (BANGLA_STAGES) একই নিয়ম অনুসরণ করে: স্টেজ ১-এ একসাথে কয়েকটা
+     *  কী (৬টা, হোম-রো'র index/middle/ring আঙুলের কী — f j d k s l), তারপর প্রতিটা
+     *  স্টেজে একটা করে নতুন কী। আগে প্রতিটা স্টেজে মাত্র ২টা কী ছিল (৩০ স্টেজ) — এখন
+     *  বাংলার প্যাটার্নের সাথে সঙ্গতিপূর্ণ করা হলো (৫৫ স্টেজ, একই ৬০টা মূল
+     *  ক্যারেক্টার/চিহ্ন, শুধু গ্রুপিং বদলেছে — কোনো কী বাদ পড়েনি)।
+     *  ⚠️ নোট: এই রিস্ট্রাকচারিংয়ে স্টেজ-নাম্বার শিফট হয়েছে (আগে স্টেজ ৬-এ যা ছিল
+     *  এখন সেটা অন্য নম্বরে) — তাই কারো পুরনো English-track progress (persisted stage
+     *  number) থাকলে সেটা নতুন গ্রুপিং অনুযায়ী পুনর্মূল্যায়ন হবে (নিচু দিকে শিফট হতে
+     *  পারে, কিন্তু কোনো ডেটা করাপশন/ক্র্যাশ হবে না — CurriculumProvider stage সবসময়
+     *  ENGLISH_STAGES.size দিয়ে coerce করে)। */
     val ENGLISH_STAGES: List<List<String>> = listOf(
-        listOf("f", "j"), listOf("d", "k"), listOf("s", "l"), listOf("a", ";"), listOf("g", "h"),
-        listOf("r", "u"), listOf("t", "y"), listOf("e", "i"), listOf("w", "o"), listOf("q", "p"),
-        listOf("v", "m"), listOf("c", ","), listOf("x", "."), listOf("z", "/"), listOf("b", "n"),
-        listOf("1", "0"), listOf("2", "9"), listOf("3", "8"), listOf("4", "7"), listOf("5", "6"),
-        listOf("-", "="), listOf("[", "]"), listOf("\\", "`"), listOf("'", "\""), listOf("!", "?"),
-        listOf("@", "#"), listOf("$", "%"), listOf("^", "&"), listOf("*", "("), listOf(")", "_")
+        listOf("f", "j", "d", "k", "s", "l"),   // স্টেজ ১ — হোম-রো'র মূল ৬টা কী দিয়ে শুরু (বাংলার স্টেজ-১-এর মতোই)
+        listOf("a"), listOf(";"), listOf("g"), listOf("h"),                 // হোম-রো সম্পূর্ণ হলো
+        listOf("r"), listOf("u"), listOf("t"), listOf("y"), listOf("e"), listOf("i"),
+        listOf("w"), listOf("o"), listOf("q"), listOf("p"),                 // টপ-রো
+        listOf("v"), listOf("m"), listOf("c"), listOf(","), listOf("x"), listOf("."),
+        listOf("z"), listOf("/"), listOf("b"), listOf("n"),                 // বটম-রো
+        listOf("1"), listOf("0"), listOf("2"), listOf("9"), listOf("3"), listOf("8"),
+        listOf("4"), listOf("7"), listOf("5"), listOf("6"),                 // সংখ্যা
+        listOf("-"), listOf("="), listOf("["), listOf("]"), listOf("\\"), listOf("`"),
+        listOf("'"), listOf("\""), listOf("!"), listOf("?"), listOf("@"), listOf("#"),
+        listOf("$"), listOf("%"), listOf("^"), listOf("&"), listOf("*"), listOf("("), listOf(")"), listOf("_")   // চিহ্ন
     )
 
     fun stagesFor(track: String): List<List<String>> = if (track == "en") ENGLISH_STAGES else BANGLA_STAGES
