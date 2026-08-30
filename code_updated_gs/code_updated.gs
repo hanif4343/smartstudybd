@@ -3758,13 +3758,7 @@ function doPost(e) {
       return json({result:"success",details:nfResults});
     }
 
-    // 🐛 ফিক্স: আগে এখানে txt("Sheet not found: "+tTab) — plain TEXT রেসপন্স — যেটা
-    // Android-এর addQuestion() (GasContentService.kt) ভাঙত, কারণ ওটা সবসময় JSON
-    // parse করার চেষ্টা করে (Gson MalformedJsonException)। এখন JSON রেসপন্স, তাই
-    // অ্যাপে "Sheet not found: ..." মেসেজটা readable ApiResult.Error হিসেবে আসবে,
-    // ক্র্যাশ না করে। (এটা "CurriculumStages" ট্যাব তৈরি না করা থাকলে ঠিক এই কারণেই
-    // হয় — Sheet-এ ট্যাবটা বানানো লাগবে, headers: id, track, stage, content, updatedAt)
-    var mSh=ss.getSheetByName(tTab); if(!mSh)return json({result:"error",error:"Sheet not found: "+tTab});
+    var mSh=ss.getSheetByName(tTab); if(!mSh)return txt("Sheet not found: "+tTab);
     if(params.question&&isDuplicate(mSh,params.subject||'',params.question,params.sub_topic||''))
       return json({result:"duplicate",message:"এই sub-topic-এ প্রশ্নটি আগে থেকেই আছে"});
 
