@@ -3,6 +3,7 @@ package com.hanif.smartstudy.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hanif.smartstudy.data.remote.TypingCloudSyncService
 import com.hanif.smartstudy.ui.typing.PassageInfo
 import com.hanif.smartstudy.ui.typing.TypingResult
 import com.hanif.smartstudy.ui.typing.normalizeBn
@@ -75,6 +76,17 @@ data class TypingSessionUiState(
     // ── পর্ব ৩/৫.৩ ধাপ ৩ (Smart Typing সম্প্রসারণ): লাইভ রিদম স্কোর (০-১০০),
     // সাম্প্রতিক কী-প্রেস ল্যাটেন্সির consistency থেকে — null মানে যথেষ্ট নমুনা এখনো হয়নি ──
     val rhythmScore: Int? = null,
+
+    // ── পর্ব ৩/৫.৩ ধাপ ২: সর্বশেষ "লক" হওয়া শব্দের তথ্য — SmartTypingScreen এটা
+    // পর্যবেক্ষণ করে TypingMistakeLogger-এ লগ করে (দুর্বল-শব্দ ড্যাশবোর্ডের জন্য)।
+    // lastLockedWordIndex পাল্টালেই নতুন ইভেন্ট ধরা হয় (LaunchedEffect key হিসেবে) ──
+    val lastLockedWordIndex: Int = -1,
+    val lastLockedWordTarget: String = "",
+    val lastLockedWordTyped: String = "",
+    val lastLockedWordCorrect: Boolean = false,
+
+    // ── স্পেস-মিস অটো-রিসিঙ্ক কতবার ট্রিগার হয়েছে — সেশন-শেষে TTS টিপের জন্য ──
+    val syncLossCount: Int = 0,
 
     // ── ফলাফল ──
     val result: TypingResult? = null
@@ -149,7 +161,7 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 isStarted = false, isFinished = false, elapsedSec = 0, result = null,
                 correctKeystrokes = 0, incorrectKeystrokes = 0, totalKeystrokes = 0,
                 leftCorrectChars = 0, leftWrongChars = 0, rightCorrectChars = 0, rightWrongChars = 0,
-                showBackspaceWarning = false
+                showBackspaceWarning = false, syncLossCount = 0
             )
         }
     }
@@ -185,6 +197,17 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(backspaceLocked = locked) }
     }
 
+    /** স্ক্রিন খোলার সময় কল করার জন্য — cloud থেকে টেনে local-এর সাথে merge করে
+     *  (মূল ফাইলের LaunchedEffect(Unit)-এর প্যাটার্নে, silent fail যদি লগইন করা না থাকে) */
+    fun syncFromCloud() {
+        viewModelScope.launch {
+            val phone = session.getCurrentUser()?.phone.orEmpty()
+            if (phone.isBlank()) return@launch
+            val cloud = TypingCloudSyncService.pull(phone) ?: return@launch
+            session.mergeTypingCloudSnapshot(cloud.bestWpm, cloud.history)
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────
     //  টাইমার
     // ─────────────────────────────────────────────────────────────────
@@ -200,7 +223,7 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 // — Exam স্প্লিট) — curriculum/keydrill ইচ্ছাকৃতভাবে বাদ, ওগুলোতে কোনো
                 // হার্ড টাইম-বাজেট নেই (মূল অ্যাপেও ছিল না, শুধু প্যাসেজ শেষ হলে থামে) ──
                 val s = _state.value
-                val isTimedMode = s.sessionMode == "free" || s.sessionMode == "exam" || s.sessionMode == "govtmock"
+                val isTimedMode = s.sessionMode == "free" || s.sessionMode == "exam" || s.sessionMode == "govtmock" || s.sessionMode == "adaptive"
                 if (isTimedMode && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
                     finishSession()
                 }
@@ -278,6 +301,7 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 if (overflow.length >= 2 && nextWord != null && nextWord.startsWith(overflow)) {
                     normalized = normalized.dropLast(cur.length) + cur.substring(0, target.length) + " " + overflow
                     autoFixedIndex = wIdx
+                    _state.update { it.copy(syncLossCount = it.syncLossCount + 1) }
                 }
             }
         }
@@ -292,12 +316,17 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             var incorrectKs = s.incorrectKeystrokes
             var leftC = s.leftCorrectChars; var leftW = s.leftWrongChars
             var rightC = s.rightCorrectChars; var rightW = s.rightWrongChars
+            var lastLockedIdx = s.lastLockedWordIndex
+            var lastLockedTarget = s.lastLockedWordTarget
+            var lastLockedTyped = s.lastLockedWordTyped
+            var lastLockedCorrect = s.lastLockedWordCorrect
 
             for (i in s.frozenWordResults.size until newSplit.completed.size) {
                 val target    = passageWords.getOrNull(i) ?: break
                 val typedWord = newSplit.completed[i]
                 val wasAutoFixed = (i == autoFixedIndex)
                 val isCorrect = !wasAutoFixed && typedWord == target
+                lastLockedIdx = i; lastLockedTarget = target; lastLockedTyped = typedWord; lastLockedCorrect = isCorrect
 
                 val len = maxOf(target.length, typedWord.length)
                 for (j in 0 until len) {
@@ -334,7 +363,9 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                     frozenWordResults = results, autoFixedWordFlags = fixedFlags,
                     totalKeystrokes = totalKs, correctKeystrokes = correctKs, incorrectKeystrokes = incorrectKs,
                     leftCorrectChars = leftC, leftWrongChars = leftW,
-                    rightCorrectChars = rightC, rightWrongChars = rightW
+                    rightCorrectChars = rightC, rightWrongChars = rightW,
+                    lastLockedWordIndex = lastLockedIdx, lastLockedWordTarget = lastLockedTarget,
+                    lastLockedWordTyped = lastLockedTyped, lastLockedWordCorrect = lastLockedCorrect
                 )
             }
         } else {
@@ -439,7 +470,8 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             wpm = netWpm, rawWpm = rawWpm, accuracy = acc, timeSec = timeSec,
             correctChars = s.correctKeystrokes, totalChars = s.totalKeystrokes,
             leftCorrect = s.leftCorrectChars, leftWrong = s.leftWrongChars,
-            rightCorrect = s.rightCorrectChars, rightWrong = s.rightWrongChars
+            rightCorrect = s.rightCorrectChars, rightWrong = s.rightWrongChars,
+            syncLossCount = s.syncLossCount
         )
 
         _state.update { it.copy(isFinished = true, result = result) }
@@ -465,6 +497,13 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (latencySnapshot.isNotEmpty()) {
                 TypingKeyStatStore.addLatencyDeltas(getApplication(), lang, latencySnapshot)
+            }
+            // ── পর্ব ৩/৫.৩ ধাপ ২: cloud sync — মূল ফাইলের প্যাটার্নেই, ব্যর্থ হলেও
+            // silent fail (local persist প্রভাবিত হয় না), Google/ফোন-লগইন করা না
+            // থাকলে phone খালি থাকবে আর push()-ই কিছু করবে না ──
+            val phone = session.getCurrentUser()?.phone.orEmpty()
+            if (phone.isNotBlank()) {
+                TypingCloudSyncService.push(phone, session.getTypingBestWpm(), session.getRawTypingHistory())
             }
         }
     }
