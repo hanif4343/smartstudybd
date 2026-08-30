@@ -60,7 +60,7 @@ object TypingPassageProvider {
                 Log.w(TAG, "cache write failed: ${e.message}")
             }
             fresh.filter { it.content.isNotBlank() }
-                .map { PassageInfo(it.content, "all") }
+                .map { PassageInfo(it.content, classifyDifficulty(it.content, it.language)) }
         } else {
             // ── fetch ব্যর্থ/খালি হলে Room-এর পুরনো cache — এটা যেই mode-এই আগে fetch
             // হয়ে থাকুক না কেন (Firebase/Google Sheet), সম্পূর্ণ কিছু না-থাকার চেয়ে
@@ -68,7 +68,7 @@ object TypingPassageProvider {
             try {
                 dao.getAll()
                     .filter { it.content.isNotBlank() }
-                    .map { PassageInfo(it.content, "all") }
+                    .map { PassageInfo(it.content, classifyDifficulty(it.content, it.language)) }
             } catch (e: Exception) {
                 Log.w(TAG, "cache read failed: ${e.message}")
                 emptyList()
@@ -85,5 +85,28 @@ object TypingPassageProvider {
     fun forceRefreshNextTime() {
         ramCache = null
         ramCacheMode = null
+    }
+
+    // ── সহজ/মাঝারি/কঠিন — Sheet-এ আলাদা "level" কলাম নেই (আগে ছিল, বাদ দেওয়া হয়েছে),
+    // তাই কনটেন্ট থেকেই আন্দাজ করা হয়: শব্দ-সংখ্যা + গড় শব্দ-দৈর্ঘ্য + (বাংলার জন্য)
+    // যুক্তাক্ষর/হসন্ত-ক্লাস্টারের ঘনত্ব — এগুলো বেশি মানেই টাইপ করা কঠিন। এটা একটা
+    // heuristic, নিখুঁত না, কিন্তু "সহজ/মাঝারি/কঠিন" ট্যাবে অন্তত প্যাসেজ দেখাবে
+    // (আগে সব প্যাসেজ শুধু "all"-এ পড়ে থাকত, easy/medium/hard সবসময় খালি ছিল)। */
+    private fun classifyDifficulty(content: String, language: String): String {
+        val words = content.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return "medium"
+        val avgWordLen = words.sumOf { it.length } / words.size.toDouble()
+        val conjunctRatio = if (language == "bn") {
+            // '্' (হসন্ত) থাকা মানে যুক্তাক্ষর — বাংলায় টাইপ করা তুলনামূলক কঠিন
+            val hasanta = content.count { it == '্' }
+            hasanta / content.length.coerceAtLeast(1).toDouble()
+        } else 0.0
+        // দৈর্ঘ্য-ভিত্তিক স্কোর: ছোট প্যাসেজ + ছোট শব্দ + কম যুক্তাক্ষর = সহজ
+        val score = avgWordLen + conjunctRatio * 20 + (words.size / 20.0)
+        return when {
+            score < 4.5 -> "easy"
+            score < 7.0 -> "medium"
+            else -> "hard"
+        }
     }
 }
