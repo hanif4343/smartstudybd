@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -30,7 +30,10 @@ import androidx.room.RoomDatabase
     // reference-ডেটা (ContentRepository.kt-এর referenceDao()/topicSyncDao())।
     // এই টেবিলগুলোর DAO/Entity ফাইল আগে থেকেই ছিল, শুধু এখানে রেজিস্টার করা হয়নি
     // ছিল — সেটাই compileDebugKotlin-এর "Unresolved reference" এর কারণ ছিল।
-    version = 12,
+    // v12 → v13: TypingCurriculumStageContentEntity যোগ হলো — Google Sheet-এর
+    // "CurriculumStages" ট্যাব থেকে admin-curated কারিকুলাম-স্টেজ প্র্যাকটিস-কনটেন্টের
+    // অফলাইন cache (দেখো CurriculumStageContentProvider.kt)।
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun studyTypingProgressDao(): StudyTypingProgressDao
     abstract fun customPassageDao(): CustomPassageDao
     abstract fun typingSheetPassageDao(): TypingSheetPassageDao
+    abstract fun typingCurriculumStageContentDao(): TypingCurriculumStageContentDao
     abstract fun typingKeyStatDao(): TypingKeyStatDao
     abstract fun curriculumProgressDao(): CurriculumProgressDao
     abstract fun typingKeyPairStatDao(): TypingKeyPairStatDao
