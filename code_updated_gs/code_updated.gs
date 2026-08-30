@@ -1271,7 +1271,7 @@ function doGet(e) {
   // এটাকে fallback হিসেবে ব্যবহার করে (SHEET_FALLBACK_TABS: Quiz/QBank/Study/Typing)।
   if (action==="getSheetRows") {
     var grTab=(e.parameter.tab||"QBank").toString().trim();
-    var grMap={quiz:"Quiz",qbank:"QBank",study:"Study",typing:"Typing",users:"Users",notice:"Notice",reports:"Reports"};
+    var grMap={quiz:"Quiz",qbank:"QBank",study:"Study",typing:"Typing",users:"Users",notice:"Notice",reports:"Reports",curriculumstages:"CurriculumStages"};
     grTab=grMap[grTab.toLowerCase()]||grTab;
     var grSs=SpreadsheetApp.getActiveSpreadsheet(), grSh=grSs.getSheetByName(grTab);
     if(!grSh) return json({status:"error",message:"Sheet not found: "+grTab});
@@ -1656,7 +1656,7 @@ function doPost(e) {
     var mIdCol=0;
     for (var mh=0; mh<mHdr.length; mh++) { if (mHdr[mh].toString().trim().toLowerCase()==="id") { mIdCol=mh; break; } }
     if(eId){for(var ei=1;ei<mData.length;ei++){if(mData[ei][mIdCol].toString()===eId.toString()){rIdx=ei+1;break;}}}
-    if(!eId&&["Quiz","Study","QBank","Typing"].indexOf(tTab)>-1)finalId=getNextId(tTab);
+    if(!eId&&["Quiz","Study","QBank","Typing","CurriculumStages"].indexOf(tTab)>-1)finalId=getNextId(tTab);
 
     var rData=[];
     var nowMs=Date.now();
@@ -1667,6 +1667,13 @@ function doPost(e) {
     //    আগে title/level কলামও ছিল, সেগুলো বাদ দেওয়া হলো (Admin App ও এখন এই
     //    ৪টা ফিল্ডই পাঠাবে)। language: "bn" | "en" ──
     else if(tTab==="Typing")rData=[finalId,params.language||"",params.content||"",nowMs];
+    // ── CurriculumStages — Smart Typing-এর কারিকুলাম-স্টেজের admin-curated drill
+    // কনটেন্ট। headers: id, track, stage, content, updatedAt (+ NotFirebase/NF, বাকি
+    // ট্যাবগুলোর মতোই)। track: "bn"|"en", stage: সংখ্যা (1-58 বাংলার জন্য)।
+    // একই track+stage-এ একাধিক row থাকতে পারে (variety-র জন্য), Android অ্যাপ
+    // এলোমেলোভাবে একটা বেছে নেয়। কোনো row না থাকলে Android নিজে থেকে
+    // সিন্থেটিক টেক্সট বানিয়ে নেয় (দেখো CurriculumProvider.buildDrillPassage) ──
+    else if(tTab==="CurriculumStages")rData=[finalId,params.track||"",params.stage||"",params.content||"",nowMs];
     else if(tTab==="Notice")rData=[params.timestamp?params.timestamp.split(',')[0]:"",params.n_title,params.n_msg,params.timestamp];
     else if(tTab==="Reports"){
       var phone=(params.Phone||"").toString().replace(/^'+/,'').trim();
@@ -1684,7 +1691,7 @@ function doPost(e) {
     // NF-ই থেকে যায় — ম্যানুয়ালি মার্ক করার আর দরকার নেই, পরে "sync_nf_rows" অ্যাকশন
     // দিয়ে রিট্রাই করা যাবে।
     var nfIdx=-1;
-    if(["Quiz","QBank","Study","Typing"].indexOf(tTab)>-1){
+    if(["Quiz","QBank","Study","Typing","CurriculumStages"].indexOf(tTab)>-1){
       var nfHdrRow=mSh.getRange(1,1,1,mSh.getLastColumn()).getValues()[0].map(function(h){return h.toString().toLowerCase().replace(/\s+/g,"");});
       nfIdx=nfHdrRow.indexOf("notfirebase");
       if(nfIdx===-1) nfIdx=nfHdrRow.indexOf("nf");
@@ -1717,12 +1724,12 @@ function updateDashStats() {
 
 /* ══ Triggers ══ */
 function onChange(e) {
-  ["Quiz","Study","QBank","Notice","Users","Typing"].forEach(function(s){try{syncToFirebase(s,s);}catch(ex){}});
+  ["Quiz","Study","QBank","Notice","Users","Typing","CurriculumStages"].forEach(function(s){try{syncToFirebase(s,s);}catch(ex){}});
   try{updateDashStats();}catch(ex){}
 }
 
 function manualSyncAll() {
-  ["Quiz","Study","QBank","Notice","Users","Typing"].forEach(function(s){try{syncToFirebase(s,s);Logger.log("OK: "+s);}catch(ex){Logger.log("ERR "+s+": "+ex.toString());}});
+  ["Quiz","Study","QBank","Notice","Users","Typing","CurriculumStages"].forEach(function(s){try{syncToFirebase(s,s);Logger.log("OK: "+s);}catch(ex){Logger.log("ERR "+s+": "+ex.toString());}});
   try{updateDashStats();Logger.log("✅ DashStats updated");}catch(ex){Logger.log("DashStats ERR: "+ex.toString());}
 }
 
