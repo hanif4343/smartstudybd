@@ -65,6 +65,7 @@ private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 // ─────────────────────────────────────────────────────────
 // Subject List Screen
 // ─────────────────────────────────────────────────────────
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SubjectListScreen(
     mode       : StudyMode,
