@@ -19,7 +19,7 @@
 // build-নামটা দেখা যাবে (secret লাগবেনা) — যদি পুরনো মান দেখা যায় বা এরর আসে,
 // তার মানে নতুন কোড এখনো লাইভ হয়নি (নতুন "deployment" বানানো হয়ে থাকলে সেটার
 // আলাদা URL হয়, পুরনো URL-এই পুরনো কোড থেকে যায় — এই কারণেই এই মার্কার)।
-var GAS_BUILD_VERSION = "2026-08-29-refDiag-v1";
+var GAS_BUILD_VERSION = "2026-08-30-autoReindex-permanent-fix-v1";
 
 function getProps() {
   var p = PropertiesService.getScriptProperties();
@@ -220,6 +220,27 @@ function doPublish_() {
   var ghToken = props.getProperty("GITHUB_WRITE_TOKEN");
   if (!ghOwner || !ghRepo || !ghToken) {
     return { status: "error", result: "error", message: "GitHub config (GH_OWNER/GH_REPO/GITHUB_WRITE_TOKEN) Script Properties-এ সেট করা নেই" };
+  }
+
+  // ── PERMANENT FIX (২০২৬-০৮-৩০ — "Quiz sheet-এ অনেক প্রশ্ন থাকলেও app-এ শুধু
+  // ১টা subject/topic দেখায়, Publish Now যতবারই করা হোক না কেন"): app-এর
+  // Subject/Topic browse-tree সম্পূর্ণভাবে Topics শিটের row_count_quiz/
+  // row_count_qbank/row_count_study কলামের ওপর নির্ভর করে — এই কলাম ০/ফাঁকা
+  // থাকলে সেই Topic app-এ একদমই দেখা যায় না। এই কলাম আগে আপডেট হতো *শুধু*
+  // runRebuildIndexCore() চললে — আর সেটা চলত শুধু ম্যানুয়ালি rebuildIndex চাপলে,
+  // অথবা installAutoReindexTrigger() দিয়ে বসানো ১৫-মিনিটের ট্রিগার সক্রিয়
+  // থাকলে (যেটা এতদিন ম্যানুয়ালি ইনস্টল করা লাগতো, প্রায় কখনোই করা হয়নি)।
+  // "Publish Now" শুধু প্রশ্নের কনটেন্ট CDN-এ পাঠাত, row_count কখনো ছুঁতোই না।
+  // এখন Publish Now শুরুতেই runRebuildIndexCore() কল করে — তাই admin যেই
+  // action বারবার চাপে, সেটাই এখন থেকে সবসময় সঙ্গে সঙ্গে পুরো index রিফ্রেশ
+  // করে দেয়, আলাদা ম্যানুয়াল ট্রিগার সেটআপের ওপর আর নির্ভর করতে হয় না। এটা
+  // batch/in-memory-buffered (দেখো runRebuildIndexCore()), তাই বড় ডেটাসেটেও
+  // দ্রুত। reindex ব্যর্থ হলেও মূল publish ফ্লো আটকায় না — লগ রাখা হয়, পরের
+  // Publish Now-এই আবার চেষ্টা হবে। ──
+  try {
+    runRebuildIndexCore();
+  } catch (ribErr) {
+    logError_("doPublish_/runRebuildIndexCore", String(ribErr));
   }
 
   var dirtySh = ss.getSheetByName("_DirtyTopics");
@@ -1250,8 +1271,28 @@ function runRebuildIndexCore() {
 // করলে আগের ট্রিগার মুছে নতুন বসায় — ডুপ্লিকেট জমবে না। ──
 var REINDEX_FLAG_KEY_ = "NEEDS_REINDEX";
 
+// ── SELF-INSTALLING TRIGGER (স্থায়ী সমাধানের ২য় অংশ): installAutoReindexTrigger()
+// আগে Apps Script এডিটরে গিয়ে একবার ম্যানুয়ালি ▶ Run করা লাগতো — বাস্তবে এই
+// এক-বারের ধাপটাই প্রায় কখনো করা হতো না, ফলে ফ্ল্যাগ সেট হলেও কেউ কখনো চেক
+// করতো না, নতুন Topic কখনো index-এ ঢুকতোই না। এখন প্রতিটা markReindexNeeded_()
+// কলেই (একটা সস্তা Script Property চেক দিয়ে) যাচাই হয় ১৫-মিনিটের ট্রিগারটা
+// বসানো আছে কিনা — না থাকলে নিজে থেকেই বসিয়ে দেয়। ফ্ল্যাগ একবার সেট হয়ে গেলে
+// পরের কলগুলোতে আর ScriptApp.getProjectTriggers() পর্যন্ত যেতেই হয় না (সস্তা)।
+var REINDEX_TRIGGER_INSTALLED_KEY_ = "REINDEX_TRIGGER_INSTALLED_V1";
+
 function markReindexNeeded_() {
-  try { PropertiesService.getScriptProperties().setProperty(REINDEX_FLAG_KEY_, "1"); }
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty(REINDEX_FLAG_KEY_, "1");
+    if (props.getProperty(REINDEX_TRIGGER_INSTALLED_KEY_) !== "1") {
+      try {
+        installAutoReindexTrigger();
+        props.setProperty(REINDEX_TRIGGER_INSTALLED_KEY_, "1");
+      } catch (instErr) {
+        logError_("markReindexNeeded_/autoInstallTrigger", String(instErr));
+      }
+    }
+  }
   catch (flagErr) { logError_("markReindexNeeded_", flagErr); }
 }
 
@@ -3487,6 +3528,10 @@ function doPost(e) {
           syncToFirebase(ufShName,ufShName);
           var ufDirtyTopicId=ufNewTopicIdVal!==null?ufNewTopicIdVal:(ufTopicIdC>=0?(ufRows[ur][ufTopicIdC]||"").toString():"");
           if(ufDirtyTopicId) markTopicDirty(ufDirtyTopicId);
+          // ── FIX: topic_id বদলালে (reclassify/move) সেই রো আর তার আগের
+          // contiguous sorted group-এ থাকে না — row_start/row_count-ভিত্তিক
+          // index স্টেল হয়ে যায় যতক্ষণ না পরের রিইনডেক্স চলে। ──
+          if(ufNewTopicIdVal!==null) markReindexNeeded_();
           return json({result:"success",failed:ufFailed});
         }
       }
@@ -3705,6 +3750,16 @@ function doPost(e) {
         if(bNewRows.length){
           bSh.getRange(bSh.getLastRow()+1,1,bNewRows.length,bRawHdr.length).setValues(bNewRows);
           markTopicsDirty(bDirtyTopics);
+          // ── FIX (স্থায়ী সমাধানের ৩য় অংশ — "নতুন bulk-add করা প্রশ্ন/টপিক app-এ
+          // দেখা যায় না"): markTopicsDirty() শুধু CDN publish-এর (manifest.json/
+          // topic JSON) জন্য মার্ক করে — কিন্তু app-এর Subject/Topic browse-tree
+          // নির্ভর করে Topics শিটের row_count_* কলামের ওপর, যেটা শুধু
+          // runRebuildIndexCore() রিফ্রেশ করে। এতদিন bulk_save_rows নতুন রো
+          // লেখার পরও কখনো markReindexNeeded_() কল করতো না, তাই periodic
+          // ট্রিগার/Publish Now ছাড়া নতুন bulk-added টপিক কখনোই app-এর তালিকায়
+          // আসতো না। এখন এখানেও ফ্ল্যাগ সেট হয় — তাই ১৫-মিনিটের মধ্যেই (বা
+          // পরের Publish Now-এই) স্বয়ংক্রিয়ভাবে ঠিক হয়ে যাবে। ──
+          markReindexNeeded_();
         }
         if(bAppearanceRows.length){
           var apSheet=ss.getSheetByName("Exam_Appearances");
@@ -3897,6 +3952,20 @@ function doPost(e) {
     var writtenRow;
     if(rIdx!==-1){ mSh.getRange(rIdx,1,1,rData.length).setValues([rData]); writtenRow=rIdx; }
     else { mSh.appendRow(rData); writtenRow=mSh.getLastRow(); }
+
+    // ── FIX (স্থায়ী সমাধানের ৪র্থ অংশ — একই বাগ এই single-question add/edit
+    // পাথেও ছিল, কিন্তু আগে কখনো ধরাই পড়েনি): bulk_save_rows-এর মতো এই
+    // পাথও এতদিন markTopicDirty()/markReindexNeeded_() কখনোই কল করতো না —
+    // তাই এই পাথ দিয়ে (আলাদা কোনো bulk uploader ছাড়া, সরাসরি একটা প্রশ্ন)
+    // যোগ করা প্রতিটা প্রশ্ন CDN-এ কখনো publish হতো না, আর app-এর
+    // Subject/Topic তালিকাতেও কখনো আসতো না, যতক্ষণ না কেউ ম্যানুয়ালি অন্য
+    // কোনো পথে সেই টপিক আবার ছুঁয়ে দিতো। এখন নতুন রো (rIdx===-1) বা
+    // topic_id-সহ যেকোনো edit — দুটোতেই dirty+reindex ফ্ল্যাগ বসে। ──
+    if (fieldMap) {
+      var addTopicIdVal = (fieldMap.topic_id || "").toString();
+      if (addTopicIdVal) markTopicDirty(addTopicIdVal);
+      if (rIdx===-1 || addTopicIdVal) markReindexNeeded_();
+    }
 
     // ✅ NF (Not Firebase) স্বয়ংক্রিয় বুককিপিং — sync-এর আগে pessimistically "NF" বসানো
     // হয়, sync সফল হলে মুছে ফেলা হয়। sync ব্যর্থ হলে (যেমন Firebase quota exceeded)
