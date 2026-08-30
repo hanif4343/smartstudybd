@@ -1590,7 +1590,7 @@ fun TypingPracticeScreen(
             curriculumStage = CurriculumProvider.getCurrentStage(ctx, track)
             curriculumProgress = CurriculumProvider.stageProgress(ctx, track, curriculumStage)
             keyStatSnapshot = loadKeyStatSnapshot(ctx, track)
-            val drillText = CurriculumProvider.buildDrillPassage(track, curriculumStage)
+            val drillText = CurriculumProvider.buildDrillPassageSmart(ctx, track, curriculumStage)
             if (drillText.isNotBlank()) {
                 reset(0, listOf(PassageInfo(drillText, "all")))
                 sessionMode = "curriculum"
