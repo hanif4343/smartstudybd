@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -48,7 +48,11 @@ import androidx.room.RoomDatabase
     // ("Sheet er group heading nai"): এই তিনটা আগে কখনো Room-এ persist হতো না, দেখো
     // QuestionEntity.kt-এর কমেন্ট। fallbackToDestructiveMigration() থাকায় migration
     // SQL লাগে না — পরের syncTopic/getRoomQuestionsByIds কলেই আবার সঠিকভাবে পপুলেট হবে।
-    version = 16,
+    // v16 → v17: TypingCurriculumStageContentEntity যোগ হলো (Typing-ব্রাঞ্চ থেকে
+    // মূল-ব্রাঞ্চে merge করার সময়) — Google Sheet-এর "CurriculumStages" ট্যাব থেকে
+    // admin-curated কারিকুলাম-স্টেজ প্র্যাকটিস-কনটেন্টের অফলাইন cache (দেখো
+    // CurriculumStageContentProvider.kt)।
+    version = 17,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -65,6 +69,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun typingKeyPairStatDao(): TypingKeyPairStatDao
     abstract fun referenceDao(): ReferenceDao
     abstract fun topicSyncDao(): TopicSyncDao
+    abstract fun typingCurriculumStageContentDao(): TypingCurriculumStageContentDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
