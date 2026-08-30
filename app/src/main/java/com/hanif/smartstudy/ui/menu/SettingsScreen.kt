@@ -271,6 +271,21 @@ fun SettingsScreen(
                         }
                         Switch(checked = state.typingRaceEnabled, onCheckedChange = { vm.setTypingRaceEnabled(it) })
                     }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("🏆 Typing Leaderboard", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (state.typingLeaderboardEnabled) "চালু আছে" else "বন্ধ (হোল্ড করা)",
+                                fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                            )
+                        }
+                        Switch(checked = state.typingLeaderboardEnabled, onCheckedChange = { vm.setTypingLeaderboardEnabled(it) })
+                    }
                 }
             }
 
