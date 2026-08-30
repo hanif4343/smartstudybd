@@ -182,6 +182,7 @@ data class MenuUiState(
     val challengesEnabled  : Boolean         = false,
     val buddyEnabled       : Boolean         = false,
     val typingRaceEnabled  : Boolean         = false,
+    val typingLeaderboardEnabled : Boolean   = false,
 )
 
 class MenuViewModel(app: Application) : AndroidViewModel(app) {
@@ -359,6 +360,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val challengesOn  = session.getChallengesEnabled()
             val buddyOn       = session.getBuddyEnabled()
             val typingRaceOn  = session.getTypingRaceEnabled()
+            val typingLeaderboardOn = session.getTypingLeaderboardEnabled()
 
             val aiKeys = session.getAiApiKeys()
 
@@ -423,7 +425,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     typingSoundPreset  = typingSoundPr,
                     challengesEnabled  = challengesOn,
                     buddyEnabled       = buddyOn,
-                    typingRaceEnabled  = typingRaceOn
+                    typingRaceEnabled  = typingRaceOn,
+                    typingLeaderboardEnabled = typingLeaderboardOn
                 )
             }
 
@@ -569,6 +572,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setTypingRaceEnabled(on)
             _state.update { it.copy(typingRaceEnabled = on) }
+        }
+    }
+
+    fun setTypingLeaderboardEnabled(on: Boolean) {
+        viewModelScope.launch {
+            session.setTypingLeaderboardEnabled(on)
+            _state.update { it.copy(typingLeaderboardEnabled = on) }
         }
     }
 
