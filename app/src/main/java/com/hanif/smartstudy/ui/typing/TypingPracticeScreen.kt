@@ -29,10 +29,12 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
@@ -66,10 +68,10 @@ import kotlinx.coroutines.launch
 
 // ── AI Adaptive Session কনফিগ — দেখো SmartStudyBD-টাইপিং-অডিট-ও-রোডম্যাপ.md সেকশন ৮ ──
 // প্রথম ধাপ (random, diagnostic) কত সেকেন্ড চলবে
-private const val ADAPTIVE_PHASE1_SECONDS = 180
+internal const val ADAPTIVE_PHASE1_SECONDS = 180
 // এই সেকেন্ডে পৌঁছালে phase-2 এর AI/blended প্যাসেজ ব্যাকগ্রাউন্ডে ফেচ শুরু হবে
 // (৬০ সেকেন্ড বাফার রেখে, যাতে phase ১ শেষ হওয়ার আগেই রেডি থাকে)
-private const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECONDS - 60
+internal const val ADAPTIVE_PHASE2_FETCH_TRIGGER_SECONDS = ADAPTIVE_PHASE1_SECONDS - 60
 
 // ── BCC Exam Simulation Mode — বাস্তব বাংলাদেশ কম্পিউটার কাউন্সিল পরীক্ষার নিয়ম অনুযায়ী
 // প্রতিটা ভাষায় ঠিক ১০ মিনিট (৬০০ সেকেন্ড) — দেখো রোডম্যাপ সেকশন ৮ ──
@@ -92,6 +94,22 @@ internal val AmberMid  = Color(0xFFF59E0B)
 
 // ── Passage + difficulty ট্যাগ — "easy" | "medium" | "hard" | "custom" | "all" ──
 data class PassageInfo(val text: String, val difficulty: String)
+
+// ── CURRENT KEY বক্সে দেখানোর জন্য — আসল টাইপ-টার্গেট (nextTypeChar) না বদলে শুধু
+// *ডিসপ্লে গ্লিফ*টা বদলানো হয় এখানে, দুইটা আলাদা কারণে:
+//  ১) স্পেস (' ') — আগে পরের শব্দের প্রথম অক্ষর দেখানো হতো, যেটা ভুল বোঝাত (মনে হতো
+//     ওটাই এখন চাপতে হবে)। এখন স্পষ্ট একটা "স্পেস" চিহ্ন (␣) দেখানো হয়।
+//  ২) চন্দ্রবিন্দু (ঁ) — একা এই diacritic-টা প্র্যাকটিসের জন্য তেমন গুরুত্বপূর্ণ না
+//     (স্ট্যান্ডএলোন কী হিসেবে মনোযোগ দেওয়ার দরকার নেই), তাই ডিসপ্লেতে এর বদলে
+//     সহজ/পরিচিত "ন" দেখানো হয় — আসল টাইপিং-ভ্যালিডেশন এতে প্রভাবিত হয় না,
+//     শুধু CURRENT KEY / ALL KEYS বক্সের ভিজ্যুয়াল লেবেল বদলায়।
+internal const val SPACE_KEY_GLYPH = "␣"
+internal fun practiceKeyGlyph(raw: String?): String? = when (raw) {
+    null -> null
+    " " -> SPACE_KEY_GLYPH
+    "ঁ" -> "ন"
+    else -> raw
+}
 
 // ── আগে এখানে হার্ডকোডেড প্যাসেজের একটা fixed তালিকা ছিল। এখন সেটা বাদ —
 // Google Sheet-এর "Typing" ট্যাব (headers: id, language, content, updatedAt, Firebase
@@ -1572,7 +1590,7 @@ fun TypingPracticeScreen(
             curriculumStage = CurriculumProvider.getCurrentStage(ctx, track)
             curriculumProgress = CurriculumProvider.stageProgress(ctx, track, curriculumStage)
             keyStatSnapshot = loadKeyStatSnapshot(ctx, track)
-            val drillText = CurriculumProvider.buildDrillPassage(track, curriculumStage)
+            val drillText = CurriculumProvider.buildDrillPassageSmart(ctx, track, curriculumStage)
             if (drillText.isNotBlank()) {
                 reset(0, listOf(PassageInfo(drillText, "all")))
                 sessionMode = "curriculum"
@@ -2436,13 +2454,11 @@ fun TypingPracticeScreen(
                 }
             }
 
-            // ── পর্ব ১ #১৪: CURRENT KEY বক্সে "স্পেস" দেখানো বিভ্রান্তিকর — nextTypeChar
-            // স্পেস হলে (মানে শব্দ শেষ, স্পেসের অপেক্ষায়) পরের শব্দের প্রথম অক্ষরটাই
-            // বরং প্রাসঙ্গিক তথ্য (ইউজার আসলে যেটার জন্য প্রস্তুতি নিচ্ছে) ──
-            val currentKeyForBox: String? = remember(nextTypeChar, frozenWordResults, passageWords) {
-                if (nextTypeChar != null && nextTypeChar != ' ') nextTypeChar.toString()
-                else passageWords.getOrNull(frozenWordResults.size + 1)?.firstOrNull()?.toString()
-            }
+            // ── CURRENT KEY বক্স — সবসময় *আসল* পরের কী-প্রেসটাই দেখায় (nextTypeChar,
+            // raw)। স্পেস/চন্দ্রবিন্দুর জন্য আলাদা, বোঝার-সহজ গ্লিফ দেখানো হয় রেন্ডার
+            // টাইমে (দেখো practiceKeyGlyph() + CurrentKeyAndAllKeysBox) — highlighting/
+            // stat-lookup এখনো raw ক্যারেক্টার দিয়েই হয়, শুধু ভিজ্যুয়াল লেবেল বদলায় ──
+            val currentKeyForBox: String? = remember(nextTypeChar) { nextTypeChar?.toString() }
 
             // ── Sheet থেকে প্যাসেজ পুল এখনো লোড না হলে (নেট নেই/প্রথমবার) — ব্যবহারকারীকে
             // জানানো, নাহলে খালি স্ক্রিন দেখে "আটকে আছে" মনে হতে পারে ──
@@ -2623,11 +2639,27 @@ fun TypingPracticeScreen(
             }
 
             // Input field
+            // ── Backspace Lock ফিক্স: String-value TextField-এ রিজেক্ট হওয়া এডিটে কার্সর
+            // শেষে জাম্প করে যেত (Compose-এর পুরনো/নতুন টেক্সট রিকনসিলিয়েশনের কারণে)।
+            // এখানে local TextFieldValue রাখা হয়েছে — ব্লকড ব্যাকস্পেসে সেটা reassign করা
+            // হয় না, তাই কার্সর/সিলেকশন যেখানে ছিল সেখানেই স্থির থাকে ──
+            var inputTfValue by remember { mutableStateOf(TextFieldValue(userInput, TextRange(userInput.length))) }
+            LaunchedEffect(userInput) {
+                if (inputTfValue.text != userInput) inputTfValue = TextFieldValue(userInput, TextRange(userInput.length))
+            }
             OutlinedTextField(
-                value         = userInput,
-                onValueChange = {
-                    if (sessionMode == "freetyping") onFreeTypingInputChange(it)
-                    else if (!isFinished) onInputChange(it)
+                value         = inputTfValue,
+                onValueChange = { newTf ->
+                    val backspaceIsBlocked = sessionMode != "freetyping" && (sessionMode == "govtmock" || backspaceLocked)
+                    if (backspaceIsBlocked && newTf.text.length < userInput.length) {
+                        // ব্লকড — inputTfValue reassign না করে শুধু ViewModel/state-লেয়ারকে
+                        // জানানো হয় (showBackspaceWarning সেট করার জন্য), কার্সর অক্ষত থাকে
+                        if (!isFinished) onInputChange(newTf.text)
+                        return@OutlinedTextField
+                    }
+                    inputTfValue = newTf
+                    if (sessionMode == "freetyping") onFreeTypingInputChange(newTf.text)
+                    else if (!isFinished) onInputChange(newTf.text)
                 },
                 modifier      = Modifier
                     .fillMaxWidth()
@@ -2684,7 +2716,8 @@ fun TypingPracticeScreen(
                     CurrentKeyAndAllKeysBox(
                         allKeys = allUnlockedKeys,
                         currentKey = currentKeyForBox,
-                        statSnapshot = keyStatSnapshot
+                        statSnapshot = keyStatSnapshot,
+                        keyProgress = if (sessionMode == "curriculum") curriculumProgress else emptyList()
                     )
                 }
                 if (keyboardLayout == "bijoy") {
@@ -2720,12 +2753,9 @@ fun TypingPracticeScreen(
                         }
                     }
                 }
-                // ── পর্ব ১ #১৬: Neonlipi ধাপ ৪.২-এর পূর্ণ রূপ — প্রতিটা অসম্পূর্ণ (এখনো
-                // unlock-থ্রেশহোল্ডে না পৌঁছানো) ক্যারেক্টারের জন্য আলাদা "বাকি X বার"
-                // কোচ-কার্ড, লাল/কমলা বর্ডারসহ — শুধু curriculum সেশনেই প্রাসঙ্গিক ──
-                if (sessionMode == "curriculum" && curriculumProgress.isNotEmpty()) {
-                    PerCharacterCoachCards(curriculumProgress)
-                }
+                // ── "🎯 এগুলোতে ফোকাস করো" এখন ALL KEYS-এর পাশের (i) বাটনে (দেখো
+                // CurrentKeyAndAllKeysBox/KeyBoxInfoDialog) — মূল স্ক্রিনে আলাদা বড়
+                // সেকশন হিসেবে আর দেখানো হয় না, জায়গা বাঁচাতে ──
             }
 
             // ── ফ্রি টাইপিং মোডে কোনো নির্দিষ্ট শেষ-বিন্দু নেই, তাই ইউজার নিজে
@@ -3437,56 +3467,73 @@ internal fun KeyAnalysisBar(label: String, valueText: String, fraction: Float) {
     }
 }
 
-/**
- * পর্ব ১ আইটেম #১৬ — Neonlipi-এর "পরবর্তী আনলক কোচ" সেকশনের সমতুল্য: বর্তমান
- * কারিকুলাম-স্টেজের যে ক্যারেক্টারগুলো এখনো unlock-থ্রেশহোল্ডে (UNLOCK_MIN_CORRECT)
- * পৌঁছায়নি, তাদের প্রত্যেকের জন্য আলাদা "বাকি X বার" কার্ড — অর্ধেকের কম progress
- * হলে লাল বর্ডার (বেশি জরুরি), তার বেশি হলে কমলা।
- */
-@Composable
-internal fun PerCharacterCoachCards(progress: List<Pair<String, Int>>) {
-    val incomplete = progress.filter { it.second < CurriculumProvider.UNLOCK_MIN_CORRECT }
-    if (incomplete.isEmpty()) return
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "🎯 এগুলোতে ফোকাস করো", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        incomplete.forEach { (ch, count) ->
-            val remaining = (CurriculumProvider.UNLOCK_MIN_CORRECT - count).coerceAtLeast(0)
-            val urgent = remaining > CurriculumProvider.UNLOCK_MIN_CORRECT / 2
-            val accent = if (urgent) RedWrong else AmberMid
-            Card(
-                Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
-                colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.08f)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(shape = RoundedCornerShape(6.dp), color = accent.copy(alpha = 0.15f)) {
-                        Text(
-                            ch, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    Text(
-                        "আরও প্র্যাকটিস লাগবে — বাকি $remaining বার সঠিক চাপ প্রয়োজন ($count/${CurriculumProvider.UNLOCK_MIN_CORRECT})।",
-                        fontSize = 11.sp, fontFamily = NotoSansBengali,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-    }
-}
+// ── "🎯 এগুলোতে ফোকাস করো" কার্ডগুলো এখন CurrentKeyAndAllKeysBox-এর (i) বাটনে
+// (KeyBoxInfoDialog-এর ভেতরে) রেন্ডার হয় — এখানে আলাদা টপ-লেভেল কম্পোজেবল হিসেবে
+// আর নেই, মূল স্ক্রিনে অতিরিক্ত জায়গা না নেওয়ার জন্য। ──
 
 /**
  * ডিজাইন-ফিডব্যাক অনুযায়ী — Backspace Lock/Blind Mode-এর মতো ছোট টগলগুলোর জন্য পুরো
  * Switch+লেখা না দেখিয়ে একটা ছোট্ট আইকন-চিপ। checked হলে রঙিন ফিল, না হলে নিরপেক্ষ।
  */
+/**
+ * সব টাইপিং-স্ক্রিনের ইনপুট বক্সের জন্য শেয়ার্ড কম্পোনেন্ট — মূল ফিক্স: Backspace
+ * Lock অন থাকলে রিজেক্ট হওয়া ব্যাকস্পেসে কার্সর আর শেষে/সামনে জাম্প করে না।
+ *
+ * কারণ: প্লেইন String-value OutlinedTextField ব্যবহার করলে, রিজেক্ট করা এডিটে
+ * (internal buffer পাল্টে গেছে কিন্তু বাইরে থেকে সাপ্লাই করা value অপরিবর্তিত)
+ * Compose পুরনো/নতুন টেক্সট মেলাতে গিয়ে কার্সরকে টেক্সটের **শেষে** নিয়ে ফেলে।
+ * এখানে বদলে local TextFieldValue (টেক্সট + সিলেকশন দুটোই) রাখা হয় — রিজেক্ট
+ * হলে সেটা স্পর্শই করা হয় না, তাই আগের কার্সর-পজিশন অক্ষত থাকে (state.showBackspaceWarning
+ * আলাদাভাবে ট্রু হয়ে ওয়ার্নিং দেখায়, কিন্তু কার্সর সেখানেই স্থির থাকে)।
+ */
+@Composable
+internal fun TypingInputField(
+    value: String,
+    isFinished: Boolean,
+    isBackspaceBlocked: Boolean,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onEscape: (() -> Unit)? = null,
+    onRestart: (() -> Unit)? = null,
+    placeholder: String = "এখানে type করা শুরু করুন...",
+    minLines: Int = 4
+) {
+    var tfValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    // বাইরে থেকে value বদলালে (নতুন প্যাসেজ/রিস্টার্ট/accepted keystroke) sync — কিন্তু
+    // রিজেক্ট হওয়া ব্যাকস্পেসে value অপরিবর্তিতই থাকে, তাই tfValue-ও অক্ষত থাকে ──
+    LaunchedEffect(value) {
+        if (tfValue.text != value) tfValue = TextFieldValue(value, TextRange(value.length))
+    }
+    OutlinedTextField(
+        value = tfValue,
+        onValueChange = { new ->
+            if (isFinished) return@OutlinedTextField
+            if (isBackspaceBlocked && new.text.length < value.length) {
+                // ব্লকড ব্যাকস্পেস — tfValue ইচ্ছাকৃতভাবে reassign করা হয় না (cursor/selection
+                // যেখানে ছিল সেখানেই থাকবে); ViewModel-কে জানানো হয় শুধু ওয়ার্নিং দেখানোর জন্য
+                onValueChange(new.text)
+                return@OutlinedTextField
+            }
+            tfValue = new
+            onValueChange(new.text)
+        },
+        modifier = modifier
+            .fillMaxWidth()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when {
+                    onEscape != null && keyEvent.key == Key.Escape -> { onEscape(); true }
+                    onRestart != null && keyEvent.key == Key.R && keyEvent.isCtrlPressed -> { onRestart(); true }
+                    else -> false
+                }
+            },
+        placeholder = { Text(placeholder, fontFamily = NotoSansBengali) },
+        enabled = !isFinished,
+        keyboardOptions = KeyboardOptions.Default,
+        minLines = minLines
+    )
+}
+
 @Composable
 internal fun CompactToggleChip(icon: String, label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
     Surface(
@@ -3515,7 +3562,8 @@ internal fun CompactToggleChip(icon: String, label: String, checked: Boolean, en
 internal fun CurrentKeyAndAllKeysBox(
     allKeys: List<String>,
     currentKey: String?,
-    statSnapshot: Map<String, Pair<Int, Int>>   // char -> (accuracyPct, samples)
+    statSnapshot: Map<String, Pair<Int, Int>>,   // char -> (accuracyPct, samples)
+    keyProgress: List<Pair<String, Int>> = emptyList()   // char -> unlock-progress count (i-বাটনের "ফোকাস করো" তালিকার জন্য)
 ) {
     Card(
         Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
@@ -3524,12 +3572,31 @@ internal fun CurrentKeyAndAllKeysBox(
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-            // ── ALL KEYS ──
-            Text(
-                "ALL KEYS", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = NotoSansBengali
-            )
+            // ── ALL KEYS + (i) ইনফো বাটন ──
+            var showKeyInfo by remember { mutableStateOf(false) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "ALL KEYS", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali
+                )
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { showKeyInfo = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Info, contentDescription = "কী-বক্স সম্পর্কে তথ্য",
+                        modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (showKeyInfo) {
+                KeyBoxInfoDialog(progress = keyProgress, onDismiss = { showKeyInfo = false })
+            }
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -3541,7 +3608,7 @@ internal fun CurrentKeyAndAllKeysBox(
                         color = if (isCurrent) Color(0xFFEC4899) else MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
-                            ch, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                            practiceKeyGlyph(ch) ?: ch, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
                             color = if (isCurrent) Color.White else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         )
@@ -3563,7 +3630,7 @@ internal fun CurrentKeyAndAllKeysBox(
                     )
                     Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFEC4899)) {
                         Text(
-                            ck, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                            practiceKeyGlyph(ck) ?: ck, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali,
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
                         )
@@ -3576,6 +3643,78 @@ internal fun CurrentKeyAndAllKeysBox(
             }
         }
     }
+}
+
+/**
+ * "ALL KEYS"-এর পাশে (i) বাটনে ট্যাপ করলে খোলে — কী-বক্সের নিয়মগুলো সংক্ষেপে বুঝিয়ে
+ * দেয় (গোলাপি হাইলাইট মানে কী, স্পেস/চন্দ্রবিন্দুর জন্য কেন আলাদা চিহ্ন দেখানো হয়,
+ * Acc%/Samples মানে কী) — সাথে (আগে মূল স্ক্রিনে আলাদা বড় সেকশন হিসেবে থাকা)
+ * "🎯 এগুলোতে ফোকাস করো" — কোন কী-তে আরও কত বার সঠিক চাপ লাগবে unlock হতে —
+ * এখন এখানেই, তাই মূল স্ক্রিনে অতিরিক্ত জায়গা নেয় না।
+ */
+@Composable
+internal fun KeyBoxInfoDialog(progress: List<Pair<String, Int>> = emptyList(), onDismiss: () -> Unit) {
+    val incomplete = remember(progress) { progress.filter { it.second < CurriculumProvider.UNLOCK_MIN_CORRECT } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("কী-বক্স সম্পর্কে", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("• ALL KEYS: এখন পর্যন্ত আনলক হওয়া সব অক্ষর। গোলাপি রঙের ব্যাজটাই এখন যেটা টাইপ করার পালা।",
+                    fontSize = 13.sp, fontFamily = NotoSansBengali)
+                Text("• CURRENT KEY: বড় করে দেখানো — এই মুহূর্তে ঠিক কোন কী চাপতে হবে, সাথে সেই কী-তে তোমার Accuracy% ও Samples (কতবার প্র্যাকটিস হয়েছে)।",
+                    fontSize = 13.sp, fontFamily = NotoSansBengali)
+                Text("• স্পেসের পালা এলে “${SPACE_KEY_GLYPH}” চিহ্ন দেখায় (একটা আসল অক্ষর দেখালে বিভ্রান্তি হতো)।",
+                    fontSize = 13.sp, fontFamily = NotoSansBengali)
+                Text("• চন্দ্রবিন্দু (ঁ) খুব গুরুত্বপূর্ণ কী না বলে বক্সে এর বদলে “ন” দেখানো হয় — টাইপিং যাচাই অবশ্য আসল অক্ষর দিয়েই হয়।",
+                    fontSize = 13.sp, fontFamily = NotoSansBengali)
+
+                if (incomplete.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "🎯 এগুলোতে ফোকাস করো", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    incomplete.forEach { (ch, count) ->
+                        val remaining = (CurriculumProvider.UNLOCK_MIN_CORRECT - count).coerceAtLeast(0)
+                        val urgent = remaining > CurriculumProvider.UNLOCK_MIN_CORRECT / 2
+                        val accent = if (urgent) RedWrong else AmberMid
+                        Card(
+                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.08f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f))
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(shape = RoundedCornerShape(6.dp), color = accent.copy(alpha = 0.15f)) {
+                                    Text(
+                                        practiceKeyGlyph(ch) ?: ch, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                                Text(
+                                    "আরও প্র্যাকটিস লাগবে — বাকি $remaining বার সঠিক চাপ প্রয়োজন ($count/${CurriculumProvider.UNLOCK_MIN_CORRECT})।",
+                                    fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("বুঝেছি", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+        }
+    )
 }
 
 /**
@@ -3779,7 +3918,12 @@ internal fun StatsRow(
     // (Neonlipi রেফারেন্সের ACCURACY/SCORE বক্সের সমতুল্য) — Normal Typing-এ (showAccuracy
     // = false) আগের মতোই Progress% থাকে, কোনো regression নেই ──
     totalKeystrokes: Int = 0,
-    showAccuracy: Boolean = false
+    showAccuracy: Boolean = false,
+    // ── রিডিজাইন — "typing-redesign-demo.html"-এর লাইভ টাইপিং স্ক্রিনের মতো "hero"
+    // স্টাইল: WPM একাই বড় করে কেন্দ্রে, বাকি সব ছোট চিপে। আপাতত শুধু Smart Typing
+    // স্ক্রিনে চালু করা হয়েছে (heroStyle=true) — বাকি স্ক্রিনে ডিফল্ট false, তাই আগের
+    // কার্ড-স্টাইল অপরিবর্তিত থাকছে, কোনো regression নেই ──
+    heroStyle: Boolean = false
 ) {
     val mins = elapsedSec / 60
     val secs = elapsedSec % 60
@@ -3790,6 +3934,40 @@ internal fun StatsRow(
         (correctKeystrokes / 5.0 / (elapsedSec / 60.0)).toInt()
     } else 0
     val liveAccuracy = if (totalKeystrokes > 0) correctKeystrokes * 100 / totalKeystrokes else 100
+
+    if (heroStyle) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("$liveWpm", fontSize = 46.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali, color = Indigo600)
+            Text(
+                "WPM", fontSize = 10.sp, letterSpacing = 2.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MiniStatChip("%02d:%02d".format(mins, secs))
+                if (showAccuracy) {
+                    MiniStatChip(
+                        "Accuracy $liveAccuracy%",
+                        if (liveAccuracy >= 90) GreenOk else if (liveAccuracy >= 70) AmberMid else RedWrong
+                    )
+                } else if (freeTypingMode) {
+                    MiniStatChip(if (isStarted) "চলছে" else "—")
+                } else {
+                    MiniStatChip("${(progress * 100).toInt()}%")
+                }
+                MiniStatChip(if (freeTypingMode) "$resolvedCount অক্ষর" else "$resolvedCount/${passage.length}")
+            }
+            if (!freeTypingMode) {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(0.85f).height(5.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Indigo600, trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
+            }
+        }
+        return
+    }
 
     // ── আগে গাঢ় নেভি (0xFF1E1B4B) ব্যাকগ্রাউন্ড ছিল — চোখে লাগতো। এখন হালকা,
     // নিরপেক্ষ ব্যাকগ্রাউন্ড (কোনো ভারী কালার ছাড়া) ব্যবহার করা হচ্ছে ──
@@ -3823,6 +4001,55 @@ internal fun StatsRow(
 }
 
 @Composable
+internal fun MiniStatChip(text: String, color: Color = Color.Unspecified) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(
+            text, fontSize = 11.5.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else color,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+        )
+    }
+}
+
+/**
+ * 🔥 কী-হিটম্যাপ — প্রতিটা আনলক-হওয়া কী একটা রঙিন স্কয়ার হিসেবে, রঙ ঠিক হয় সেই
+ * কী-এর accuracy দিয়ে (সবুজ ≥৯০%, কমলা ≥৭০%, লাল তার নিচে, ধূসর = এখনো কোনো
+ * ডেটা নেই)। ৬টা করে সারিতে ভাঙা হয় (ছোট মোবাইল স্ক্রিনে ভালো ফিট করে)।
+ */
+@Composable
+internal fun KeyHeatmapGrid(keys: List<String>, stats: Map<String, Pair<Int, Int>>, dimmed: Boolean = false) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            "🔥 কী-হিটম্যাপ", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+            color = if (dimmed) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        keys.chunked(6).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { ch ->
+                    val (acc, samples) = stats[ch] ?: (0 to 0)
+                    val bg = when {
+                        samples == 0 -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        acc >= 90 -> GreenOk.copy(alpha = 0.75f)
+                        acc >= 70 -> AmberMid.copy(alpha = 0.75f)
+                        else -> RedWrong.copy(alpha = 0.8f)
+                    }
+                    Box(
+                        Modifier.weight(1f).aspectRatio(1f).background(bg, RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            practiceKeyGlyph(ch) ?: ch, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                            fontFamily = NotoSansBengali, color = Color.White
+                        )
+                    }
+                }
+                repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun StatBox(icon: String, value: String, label: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 14.sp)
@@ -3838,6 +4065,20 @@ internal fun ResultCard(
     bestWpm      : Int,
     sessionMistakeWords: List<String> = emptyList(),
     showSmartFeatures: Boolean = false,
+    // ── রিডিজাইন: "🎯 পরবর্তী পদক্ষেপ" — এখনো unlock-থ্রেশহোল্ডে না পৌঁছানো কী-গুলো
+    // (curriculumProgress থেকে), আগে এটা শুধু ALL KEYS-এর (i) বাটনে ছিল — এখন
+    // সেশন-শেষের রিপোর্টেও (সংক্ষিপ্ত আকারে, সর্বোচ্চ ৩টা) দেখানো হয়, ঠিক
+	// "typing-redesign-demo.html"-এর রিপোর্ট স্ক্রিনের মতো ──
+    weakKeyProgress: List<Pair<String, Int>> = emptyList(),
+    // ── 🔥 কী-হিটম্যাপ — allUnlockedKeys + keyStatSnapshot (char -> accPct/samples)
+    // থাকলে "পরবর্তী পদক্ষেপ"-এর উপরে একটা রঙিন গ্রিড দেখাবে (সবুজ=ভালো, লাল=দুর্বল,
+    // ধূসর=এখনো ডেটা নেই) — "typing-redesign-demo.html"-এর হিটম্যাপের রিয়েল-ডেটা ভার্সন ──
+    heatmapKeys: List<String> = emptyList(),
+    heatmapStats: Map<String, Pair<Int, Int>> = emptyMap(),
+    // ── ভুল-শব্দ দিয়ে AI-জেনারেটেড পরের প্যাসেজ — sessionMistakeWords খালি না
+    // থাকলে আর এই ল্যাম্বডা দেওয়া থাকলেই বাটনটা দেখাবে (opt-in, ডিফল্ট "পরের
+    // Passage" আচরণ বদলায় না) ──
+    onAiMistakeDrill: (() -> Unit)? = null,
     onRetry      : () -> Unit,
     onNextPassage: () -> Unit
 ) {
@@ -3935,6 +4176,55 @@ internal fun ResultCard(
             if (result.syncLossCount > 0) {
                 Text("🔄 ${result.syncLossCount} বার টেক্সট ট্র্যাক হারিয়েছ — ধীরে টাইপ করার চেষ্টা করো",
                     fontSize = 11.sp, fontFamily = NotoSansBengali, color = AmberMid)
+            }
+
+            // ── 🔥 কী-হিটম্যাপ ──
+            if (heatmapKeys.isNotEmpty()) {
+                KeyHeatmapGrid(heatmapKeys, heatmapStats, dimmed = isNewBest)
+            }
+
+            // ── 🎯 পরবর্তী পদক্ষেপ — যে কী-গুলোতে এখনো যথেষ্ট প্র্যাকটিস হয়নি, সর্বোচ্চ ৩টা ──
+            val incompleteKeys = remember(weakKeyProgress) {
+                weakKeyProgress.filter { it.second < CurriculumProvider.UNLOCK_MIN_CORRECT }.take(3)
+            }
+            if (incompleteKeys.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "🎯 পরবর্তী পদক্ষেপ", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                        color = if (isNewBest) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    incompleteKeys.forEach { (ch, count) ->
+                        val remaining = (CurriculumProvider.UNLOCK_MIN_CORRECT - count).coerceAtLeast(0)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(RedWrong.copy(alpha = if (isNewBest) 0.15f else 0.08f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(shape = RoundedCornerShape(6.dp), color = RedWrong.copy(alpha = 0.2f)) {
+                                Text(practiceKeyGlyph(ch) ?: ch, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                            Text(
+                                "গড়ের চেয়ে বেশি ভুল হচ্ছে — বাকি $remaining বার সঠিক চাপ লাগবে", fontSize = 10.5.sp,
+                                fontFamily = NotoSansBengali, modifier = Modifier.weight(1f),
+                                color = if (isNewBest) Color(0xFFCBD5E1) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 🤖 ভুল-শব্দ দিয়ে AI প্র্যাকটিস — শুধু তখনই দেখাবে যখন এই সেশনে সত্যিকারের
+            // ভুল-শব্দ জমা হয়েছে (sessionMistakeWords) এবং caller AI-ড্রিল সাপোর্ট করে ──
+            if (onAiMistakeDrill != null && sessionMistakeWords.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = onAiMistakeDrill, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEC4899))
+                ) {
+                    Text("🤖 ভুল শব্দ দিয়ে AI প্র্যাকটিস (${sessionMistakeWords.distinct().size}টা শব্দ)",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
+                }
             }
 
             // ── এই সেশনে ভুল হওয়া শব্দের তালিকা এখন আর সরাসরি দেখানো হয় না — sessionMistakeWords
