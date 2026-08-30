@@ -71,6 +71,18 @@ object CurriculumProvider {
      *  (তাতে এখনো-আনলক-না-হওয়া অক্ষরও থাকে), তাই ছোট ছোট এলোমেলো সিলেবল/শব্দ-প্যাটার্ন
      *  জেনারেট করা হয় (Neonlipi-সহ প্রায় সব টাইপিং-টিউটোরিয়ালেই একই পদ্ধতি — শুরুতে
      *  বাস্তব শব্দের বদলে key-drill প্যাটার্নই শেখানো হয়)। */
+    /** buildDrillPassage()-এর "স্মার্ট" ভার্সন — আগে CurriculumStageContentProvider-এ
+     *  চেক করে দেখে এই track+stage-এ এডমিন কোনো curated কনটেন্ট (Google Sheet
+     *  "CurriculumStages" ট্যাব) বসিয়েছে কিনা; থাকলে তার থেকে এলোমেলোভাবে একটা
+     *  বেছে নেয় (একাধিক ভ্যারিয়েন্ট থাকলে), না থাকলে আগের সিন্থেটিক জেনারেশনেই
+     *  (buildDrillPassage) ফিরে যায় — তাই কোনো স্টেজে এডমিন কিছু না বসালেও কিছু
+     *  ভাঙে না, প্র্যাকটিস স্বাভাবিকভাবেই চলতে থাকে। */
+    suspend fun buildDrillPassageSmart(context: Context, track: String, stage: Int, wordCount: Int = 12): String {
+        val curated = CurriculumStageContentProvider.getStageContent(context, track, stage)
+        if (curated.isNotEmpty()) return curated.random()
+        return buildDrillPassage(track, stage, wordCount)
+    }
+
     fun buildDrillPassage(track: String, stage: Int, wordCount: Int = 12): String {
         val allowed = BijoyCurriculum.allowedCharsUpTo(track, stage).toList()
         if (allowed.isEmpty()) return ""
