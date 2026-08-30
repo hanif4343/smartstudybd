@@ -41,7 +41,7 @@ fun TypingLeaderboardScreen(onBack: () -> Unit) {
     val myPhone = remember { session.getCurrentUser()?.phone?.takeIf { it.isNotBlank() } ?: "" }
     val myKey = remember { myPhone.firebaseKey() }
 
-    var entries by remember { mutableStateOf<List<LeaderboardEntry>>(null) }
+    var entries by remember { mutableStateOf<List<LeaderboardEntry>?>(null) }
     var language by remember { mutableStateOf("bn") }
     var refreshKey by remember { mutableStateOf(0) }
 
