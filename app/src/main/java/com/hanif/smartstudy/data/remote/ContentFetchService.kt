@@ -512,6 +512,16 @@ object ContentFetchService {
     suspend fun fetchTypingPassages(): List<com.hanif.smartstudy.data.model.TypingSheetPassage> =
         fetchSheet("Typing")
 
+    /**
+     * Google Sheet "CurriculumStages" ট্যাব (headers: id, track, stage, content, updatedAt)
+     * — Firebase "CurriculumStages" node থেকে, ঠিক Typing-এর মতোই generic fetchSheet<T> দিয়ে।
+     * Smart Typing-এর কারিকুলাম-স্টেজের admin-curated প্র্যাকটিস-কনটেন্ট — দেখো
+     * util/CurriculumStageContentProvider.kt। (Typing-ব্রাঞ্চ থেকে merge করা হয়েছে —
+     * এই node CDN মাইগ্রেশনের বাইরে, Typing-এর মতোই এখনো Firebase-এই থাকবে।)
+     */
+    suspend fun fetchCurriculumStageContent(): List<com.hanif.smartstudy.data.model.TypingSheetStageContent> =
+        fetchSheet("CurriculumStages")
+
     private suspend inline fun <reified T> fetchSheet(sheet: String): List<T> =
         withContext(Dispatchers.IO) {
             try {
