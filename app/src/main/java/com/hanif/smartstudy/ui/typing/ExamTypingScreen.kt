@@ -72,7 +72,10 @@ fun ExamTypingScreen(
     var showPhaseTransition by remember { mutableStateOf(false) }
     var govtMockMinutes by remember { mutableStateOf(10) }
 
-    LaunchedEffect(Unit) { allPassages = TypingPassageProvider.getPassages(ctx) }
+    LaunchedEffect(Unit) {
+        vm.syncFromCloud()
+        allPassages = TypingPassageProvider.getPassages(ctx)
+    }
 
     fun startExamSimulation() {
         examMode = "exam"; examPhase = "en"; examEnglishResult = null; examBanglaResult = null; showPhaseTransition = false
@@ -192,7 +195,7 @@ fun ExamTypingScreen(
                 StatsRow(
                     elapsedSec = state.elapsedSec, resolvedCount = resolvedCount, passage = state.passage,
                     isStarted = state.isStarted, correctKeystrokes = state.correctKeystrokes,
-                    totalKeystrokes = state.totalKeystrokes, showAccuracy = true
+                    totalKeystrokes = state.totalKeystrokes, showAccuracy = true, heroStyle = true
                 )
 
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
@@ -236,14 +239,11 @@ fun ExamTypingScreen(
                         fontSize = 11.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.error)
                 }
 
-                OutlinedTextField(
+                TypingInputField(
                     value = state.userInput,
-                    onValueChange = { if (!state.isFinished) vm.onInputChange(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("এখানে type করা শুরু করুন...", fontFamily = NotoSansBengali) },
-                    enabled = !state.isFinished,
-                    keyboardOptions = KeyboardOptions.Default,
-                    minLines = 4
+                    isFinished = state.isFinished,
+                    isBackspaceBlocked = examMode == "govtmock" || state.backspaceLocked,
+                    onValueChange = { vm.onInputChange(it) }
                 )
 
                 if (state.isStarted && !state.isFinished) {
