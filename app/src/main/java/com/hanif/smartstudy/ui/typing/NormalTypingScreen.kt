@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.util.TypingErrorAnalyzer
 import com.hanif.smartstudy.util.TypingPassageProvider
 import com.hanif.smartstudy.viewmodel.TypingSessionViewModel
 
@@ -82,8 +83,18 @@ fun NormalTypingScreen(
     var language   by remember { mutableStateOf("bn") }     // bn/en
     var allPassages by remember { mutableStateOf(listOf<PassageInfo>()) }
 
+    // ── FIX: আগে এখানে শুধু difficulty দিয়ে ফিল্টার হতো, ভাষা (bn/en) একদম উপেক্ষা
+    // করা হতো — ফলে "English" সিলেক্ট করলেও পুল-এ বাংলা প্যাসেজ থেকে যেত, আর প্যাসেজ
+    // শেষে/সাবমিটে পরের প্যাসেজ (advanceToNextPassage) সেই একই না-ফিল্টার-করা পুল
+    // থেকে বাছাই করত বলে মাঝে মাঝে বাংলা চলে আসত। এখন difficulty-এর পাশাপাশি
+    // TypingErrorAnalyzer.detectLanguage() দিয়ে প্রতিটা প্যাসেজের ভাষা যাচাই করে
+    // সিলেক্ট-করা language-এর সাথে না মিললে বাদ দেওয়া হয় — তাই "English" সিলেক্ট
+    // থাকলে সবসময় শুধু ইংরেজি, "বাংলা" সিলেক্ট থাকলে সবসময় শুধু বাংলা প্যাসেজ আসবে ──
     fun currentPool(): List<PassageInfo> =
-        allPassages.filter { (difficulty == "all" || it.difficulty == difficulty) }
+        allPassages.filter {
+            (difficulty == "all" || it.difficulty == difficulty) &&
+                TypingErrorAnalyzer.detectLanguage(it.text) == language
+        }
 
     // ── প্রথমবার স্ক্রিন খোলার সময় Timer On/Off পছন্দ (persisted) লোড করে, তারপর
     // প্যাসেজ-পুল লোড করে সেশন শুরু + cloud sync পুল ──
@@ -91,14 +102,13 @@ fun NormalTypingScreen(
         vm.setTimerEnabled(session.getTypingTimerEnabled())
         vm.syncFromCloud()
         allPassages = TypingPassageProvider.getPassages(ctx)
-        val pool = allPassages.filter { difficulty == "all" || it.difficulty == difficulty }
-        vm.startSession("free", pool, budgetSec = 300)
+        vm.startSession("free", currentPool(), budgetSec = 300)
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("⌨️ Normal Typing", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                title = { Text("🌿 ফ্রি টাইপিং", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
