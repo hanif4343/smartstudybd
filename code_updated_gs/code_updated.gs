@@ -19,7 +19,7 @@
 // build-নামটা দেখা যাবে (secret লাগবেনা) — যদি পুরনো মান দেখা যায় বা এরর আসে,
 // তার মানে নতুন কোড এখনো লাইভ হয়নি (নতুন "deployment" বানানো হয়ে থাকলে সেটার
 // আলাদা URL হয়, পুরনো URL-এই পুরনো কোড থেকে যায় — এই কারণেই এই মার্কার)।
-var GAS_BUILD_VERSION = "2026-08-30-autoReindex-permanent-fix-v1";
+var GAS_BUILD_VERSION = "2026-08-30-update_explanation-dirty-fix-v2";
 
 function getProps() {
   var p = PropertiesService.getScriptProperties();
@@ -1453,6 +1453,11 @@ function doGet(e) {
         // ব্যবহার হয়, নাহলে আগের মতোই snapshot-এর মান।
         var uDirtyTopicId = (uTopicIdC>=0 && fldC===uTopicIdC) ? content.toString() : (uTopicIdC>=0 ? (uRows[ur][uTopicIdC]||"").toString() : "");
         if (uDirtyTopicId) markTopicDirty(uDirtyTopicId);
+        // ── FIX: update_fields (plural, POST)-এর মতোই একই গ্যাপ এই singular
+        // GET action=updateField-এও ছিল — topic_id বদলালে dirty মার্ক হতো,
+        // কিন্তু reindex flag কখনো উঠতো না, তাই row_start/row_count grouping
+        // পরের mutation না আসা পর্যন্ত stale থেকে যেত। ──
+        if (uTopicIdC>=0 && fldC===uTopicIdC) markReindexNeeded_();
         return json({result:"success"});
       }
     }
@@ -3434,7 +3439,30 @@ function doPost(e) {
       if(fldC===-1){for(var fc=0;fc<uHdr.length;fc++){if(uHdr[fc].includes(fld)){fldC=fc;break;}}}
       if(idC===-1||fldC===-1)return txt("Column not found");
       var ueAtC=uHdr.indexOf("updatedat");
-      for(var ur=1;ur<uRows.length;ur++){if(uRows[ur][idC].toString().trim()===params.id.toString().trim()){uSheet.getRange(ur+1,fldC+1).setValue(params.content);if(ueAtC!==-1)uSheet.getRange(ur+1,ueAtC+1).setValue(Date.now());if(!params.bulkMode)syncToFirebase(sName,sName);return txt("Successfully Updated");}}
+      // ── dirty-tracking-এর জন্য ──
+      var ueTopicIdC=uHdr.indexOf("topic_id");
+      for(var ur=1;ur<uRows.length;ur++){
+        if(uRows[ur][idC].toString().trim()===params.id.toString().trim()){
+          uSheet.getRange(ur+1,fldC+1).setValue(params.content);
+          if(ueAtC!==-1)uSheet.getRange(ur+1,ueAtC+1).setValue(Date.now());
+          if(!params.bulkMode)syncToFirebase(sName,sName);
+          // ── FIX (স্থায়ী সমাধানের ৫ম অংশ): এই handler নামে "update_explanation"
+          // হলেও আসলে জেনেরিক single-field updater — generate-explanations.mjs
+          // ও generate-mcq-options.mjs script দুটো এটা দিয়েই explanation/option1-4
+          // (আসল প্রশ্নের কনটেন্ট) সরাসরি Sheet-এ লেখে, বাল্কে, হাজার হাজার রো-তে।
+          // আগে এখানে markTopicDirty() কখনোই কল হতো না — তাই এই script দুটো দিয়ে
+          // লেখা কনটেন্ট Sheet-এ ঠিকই বসত কিন্তু কখনো CDN-এ publish হতো না, যতক্ষণ
+          // না অন্য কোনো path (edit/move) দিয়ে সেই একই টপিক আবার আলাদাভাবে ছোঁয়া
+          // হতো। এখন প্রতিটা সফল লেখায় সেই রো-র topic_id dirty মার্ক হয়, আর field
+          // নিজেই topic_id হলে (ভবিষ্যতে কেউ এই জেনেরিক endpoint দিয়ে topic_id
+          // বদলালে) reindex flag-ও ওঠে — update_fields-এ আগেই যেই একই ফিক্স
+          // করা হয়েছিল, ঠিক সেই একই প্যাটার্ন। ──
+          var ueDirtyTopicId = (ueTopicIdC>=0 && fldC===ueTopicIdC) ? params.content.toString() : (ueTopicIdC>=0 ? (uRows[ur][ueTopicIdC]||"").toString() : "");
+          if (ueDirtyTopicId) markTopicDirty(ueDirtyTopicId);
+          if (ueTopicIdC>=0 && fldC===ueTopicIdC) markReindexNeeded_();
+          return txt("Successfully Updated");
+        }
+      }
       return txt("ID not found: "+params.id);
     }
 
