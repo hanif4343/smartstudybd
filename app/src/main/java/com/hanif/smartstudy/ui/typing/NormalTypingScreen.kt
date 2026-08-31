@@ -108,7 +108,7 @@ fun NormalTypingScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("🌿 ফ্রি টাইপিং", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                title = { Text("🌿 টাইপিং অনুশীলন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
