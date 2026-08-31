@@ -59,6 +59,11 @@ data class TypingSessionUiState(
     val isFinished: Boolean = false,
     val elapsedSec: Int = 0,
     val freeModeBudgetSec: Int = 300,
+    // ── Timer On/Off (Normal Typing) — বন্ধ থাকলে freeModeBudgetSec-এর হার্ড
+    // কাটঅফ/অটো-লুপ-লিমিট উপেক্ষা করা হয়, ইউজার নিজে "Submit Now" না চাপা পর্যন্ত
+    // যতক্ষণ ইচ্ছা টাইপ করতে পারে। ডিফল্ট true (আগের আচরণ) — setTimerEnabled()/
+    // NormalTypingScreen.kt-এর persisted পছন্দ দিয়ে সেট হয় ──
+    val timerEnabled: Boolean = true,
 
     // ── কীস্ট্রোক কাউন্টার ──
     val correctKeystrokes: Int = 0,
@@ -102,6 +107,11 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
      *  এর ভেতরের auto-advance লজিক এটাই ব্যবহার করে (UI থেকে বারবার পাস করতে হয় না)। */
     private var currentPool: List<PassageInfo> = emptyList()
 
+    /** UI থেকে টগল করা Timer On/Off পছন্দ — startSession()-এ নতুন state তৈরি হলেও
+     *  (যেমন difficulty/language পাল্টালে) এটা হারায় না, প্রতিবার নতুন
+     *  TypingSessionUiState-এ আবার বসানো হয় (দেখো startSession())। */
+    private var timerEnabledPref: Boolean = true
+
     // ── পর্ব ৩/৫.৩ ধাপ ৩ (Smart Typing সম্প্রসারণ): প্রতি-ক্যারেক্টার সঠিক/ভুল ও
     // ল্যাটেন্সি — সেশন চলাকালীন RAM-এ জমে, finishSession()-এ একবারে TypingKeyStatStore-এ
     // flush হয় (ঠিক মূল TypingPracticeScreen.kt-এর প্যাটার্নেই — batch persist, বারবার
@@ -143,7 +153,8 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             passageIndex = idx,
             passage = chosen?.text ?: "",
             passageDifficulty = chosen?.difficulty ?: "",
-            freeModeBudgetSec = budgetSec
+            freeModeBudgetSec = budgetSec,
+            timerEnabled = timerEnabledPref
         )
         chosen?.text?.let { txt ->
             if (mode == "free" && txt.isNotBlank()) {
@@ -197,6 +208,14 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(backspaceLocked = locked) }
     }
 
+    /** Timer On/Off টগল — বন্ধ করলে বর্তমান সেশনেও সাথে সাথে হার্ড টাইম-কাটঅফ থেমে
+     *  যায় (elapsedSec গোনা চলতে থাকে শুধু তথ্যের জন্য, কিন্তু আর ফোর্স-ফিনিশ হবে
+     *  না)। পরের startSession()-গুলোতেও এই পছন্দ ধরে রাখা হয় (timerEnabledPref)। */
+    fun setTimerEnabled(enabled: Boolean) {
+        timerEnabledPref = enabled
+        _state.update { it.copy(timerEnabled = enabled) }
+    }
+
     /** স্ক্রিন খোলার সময় কল করার জন্য — cloud থেকে টেনে local-এর সাথে merge করে
      *  (মূল ফাইলের LaunchedEffect(Unit)-এর প্যাটার্নে, silent fail যদি লগইন করা না থাকে) */
     fun syncFromCloud() {
@@ -224,7 +243,10 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
                 // হার্ড টাইম-বাজেট নেই (মূল অ্যাপেও ছিল না, শুধু প্যাসেজ শেষ হলে থামে) ──
                 val s = _state.value
                 val isTimedMode = s.sessionMode == "free" || s.sessionMode == "exam" || s.sessionMode == "govtmock" || s.sessionMode == "adaptive"
-                if (isTimedMode && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
+                // ── Timer বন্ধ থাকলে (শুধু Normal/"free" মোডে UI থেকে টগল করা যায়)
+                // হার্ড কাটঅফ স্কিপ — ইউজার নিজে "Submit Now" না চাপা পর্যন্ত সেশন
+                // চলতেই থাকবে, elapsedSec শুধু তথ্যের জন্য বাড়তে থাকবে ──
+                if (isTimedMode && s.timerEnabled && !s.isFinished && s.elapsedSec >= s.freeModeBudgetSec) {
                     finishSession()
                 }
             }
@@ -397,7 +419,10 @@ class TypingSessionViewModel(app: Application) : AndroidViewModel(app) {
             // (মূল TypingPracticeScreen.kt-এর আচরণের সাথে হুবহু মিলিয়ে) — curriculum/
             // keydrill ইত্যাদিতে লুপ হয় না, একটা প্যাসেজ শেষ = সেশন শেষ ──
             val loopsWithinBudget = latest.sessionMode == "free" || latest.sessionMode == "exam" || latest.sessionMode == "govtmock"
-            if (loopsWithinBudget && latest.elapsedSec < latest.freeModeBudgetSec && currentPool.isNotEmpty()) {
+            // ── Timer বন্ধ থাকলে বাজেট-সীমা উপেক্ষা করে সবসময় পরের প্যাসেজে লুপ করে
+            // (নতুন-শেখা ইউজার যতক্ষণ চায় টাইপ করে যেতে পারবে) ──
+            val withinBudget = !latest.timerEnabled || latest.elapsedSec < latest.freeModeBudgetSec
+            if (loopsWithinBudget && withinBudget && currentPool.isNotEmpty()) {
                 advanceToNextPassage(currentPool)
             } else {
                 finishSession()
