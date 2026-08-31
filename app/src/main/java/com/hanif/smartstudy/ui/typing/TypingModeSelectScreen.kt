@@ -216,7 +216,7 @@ fun TypingModeSelectScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ModeTile(
-                        Modifier.weight(1f), icon = "🌿", title = "ফ্রি টাইপিং",
+                        Modifier.weight(1f), icon = "🌿", title = "টাইপিং অনুশীলন",
                         desc = "চাপ ছাড়া, নিজের গতিতে", onClick = onSelectNormal
                     )
                     ModeTile(
