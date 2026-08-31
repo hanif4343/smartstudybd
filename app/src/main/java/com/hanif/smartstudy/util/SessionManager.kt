@@ -93,6 +93,14 @@ class SessionManager(private val context: Context) {
         // করলে সব একসাথে চালু হয়। দেখো getSmartTypingEnabled()/setSmartTypingEnabled()।
         val KEY_SMART_TYPING_ON = booleanPreferencesKey("smart_typing_enabled")
 
+        // ── Normal Typing: "Timer On/Off" টগল — যারা নতুন শিখছে তারা সময়ের চাপ
+        // ছাড়া, যতক্ষণ লাগুক ততক্ষণ ধরে টাইপ করতে পারবে (Timer বন্ধ থাকলে ৫মিনিট/
+        // Quick-3 বাজেট শেষ হলেও সেশন জোর করে শেষ হবে না, "Submit Now" চাপলে তবেই
+        // শেষ হবে)। দক্ষ ইউজাররা Timer চালু রেখে আগের মতোই টাইমড প্র্যাকটিস করতে
+        // পারবে। ডিফল্ট **true** (আগের আচরণ অপরিবর্তিত), পছন্দটা persist থাকে যাতে
+        // পরের বার Normal Typing খুললেও মনে থাকে। ──
+        val KEY_TYPING_TIMER_ENABLED = booleanPreferencesKey("typing_timer_enabled")
+
         // ── FIX (Speed Plan Task 4): "Unused feature hold rakhar jonno Menu toggle" —
         // Challenge Zone (⚔️ চ্যালেঞ্জ + 🏆 চ্যাম্পিয়নশিপ/WeekendBattle একই বটম-ট্যাবে,
         // দেখো MainScreen.kt BottomTab.CHALLENGE), Study Buddy, আর Typing Race
@@ -295,6 +303,15 @@ class SessionManager(private val context: Context) {
 
     suspend fun setSmartTypingEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_SMART_TYPING_ON] = on }
+    }
+
+    /** Normal Typing স্ক্রিনের Timer On/Off পছন্দ — ডিফল্ট চালু (আগের আচরণ)। */
+    fun getTypingTimerEnabled(): Boolean = runBlocking {
+        context.dataStore.data.first()[KEY_TYPING_TIMER_ENABLED] ?: true
+    }
+
+    suspend fun setTypingTimerEnabled(on: Boolean) {
+        context.dataStore.edit { it[KEY_TYPING_TIMER_ENABLED] = on }
     }
 
     // ── Speed Plan Task 4: লাইভ ফিচার হোল্ড/আনহোল্ড টগল — ডিফল্ট false (হোল্ড করা) ──
