@@ -211,18 +211,9 @@ fun TypingModeSelectScreen(
             }
 
             // ══════════ প্র্যাকটিস মোড গ্রিড ══════════
+            // ── ফ্রি টাইপিং উপরে, কারিকুলাম নিচে (ইউজার-রিকোয়েস্ট) ──
             SectionLabel("প্র্যাকটিস মোড")
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ModeTile(
-                        Modifier.weight(1f), icon = "🎯", title = "কারিকুলাম",
-                        desc = "ধাপে ধাপে নতুন কী আনলক করুন", onClick = onSelectSmart
-                    )
-                    ModeTile(
-                        Modifier.weight(1f), icon = "🩹", title = "দুর্বল-কী ড্রিল",
-                        desc = "যেসব কী-তে ভুল বেশি, শুধু সেগুলো", onClick = onSelectSmart
-                    )
-                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ModeTile(
                         Modifier.weight(1f), icon = "🌿", title = "ফ্রি টাইপিং",
@@ -231,6 +222,16 @@ fun TypingModeSelectScreen(
                     ModeTile(
                         Modifier.weight(1f), icon = "🏁", title = "এক্সাম সিমুলেশন",
                         desc = "সরকারি পরীক্ষার মতো টাইমড টেস্ট", onClick = onSelectExam
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ModeTile(
+                        Modifier.weight(1f), icon = "🎯", title = "কারিকুলাম",
+                        desc = "ধাপে ধাপে নতুন কী আনলক করুন", onClick = onSelectSmart
+                    )
+                    ModeTile(
+                        Modifier.weight(1f), icon = "🩹", title = "দুর্বল-কী ড্রিল",
+                        desc = "যেসব কী-তে ভুল বেশি, শুধু সেগুলো", onClick = onSelectSmart
                     )
                 }
             }
