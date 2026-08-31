@@ -4130,4 +4130,4 @@ function testUpdateFieldsDirectly() {
 
   var result = doPost(fakeEvent);
   Logger.log("RESULT: " + result.getContent());
-}
+} 
