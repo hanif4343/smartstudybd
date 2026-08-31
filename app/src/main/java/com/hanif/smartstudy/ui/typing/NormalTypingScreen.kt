@@ -216,7 +216,13 @@ fun NormalTypingScreen(
             )
 
             // ── প্যাসেজ প্রদর্শন (সঠিক=সবুজ, ভুল=লাল, বর্তমান শব্দ=নীল ব্যাকগ্রাউন্ড) ──
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+            // ── Card-টা একটা Box-এ মোড়ানো, যাতে ওপর-ডানে "⏭️ পরের প্যাসেজ" বাটন
+            // ভাসিয়ে রাখা যায় — সাবমিট/সময়-শেষ ছাড়াই, বর্তমান প্যাসেজ পছন্দ না
+            // হলে বা কঠিন লাগলে সরাসরি এক-ট্যাপে অন্য একটা প্যাসেজে চলে যাওয়া যায়
+            // (cumulative WPM/Accuracy স্ট্যাট অক্ষত থাকে, restartCurrentPassage()-এর
+            // মতোই — শুধু প্যাসেজটাই পাল্টায়) ──
+            Box(Modifier.fillMaxWidth()) {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
                 val liveSplit = remember(state.userInput) { splitTypedWords(state.userInput) }
                 val annotated = remember(state.passage, state.frozenWordResults, liveSplit) {
                     buildAnnotatedString {
@@ -260,7 +266,9 @@ fun NormalTypingScreen(
                     modifier = Modifier
                         .heightIn(max = 150.dp)
                         .verticalScroll(passageScrollState)
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        // ── উপরে-ডানে ভাসমান "পরের" বাটনের সাথে টেক্সট যেন না মিশে যায় ──
+                        .padding(end = 46.dp),
                     onTextLayout = { passageLayout = it }
                 )
                 LaunchedEffect(resolvedCount, passageLayout) {
@@ -271,6 +279,23 @@ fun NormalTypingScreen(
                     val line = layout.getLineForOffset(offset)
                     val lineTop = layout.getLineTop(line).toInt()
                     passageScrollState.animateScrollTo(lineTop.coerceAtLeast(0))
+                }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { vm.advanceToNextPassage(currentPool()) }
+                ) {
+                    Text(
+                        "⏭️ পরের", fontSize = 10.5.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                    )
                 }
             }
 
