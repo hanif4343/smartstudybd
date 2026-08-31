@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.util.TypingPassageProvider
@@ -67,6 +68,7 @@ fun NormalTypingScreen(
 ) {
     val ctx = LocalContext.current
     val session = remember { SessionManager(ctx) }
+    val scope = rememberCoroutineScope()
     val state by vm.state.collectAsState()
 
     // ── পুরনো TypingPracticeScreen-এর মতোই — ফলাফল এলেই onResult() কল হয়
@@ -83,8 +85,10 @@ fun NormalTypingScreen(
     fun currentPool(): List<PassageInfo> =
         allPassages.filter { (difficulty == "all" || it.difficulty == difficulty) }
 
-    // ── প্রথমবার স্ক্রিন খোলার সময় প্যাসেজ-পুল লোড করে সেশন শুরু + cloud sync পুল ──
+    // ── প্রথমবার স্ক্রিন খোলার সময় Timer On/Off পছন্দ (persisted) লোড করে, তারপর
+    // প্যাসেজ-পুল লোড করে সেশন শুরু + cloud sync পুল ──
     LaunchedEffect(Unit) {
+        vm.setTimerEnabled(session.getTypingTimerEnabled())
         vm.syncFromCloud()
         allPassages = TypingPassageProvider.getPassages(ctx)
         val pool = allPassages.filter { difficulty == "all" || it.difficulty == difficulty }
@@ -140,6 +144,23 @@ fun NormalTypingScreen(
                             color = if (language == key) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
                     }
+                }
+            }
+
+            // ── Timer On/Off — যারা নতুন টাইপিং শিখছে, তারা সময়ের চাপ ছাড়া নিজের
+            // গতিতে টাইপ করতে পারবে (Timer বন্ধ থাকলে সময়সীমা শেষ হলেও সেশন জোর
+            // করে শেষ হবে না)। দক্ষ ইউজাররা Timer চালু রেখে আগের মতোই টাইমড
+            // প্র্যাকটিস করতে পারবে। পছন্দটা সেভ থাকে, পরের বার স্ক্রিন খুললেও মনে থাকে ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (state.timerEnabled) "⏱️ টাইমার চালু আছে" else "⏱️ টাইমার বন্ধ — যতক্ষণ ইচ্ছা টাইপ করুন",
+                    fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                CompactToggleChip(icon = "⏱️", label = "Timer", checked = state.timerEnabled) {
+                    val next = !state.timerEnabled
+                    vm.setTimerEnabled(next)
+                    scope.launch { session.setTypingTimerEnabled(next) }
                 }
             }
 
