@@ -107,7 +107,14 @@ fun SubjectListScreen(
     onRefresh        : () -> Unit = {},
     onForceFullResync: () -> Unit = {},
     forceResyncMsg   : String?    = null,
-    onDismissForceResyncMsg: () -> Unit = {}
+    onDismissForceResyncMsg: () -> Unit = {},
+    // 🆕 FIX ("ইউজারের নিজের audience-এর বাইরের Subject/Topic ০ প্রশ্ন দেখাচ্ছিল,
+    // বোঝা যাচ্ছিল না কেন" — Admin নিজেও একবার নিজের অ্যাকাউন্টে ভুল audience
+    // দেখে বিভ্রান্ত হয়েছিলেন): বর্তমান ইউজারের effective audience group
+    // (AudienceFilter.audienceGroupLabel(user), যেমন "চাকরি (Job)" বা "মাস্টার্স
+    // ১ বর্ষ") — শুধু দেখানোর জন্য, বাড়তি কিছু না (কোনো টগল/বাটন না, শুধু লেবেল)।
+    // null/ফাঁকা দিলে কিছুই রেন্ডার হয় না (আগের আচরণ অক্ষত)।
+    audienceLabel : String? = null
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -174,6 +181,10 @@ fun SubjectListScreen(
                             color = headerTextColor, fontFamily = NotoSansBengali)
                         Text("বিষয় বেছে নিন", fontSize = 12.sp, color = headerSubTextColor,
                             fontFamily = NotoSansBengali)
+                        if (!audienceLabel.isNullOrBlank()) {
+                            Text("🎯 $audienceLabel", fontSize = 11.sp, color = headerSubTextColor,
+                                fontFamily = NotoSansBengali)
+                        }
                     }
                     if (isAdmin) {
                         AdminMenuButton(
