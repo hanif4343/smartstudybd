@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +25,7 @@ import com.hanif.smartstudy.viewmodel.ArchiveViewModel
    Mark All / Move to Active। ডিলিট কোনো বাটনেই নেই (ইচ্ছাকৃত — প্ল্যান দ্রঃ)।
    ───────────────────────────────────────────────────────────────────────── */
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArchiveQuestionListScreen(
     viewModel : ArchiveViewModel,
@@ -206,6 +208,7 @@ private fun ArchiveQuestionCard(q: ArchiveQuestion, isMarked: Boolean, onToggle:
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoveToActiveDialog(
     sheetLabel        : String,
