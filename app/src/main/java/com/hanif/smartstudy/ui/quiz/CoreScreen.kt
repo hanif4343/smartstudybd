@@ -337,6 +337,7 @@ fun CoreScreen(
         mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.INSTITUTION &&
             state.navPath.depth() == 0 && state.qbankSelectedInstitution == null -> {
             SubjectListScreen(
+                audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
                 mode       = state.mode,
                 subjects   = state.qbankInstitutions,
                 weakTopics = emptyList(),
@@ -409,6 +410,7 @@ fun CoreScreen(
         mode == StudyMode.QBANK && state.qbankFilterMode == QBankFilterMode.YEAR &&
             state.navPath.depth() == 0 -> {
             SubjectListScreen(
+                audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
                 mode       = state.mode,
                 subjects   = state.qbankYears,
                 weakTopics = emptyList(),
@@ -440,6 +442,7 @@ fun CoreScreen(
             (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
             state.navPath.depth() == 0 && state.qbankSelectedPost == null -> {
             SubjectListScreen(
+                audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
                 mode       = state.mode,
                 subjects   = state.qbankPosts,
                 weakTopics = emptyList(),
@@ -509,6 +512,7 @@ fun CoreScreen(
         // Phase 6: এখন লেজি (Subjects reference-টেবিল থেকে) ──
         else -> {
             SubjectListScreen(
+                audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
                 mode       = state.mode,
                 subjects   = state.subjects,
                 weakTopics = state.weakTopics,
