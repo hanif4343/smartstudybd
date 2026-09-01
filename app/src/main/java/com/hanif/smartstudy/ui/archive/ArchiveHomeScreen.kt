@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ import com.hanif.smartstudy.viewmodel.ArchiveViewModel
 private val ArchiveAccent = Color(0xFFF59E0B)      // Amber — "cleanup/admin টুল" বোঝাতে Quiz/QBank-এর ইন্ডিগো থেকে ইচ্ছাকৃতভাবে আলাদা রঙ
 private val ArchiveAccentBg = Color(0xFFFFFBEB)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArchiveHomeScreen(
     onBack    : () -> Unit,
