@@ -145,6 +145,7 @@ fun HomeScreen(
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
     onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
+    onOpenArchive  : () -> Unit = {},           // Admin-only "Archive" কার্ড → নতুন Archive সেকশন (Quiz/QBank duplicate-cleanup)
     onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -231,6 +232,30 @@ fun HomeScreen(
                     state = state,
                     onRefresh = { viewModel.loadAdminContentCounts() }
                 )
+            }
+
+            // ── Archive সেকশন (Admin-only) — Quiz-Archive/QBank-Archive duplicate-cleanup
+            // টুল, নতুন স্বতন্ত্র স্ক্রিন-ফ্লো (ui/archive/ArchiveHomeScreen.kt) ──
+            if (isAdmin) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenArchive),
+                    color = Color(0xFFFFFBEB),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🗄️", fontSize = 22.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Archive", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFB45309))
+                            Text("Quiz/QBank duplicate রিভিউ ও ক্লিনআপ (Admin)", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF92400E))
+                        }
+                    }
+                }
             }
 
             if (state.isLoading) {
