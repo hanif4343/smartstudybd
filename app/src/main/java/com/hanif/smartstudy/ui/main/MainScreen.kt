@@ -72,6 +72,7 @@ fun MainScreen(
     var showFocusModeInfo by remember { mutableStateOf(false) }
     var showAiChat     by remember { mutableStateOf(false) }
     var showViva       by remember { mutableStateOf(false) }
+    var showArchive    by remember { mutableStateOf(false) }   // Admin-only Archive সেকশন (Quiz/QBank duplicate-cleanup) — নতুন, স্বতন্ত্র
     var showExitDialog        by remember { mutableStateOf(false) }
     var pendingRoutineItemId  by remember { mutableStateOf<String?>(null) }
 
@@ -370,6 +371,12 @@ fun MainScreen(
         VivaComingSoonScreen(onBack = { showViva = false })
         return
     }
+    if (showArchive) {
+        // ── Archive সেকশন — সম্পূর্ণ নতুন, স্বতন্ত্র স্ক্রিন-ফ্লো (ui/archive/*),
+        // existing QuizViewModel/CoreScreen স্পর্শ করেনি ──
+        com.hanif.smartstudy.ui.archive.ArchiveHomeScreen(onBack = { showArchive = false })
+        return
+    }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -432,6 +439,7 @@ fun MainScreen(
                     onOpenFocusMode = { showFocusModeInfo = true },
                     onOpenAiChat    = { showAiChat = true },
                     onOpenViva      = { showViva = true },
+                    onOpenArchive   = { showArchive = true },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
