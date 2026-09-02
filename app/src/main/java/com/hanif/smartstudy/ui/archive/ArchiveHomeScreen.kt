@@ -5,14 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ArrowForwardIos
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,17 +22,17 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanif.smartstudy.data.model.ArchiveSheet
 import com.hanif.smartstudy.data.model.ArchiveTopicRef
+import com.hanif.smartstudy.data.model.SubjectRef
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.ArchiveViewModel
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Archive সেকশন — নতুন, স্বতন্ত্র স্ক্রিন (existing Quiz/QBank স্ক্রিন থেকে
-   সম্পূর্ণ আলাদা ফাইল, existing কোড অপরিবর্তিত)। Admin-only — MainScreen থেকে
-   isAdmin গেট করে ঢোকানো হয়।
+   Archive সেকশন — existing Quiz সেকশনের মতোই ৩-লেভেল ড্রিল-ডাউন:
+   Subject কার্ড → Topic কার্ড → Question লিস্ট। ভিজ্যুয়ালি existing
+   SubjectListScreen.kt-এর SubjectCard-এর স্টাইল (rounded card, icon box,
+   bold name, subtitle, chevron) অনুসরণ করা হয়েছে — কিন্তু ফাইল আলাদা,
+   existing স্ক্রিন কোথাও স্পর্শ করা হয়নি।
    ───────────────────────────────────────────────────────────────────────── */
-
-private val ArchiveAccent = Color(0xFFF59E0B)      // Amber — "cleanup/admin টুল" বোঝাতে Quiz/QBank-এর ইন্ডিগো থেকে ইচ্ছাকৃতভাবে আলাদা রঙ
-private val ArchiveAccentBg = Color(0xFFFFFBEB)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,111 +41,184 @@ fun ArchiveHomeScreen(
     viewModel : ArchiveViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
-
     LaunchedEffect(Unit) { viewModel.loadInitial(ArchiveSheet.QUIZ_ARCHIVE) }
 
-    // ── টপিক সিলেক্ট করা থাকলে প্রশ্ন-লিস্ট স্ক্রিনে চলে যায় ──
-    if (state.selectedTopic != null) {
-        ArchiveQuestionListScreen(viewModel = viewModel, onBack = { viewModel.backToTopics() })
-        return
-    }
+    when {
+        state.selectedTopic != null ->
+            ArchiveQuestionListScreen(viewModel = viewModel, onBack = { viewModel.backToTopics() })
 
-    val subjectNameById = remember(state.subjects) {
-        state.subjects.associate { (it.subjectId ?: "") to (it.name ?: it.subjectId ?: "?") }
+        state.selectedSubjectId != null ->
+            ArchiveTopicListScreen(
+                subjectName = state.subjects.firstOrNull { it.subjectId == state.selectedSubjectId }?.name
+                    ?: state.selectedSubjectId ?: "",
+                topics   = state.archiveTopics.filter { it.subjectId == state.selectedSubjectId && it.rowCountFor(state.sheet) > 0 }
+                    .sortedByDescending { it.rowCountFor(state.sheet) },
+                sheet    = state.sheet,
+                isLoading = state.isLoadingTopics,
+                onBack   = { viewModel.backToSubjects() },
+                onTopic  = { viewModel.selectTopic(it) }
+            )
+
+        else ->
+            ArchiveSubjectListScreen(
+                sheet        = state.sheet,
+                subjects     = state.subjects,
+                archiveTopics= state.archiveTopics,
+                isLoading    = state.isLoadingTopics,
+                error        = state.error,
+                onBack       = onBack,
+                onSwitchSheet= { viewModel.switchSheet(it) },
+                onSubject    = { viewModel.selectSubject(it) }
+            )
     }
-    val groupedTopics = remember(state.archiveTopics, state.sheet) {
-        state.archiveTopics
-            .filter { it.rowCountFor(state.sheet) > 0 }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ArchiveSubjectListScreen(
+    sheet         : ArchiveSheet,
+    subjects      : List<SubjectRef>,
+    archiveTopics : List<ArchiveTopicRef>,
+    isLoading     : Boolean,
+    error         : String?,
+    onBack        : () -> Unit,
+    onSwitchSheet : (ArchiveSheet) -> Unit,
+    onSubject     : (String) -> Unit
+) {
+    // ── প্রতি subject-এ কতগুলো টপিক + মোট প্রশ্ন (আনুমানিক, index থেকে) ──
+    val countsBySubject = remember(archiveTopics, sheet) {
+        archiveTopics.filter { it.rowCountFor(sheet) > 0 }
             .groupBy { it.subjectId ?: "" }
+            .mapValues { (_, list) -> Pair(list.size, list.sumOf { it.rowCountFor(sheet) }) }
+    }
+    val visibleSubjects = remember(subjects, countsBySubject) {
+        subjects.filter { (countsBySubject[it.subjectId ?: ""]?.first ?: 0) > 0 }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Archive (Admin)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = ArchiveAccentBg)
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") } }
             )
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-
-            // ── Quiz-Archive / QBank-Archive টগল ──
-            TabRow(
-                selectedTabIndex = ArchiveSheet.entries.indexOf(state.sheet),
-                containerColor = Color.White,
-                contentColor = ArchiveAccent
-            ) {
+            TabRow(selectedTabIndex = ArchiveSheet.entries.indexOf(sheet)) {
                 ArchiveSheet.entries.forEach { sh ->
                     Tab(
-                        selected = state.sheet == sh,
-                        onClick  = { viewModel.switchSheet(sh) },
+                        selected = sheet == sh,
+                        onClick  = { onSwitchSheet(sh) },
                         text     = { Text(sh.label, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold) }
                     )
                 }
             }
 
-            if (state.isLoadingTopics) {
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                return@Scaffold
+            }
+            error?.let {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                    Text(it, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 13.sp,
+                        fontFamily = NotoSansBengali, modifier = Modifier.padding(12.dp))
+                }
+            }
+            if (visibleSubjects.isEmpty() && !isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = ArchiveAccent)
+                    Text("এই মুহূর্তে ${sheet.label}-এ রিভিউ করার মতো কিছু নেই 🎉",
+                        fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 }
                 return@Scaffold
             }
 
-            state.error?.let { err ->
-                Surface(color = Color(0xFFFEE2E2), modifier = Modifier.fillMaxWidth()) {
-                    Text(err, color = Color(0xFFB91C1C), fontSize = 13.sp, fontFamily = NotoSansBengali,
-                        modifier = Modifier.padding(12.dp))
-                }
-            }
-
-            if (groupedTopics.isEmpty() && !state.isLoadingTopics) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "এই মুহূর্তে ${state.sheet.label}-এ রিভিউ করার মতো কিছু নেই 🎉",
-                        fontFamily = NotoSansBengali, color = Color.Gray, fontSize = 14.sp
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(visibleSubjects, key = { it.subjectId ?: it.hashCode().toString() }) { subj ->
+                    val (topicCount, qCount) = countsBySubject[subj.subjectId ?: ""] ?: (0 to 0)
+                    ArchiveEntityCard(
+                        emoji    = "📚",
+                        title    = subj.name ?: subj.subjectId ?: "?",
+                        subtitle = "$topicCount টি টপিক · ~$qCount টা প্রশ্ন (আনুমানিক)",
+                        onClick  = { subj.subjectId?.let(onSubject) }
                     )
                 }
-                return@Scaffold
-            }
-
-            LazyColumn(Modifier.fillMaxSize()) {
-                groupedTopics.toSortedMap(compareBy { subjectNameById[it] ?: it }).forEach { (subjectId, topics) ->
-                    item(key = "hdr_$subjectId") {
-                        Text(
-                            subjectNameById[subjectId] ?: subjectId,
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                            color = ArchiveAccent,
-                            modifier = Modifier.fillMaxWidth().background(ArchiveAccentBg)
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
-                    items(topics.sortedByDescending { it.rowCountFor(state.sheet) }, key = { it.topicId ?: it.hashCode().toString() }) { topic ->
-                        ArchiveTopicRow(topic = topic, count = topic.rowCountFor(state.sheet), onClick = { viewModel.selectTopic(topic) })
-                    }
-                }
-                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ArchiveTopicRow(topic: ArchiveTopicRef, count: Int, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(topic.name ?: topic.topicId ?: "?", fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text("~$count টা প্রশ্ন (আনুমানিক)", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray)
+private fun ArchiveTopicListScreen(
+    subjectName : String,
+    topics      : List<ArchiveTopicRef>,
+    sheet       : ArchiveSheet,
+    isLoading   : Boolean,
+    onBack      : () -> Unit,
+    onTopic     : (ArchiveTopicRef) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(subjectName, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, maxLines = 1) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") } }
+            )
         }
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray)
+    ) { padding ->
+        if (isLoading) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return@Scaffold
+        }
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(topics, key = { it.topicId ?: it.hashCode().toString() }) { topic ->
+                ArchiveEntityCard(
+                    emoji    = "📖",
+                    title    = topic.name ?: topic.topicId ?: "?",
+                    subtitle = "~${topic.rowCountFor(sheet)} টা প্রশ্ন (আনুমানিক, রিভিউ-না-হওয়া সহ)",
+                    onClick  = { onTopic(topic) }
+                )
+            }
+        }
     }
-    Divider(color = Color(0xFFF3F4F6))
+}
+
+/** existing SubjectCard-এর ঠিক একই ভিজ্যুয়াল ভাষা — rounded card, ইমোজি
+ * আইকন বক্স, বোল্ড টাইটেল, subtitle, ট্রেলিং chevron। Progress bar নেই যেহেতু
+ * Archive-এ "progress %" ধারণাটা প্রযোজ্য না। */
+@Composable
+private fun ArchiveEntityCard(emoji: String, title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp).clickable(onClick = onClick),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) { Text(emoji, fontSize = 22.sp) }
+
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                Spacer(Modifier.height(3.dp))
+                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(14.dp))
+        }
+    }
 }
