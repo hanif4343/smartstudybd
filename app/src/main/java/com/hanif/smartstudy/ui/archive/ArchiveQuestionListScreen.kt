@@ -1,8 +1,10 @@
 package com.hanif.smartstudy.ui.archive
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.SortByAlpha
@@ -21,8 +23,14 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.ArchiveViewModel
 
 /* ─────────────────────────────────────────────────────────────────────────
-   একটা Archive টপিকের প্রশ্ন-পেজ — A-Z Sort / প্রতি-প্রশ্ন Duplicate checkbox /
-   Mark All / Move to Active। ডিলিট কোনো বাটনেই নেই (ইচ্ছাকৃত — প্ল্যান দ্রঃ)।
+   একটা Archive টপিকের প্রশ্ন-পেজ —
+   - A-Z Sort
+   - প্রতি-প্রশ্ন "Duplicate" বাটন (এক ক্লিকে মার্ক/আনমার্ক) — পুরো পেজ একসাথে
+     "Move to Active" করার সময় এগুলো বাদ পড়ে
+   - "সিলেক্ট করে Move" মোড (☑️/⬜ টগল, original Quiz-এর isSelectMode-এর মতোই) —
+     যেসব প্রশ্ন এই Archive টপিকে থাকলেও আসলে ভুল Subject/Topic-এ পড়ে আছে,
+     সেগুলো আলাদাভাবে বেছে সরাসরি একটা ভিন্ন destination-এ move করা যায়
+   ডিলিট কোনো বাটনেই নেই (ইচ্ছাকৃত — প্ল্যান দ্রঃ)।
    ───────────────────────────────────────────────────────────────────────── */
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,7 +40,16 @@ fun ArchiveQuestionListScreen(
     onBack    : () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
-    var showMoveDialog by remember { mutableStateOf(false) }
+    var showMoveDialog by remember { mutableStateOf(false) }         // পুরো পেজের "Move to Active"
+    var showMoveSelectedDialog by remember { mutableStateOf(false) } // সিলেক্ট-মোডের "Move Selected"
+
+    // ── এই টপিকের নিজের Subject/Topic নাম — যদি Active-এ একই নামের Topic
+    // থাকে, dialog-এ এটাই ডিফল্ট prefill হবে (বেশিরভাগ ক্ষেত্রে এটাই সঠিক,
+    // admin শুধু ব্যতিক্রম হলে বদলাবে) ──
+    val currentSubjectName = remember(state.selectedTopic, state.subjects) {
+        state.subjects.firstOrNull { it.subjectId == state.selectedTopic?.subjectId }?.name
+    }
+    val currentTopicName = state.selectedTopic?.name
 
     Scaffold(
         topBar = {
@@ -52,6 +69,14 @@ fun ArchiveQuestionListScreen(
                     },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") } },
                     actions = {
+                        // ── "সিলেক্ট করে Move" টগল — original Quiz-এর ☑️/⬜ স্টাইলেই ──
+                        IconButton(onClick = { viewModel.toggleSelectMode() }) {
+                            Text(
+                                if (state.selectMode) "☑️" else "⬜",
+                                fontSize = 16.sp,
+                                color = if (state.selectMode) MaterialTheme.colorScheme.primary else Color.Gray
+                            )
+                        }
                         IconButton(onClick = { viewModel.toggleSort() }) {
                             Icon(
                                 Icons.Default.SortByAlpha, contentDescription = "A-Z Sort",
@@ -60,43 +85,90 @@ fun ArchiveQuestionListScreen(
                         }
                     }
                 )
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = { viewModel.toggleMarkAll() }, enabled = state.questions.isNotEmpty()) {
+                if (state.selectMode) {
+                    Surface(color = Color(0xFFEEF2FF), modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            if (state.duplicateIds.isNotEmpty() && state.duplicateIds.containsAll(state.questions.map { it.id }))
-                                "☑️ সব আনসিলেক্ট" else "☐ Mark All (ডুপ্লিকেট)",
-                            fontFamily = NotoSansBengali, fontSize = 12.sp
+                            "🔀 সিলেক্ট-মোড: যেগুলো ভুল Subject/Topic-এ আছে সেগুলোতে টিক দিয়ে নিচের \"Move\" বাটনে চাপুন",
+                            fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF4338CA),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
-                    Text(
-                        "${state.duplicateIds.size} টা duplicate মার্ক করা",
-                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray
-                    )
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { viewModel.toggleMarkAll() }, enabled = state.questions.isNotEmpty()) {
+                            Text(
+                                if (state.duplicateIds.isNotEmpty() && state.duplicateIds.containsAll(state.questions.map { it.id }))
+                                    "☑️ সব আনসিলেক্ট" else "☐ Mark All (ডুপ্লিকেট)",
+                                fontFamily = NotoSansBengali, fontSize = 12.sp
+                            )
+                        }
+                        Text(
+                            "${state.duplicateIds.size} টা duplicate মার্ক করা",
+                            fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray
+                        )
+                    }
                 }
                 Divider()
             }
         },
         bottomBar = {
-            Surface(shadowElevation = 8.dp, color = Color.White) {
-                Button(
-                    onClick  = { showMoveDialog = true },
-                    enabled  = state.questions.isNotEmpty() && !state.isBusy,
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                ) {
-                    if (state.isBusy) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        val moveCount = state.questions.size - state.duplicateIds.size
+            Surface(
+                shadowElevation = 8.dp,
+                color = Color.White,
+                // ── বাটন যাতে সিস্টেম নেভিগেশন বার/জেসচার বার-এর একদম গা ঘেঁষে না
+                // থেকে একটু ওপরে, নিরাপদ জায়গায় বসে ──
+                modifier = Modifier.navigationBarsPadding()
+            ) {
+                if (state.selectMode) {
+                    // ── সিলেক্ট-মোড bottom bar — original Quiz-এর "N প্রশ্ন সিলেক্টেড" floating bar-এর মতো ──
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 18.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "Move to Active ($moveCount টা ভালো" +
-                                    if (state.duplicateIds.isNotEmpty()) " + ${state.duplicateIds.size} টা duplicate মার্ক)" else ")",
-                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White
+                            "${state.selectedForMove.size}টি প্রশ্ন সিলেক্টেড",
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { viewModel.toggleSelectMode() }) {
+                                Text("বাতিল", fontFamily = NotoSansBengali)
+                            }
+                            Button(
+                                onClick = { showMoveSelectedDialog = true },
+                                enabled = state.selectedForMove.isNotEmpty() && !state.isBusy,
+                                colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                            ) {
+                                if (state.isBusy) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Text("Move (${state.selectedForMove.size})", fontFamily = NotoSansBengali,
+                                        fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick  = { showMoveDialog = true },
+                        enabled  = state.questions.isNotEmpty() && !state.isBusy,
+                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 18.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                    ) {
+                        if (state.isBusy) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            val moveCount = state.questions.size - state.duplicateIds.size
+                            Text(
+                                "Move to Active ($moveCount টা ভালো" +
+                                        if (state.duplicateIds.isNotEmpty()) " + ${state.duplicateIds.size} টা duplicate মার্ক)" else ")",
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -134,9 +206,12 @@ fun ArchiveQuestionListScreen(
             LazyColumn(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 items(state.questions, key = { it.id }) { q ->
                     ArchiveQuestionCard(
-                        q          = q,
-                        isMarked   = q.id in state.duplicateIds,
-                        onToggle   = { viewModel.toggleDuplicate(q.id) }
+                        q                     = q,
+                        isMarkedDuplicate     = q.id in state.duplicateIds,
+                        onToggleDuplicate     = { viewModel.toggleDuplicate(q.id) },
+                        selectMode            = state.selectMode,
+                        isSelectedForMove     = q.id in state.selectedForMove,
+                        onToggleSelectForMove = { viewModel.toggleSelectForMove(q.id) }
                     )
                 }
                 if (state.hasMore && !state.isSorted) {
@@ -160,28 +235,56 @@ fun ArchiveQuestionListScreen(
 
     if (showMoveDialog) {
         MoveToActiveDialog(
-            sheetLabel  = state.sheet.label,
-            subjects    = state.subjects,
-            activeTopics= state.activeTopics,
-            defaultSubjectId = state.selectedTopic?.subjectId,
-            onDismiss   = { showMoveDialog = false },
-            onConfirm   = { subject, topicName ->
+            title              = "Active ${state.sheet.label}-এ Move করুন",
+            subjects           = state.subjects,
+            activeTopics       = state.activeTopics,
+            defaultSubjectId   = state.selectedTopic?.subjectId,
+            defaultSubjectName = currentSubjectName,
+            defaultTopicName   = currentTopicName,
+            onDismiss          = { showMoveDialog = false },
+            onConfirm          = { subject, topicName ->
                 showMoveDialog = false
                 viewModel.finishPage(subject, topicName)
+            }
+        )
+    }
+
+    if (showMoveSelectedDialog) {
+        MoveToActiveDialog(
+            title              = "সিলেক্ট করা ${state.selectedForMove.size}টি প্রশ্ন কোথায় Move হবে?",
+            subjects           = state.subjects,
+            activeTopics       = state.activeTopics,
+            defaultSubjectId   = state.selectedTopic?.subjectId,
+            defaultSubjectName = null,   // ── ইচ্ছাকৃতভাবে prefill না — এগুলো "ভুল টপিকে থাকা" প্রশ্ন, তাই admin-কে সচেতনভাবে destination বাছাই করতে হবে ──
+            defaultTopicName   = null,
+            onDismiss          = { showMoveSelectedDialog = false },
+            onConfirm          = { subject, topicName ->
+                showMoveSelectedDialog = false
+                viewModel.moveSelected(subject, topicName)
             }
         )
     }
 }
 
 @Composable
-private fun ArchiveQuestionCard(q: ArchiveQuestion, isMarked: Boolean, onToggle: () -> Unit) {
+private fun ArchiveQuestionCard(
+    q                     : ArchiveQuestion,
+    isMarkedDuplicate     : Boolean,
+    onToggleDuplicate     : () -> Unit,
+    selectMode            : Boolean,
+    isSelectedForMove     : Boolean,
+    onToggleSelectForMove : () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = if (isMarked) Color(0xFFFEE2E2) else Color.White),
+        colors = CardDefaults.cardColors(containerColor = if (isMarkedDuplicate) Color(0xFFFEE2E2) else Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top) {
-            Checkbox(checked = isMarked, onCheckedChange = { onToggle() })
+            // ── সিলেক্ট-মোডে Move-এর জন্য আলাদা চেকবক্স (duplicate ট্যাগ থেকে সম্পূর্ণ আলাদা) ──
+            if (selectMode) {
+                Checkbox(checked = isSelectedForMove, onCheckedChange = { onToggleSelectForMove() })
+            }
             Column(Modifier.weight(1f)) {
                 if (q.srl > 0) {
                     Text("#${q.srl}", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
@@ -200,8 +303,19 @@ private fun ArchiveQuestionCard(q: ArchiveQuestion, isMarked: Boolean, onToggle:
                         )
                     }
                 }
-                if (isMarked) {
-                    Text("✕ Duplicate/সমস্যা হিসেবে মার্ক করা", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFFB91C1C))
+                // ── এক-ক্লিক Duplicate বাটন — সবসময় দৃশ্যমান (checkbox না, স্পষ্ট বাটন) ──
+                Spacer(Modifier.height(6.dp))
+                Surface(
+                    onClick = onToggleDuplicate,
+                    shape   = RoundedCornerShape(20.dp),
+                    color   = if (isMarkedDuplicate) Color(0xFFDC2626) else Color(0xFFF3F4F6)
+                ) {
+                    Text(
+                        if (isMarkedDuplicate) "✕ Duplicate মার্ক করা (আনমার্ক করতে ট্যাপ করুন)" else "🗑️ Duplicate/সমস্যা মার্ক করুন",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = if (isMarkedDuplicate) Color.White else Color(0xFF374151),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
                 }
             }
         }
@@ -211,19 +325,31 @@ private fun ArchiveQuestionCard(q: ArchiveQuestion, isMarked: Boolean, onToggle:
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoveToActiveDialog(
-    sheetLabel        : String,
-    subjects          : List<com.hanif.smartstudy.data.model.SubjectRef>,
-    activeTopics      : List<TopicRef>,
-    defaultSubjectId  : String?,
-    onDismiss         : () -> Unit,
-    onConfirm         : (subject: String, topic: String) -> Unit
+    title              : String,
+    subjects           : List<com.hanif.smartstudy.data.model.SubjectRef>,
+    activeTopics       : List<TopicRef>,
+    defaultSubjectId   : String?,
+    defaultSubjectName : String?,
+    defaultTopicName   : String?,
+    onDismiss          : () -> Unit,
+    onConfirm          : (subject: String, topic: String) -> Unit
 ) {
     var selectedSubject by remember {
-        mutableStateOf(subjects.firstOrNull { it.subjectId == defaultSubjectId } ?: subjects.firstOrNull())
+        mutableStateOf(
+            subjects.firstOrNull { it.subjectId == defaultSubjectId }
+                ?: subjects.firstOrNull { it.name == defaultSubjectName }
+                ?: subjects.firstOrNull()
+        )
     }
     var subjectExpanded by remember { mutableStateOf(false) }
     var topicExpanded   by remember { mutableStateOf(false) }
-    var selectedTopicName by remember { mutableStateOf<String?>(null) }
+
+    // ── ডিফল্ট টপিক prefill — Active-এ একই নামের টপিক থাকলে সেটাই বেছে রাখা হয়
+    // (বেশিরভাগ ক্ষেত্রে এটাই সঠিক destination, admin শুধু ব্যতিক্রম হলে বদলাবে) ──
+    val initialTopicMatch = remember(selectedSubject) {
+        activeTopics.firstOrNull { it.subjectId == selectedSubject?.subjectId && it.name == defaultTopicName }
+    }
+    var selectedTopicName by remember { mutableStateOf(initialTopicMatch?.name) }
     var isNewTopic by remember { mutableStateOf(false) }
     var newTopicText by remember { mutableStateOf("") }
 
@@ -233,9 +359,20 @@ private fun MoveToActiveDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Active $sheetLabel-এ Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 15.sp) },
         text = {
             Column {
+                if (defaultTopicName != null && selectedTopicName == defaultTopicName) {
+                    Surface(color = Color(0xFFECFDF5), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "✓ এই টপিকের নিজের Subject/Topic-ই ডিফল্ট বাছা আছে — সঠিক হলে শুধু Confirm চাপুন",
+                            fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF065F46),
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
                 Text("Subject", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray)
                 ExposedDropdownMenuBox(expanded = subjectExpanded, onExpandedChange = { subjectExpanded = it }) {
                     OutlinedTextField(
