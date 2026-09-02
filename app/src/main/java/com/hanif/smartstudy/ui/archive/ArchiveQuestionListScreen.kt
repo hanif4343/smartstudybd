@@ -55,11 +55,10 @@ fun ArchiveQuestionListScreen(
                         IconButton(onClick = { viewModel.toggleSort() }) {
                             Icon(
                                 Icons.Default.SortByAlpha, contentDescription = "A-Z Sort",
-                                tint = if (state.isSorted) Color(0xFFF59E0B) else Color.Gray
+                                tint = if (state.isSorted) MaterialTheme.colorScheme.primary else Color.Gray
                             )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFFFBEB))
+                    }
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -120,7 +119,7 @@ fun ArchiveQuestionListScreen(
 
             if (state.isLoadingQuestions && state.questions.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFFF59E0B))
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
                 return@Scaffold
             }
@@ -189,11 +188,12 @@ private fun ArchiveQuestionCard(q: ArchiveQuestion, isMarked: Boolean, onToggle:
                 }
                 Text(q.question, fontFamily = NotoSansBengali, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(4.dp))
+                val optionLabels = listOf("ক", "খ", "গ", "ঘ")
                 listOf(q.option1, q.option2, q.option3, q.option4).forEachIndexed { idx, opt ->
                     if (opt.isNotBlank()) {
                         val isCorrect = opt.trim() == q.correct.trim() || (idx + 1).toString() == q.correct.trim()
                         Text(
-                            "${'A' + idx}. $opt",
+                            "${optionLabels[idx]}) $opt",
                             fontFamily = NotoSansBengali, fontSize = 12.sp,
                             color = if (isCorrect) Color(0xFF059669) else Color.DarkGray,
                             fontWeight = if (isCorrect) FontWeight.Bold else FontWeight.Normal
