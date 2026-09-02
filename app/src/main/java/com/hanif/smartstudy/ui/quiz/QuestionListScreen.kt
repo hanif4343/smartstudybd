@@ -753,64 +753,42 @@ fun QuestionListScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // প্রশ্ন নম্বর counter
-                    Column {
-                        Text(
-                            "${readingIdx + 1}/$effectiveTotal",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            fontFamily = NotoSansBengali
-                        )
-                        Text(
-                            if (totalPages > 1) "পৃষ্ঠা ${safeCurrentPage + 1}/$totalPages" else "প্রশ্ন নম্বর",
-                            fontSize = 10.sp,
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontFamily = NotoSansBengali
-                        )
-                    }
-
-                    // Answered count
+                    // ── Quiz/QBank: Prev (পেজ নম্বর নিচে) | সবসময়-অ্যাক্টিভ Submit | Next
+                    // Study: আগের মতোই অপরিবর্তিত (নিচে আলাদা ব্লক) ──
                     if (mode != StudyMode.STUDY) {
+                        // ── Prev + পেজ নম্বর (নিচে ছোট করে) ──
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "$answered উত্তর",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF86EFAC),
-                                fontFamily = NotoSansBengali
-                            )
-                            Text(
-                                "${questions.size - answered} বাকি",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontFamily = NotoSansBengali
-                            )
-                        }
-
-                        // Next page or Submit button
-                        if (!isLastPage) {
-                            // পরবর্তী পৃষ্ঠা বাটন
                             Button(
-                                onClick = {
-                                    viewModel.goToPage(safeCurrentPage + 1)
-                                },
+                                onClick = { viewModel.goToPage(safeCurrentPage - 1) },
+                                enabled = safeCurrentPage > 0,
                                 shape   = RoundedCornerShape(20.dp),
                                 colors  = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF4F46E5)
+                                    containerColor = Color(0xFF4F46E5),
+                                    disabledContainerColor = Color.White.copy(alpha = 0.15f)
                                 ),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Text(
-                                    "পরবর্তী ➜",
-                                    fontSize   = 13.sp,
+                                    "← Prev",
+                                    fontSize   = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color      = Color.White,
                                     fontFamily = NotoSansBengali
                                 )
                             }
-                        } else {
-                            // Submit button (শেষ পৃষ্ঠায়)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                if (totalPages > 1) "${safeCurrentPage + 1}/$totalPages" else "১/১",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+
+                        // ── মাঝখানে সবসময়-অ্যাক্টিভ Submit — যেকোনো পেজ থেকেই সাবমিট
+                        // করা যায় (একটা টপিকে ২০০+ প্রশ্ন/অনেকগুলো পেজ থাকতে পারে,
+                        // শেষ পেজ পর্যন্ত আটকে থাকতে হবে না) ──
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Button(
                                 onClick = { showSubmitDialog = true },
                                 shape   = RoundedCornerShape(20.dp),
@@ -827,6 +805,54 @@ fun QuestionListScreen(
                                     fontFamily = NotoSansBengali
                                 )
                             }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "$answered/${questions.size} উত্তর",
+                                fontSize = 10.sp,
+                                color = Color(0xFF86EFAC),
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+
+                        // ── Next — শেষ পেজে disabled হয়ে যায় (হাইড না করে dim
+                        // করে রাখা, যাতে Prev/Submit/Next তিনটাই সবসময় একই জায়গায়
+                        // থাকে, বাটন এদিক-ওদিক লাফায় না) ──
+                        Button(
+                            onClick = { viewModel.goToPage(safeCurrentPage + 1) },
+                            enabled = !isLastPage,
+                            shape   = RoundedCornerShape(20.dp),
+                            colors  = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF4F46E5),
+                                disabledContainerColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                "Next →",
+                                fontSize   = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color      = Color.White,
+                                fontFamily = NotoSansBengali
+                            )
+                        }
+                    } else {
+                        // ── Study mode — অপরিবর্তিত, আগের মতোই শুধু প্রশ্ন-নম্বর
+                        // কাউন্টার (পেজ-ভিত্তিক Prev/Submit এখানে প্রযোজ্য না,
+                        // রিকল-টাইপিং সাবমিট বাটন নিচে আলাদাভাবে আছে) ──
+                        Column {
+                            Text(
+                                "${readingIdx + 1}/$effectiveTotal",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                fontFamily = NotoSansBengali
+                            )
+                            Text(
+                                if (totalPages > 1) "পৃষ্ঠা ${safeCurrentPage + 1}/$totalPages" else "প্রশ্ন নম্বর",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontFamily = NotoSansBengali
+                            )
                         }
                     }
 
