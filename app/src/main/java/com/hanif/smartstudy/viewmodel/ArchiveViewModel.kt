@@ -28,6 +28,7 @@ data class ArchiveUiState(
     val archiveTopics      : List<ArchiveTopicRef> = emptyList(),
     val subjects           : List<SubjectRef> = emptyList(),   // Move-to dropdown-এর জন্য (Active Subjects, Archive-এর সাথে ১০০% মেলে)
     val activeTopics       : List<TopicRef> = emptyList(),      // Move-to dropdown-এর জন্য (Active Topics — existing হলে dropdown, না হলে নতুন লেখা যাবে)
+    val selectedSubjectId  : String? = null,     // Quiz-এর মতো ৩-লেভেল ড্রিল-ডাউন: Subject → Topic → Questions
     val selectedTopic      : ArchiveTopicRef? = null,
     val isLoadingQuestions : Boolean = false,
     val questions          : List<ArchiveQuestion> = emptyList(),
@@ -76,6 +77,16 @@ class ArchiveViewModel : ViewModel() {
         }
     }
 
+    /** Subject কার্ডে ট্যাপ — Topic লিস্টে যাওয়া (Quiz-এর মতোই ৩-লেভেল ড্রিল-ডাউন) */
+    fun selectSubject(subjectId: String) {
+        _state.update { it.copy(selectedSubjectId = subjectId) }
+    }
+
+    /** Topic লিস্ট থেকে Subject লিস্টে ফেরত */
+    fun backToSubjects() {
+        _state.update { it.copy(selectedSubjectId = null) }
+    }
+
     /** একটা টপিক বাছাই করলে — প্রথম পেজ লোড */
     fun selectTopic(topic: ArchiveTopicRef) {
         _state.update {
@@ -87,6 +98,8 @@ class ArchiveViewModel : ViewModel() {
         loadNextPage()
     }
 
+    /** Question লিস্ট থেকে Topic লিস্টে ফেরত — selectedSubjectId ঠিক থাকে, তাই একই
+     * Subject-এর Topic কার্ডগুলোতেই ফেরত যায়, Subject লিস্টে না */
     fun backToTopics() {
         _state.update { it.copy(selectedTopic = null, questions = emptyList(), duplicateIds = emptySet()) }
     }
