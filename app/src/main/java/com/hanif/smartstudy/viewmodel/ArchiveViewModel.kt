@@ -32,7 +32,9 @@ data class ArchiveUiState(
     val selectedTopic      : ArchiveTopicRef? = null,
     val isLoadingQuestions : Boolean = false,
     val questions          : List<ArchiveQuestion> = emptyList(),
-    val duplicateIds       : Set<String> = emptySet(),   // per-question "ডুপ্লিকেট" চেকবক্স
+    val duplicateIds       : Set<String> = emptySet(),   // per-question "ডুপ্লিকেট" বাটন (পুরো পেজ একসাথে "Move to Active"-এর সময় ব্যবহৃত হয়)
+    val selectMode         : Boolean = false,             // "সিলেক্ট করে Move" মোড — ভুল Subject/Topic-এ থাকা বিচ্ছিন্ন প্রশ্নের জন্য (original Quiz-এর isSelectMode-এর মতো)
+    val selectedForMove    : Set<String> = emptySet(),    // selectMode-এ যেগুলো টিক দেওয়া, আলাদা destination-এ move হবে
     val cursor             : Int = 0,
     val hasMore            : Boolean = false,
     val total              : Int = 0,
@@ -92,6 +94,7 @@ class ArchiveViewModel : ViewModel() {
         _state.update {
             it.copy(
                 selectedTopic = topic, questions = emptyList(), duplicateIds = emptySet(),
+                selectMode = false, selectedForMove = emptySet(),
                 cursor = 0, hasMore = false, total = 0, isSorted = false, error = null, message = null
             )
         }
@@ -101,7 +104,10 @@ class ArchiveViewModel : ViewModel() {
     /** Question লিস্ট থেকে Topic লিস্টে ফেরত — selectedSubjectId ঠিক থাকে, তাই একই
      * Subject-এর Topic কার্ডগুলোতেই ফেরত যায়, Subject লিস্টে না */
     fun backToTopics() {
-        _state.update { it.copy(selectedTopic = null, questions = emptyList(), duplicateIds = emptySet()) }
+        _state.update {
+            it.copy(selectedTopic = null, questions = emptyList(), duplicateIds = emptySet(),
+                selectMode = false, selectedForMove = emptySet())
+        }
     }
 
     /** পরের ৫০টা (বা প্রথমবার) — resume-safe cursor দিয়ে, review_status ট্যাগ হওয়া
@@ -174,6 +180,60 @@ class ArchiveViewModel : ViewModel() {
     }
 
     fun clearMessages() { _state.update { it.copy(error = null, message = null) } }
+
+    // ── "সিলেক্ট করে Move" — যে প্রশ্নগুলো এই Archive টপিকে থাকলেও আসলে ভুল
+    // Subject/Topic-এ পড়ে আছে, সেগুলো আলাদাভাবে বেছে ভিন্ন destination-এ পাঠানোর
+    // জন্য (original Quiz-এর isSelectMode + AdminMoveQuestionsPickerDialog-এর
+    // প্যাটার্ন)। এটা duplicateIds থেকে সম্পূর্ণ আলাদা — duplicateIds পুরো পেজ
+    // একসাথে "Move to Active" করার সময় ডুপ্লিকেট বাদ দিতে ব্যবহার হয়, এখানে বরং
+    // নির্দিষ্ট কয়েকটা প্রশ্ন এখনই, ভিন্ন subject/topic-এ সরাসরি সরানো হয়। ──
+    fun toggleSelectMode() {
+        _state.update {
+            if (it.selectMode) it.copy(selectMode = false, selectedForMove = emptySet())
+            else it.copy(selectMode = true)
+        }
+    }
+
+    fun toggleSelectForMove(id: String) {
+        _state.update {
+            val cur = it.selectedForMove
+            it.copy(selectedForMove = if (id in cur) cur - id else cur + id)
+        }
+    }
+
+    /**
+     * সিলেক্ট করা (ভুল Subject/Topic-এ থাকা) প্রশ্নগুলো নির্দিষ্ট একটা
+     * newSubject/newSubTopic-এ সরাসরি move করে — duplicateIds/finishPage flow-কে
+     * প্রভাবিত করে না। সফল হলে ওই প্রশ্নগুলো লোকাল লিস্ট থেকে সরাসরি বাদ দেওয়া হয়
+     * (আবার fetch করার দরকার নেই, ঠিক কোন id-গুলো সরেছে সেটা জানাই আছে)।
+     */
+    fun moveSelected(newSubject: String, newSubTopic: String) {
+        val s = _state.value
+        val ids = s.selectedForMove.toList()
+        if (ids.isEmpty()) return
+        if (newSubject.isBlank() || newSubTopic.isBlank()) {
+            _state.update { it.copy(error = "Subject ও Topic দুটোই লাগবে") }
+            return
+        }
+        _state.update { it.copy(isBusy = true, error = null, message = null) }
+        viewModelScope.launch {
+            val res = ArchiveGasService.moveToActive(s.sheet, ids, newSubject.trim(), newSubTopic.trim())
+            if (res.error != null) {
+                _state.update { it.copy(isBusy = false, error = res.error) }
+            } else {
+                _state.update {
+                    it.copy(
+                        isBusy = false,
+                        message = "✅ ${res.moved} টা প্রশ্ন \"$newSubject / $newSubTopic\"-এ মুভ হয়েছে",
+                        questions       = it.questions.filterNot { q -> q.id in ids },
+                        duplicateIds    = it.duplicateIds - ids.toSet(),
+                        selectedForMove = emptySet(),
+                        selectMode      = false
+                    )
+                }
+            }
+        }
+    }
 
     /**
      * "Move to Active" কনফার্ম — একসাথে দুটো কাজ:
