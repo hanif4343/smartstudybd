@@ -5,8 +5,10 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,6 +71,7 @@ fun ResultModal(
         containerColor    = MaterialTheme.colorScheme.surface,
         shape             = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
+        Box(Modifier.fillMaxWidth()) {
         LazyColumn(
             modifier            = Modifier.fillMaxWidth(),
             contentPadding      = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp),
@@ -155,7 +158,7 @@ fun ResultModal(
                         modifier = Modifier.weight(1f),
                         shape    = RoundedCornerShape(14.dp)
                     ) {
-                        Text("🏠 হোম", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                        Text("🏠 Home", fontWeight = FontWeight.ExtraBold)
                     }
                     Button(
                         onClick  = onRetry,
@@ -163,7 +166,7 @@ fun ResultModal(
                         shape    = RoundedCornerShape(14.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
                     ) {
-                        Text("🔄 আবার চেষ্টা", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                        Text("🔄 Retry", fontWeight = FontWeight.ExtraBold)
                     }
                     Button(
                         onClick  = { com.hanif.smartstudy.util.ResultShareUtil.share(context, result, subjectName) },
@@ -171,10 +174,30 @@ fun ResultModal(
                         shape    = RoundedCornerShape(14.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9))
                     ) {
-                        Text("📤 শেয়ার", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
+                        Text("📤 Share", fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
+        }
+
+        // ── ঠিক উপরে-ডান কোণায় সুন্দর একটা Close বাটন — ট্যাপ করলে Home-এর মতোই
+        // (ad দেখিয়ে) বন্ধ হয়ে যাবে, যাতে আলাদা কোনো নতুন এক্সিট-পাথ তৈরি না হয় ──
+        IconButton(
+            onClick  = onHomeWithAd,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 10.dp, end = 10.dp)
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "বন্ধ করুন",
+                tint     = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
         }
     }
 }
