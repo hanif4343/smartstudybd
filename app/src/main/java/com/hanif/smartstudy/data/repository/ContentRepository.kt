@@ -203,6 +203,25 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomTotalCountByTopic(sheet: String, topicId: String, tag: String): Int =
         dao.countByTopicIdFiltered(sheet.uppercase(), topicId, tag)
 
+    // ── FIX ("সঠিক উত্তর দেওয়া প্রশ্ন পরে আর নিচে যায় না" বাগ) — এই দুটো নতুন
+    // ফাংশন topic/subTopic-এর *সব* প্রশ্ন একসাথে আনে (LIMIT/OFFSET ছাড়া), যাতে
+    // QuizViewModel পুরো লিস্ট গ্লোবালি sort করে *তারপর* পেজ কাটতে পারে — আগের
+    // getRoomPagedQuestions*/ফাংশনগুলো অপরিবর্তিত রইলো, অন্য কোথাও ব্যবহৃত হলে
+    // ভাঙবে না। ──
+    suspend fun getRoomAllQuestionsByTopic(sheet: String, topicId: String, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        dao.getByTopicId(sheet.uppercase(), topicId, tag).map { it.toQuestionItem() }
+
+    suspend fun getRoomAllQuestions(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> = if (tag.isBlank() || tag == "all") {
+        dao.getAllForSubTopic(sheet, subject, subTopic)
+    } else {
+        dao.getAllForSubTopicFiltered(sheet, subject, subTopic, tag)
+    }.map { it.toQuestionItem() }
+
     /**
      * Firebase থেকে fetch করে Room-এ save করো।
      * Online sync — background-এ চলে।
