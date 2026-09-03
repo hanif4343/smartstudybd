@@ -556,14 +556,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // শুরুতেই শুধু প্রথম ৫০টা (PAGE_SIZE) topicId দিয়ে paginate করে আনা হয়,
             // goToPage()-ও এখন একই topicId-ভিত্তিক পাথ ব্যবহার করে (দেখো
             // loadQuestionsFromRoomByTopic) — দুটো ধাপ একই, সামঞ্জস্যপূর্ণ ডেটা-পাথ। ──
-            val total = repo.getRoomTotalCountByTopic(sheet, topicId, tag)
-            val items = repo.getRoomPagedQuestionsByTopic(sheet, topicId, tag, 0, PAGE_SIZE).map { q ->
-                q.copy(
-                    isBookmarked = bookmarks.contains(q.id),
-                    isWeakTopic  = isWeak(q.subTopic),
-                    isStudyDone  = isStudyDone(q.id)
-                )
-            }
+            // ── FIX ("সঠিক উত্তর দেওয়া প্রশ্ন পরে আর নিচে যায় না, নতুন/ভুল প্রশ্ন সামনে
+            // আসে না" বাগ, root cause): এই ফাংশনটাই আসল এন্ট্রি পয়েন্ট — টপিকে ঢুকলে
+            // (নতুন করে ওপেন করলেও) সবসময় এখান দিয়েই লোড হয়, কিন্তু আগে এখানে সরাসরি
+            // getRoomPagedQuestionsByTopic() (SQL LIMIT/OFFSET, কোনো sort ছাড়াই) ব্যবহার
+            // হতো — isMastered() সর্ট এখানে কখনোই প্রয়োগ হতো না, যদিও goToPage()-এর
+            // loadQuestionsFromRoomByTopic()-এ ঠিকই হতো। তাই ১ম পাতা সবসময় DB-এর ডিফল্ট
+            // ক্রমেই আসত। এখন loadQuestionsFromRoomByTopic()-এর মতোই — পুরো টপিকের সব
+            // প্রশ্ন একসাথে এনে গ্লোবালি isMastered/isStudyDone দিয়ে sort করে, *তারপর*
+            // প্রথম পাতা কাটা হচ্ছে — তাই সঠিক-উত্তর-দেওয়া প্রশ্ন সত্যিই নিচে যাবে, আর
+            // নতুন/ভুল প্রশ্ন পরের বার টপিক খুললে সামনে আসবে। ──
+            val allSorted = repo.getRoomAllQuestionsByTopic(sheet, topicId, tag)
+                .map { q ->
+                    q.copy(
+                        isBookmarked = bookmarks.contains(q.id),
+                        isWeakTopic  = isWeak(q.subTopic),
+                        isStudyDone  = isStudyDone(q.id)
+                    )
+                }
+                .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+            val total = allSorted.size
+            val items = allSorted.take(PAGE_SIZE)
             Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=$total loaded_page1=${items.size}")
 
             // দ্বিতীয়বার চেক — Room থেকে items বের করতেও কিছুটা সময় লাগে, ততক্ষণে
@@ -914,6 +927,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun navigateBack() {
         val path = _state.value.navPath
         timerJob?.cancel()
+        // ── FIX ("প্রশ্ন লোড হওয়ার সময় Back চাপলে নেভিগেশন ফ্রিজ হয়ে যায় — না সামনে
+        // না পেছনে যায়"): টপিক লোড হতে থাকা অবস্থায় (navigateToSubTopicLazy-এর
+        // subTopicLoadJob তখনো চলছে) Back চাপলে আগে এই চলমান জব cancel হতো না —
+        // token-ও বাড়ত না। ফলে ব্যাক করে অন্য জায়গায় চলে যাওয়ার পরও পুরনো লোড
+        // ব্যাকগ্রাউন্ডে শেষ হয়ে (myToken == subTopicLoadToken মিলে যাওয়ায় "stale"
+        // হিসেবে ধরা না পড়ে) navPath/questions বদলে পুরনো state দিয়ে ওভাররাইট করে
+        // দিত — স্ক্রিন তখন কোনো চেনা when-branch এ না মিলে "আটকে" থাকত। এখন Back
+        // চাপার সাথে সাথেই চলমান জব cancel এবং token বাড়িয়ে সেই রেসপন্সকে সবসময়
+        // stale বানানো হচ্ছে — যেকোনো নেভিগেশনেই। ──
+        subTopicLoadJob?.cancel()
+        subTopicLoadToken++
         when {
             // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subject picker এ ফিরে যাও
             // (Job ইউজারের ক্ষেত্রে subject picker ছিলই না — সরাসরি বন্ধ করে বেস লিস্টে ফিরে যাও)
