@@ -751,36 +751,44 @@ fun QuestionListScreen(
                         .background(barBrush)
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Top
                 ) {
-                    // ── Quiz/QBank: Prev (পেজ নম্বর নিচে) | সবসময়-অ্যাক্টিভ Submit | Next
+                    // ── Quiz/QBank: Prev (পেজ + উত্তর-সংখ্যা নিচে) | সবসময়-অ্যাক্টিভ Submit | Next
                     // Study: আগের মতোই অপরিবর্তিত (নিচে আলাদা ব্লক) ──
                     if (mode != StudyMode.STUDY) {
-                        // ── Prev + পেজ নম্বর (নিচে ছোট করে) ──
+                        // ── তিনটা বাটনই Top-aligned Column-এ, যাতে বাটনগুলোর উচ্চতা
+                        // সবসময় একই লাইনে থাকে (subtitle-এর দৈর্ঘ্য যা-ই হোক না কেন) ──
+                        // ── Prev + পেজ নম্বর + উত্তর-সংখ্যা (দুটোই নিচে, ছোট করে) ──
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage - 1) },
                                 enabled = safeCurrentPage > 0,
-                                shape   = RoundedCornerShape(20.dp),
+                                shape   = RoundedCornerShape(18.dp),
                                 colors  = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF4F46E5),
-                                    disabledContainerColor = Color.White.copy(alpha = 0.15f)
+                                    containerColor = Color.White.copy(alpha = 0.16f),
+                                    disabledContainerColor = Color.White.copy(alpha = 0.06f)
                                 ),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     "← Prev",
-                                    fontSize   = 12.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize   = 11.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color      = Color.White,
                                     fontFamily = NotoSansBengali
                                 )
                             }
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(3.dp))
                             Text(
                                 if (totalPages > 1) "${safeCurrentPage + 1}/$totalPages" else "১/১",
                                 fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.7f),
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontFamily = NotoSansBengali
+                            )
+                            Text(
+                                "$answered/${questions.size} উত্তর",
+                                fontSize = 10.sp,
+                                color = Color(0xFF86EFAC),
                                 fontFamily = NotoSansBengali
                             )
                         }
@@ -791,7 +799,7 @@ fun QuestionListScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Button(
                                 onClick = { showSubmitDialog = true },
-                                shape   = RoundedCornerShape(20.dp),
+                                shape   = RoundedCornerShape(18.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF10B981)
                                 ),
@@ -805,35 +813,30 @@ fun QuestionListScreen(
                                     fontFamily = NotoSansBengali
                                 )
                             }
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "$answered/${questions.size} উত্তর",
-                                fontSize = 10.sp,
-                                color = Color(0xFF86EFAC),
-                                fontFamily = NotoSansBengali
-                            )
                         }
 
                         // ── Next — শেষ পেজে disabled হয়ে যায় (হাইড না করে dim
                         // করে রাখা, যাতে Prev/Submit/Next তিনটাই সবসময় একই জায়গায়
                         // থাকে, বাটন এদিক-ওদিক লাফায় না) ──
-                        Button(
-                            onClick = { viewModel.goToPage(safeCurrentPage + 1) },
-                            enabled = !isLastPage,
-                            shape   = RoundedCornerShape(20.dp),
-                            colors  = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF4F46E5),
-                                disabledContainerColor = Color.White.copy(alpha = 0.15f)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                "Next →",
-                                fontSize   = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color      = Color.White,
-                                fontFamily = NotoSansBengali
-                            )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Button(
+                                onClick = { viewModel.goToPage(safeCurrentPage + 1) },
+                                enabled = !isLastPage,
+                                shape   = RoundedCornerShape(18.dp),
+                                colors  = ButtonDefaults.buttonColors(
+                                    containerColor = Color.White.copy(alpha = 0.16f),
+                                    disabledContainerColor = Color.White.copy(alpha = 0.06f)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    "Next →",
+                                    fontSize   = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = Color.White,
+                                    fontFamily = NotoSansBengali
+                                )
+                            }
                         }
                     } else {
                         // ── Study mode — অপরিবর্তিত, আগের মতোই শুধু প্রশ্ন-নম্বর
