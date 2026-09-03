@@ -290,7 +290,25 @@ fun CoreScreen(
                 answered            = state.answeredCount,
                 currentPage         = state.currentPage,
                 totalQuestions      = state.totalQuestions,
-                onBack              = { viewModel.navigateBack() },
+                // ── FIX ("QBank-এ MCQ প্রশ্ন লিস্টে ফোনের Back বাটনে ফ্রিজ"):
+                // QuestionListScreen-এর নিজের ভেতরের BackHandler (দেখো
+                // QuestionListScreen.kt) সরাসরি এই onBack কল করে, CoreScreen-এর
+                // উপরের BackHandler(enabled = isInsideNav)-কে বাইপাস করে — ফলে
+                // এতদিন এখানে unconditional viewModel.navigateBack() কল হতো।
+                // কিন্তু QBank-এর পদবী/প্রতিষ্ঠান/সাল ফিল্টার-মোডে navPath আসল
+                // Subject→SubTopic pair না (flat/placeholder), navigateBack()
+                // সেটা বুঝতে পারে না — path.subject-কে ভুল করে আসল subject ধরে
+                // navigateToSubjectLazy() কল করে, কোনো SubTopic না পেয়ে state
+                // এমন জায়গায় আটকে যায় যেটা CoreScreen-এর কোনো when-branch-ই
+                // ম্যাচ করে না (সাদা/ফ্রিজ স্ক্রিন, MCQ প্রশ্নেই এই branch ব্যবহার
+                // হয় বলে সমস্যাটা সেখানেই বেশি ধরা পড়ত)। এখন উপরের BackHandler-এর
+                // মতোই সঠিক ফাংশন বেছে নেওয়া হচ্ছে। ──
+                onBack              = {
+                    val useQBankFilterBack = mode == StudyMode.QBANK &&
+                        !state.isMockZone && !state.isModelTestZone &&
+                        !state.isModelTestSubjectPicker && !state.showResult
+                    if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
+                },
                 onSubmit            = { viewModel.submitQuiz() },
                 currentUser         = currentUser,
                 highlightQuestionId = state.highlightQuestionId,
