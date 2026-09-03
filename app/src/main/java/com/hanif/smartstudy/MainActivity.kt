@@ -193,8 +193,6 @@ class MainActivity : ComponentActivity() {
                 .collectAsState(initial = true)
             val pendingSync = remember { session.getPendingSyncCount() }
 
-            val pendingSync = remember { session.getPendingSyncCount() }
-
             SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
                 // ── টেক্সট সিলেকশন টুলবার (Copy/Select all/Share/Web Search/Read Aloud) ──
                 // পুরো অ্যাপের রুটে একবার wrap করলেই সব স্ক্রিনের SelectionContainer এ
