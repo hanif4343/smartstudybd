@@ -760,27 +760,21 @@ fun QuestionListScreen(
                         .background(barBrush)
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                 ) {
-                    // ── Quiz/QBank: উপরে পেজ নম্বর (মাঝখানে), নিচে Prev | Submit | Next সারি
-                    // Study: আগের মতোই অপরিবর্তিত (নিচে আলাদা ব্লক) ──
+                    // ── Quiz/QBank: Prev | Submit | Next সারি — উপরের পেজ-নম্বর টেক্সট
+                    // সরিয়ে দেওয়া হলো (ইউজারের অনুরোধে, অপ্রয়োজনীয়)। মাত্র ১টা পেজ
+                    // থাকলে Prev/Next দুটোই disabled থাকবে, ব্যাকগ্রাউন্ড ও টেক্সট দুটোই
+                    // হালকা রঙে (dim) দেখাবে — যাতে বোঝা যায় এগুলো এখন নিষ্ক্রিয়। ──
                     if (mode != StudyMode.STUDY) {
-                        Text(
-                            if (totalPages > 1) "পেজ ${safeCurrentPage + 1}/$totalPages" else "১/১",
-                            fontSize   = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color      = Color.White.copy(alpha = 0.75f),
-                            fontFamily = NotoSansBengali,
-                            modifier   = Modifier.align(Alignment.CenterHorizontally)
-                        )
-                        Spacer(Modifier.height(6.dp))
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // ── Prev ──
+                            val prevEnabled = safeCurrentPage > 0
                             Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage - 1) },
-                                enabled = safeCurrentPage > 0,
+                                enabled = prevEnabled,
                                 shape   = RoundedCornerShape(16.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color.White.copy(alpha = 0.16f),
@@ -792,7 +786,7 @@ fun QuestionListScreen(
                                     "← Prev",
                                     fontSize   = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color      = Color.White,
+                                    color      = Color.White.copy(alpha = if (prevEnabled) 1f else 0.35f),
                                     fontFamily = NotoSansBengali
                                 )
                             }
@@ -819,9 +813,10 @@ fun QuestionListScreen(
 
                             // ── Next — শেষ পেজে disabled (হাইড না করে dim, বাটন
                             // এদিক-ওদিক লাফায় না) ──
+                            val nextEnabled = !isLastPage
                             Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage + 1) },
-                                enabled = !isLastPage,
+                                enabled = nextEnabled,
                                 shape   = RoundedCornerShape(16.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color.White.copy(alpha = 0.16f),
@@ -833,7 +828,7 @@ fun QuestionListScreen(
                                     "Next →",
                                     fontSize   = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color      = Color.White,
+                                    color      = Color.White.copy(alpha = if (nextEnabled) 1f else 0.35f),
                                     fontFamily = NotoSansBengali
                                 )
                             }
