@@ -427,9 +427,18 @@ fun QuestionListScreen(
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
 
-                // Timer bar
+                // Timer bar — ঘড়ি আইকনের বদলে "X/Y উত্তর" (Quiz/QBank মোডে)
                 if (mode != StudyMode.STUDY && totalTime > 0) {
-                    TimerBar(timerSec = timerSec, totalSec = totalTime)
+                    TimerBar(
+                        timerSec = timerSec, totalSec = totalTime,
+                        leadingContent = {
+                            Text(
+                                "$answered/${questions.size} উত্তর",
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                color = Color(0xFF059669), fontFamily = NotoSansBengali
+                            )
+                        }
+                    )
                 }
 
                 // ── Quiz: প্রতি ১০ প্রশ্নে sticky top banner ──
@@ -743,32 +752,41 @@ fun QuestionListScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Row(
+                Column(
                     Modifier
                         .fillMaxWidth()
-                        .shadow(8.dp, RoundedCornerShape(28.dp))
-                        .clip(RoundedCornerShape(28.dp))
+                        .shadow(8.dp, RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(24.dp))
                         .background(barBrush)
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
                 ) {
-                    // ── Quiz/QBank: Prev (পেজ + উত্তর-সংখ্যা নিচে) | সবসময়-অ্যাক্টিভ Submit | Next
+                    // ── Quiz/QBank: উপরে পেজ নম্বর (মাঝখানে), নিচে Prev | Submit | Next সারি
                     // Study: আগের মতোই অপরিবর্তিত (নিচে আলাদা ব্লক) ──
                     if (mode != StudyMode.STUDY) {
-                        // ── তিনটা বাটনই Top-aligned Column-এ, যাতে বাটনগুলোর উচ্চতা
-                        // সবসময় একই লাইনে থাকে (subtitle-এর দৈর্ঘ্য যা-ই হোক না কেন) ──
-                        // ── Prev + পেজ নম্বর + উত্তর-সংখ্যা (দুটোই নিচে, ছোট করে) ──
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            if (totalPages > 1) "পেজ ${safeCurrentPage + 1}/$totalPages" else "১/১",
+                            fontSize   = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color      = Color.White.copy(alpha = 0.75f),
+                            fontFamily = NotoSansBengali,
+                            modifier   = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // ── Prev ──
                             Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage - 1) },
                                 enabled = safeCurrentPage > 0,
-                                shape   = RoundedCornerShape(18.dp),
+                                shape   = RoundedCornerShape(16.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color.White.copy(alpha = 0.16f),
                                     disabledContainerColor = Color.White.copy(alpha = 0.06f)
                                 ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     "← Prev",
@@ -778,56 +796,38 @@ fun QuestionListScreen(
                                     fontFamily = NotoSansBengali
                                 )
                             }
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                if (totalPages > 1) "${safeCurrentPage + 1}/$totalPages" else "১/১",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontFamily = NotoSansBengali
-                            )
-                            Text(
-                                "$answered/${questions.size} উত্তর",
-                                fontSize = 10.sp,
-                                color = Color(0xFF86EFAC),
-                                fontFamily = NotoSansBengali
-                            )
-                        }
 
-                        // ── মাঝখানে সবসময়-অ্যাক্টিভ Submit — যেকোনো পেজ থেকেই সাবমিট
-                        // করা যায় (একটা টপিকে ২০০+ প্রশ্ন/অনেকগুলো পেজ থাকতে পারে,
-                        // শেষ পেজ পর্যন্ত আটকে থাকতে হবে না) ──
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // ── সবসময়-অ্যাক্টিভ Submit — যেকোনো পেজ থেকেই সাবমিট করা
+                            // যায় (একটা টপিকে ২০০+ প্রশ্ন/অনেকগুলো পেজ থাকতে পারে,
+                            // শেষ পেজ পর্যন্ত আটকে থাকতে হবে না) ──
                             Button(
                                 onClick = { showSubmitDialog = true },
-                                shape   = RoundedCornerShape(18.dp),
+                                shape   = RoundedCornerShape(16.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF10B981)
                                 ),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 9.dp)
                             ) {
                                 Text(
                                     "✅ সাবমিট",
-                                    fontSize   = 13.sp,
+                                    fontSize   = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color      = Color.White,
                                     fontFamily = NotoSansBengali
                                 )
                             }
-                        }
 
-                        // ── Next — শেষ পেজে disabled হয়ে যায় (হাইড না করে dim
-                        // করে রাখা, যাতে Prev/Submit/Next তিনটাই সবসময় একই জায়গায়
-                        // থাকে, বাটন এদিক-ওদিক লাফায় না) ──
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // ── Next — শেষ পেজে disabled (হাইড না করে dim, বাটন
+                            // এদিক-ওদিক লাফায় না) ──
                             Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage + 1) },
                                 enabled = !isLastPage,
-                                shape   = RoundedCornerShape(18.dp),
+                                shape   = RoundedCornerShape(16.dp),
                                 colors  = ButtonDefaults.buttonColors(
                                     containerColor = Color.White.copy(alpha = 0.16f),
                                     disabledContainerColor = Color.White.copy(alpha = 0.06f)
                                 ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     "Next →",
@@ -842,21 +842,19 @@ fun QuestionListScreen(
                         // ── Study mode — অপরিবর্তিত, আগের মতোই শুধু প্রশ্ন-নম্বর
                         // কাউন্টার (পেজ-ভিত্তিক Prev/Submit এখানে প্রযোজ্য না,
                         // রিকল-টাইপিং সাবমিট বাটন নিচে আলাদাভাবে আছে) ──
-                        Column {
-                            Text(
-                                "${readingIdx + 1}/$effectiveTotal",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                fontFamily = NotoSansBengali
-                            )
-                            Text(
-                                if (totalPages > 1) "পৃষ্ঠা ${safeCurrentPage + 1}/$totalPages" else "প্রশ্ন নম্বর",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontFamily = NotoSansBengali
-                            )
-                        }
+                        Text(
+                            "${readingIdx + 1}/$effectiveTotal",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            fontFamily = NotoSansBengali
+                        )
+                        Text(
+                            if (totalPages > 1) "পৃষ্ঠা ${safeCurrentPage + 1}/$totalPages" else "প্রশ্ন নম্বর",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontFamily = NotoSansBengali
+                        )
                     }
 
                     // ── Study: ⌨️ রিকল-টাইপিং মোড চালু থাকলে এখানে একটা "সাবমিট"
