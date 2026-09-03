@@ -352,8 +352,17 @@ fun QuestionCard(
                         }
                     }
                     if (onAskAi != null) {
+                        // ── আগে এখানে শুধু 🤖 ইমোজি ছিল — অনেকেই বুঝতে পারতো না এটা কিসের
+                        // বাটন, তাই এখন স্পষ্ট "AI" লেখা একটা ছোট্ট ব্যাজ ──
                         IconButton(onClick = onAskAi, modifier = Modifier.size(28.dp)) {
-                            Text("🤖", fontSize = 15.sp)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Indigo600.copy(alpha = 0.12f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text("AI", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
+                            }
                         }
                     }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
@@ -365,7 +374,7 @@ fun QuestionCard(
                         )
                     }
                     IconButton(onClick = onReport, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Flag, null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
+                        Text("🚩", fontSize = 15.sp)
                     }
                 }
             }
