@@ -186,7 +186,8 @@ fun ResultModal(
             onClick  = onHomeWithAd,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 10.dp, end = 10.dp)
+                .padding(top = 2.dp, end = 10.dp)
+                .offset(y = (-24).dp)
                 .size(32.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
