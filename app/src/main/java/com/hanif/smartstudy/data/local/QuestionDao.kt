@@ -66,6 +66,23 @@ interface QuestionDao {
     """)
     suspend fun getAllForSubTopic(sheet: String, subject: String, subTopic: String): List<QuestionEntity>
 
+    // ── FIX ("সঠিক উত্তর দেওয়া প্রশ্ন পরে আর নিচে যায় না" বাগ, root cause): আগে
+    // getPagedQuestionsFiltered (নিচে) দিয়ে SQL LIMIT/OFFSET-এ *আগে* একটা ফিক্সড
+    // পেজ (৫০টা) আনা হতো, তারপর ViewModel-এ isMastered দিয়ে sort হতো — কিন্তু সেই
+    // sort শুধু ওই ৫০টার ভেতরেই কাজ করত, অন্য পেজের প্রশ্নের সাথে তুলনা হতো না।
+    // ফলে একটা টপিকে অনেক পেজ থাকলে, সঠিক-উত্তর-দেওয়া প্রশ্নগুলো নিজের পেজের
+    // শেষেই আটকে থাকত, পরের পেজের নতুন/ভুল প্রশ্ন কখনো ১ম পেজে উঠে আসত না। এই
+    // নতুন all-fetch (audience-filtered, কিন্তু LIMIT/OFFSET ছাড়া) দিয়ে
+    // ViewModel পুরো টপিকের সব প্রশ্ন একসাথে এনে গ্লোবালি sort করে, *তারপর*
+    // পেজ কাটে — এখন সব পেজ জুড়েই সঠিক ঠিকমতো "নিচে" যায়। ──
+    @Query("""
+        SELECT * FROM questions 
+        WHERE sheet = :sheet AND subject = :subject AND subTopic = :subTopic
+          AND (audienceTags = '' OR audienceTags LIKE '%' || :tag || '%')
+        ORDER BY fbKey
+    """)
+    suspend fun getAllForSubTopicFiltered(sheet: String, subject: String, subTopic: String, tag: String): List<QuestionEntity>
+
     // ── Audience-filtered paginated query ────────────────────────────────────
     @Query("""
         SELECT * FROM questions 
