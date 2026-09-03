@@ -149,7 +149,11 @@ fun StudyDoneCheckIcon(done: Boolean, onClick: () -> Unit) {
 fun TimerBar(
     timerSec  : Int,
     totalSec  : Int,
-    modifier  : Modifier = Modifier
+    modifier  : Modifier = Modifier,
+    // ── ডিফল্ট আচরণ অপরিবর্তিত (⏱ আইকন) — কোনো caller override না করলে আগের
+    // মতোই দেখাবে। QuestionListScreen.kt-এ এটাকে "২/২২ উত্তর" টেক্সট দিয়ে
+    // replace করা হয়েছে, ঘড়ি আইকন সরিয়ে ──
+    leadingContent : @Composable () -> Unit = { Text("⏱", fontSize = 14.sp) }
 ) {
     val pct     = if (totalSec > 0) timerSec.toFloat() / totalSec else 0f
     val animPct by animateFloatAsState(pct, tween(800), label = "timer")
@@ -167,7 +171,7 @@ fun TimerBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("⏱", fontSize = 14.sp)
+            leadingContent()
             Text(
                 text       = "%d:%02d".format(m, s),
                 fontSize   = 13.sp,
