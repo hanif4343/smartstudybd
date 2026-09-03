@@ -2579,17 +2579,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         _state.update { it.copy(questionsLoading = true) }
 
-        val total     = repo.getRoomTotalCountByTopic(sheet, topicId, tag)
-        val items     = repo.getRoomPagedQuestionsByTopic(sheet, topicId, tag, page, PAGE_SIZE)
-        val bookmarks = _state.value.bookmarkedIds
+        // ── FIX: আগে getRoomPagedQuestionsByTopic দিয়ে SQL LIMIT/OFFSET-এ আগে
+        // পেজ কাটা হতো, *তারপর* isMastered sort হতো — sort তখন শুধু ওই পেজের
+        // ভেতরেই কাজ করত। এখন পুরো টপিকের সব প্রশ্ন একসাথে এনে গ্লোবালি sort
+        // করে, তারপর পেজ কাটা হচ্ছে — তাই সঠিক-উত্তর-দেওয়া প্রশ্ন এখন সত্যিই
+        // "নিচের পেজে" চলে যায় (আগের মতো নিজের পেজেই আটকে থাকে না)। ──
+        val bookmarks  = _state.value.bookmarkedIds
+        val allSorted  = repo.getRoomAllQuestionsByTopic(sheet, topicId, tag)
+            .map { q ->
+                q.copy(
+                    isBookmarked = bookmarks.contains(q.id),
+                    isWeakTopic  = isWeak(q.subTopic),
+                    isStudyDone  = isStudyDone(q.id)
+                )
+            }
+            .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
 
-        val questions = items.map { q ->
-            q.copy(
-                isBookmarked = bookmarks.contains(q.id),
-                isWeakTopic  = isWeak(q.subTopic),
-                isStudyDone  = isStudyDone(q.id)
-            )
-        }.sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+        val total     = allSorted.size
+        val questions = allSorted.drop(page * PAGE_SIZE).take(PAGE_SIZE)
 
         Log.d("QuizVM", "loadQuestionsFromRoomByTopic: page=$page total=$total loaded=${questions.size}")
 
@@ -2623,17 +2630,20 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         _state.update { it.copy(questionsLoading = true) }
 
-        val total    = repo.getRoomTotalCount(sheet, subject, subTopic, tag)
-        val items    = repo.getRoomPagedQuestions(sheet, subject, subTopic, tag, page, PAGE_SIZE)
+        // ── একই FIX — loadQuestionsFromRoomByTopic()-এর উপরের কমেন্ট দ্রষ্টব্য ──
         val bookmarks = _state.value.bookmarkedIds
+        val allSorted = repo.getRoomAllQuestions(sheet, subject, subTopic, tag)
+            .map { q ->
+                q.copy(
+                    isBookmarked = bookmarks.contains(q.id),
+                    isWeakTopic  = isWeak(q.subTopic),
+                    isStudyDone  = isStudyDone(q.id)
+                )
+            }
+            .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
 
-        val questions = items.map { q ->
-            q.copy(
-                isBookmarked = bookmarks.contains(q.id),
-                isWeakTopic  = isWeak(q.subTopic),
-                isStudyDone  = isStudyDone(q.id)
-            )
-        }.sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+        val total     = allSorted.size
+        val questions = allSorted.drop(page * PAGE_SIZE).take(PAGE_SIZE)
 
         Log.d("QuizVM", "loadQuestionsFromRoom: page=$page total=$total loaded=${questions.size}")
 
