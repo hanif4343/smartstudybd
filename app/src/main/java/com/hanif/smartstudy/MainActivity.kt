@@ -17,13 +17,10 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
-import com.hanif.smartstudy.data.model.Achievement
 import com.hanif.smartstudy.service.SmartStudyFirebaseService
 import com.hanif.smartstudy.ui.navigation.SmartStudyNavGraph
-import com.hanif.smartstudy.ui.shared.AchievementPopup
 import com.hanif.smartstudy.ui.shared.OfflineBanner
 import com.hanif.smartstudy.ui.shared.ProvideSmartTextToolbar
-import com.hanif.smartstudy.ui.shared.StreakPopup
 import com.hanif.smartstudy.ui.theme.*
 import android.Manifest
 import android.app.AlarmManager
@@ -196,9 +193,7 @@ class MainActivity : ComponentActivity() {
                 .collectAsState(initial = true)
             val pendingSync = remember { session.getPendingSyncCount() }
 
-            var pendingAchievement by remember { mutableStateOf<Achievement?>(null) }
-            var showStreak         by remember { mutableStateOf(false) }
-            var streakCount        by remember { mutableStateOf(0) }
+            val pendingSync = remember { session.getPendingSyncCount() }
 
             SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
                 // ── টেক্সট সিলেকশন টুলবার (Copy/Select all/Share/Web Search/Read Aloud) ──
@@ -210,12 +205,12 @@ class MainActivity : ComponentActivity() {
 
                         val toastState = rememberToastState()
 
+                        // ── স্ট্রিক ও অ্যাচিভমেন্ট ইনফো-কার্ড (আগে সাবমিটের পরে এখানেই পপআপ
+                        // হতো) ইউজারের অনুরোধে সরিয়ে দেওয়া হলো — এখন এই দুটো callback no-op ──
                         SmartStudyNavGraph(
                             deepLink              = pendingDeepLink.value,
-                            onAchievementUnlocked = { ach -> pendingAchievement = ach },
-                            onStreakUpdated        = { streak ->
-                                if (streak > 0) { streakCount = streak; showStreak = true }
-                            }
+                            onAchievementUnlocked = { },
+                            onStreakUpdated       = { }
                         )
                         ToastHost(state = toastState)
 
@@ -227,17 +222,11 @@ class MainActivity : ComponentActivity() {
                                 .navigationBarsPadding()
                         )
 
-                        AchievementPopup(
-                            achievement = pendingAchievement,
-                            onDismiss   = { pendingAchievement = null }
-                        )
+                        // ── স্ট্রিক ও অ্যাচিভমেন্ট ইনফো-কার্ড (সাবমিটের আগে দেখা যেত) —
+                        // ইউজারের অনুরোধে সরিয়ে দেওয়া হলো ──
                     }
                 }
                 }
-            }
-
-            if (showStreak) {
-                StreakPopup(streak = streakCount, onDismiss = { showStreak = false })
             }
         }
     }
