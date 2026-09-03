@@ -1120,6 +1120,104 @@ function syncNFRows(sheetName, folderName){
   }catch(e){ return {ok:false,msg:e.toString(),count:0}; }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// runRebuildArchiveIndexCore — Archive-এর জন্য runRebuildIndexCore()-এর
+// প্যারালাল ভার্সন (নতুন, সম্পূর্ণ additive)। এটা না চালালে "Topics Archive"
+// শিটের row_start_quiz/row_count_quiz/row_start_qbank/row_count_qbank
+// কলামগুলো খালিই থাকে, ফলে getArchiveQuestionsPage-এর fast-path কখনো ট্রিগার
+// হয় না আর app-এর টপিক-লিস্টে (যেটা rowCountFor() দিয়ে filter করে) প্রায় সব
+// টপিক 0 দেখায়/বাদ পড়ে যায় — এটাই ঠিক যে বাগ রিপোর্ট হয়েছিল তার আসল কারণ।
+//
+// ⚠️ ONE-TIME (+মাঝেমধ্যে) — ম্যানুয়ালি একবার চালাতে হবে (browser দিয়ে
+// action=rebuildArchiveIndex কল করে, বা Apps Script এডিটর থেকে সরাসরি এই
+// ফাংশন Run করে), তারপর শুধু তখনই আবার চালানো লাগবে যখন আপনি নিজে Sheet-এ
+// গিয়ে ম্যানুয়ালি duplicate-ট্যাগ করা রো ডিলিট করবেন (কারণ তখন row position
+// শিফট হয়ে যাবে, index স্টেল হয়ে যাবে)। archiveMarkDuplicate/
+// archiveMoveToActive — এই দুটো action কখনো row shift করে না, তাই এগুলোর
+// পরে আবার রান করার দরকার নেই।
+// ──────────────────────────────────────────────────────────────────────
+function runRebuildArchiveIndexCore() {
+  var raibResults={};
+  // ⚠️ এই ম্যাপ ইচ্ছাকৃতভাবে doGet-এর ভিতরের ARCHIVE_SHEET_MAP_-এর হুবহু কপি —
+  // এই ফাংশনটা top-level (doGet-এর বাইরে, যাতে Apps Script এডিটর থেকে সরাসরি
+  // Run করা যায়), তাই doGet-এর ভিতরের var আলাদা স্কোপে থাকায় এখানে পুনরায়
+  // লেখা হলো। দুটো জায়গায় sheet/column নাম বদলালে দুটোই আপডেট করতে হবে।
+  var raibSheets=[
+    {name:"Quiz-Archive",  rsCol:"row_start_quiz",  rcCol:"row_count_quiz"},
+    {name:"QBank-Archive", rsCol:"row_start_qbank", rcCol:"row_count_qbank"}
+  ];
+  var raibSs=SpreadsheetApp.getActiveSpreadsheet();
+  var raibTopicsSh=raibSs.getSheetByName("Topics Archive");
+  if (!raibTopicsSh) return {error:"'Topics Archive' শিট পাওয়া যায়নি"};
+  var raibTopicsData=raibTopicsSh.getDataRange().getValues();
+  var raibTopicsHdr=raibTopicsData[0]||[];
+  var raibNumTopicRows=Math.max(raibTopicsData.length-1,0);
+  var raibTIdCol=raibTopicsHdr.indexOf("topic_id");
+  if (raibTIdCol<0) return {error:"'Topics Archive'-এ 'topic_id' কলাম নেই"};
+
+  var raibColBuffers={}; // colIndex -> array[raibNumTopicRows]
+  function raibGetBuffer(colIdx){
+    if (!raibColBuffers[colIdx]) {
+      var buf=new Array(raibNumTopicRows);
+      for (var bi=0;bi<raibNumTopicRows;bi++) buf[bi]="";
+      raibColBuffers[colIdx]=buf;
+    }
+    return raibColBuffers[colIdx];
+  }
+
+  for (var rs=0; rs<raibSheets.length; rs++){
+    var raibShName=raibSheets[rs].name;
+    var raibSh=raibSs.getSheetByName(raibShName);
+    if (!raibSh || raibSh.getLastRow()<2) { raibResults[raibShName]="sheet ফাঁকা/নেই — skip"; continue; }
+    var raibData=raibSh.getDataRange().getValues();
+    var raibHdr=raibData[0];
+    var raibTopCol=raibHdr.indexOf("topic_id");
+    if (raibTopCol<0) { raibResults[raibShName]="'topic_id' কলাম নেই — skip"; continue; }
+
+    // ── existing runRebuildIndexCore()-এর মতোই — sort করে contiguous ব্লক বানানো ──
+    var raibSubCol=raibHdr.indexOf("subject_id");
+    var raibSortCols=[];
+    if (raibSubCol>=0) raibSortCols.push({column:raibSubCol+1,ascending:true});
+    raibSortCols.push({column:raibTopCol+1,ascending:true});
+    raibSh.getRange(2,1,raibSh.getLastRow()-1,raibSh.getLastColumn()).sort(raibSortCols);
+
+    var raibData2=raibSh.getDataRange().getValues();
+    var raibIndexMap={};
+    var curTopic=null, curStart=2, curCount=0;
+    for (var i5=1;i5<raibData2.length;i5++){
+      var tId=(raibData2[i5][raibTopCol]||"").toString();
+      if (tId!==curTopic) {
+        if (curTopic) raibIndexMap[curTopic]={start:curStart,count:curCount};
+        curTopic=tId; curStart=i5+1; curCount=0;
+      }
+      curCount++;
+    }
+    if (curTopic) raibIndexMap[curTopic]={start:curStart,count:curCount};
+    raibResults[raibShName]="sorted, "+(raibData2.length-1)+" rows, "+Object.keys(raibIndexMap).length+" topics";
+
+    var raibPair=raibSheets[rs];
+    var raibRsC=raibTopicsHdr.indexOf(raibPair.rsCol), raibRcC=raibTopicsHdr.indexOf(raibPair.rcCol);
+    if (raibRsC<0 || raibRcC<0) { raibResults[raibShName]+=" | ⚠️ Topics Archive-এ "+raibPair.rsCol+"/"+raibPair.rcCol+" কলাম নেই"; continue; }
+    var raibRsBuf=raibGetBuffer(raibRsC), raibRcBuf=raibGetBuffer(raibRcC);
+    for (var t2=1;t2<raibTopicsData.length;t2++){
+      var raibTid=(raibTopicsData[t2][raibTIdCol]||"").toString();
+      var raibEntry=raibIndexMap[raibTid];
+      var bufIdx=t2-1;
+      if (raibEntry) { raibRsBuf[bufIdx]=raibEntry.start; raibRcBuf[bufIdx]=raibEntry.count; }
+      else { raibRsBuf[bufIdx]=""; raibRcBuf[bufIdx]=""; }
+    }
+  }
+
+  if (raibTopicsSh && raibNumTopicRows>0) {
+    Object.keys(raibColBuffers).forEach(function(colIdxStr){
+      var colIdx=parseInt(colIdxStr,10);
+      var buf=raibColBuffers[colIdx];
+      raibTopicsSh.getRange(2,colIdx+1,raibNumTopicRows,1).setValues(buf.map(function(v){return [v];}));
+    });
+  }
+  return raibResults;
+}
+
 /* ══════════════════════════════════════════════════════════
    doGet
 ══════════════════════════════════════════════════════════ */
@@ -3248,6 +3346,348 @@ function doGet(e) {
       gqiRows.push(gqiRec);
     }
     return json({status:"success",result:"success",rows:gqiRows});
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ARCHIVE SECTION — নতুন, সম্পূর্ণ additive (কোনো existing action/লজিক এখানে
+  // বদলানো হয়নি)। Archive-এর কোনো row কখনো delete/shift হয় না — শুধু
+  // review_status/moved_to_id কলামে ট্যাগ বসে — তাই এই ৪টা action "Topics
+  // Archive" শিটের row_start_*/row_count_* index-কে কখনো invalidate করে না।
+  // archiveMoveToActive শুধু destination (Quiz/QBank Active) সাইডেই
+  // markReindexNeeded_() কল করে, Archive সাইডে reindex লাগে না। ──
+  // ──────────────────────────────────────────────────────────────────────
+  var ARCHIVE_SHEET_MAP_ = {
+    archive_quiz : { data:"Quiz-Archive",  active:"Quiz",  rsCol:"row_start_quiz",  rcCol:"row_count_quiz"  },
+    archive_qbank: { data:"QBank-Archive", active:"QBank", rsCol:"row_start_qbank", rcCol:"row_count_qbank" }
+  };
+
+  // ── rebuildArchiveIndex — Topics Archive-এর row_start_quiz/row_count_quiz/
+  // row_start_qbank/row_count_qbank কলাম (re)build করে। প্রথমবার Archive
+  // ব্যবহারের আগে অবশ্যই একবার এটা চালাতে হবে (browser-এ এই action কল করুন),
+  // নাহলে app-এর টপিক-লিস্টে বেশিরভাগ টপিক 0/অনুপস্থিত দেখাবে। ──
+  if (action==="rebuildArchiveIndex") {
+    var raiOut=runRebuildArchiveIndexCore();
+    return json({status:"success",result:"success",message:"Archive index rebuilt",details:raiOut});
+  }
+
+  // ── getArchiveQuestionsPage — একটা Archive topic-এর ভেতর শুধু unreviewed
+  // (review_status খালি) রো-গুলো ৫০-৫০ করে পেজ-বাই-পেজ আনে। cursor এখানে
+  // "raw row offset" (topic-block-এর শুরু থেকে কতগুলো রো স্ক্যান করা হয়ে গেছে) —
+  // রিটার্ন করা item সংখ্যা না। review_status ট্যাগ বসার কারণে মাঝে কিছু রো
+  // স্কিপ হলেও পরের কল ঠিক জায়গা থেকেই আবার শুরু করে — পেজিং কখনো ভাঙে না,
+  // কারণ কোনো রো এখানে সরে/শিফট হয় না, শুধু ট্যাগ বসে। ──
+  if (action==="getArchiveQuestionsPage") {
+    var agpKey=(e.parameter.sheet||"archive_quiz").toString().trim().toLowerCase();
+    var agpCfg=ARCHIVE_SHEET_MAP_[agpKey];
+    if (!agpCfg) return json({status:"error",result:"error",message:"অজানা archive sheet: "+agpKey});
+    var agpTopicId=(e.parameter.topicId||"").toString().trim();
+    var agpCursor=parseInt(e.parameter.cursor||"0",10)||0;
+    var agpLimit=Math.min(parseInt(e.parameter.limit||"50",10)||50, 100);
+    if (!agpTopicId) return json({status:"error",result:"error",message:"topicId প্রয়োজন"});
+
+    var agpSs=SpreadsheetApp.getActiveSpreadsheet();
+    var agpSh=agpSs.getSheetByName(agpCfg.data);
+    if (!agpSh) return json({status:"error",result:"error",message:"Sheet not found: "+agpCfg.data});
+    var agpHdr=agpSh.getRange(1,1,1,agpSh.getLastColumn()).getValues()[0];
+    var agpHdrNorm=agpHdr.map(function(h){return h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,"");});
+    var agpRevCol=agpHdrNorm.indexOf("reviewstatus");
+
+    function agpBuildRec(rowArr){
+      var rec={};
+      for (var k=0;k<agpHdr.length;k++){
+        var key=agpHdr[k].toString().trim(); if (!key) continue;
+        var val=rowArr[k];
+        rec[key]=(val instanceof Date)?Utilities.formatDate(val,"GMT+6","dd-MM-yyyy HH:mm:ss"):val;
+      }
+      return rec;
+    }
+
+    // ── index লুকআপ — Topics Archive শিট থেকে (Topics না!) ──
+    var agpEntry=null;
+    var agpTopicsSh=agpSs.getSheetByName("Topics Archive");
+    if (agpTopicsSh) {
+      var agpTData=agpTopicsSh.getDataRange().getValues(), agpTHdr=agpTData[0]||[];
+      var agpTIdCol=agpTHdr.indexOf("topic_id");
+      var agpRsCol=agpTHdr.indexOf(agpCfg.rsCol), agpRcCol=agpTHdr.indexOf(agpCfg.rcCol);
+      if (agpTIdCol>=0 && agpRsCol>=0 && agpRcCol>=0) {
+        for (var a1=1;a1<agpTData.length;a1++){
+          if ((agpTData[a1][agpTIdCol]||"").toString()===agpTopicId){
+            var agpS=agpTData[a1][agpRsCol], agpC=agpTData[a1][agpRcCol];
+            if (agpS && agpC) agpEntry={start:agpS,count:agpC};
+            break;
+          }
+        }
+      }
+    }
+
+    var agpRows=[], agpNextCursor=agpCursor, agpHasMore=false, agpBlockTotal=0;
+
+    if (agpEntry) {
+      try {
+        if (agpEntry.start<1 || agpEntry.start+agpEntry.count-1>agpSh.getLastRow()) throw new Error("stale archive index");
+        agpBlockTotal=agpEntry.count;
+        // ── পুরো ব্লক একটাই getRange কলে আনা — লুপের ভেতরে বারবার getRange না
+        // করে, নাহলে বেশি already-reviewed রো স্কিপ করতে গেলে quota চাপ বাড়ত ──
+        var agpBlockVals=agpSh.getRange(agpEntry.start,1,agpEntry.count,agpSh.getLastColumn()).getValues();
+        var agpScan=agpCursor;
+        while (agpScan<agpBlockTotal && agpRows.length<agpLimit) {
+          var agpVals=agpBlockVals[agpScan];
+          agpScan++;
+          var agpRevVal=agpRevCol>=0?(agpVals[agpRevCol]||"").toString().trim():"";
+          if (agpRevVal) continue; // আগেই reviewed — স্কিপ
+          agpRows.push(agpBuildRec(agpVals));
+        }
+        agpNextCursor=agpScan;
+        agpHasMore=agpNextCursor<agpBlockTotal;
+      } catch (agpErr) {
+        Logger.log("getArchiveQuestionsPage fast-path failed: "+agpErr);
+        agpEntry=null; // ── fallback-এ নামো ──
+        agpRows=[]; agpNextCursor=agpCursor; agpHasMore=false; agpBlockTotal=0;
+      }
+    }
+    if (!agpEntry) {
+      // ── FALLBACK: live scan (index নেই/স্টেল) ──
+      var agpTopicColIdx=agpHdrNorm.indexOf("topicid");
+      if (agpTopicColIdx<0) return json({status:"error",result:"error",message:"'topic_id' কলাম নেই sheet: "+agpCfg.data});
+      var agpAllData=agpSh.getDataRange().getValues();
+      var agpMatches=[];
+      for (var am=1; am<agpAllData.length; am++){
+        if ((agpAllData[am][agpTopicColIdx]||"").toString().trim()===agpTopicId) agpMatches.push(agpAllData[am]);
+      }
+      agpBlockTotal=agpMatches.length;
+      var agpScan2=agpCursor;
+      while (agpScan2<agpBlockTotal && agpRows.length<agpLimit) {
+        var agpRowArr=agpMatches[agpScan2];
+        agpScan2++;
+        var agpRevVal2=agpRevCol>=0?(agpRowArr[agpRevCol]||"").toString().trim():"";
+        if (agpRevVal2) continue;
+        agpRows.push(agpBuildRec(agpRowArr));
+      }
+      agpNextCursor=agpScan2;
+      agpHasMore=agpNextCursor<agpBlockTotal;
+    }
+
+    return json({status:"success",result:"success",rows:agpRows,hasMore:agpHasMore,nextCursor:agpNextCursor,total:agpBlockTotal});
+  }
+
+  // ── getArchiveQuestionsSorted — A-Z Sort বাটন। একটা টপিকের সব unreviewed
+  // রো (পুরো রো — question, option1-4, correct, explanation, id, সব ফিল্ড
+  // একসাথে) এনে question-টেক্সট অনুযায়ী সাজিয়ে serial (_srl) বসিয়ে দেয় —
+  // কাছাকাছি টেক্সটের ডুপ্লিকেট পাশাপাশি দেখা যায়। এটা display-only —
+  // Sheet-এর কোনো রো এখানে নড়ে না, sort হয় শুধু মেমোরিতে। ──
+  if (action==="getArchiveQuestionsSorted") {
+    var asKey=(e.parameter.sheet||"archive_quiz").toString().trim().toLowerCase();
+    var asCfg=ARCHIVE_SHEET_MAP_[asKey];
+    if (!asCfg) return json({status:"error",result:"error",message:"অজানা archive sheet: "+asKey});
+    var asTopicId=(e.parameter.topicId||"").toString().trim();
+    if (!asTopicId) return json({status:"error",result:"error",message:"topicId প্রয়োজন"});
+    var asCap=2000; // safety cap — একটা টপিকে সাধারণত এত প্রশ্ন থাকে না (গড় ~২৭টা)
+
+    var asSs=SpreadsheetApp.getActiveSpreadsheet();
+    var asSh=asSs.getSheetByName(asCfg.data);
+    if (!asSh) return json({status:"error",result:"error",message:"Sheet not found: "+asCfg.data});
+    var asHdr=asSh.getRange(1,1,1,asSh.getLastColumn()).getValues()[0];
+    var asHdrNorm=asHdr.map(function(h){return h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,"");});
+    var asRevCol=asHdrNorm.indexOf("reviewstatus");
+    var asQCol=asHdrNorm.indexOf("question");
+    if (asQCol<0) return json({status:"error",result:"error",message:"'question' কলাম নেই sheet: "+asCfg.data});
+
+    var asTopicsSh=asSs.getSheetByName("Topics Archive");
+    var asBlockVals=null;
+    if (asTopicsSh) {
+      var asTData=asTopicsSh.getDataRange().getValues(), asTHdr=asTData[0]||[];
+      var asTIdCol=asTHdr.indexOf("topic_id");
+      var asRsCol=asTHdr.indexOf(asCfg.rsCol), asRcCol=asTHdr.indexOf(asCfg.rcCol);
+      if (asTIdCol>=0 && asRsCol>=0 && asRcCol>=0) {
+        for (var s1=1;s1<asTData.length;s1++){
+          if ((asTData[s1][asTIdCol]||"").toString()===asTopicId){
+            var asS=asTData[s1][asRsCol], asC=asTData[s1][asRcCol];
+            if (asS && asC && asS>=1 && asS+asC-1<=asSh.getLastRow()) {
+              asBlockVals=asSh.getRange(asS,1,Math.min(asC,asCap),asSh.getLastColumn()).getValues();
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (!asBlockVals) {
+      // ── fallback: live scan ──
+      var asTopicColIdx=asHdrNorm.indexOf("topicid");
+      if (asTopicColIdx<0) return json({status:"error",result:"error",message:"'topic_id' কলাম নেই sheet: "+asCfg.data});
+      var asAllData=asSh.getDataRange().getValues();
+      asBlockVals=[];
+      for (var sa=1; sa<asAllData.length && asBlockVals.length<asCap; sa++){
+        if ((asAllData[sa][asTopicColIdx]||"").toString().trim()===asTopicId) asBlockVals.push(asAllData[sa]);
+      }
+    }
+
+    var asRecs=[];
+    for (var sb=0;sb<asBlockVals.length;sb++){
+      var asRowArr=asBlockVals[sb];
+      var asRevVal=asRevCol>=0?(asRowArr[asRevCol]||"").toString().trim():"";
+      if (asRevVal) continue; // আগেই reviewed — বাদ, ফলে বারবার একই জিনিস আসবে না
+      var asRec={};
+      for (var sc=0;sc<asHdr.length;sc++){
+        var asKeyName=asHdr[sc].toString().trim(); if (!asKeyName) continue;
+        var asVal=asRowArr[sc];
+        asRec[asKeyName]=(asVal instanceof Date)?Utilities.formatDate(asVal,"GMT+6","dd-MM-yyyy HH:mm:ss"):asVal;
+      }
+      asRecs.push(asRec);
+    }
+
+    // ── পুরো রো (সব ফিল্ড একসাথে, question/answer/id কিছুই আলাদা হয় না) —
+    // শুধু question টেক্সট দিয়ে compare করে সাজানো হচ্ছে ──
+    var asQKeyName=asHdr[asQCol].toString().trim();
+    asRecs.sort(function(r1,r2){
+      var t1=(r1[asQKeyName]||"").toString().trim().toLowerCase();
+      var t2=(r2[asQKeyName]||"").toString().trim().toLowerCase();
+      if (t1<t2) return -1; if (t1>t2) return 1; return 0;
+    });
+    for (var sd=0; sd<asRecs.length; sd++) asRecs[sd]._srl=sd+1;
+
+    return json({status:"success",result:"success",rows:asRecs,total:asRecs.length});
+  }
+
+  // ── archiveMarkDuplicate — সিলেক্ট করা প্রশ্নগুলোতে review_status="duplicate"
+  // বসায় (batch, single-column write, সস্তা অপারেশন) — Archive-এর কোনো রো
+  // ডিলিট/শিফট হয় না, তাই index অক্ষত থাকে, reindex লাগে না। পরে আপনি নিজে
+  // Sheet-এ গিয়ে review_status="duplicate" ফিল্টার করে বাল্কে ম্যানুয়ালি
+  // ডিলিট করবেন — সেটায় কোনো GAS execution লাগে না। ──
+  if (action==="archiveMarkDuplicate") {
+    return withWriteLock(function(){
+    var amdKey=(e.parameter.sheet||"archive_quiz").toString().trim().toLowerCase();
+    var amdCfg=ARCHIVE_SHEET_MAP_[amdKey];
+    if (!amdCfg) return json({status:"error",result:"error",message:"অজানা archive sheet: "+amdKey});
+    var amdIds=(e.parameter.ids||"").split(",").map(function(x){return x.trim();}).filter(Boolean);
+    if (!amdIds.length) return json({status:"error",result:"error",message:"ids প্রয়োজন"});
+
+    var amdSs=SpreadsheetApp.getActiveSpreadsheet(), amdSh=amdSs.getSheetByName(amdCfg.data);
+    if (!amdSh) return json({status:"error",result:"error",message:"Sheet not found: "+amdCfg.data});
+    var amdData=amdSh.getDataRange().getValues(), amdHdr=amdData[0];
+    var amdHdrNorm=amdHdr.map(function(h){return h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,"");});
+    var amdIdCol=amdHdrNorm.indexOf("id");
+    var amdRevCol=amdHdrNorm.indexOf("reviewstatus");
+    if (amdIdCol<0) return json({status:"error",result:"error",message:"'id' কলাম নেই sheet: "+amdCfg.data});
+    if (amdRevCol<0) return json({status:"error",result:"error",message:"'review_status' কলাম নেই sheet: "+amdCfg.data});
+
+    var amdIdSet={}; amdIds.forEach(function(id){amdIdSet[id]=true;});
+    var amdMarked=0;
+    for (var am2=1; am2<amdData.length; am2++){
+      var amdRowId=(amdData[am2][amdIdCol]||"").toString().trim();
+      if (!amdIdSet[amdRowId]) continue;
+      amdSh.getRange(am2+1, amdRevCol+1).setValue("duplicate");
+      amdMarked++;
+    }
+    if (!amdMarked) return json({status:"error",result:"error",message:"কোনো matching প্রশ্ন পাওয়া যায়নি"});
+    return json({status:"success",result:"success",marked:amdMarked});
+    });
+  }
+
+  // ── archiveMoveToActive — সিলেক্ট করা (ভালো/duplicate-না-মার্ক-করা) প্রশ্নগুলো
+  // Archive থেকে Active Quiz/QBank শিটে কপি করে (নতুন id সহ, পুরনো id কখনো
+  // পুনর্ব্যবহার হয় না) + Archive-এ review_status="moved", moved_to_id=<নতুন id>
+  // বসায়। Archive-এর রো ডিলিট হয় না (শুধু ট্যাগ) — তাই Archive-সাইড index
+  // অক্ষত থাকে, শুধু destination (Active) সাইডেই reindex দরকার। Subject/Topic
+  // — existing হলে dropdown থেকে সিলেক্ট হওয়া নাম পাঠালেই তার existing id
+  // ব্যবহার হবে, না থাকলে নতুন Subject/Topic (resolveOrCreateSubjectTopicId,
+  // Add-Question ফর্মেও যেটা ব্যবহৃত হয়) নিজে থেকেই তৈরি হয়ে যাবে। ──
+  if (action==="archiveMoveToActive") {
+    return withWriteLock(function(){
+    var amaKey=(e.parameter.sheet||"archive_quiz").toString().trim().toLowerCase();
+    var amaCfg=ARCHIVE_SHEET_MAP_[amaKey];
+    if (!amaCfg) return json({status:"error",result:"error",message:"অজানা archive sheet: "+amaKey});
+    var amaIds=(e.parameter.ids||"").split(",").map(function(x){return x.trim();}).filter(Boolean);
+    var amaNewSubject=(e.parameter.newSubject||"").toString().trim();
+    var amaNewSubTopic=(e.parameter.newSubTopic||"").toString().trim();
+    if (!amaIds.length) return json({status:"error",result:"error",message:"ids প্রয়োজন"});
+    if (!amaNewSubject||!amaNewSubTopic) return json({status:"error",result:"error",message:"newSubject/newSubTopic প্রয়োজন"});
+
+    var amaSs=SpreadsheetApp.getActiveSpreadsheet();
+    var amaSrcSh=amaSs.getSheetByName(amaCfg.data);
+    var amaDstSh=amaSs.getSheetByName(amaCfg.active);
+    if (!amaSrcSh) return json({status:"error",result:"error",message:"Sheet not found: "+amaCfg.data});
+    if (!amaDstSh) return json({status:"error",result:"error",message:"Sheet not found: "+amaCfg.active});
+
+    var amaSrcData=amaSrcSh.getDataRange().getValues(), amaSrcHdr=amaSrcData[0];
+    var amaSrcHdrNorm=amaSrcHdr.map(function(h){return h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,"");});
+    var amaSrcIdCol=amaSrcHdrNorm.indexOf("id");
+    var amaRevCol=amaSrcHdrNorm.indexOf("reviewstatus");
+    var amaMovedToCol=amaSrcHdrNorm.indexOf("movedtoid");
+    if (amaSrcIdCol<0) return json({status:"error",result:"error",message:"'id' কলাম নেই sheet: "+amaCfg.data});
+    if (amaRevCol<0) return json({status:"error",result:"error",message:"'review_status' কলাম নেই sheet: "+amaCfg.data});
+
+    var amaDstLastCol=amaDstSh.getLastColumn();
+    var amaDstHdr=amaDstSh.getRange(1,1,1,amaDstLastCol).getValues()[0];
+    var amaDstHdrNormArr=amaDstHdr.map(function(h){return h.toString().trim().toLowerCase().replace(/[^a-z0-9]/g,"");});
+    var amaDstSubCol=amaDstHdrNormArr.indexOf("subject");
+    var amaDstSubIdCol=amaDstHdrNormArr.indexOf("subjectid");
+    var amaDstTopicCol=amaDstHdrNormArr.indexOf("topic");
+    var amaDstTopicIdCol=amaDstHdrNormArr.indexOf("topicid");
+    var amaDstIdCol=amaDstHdrNormArr.indexOf("id");
+    var amaDstUpdAtCol=amaDstHdrNormArr.indexOf("updatedat");
+
+    // ── existing subject/topic হলে তার id ব্যবহার, না থাকলে নতুন তৈরি ──
+    var amaBatchCache={};
+    var amaResolved=resolveOrCreateSubjectTopicId(amaCfg.active, amaNewSubject, amaNewSubTopic, amaBatchCache);
+    if (!amaResolved.subjectId || !amaResolved.topicId) {
+      return json({status:"error",result:"error",message:"Subject/Topic resolve ব্যর্থ"});
+    }
+
+    var amaIdSet={}; amaIds.forEach(function(id){amaIdSet[id]=true;});
+    var amaNewRows=[], amaSrcRowNums=[], amaNewIds=[];
+    var amaNow=Date.now();
+
+    for (var ai=1; ai<amaSrcData.length; ai++){
+      var amaSrcRowId=(amaSrcData[ai][amaSrcIdCol]||"").toString().trim();
+      if (!amaIdSet[amaSrcRowId]) continue;
+      var amaSrcRowArr=amaSrcData[ai];
+      // ── source-এর রো-কে normalized-key→value ম্যাপে বানিয়ে destination
+      // হেডার অনুযায়ী বসানো — দুই শিটের কলাম-অর্ডার/সংখ্যা আলাদা হলেও (যেমন
+      // QBank vs QBank-Archive) কোনো সমস্যা হবে না, নাম মিললেই কপি হবে ──
+      var amaSrcRec={};
+      for (var aj=0;aj<amaSrcHdr.length;aj++){
+        var amaK=amaSrcHdrNorm[aj]; if (!amaK) continue;
+        amaSrcRec[amaK]=amaSrcRowArr[aj];
+      }
+      var amaNewId=getNextId(amaCfg.active);
+      var amaDstRow=new Array(amaDstLastCol).fill("");
+      for (var ak=0;ak<amaDstHdrNormArr.length;ak++){
+        var amaDk=amaDstHdrNormArr[ak]; if (!amaDk) continue;
+        if (amaSrcRec.hasOwnProperty(amaDk)) amaDstRow[ak]=amaSrcRec[amaDk];
+      }
+      if (amaDstIdCol>=0)      amaDstRow[amaDstIdCol]=amaNewId;
+      if (amaDstSubCol>=0)     amaDstRow[amaDstSubCol]=amaNewSubject;
+      if (amaDstSubIdCol>=0)   amaDstRow[amaDstSubIdCol]=amaResolved.subjectId;
+      if (amaDstTopicCol>=0)   amaDstRow[amaDstTopicCol]=amaNewSubTopic;
+      if (amaDstTopicIdCol>=0) amaDstRow[amaDstTopicIdCol]=amaResolved.topicId;
+      if (amaDstUpdAtCol>=0)   amaDstRow[amaDstUpdAtCol]=amaNow;
+
+      amaNewRows.push(amaDstRow);
+      amaSrcRowNums.push(ai+1);
+      amaNewIds.push(amaNewId);
+    }
+
+    if (!amaNewRows.length) return json({status:"error",result:"error",message:"কোনো matching প্রশ্ন পাওয়া যায়নি"});
+
+    // ── destination-এ batch append (একটাই setValues কল, প্রশ্ন-সংখ্যা যতই হোক) ──
+    var amaDstStartRow=amaDstSh.getLastRow()+1;
+    amaDstSh.getRange(amaDstStartRow,1,amaNewRows.length,amaDstLastCol).setValues(amaNewRows);
+
+    // ── source (Archive)-এ review_status="moved" + moved_to_id ট্যাগ ──
+    for (var al=0; al<amaSrcRowNums.length; al++){
+      amaSrcSh.getRange(amaSrcRowNums[al], amaRevCol+1).setValue("moved");
+      if (amaMovedToCol>=0) amaSrcSh.getRange(amaSrcRowNums[al], amaMovedToCol+1).setValue(amaNewIds[al]);
+    }
+
+    // ── শুধু destination (Active) সাইডের reindex দরকার — Archive-এর
+    // block/count অপরিবর্তিত থাকায় Archive-সাইডে reindex লাগছে না ──
+    var amaDirty={}; amaDirty[amaResolved.topicId]=1;
+    markTopicsDirty(amaDirty);
+    markReindexNeeded_();
+
+    return json({status:"success",result:"success",moved:amaNewRows.length,newIds:amaNewIds,subjectId:amaResolved.subjectId,topicId:amaResolved.topicId});
+    });
   }
 
   // ── getAI ──
