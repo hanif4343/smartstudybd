@@ -1704,6 +1704,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── Phase 1 (সিরিয়াল-ফিক্স প্ল্যান): এই সেশনে কোন mode+tag / mode+tag+subject এর
+    // জন্য auto-serial ইতিমধ্যে ট্রিগার হয়েছে সেটার ইন-মেমরি guard — নাহলে প্রতিবার
+    // rebuildSubjects/rebuildSubTopics কল হলেই (প্রতি স্ক্রিন ভিজিটে) বারবার একই
+    // Firebase write পাঠানো হতো ──
+    private val autoFixedSubjectOrderKeys  = mutableSetOf<String>()
+    private val autoFixedSubTopicOrderKeys = mutableSetOf<String>()
+
     private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
         val user     = session.getCurrentUser()
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
@@ -1750,6 +1757,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
         Log.d("QuizVM", "Subjects built: ${subjects.size} for mode=$mode tag=$effectiveTag")
         _state.update { it.copy(subjects = subjects, isLoading = false) }
+
+        // ── Phase 1 — Auto-serial: এই তালিকায় যদি কোনো subject-এর explicit order না
+        // থাকে (মানে উপরের sort-এ ওটা Int.MAX_VALUE ফলব্যাকে গিয়ে নাম-অনুযায়ী শেষে
+        // বসেছে), admin-এর ডিভাইসে চুপচাপ পুরো লিস্টটা এখনকার (স্থিতিশীল) ক্রম
+        // অনুযায়ী ১,২,৩...N নাম্বার বসিয়ে সেভ করে দাও। এতে existing serial-ওয়ালা
+        // subject-গুলোর আপেক্ষিক ক্রম অক্ষুণ্ণ থাকে, আর নতুন/serial-হীন subject-ও
+        // এখন থেকে একটা স্থায়ী নাম্বার পেয়ে যায় — আর কখনো "কখনো এই ক্রমে কখনো
+        // অন্য ক্রমে" দেখাবে না। শুধু admin ডিভাইসেই ট্রিগার হয় (Firebase write
+        // permission), আর প্রতি সেশনে একবারই (guard সেট) ──
+        if (user?.isAdmin() == true && subjects.isNotEmpty() && subjects.size > order.size) {
+            val guardKey = "${mode.name}|$encodedTag"
+            if (autoFixedSubjectOrderKeys.add(guardKey)) {
+                Log.d("QuizVM", "Auto-serial: $guardKey — ${subjects.size} subjects, ${order.size} had explicit order")
+                persistSubjectOrder(subjects.map { it.name })
+            }
+        }
     }
 
     private suspend fun rebuildSubTopics(content: AppContent, subject: String, mode: StudyMode) {
@@ -1785,6 +1808,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // মতোই subject list-এর নিচে একটা গ্লোবাল বাটন থেকে (openModelTestPicker) অ্যাক্সেস হয়,
         // তাই এখানে আর ইনজেক্ট করা হয় না।
         _state.update { it.copy(subTopics = subTopics) }
+
+        // ── Phase 1 — Auto-serial (subTopic-level, একই যুক্তি উপরের rebuildSubjects-এর মতো) ──
+        if (user?.isAdmin() == true && subTopics.isNotEmpty() && subTopics.size > order.size) {
+            val guardKey = "${mode.name}|$encodedTag|$subject"
+            if (autoFixedSubTopicOrderKeys.add(guardKey)) {
+                Log.d("QuizVM", "Auto-serial: $guardKey — ${subTopics.size} subTopics, ${order.size} had explicit order")
+                persistSubTopicOrder(subject, subTopics.map { it.name })
+            }
+        }
     }
 
     // ═════════════════════════════════════════════════════════
@@ -2479,6 +2511,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
         val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        // ── Phase 3 (audience tag audit): reorder সবসময় mode+tag ভিত্তিক আলাদা ক্রম
+        // হিসেবে সেভ হয় (persistSubjectOrder/persistSubTopicOrder এর ওপরের কমেন্ট
+        // দেখো)। Admin ভুল ট্যাগে (বা admin panel-এ tag না বেছে blank রেখে) সেভ
+        // করলে সেটা target audience-এর কাছে কখনোই দেখা যায় না, অথচ admin নিজে
+        // (নিজের সেশনের tag দিয়ে) ঠিকই দেখেন বলে বাগটা ধরাই পড়ে না। তাই এখন সেভ
+        // হওয়া tag-টা সরাসরি orderSavedMsg-এ দেখানো হচ্ছে, আর tag ফাঁকা থাকলে
+        // আলাদা করে সতর্ক করা হচ্ছে — যাতে admin সাথে সাথেই বুঝতে পারেন কোন
+        // audience-এর জন্য এই ক্রম প্রযোজ্য হলো। ──
+        val tagLabel = effectiveTag.ifBlank { "⚠️ কোনো tag সেট নেই (সব audience-এর ডিফল্ট)" }
         orderSaveJob?.cancel()
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
@@ -2493,13 +2534,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (!repo.isOnline()) {
                 pendingQueue.enqueueAdminReorderSubject(mode.name, effectiveTag, order)
                 _state.update { it.copy(isSavingOrder = false,
-                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
+                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত (tag: $tagLabel) — net আসলে auto sync হবে") }
                 return@launch
             }
 
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubjectOrderBulk(mode.name, effectiveTag, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে — সব ইউজার দেখতে পাবে") }
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে (tag: $tagLabel) — এই audience-এর সব ইউজার দেখতে পাবে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     // Online কিন্তু fail (যেমন Firebase quota শেষ) — queue এ রাখো, লোকাল
@@ -2507,7 +2548,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     pendingQueue.enqueueAdminReorderSubject(mode.name, effectiveTag, order)
                     com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
                     _state.update { it.copy(isSavingOrder = false,
-                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}, tag: $tagLabel) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
                 }
             }
         }
@@ -2524,6 +2565,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
         val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val tagLabel = effectiveTag.ifBlank { "⚠️ কোনো tag সেট নেই (সব audience-এর ডিফল্ট)" }
         orderSaveJob?.cancel()
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
@@ -2538,25 +2580,49 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (!repo.isOnline()) {
                 pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
                 _state.update { it.copy(isSavingOrder = false,
-                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
+                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত (tag: $tagLabel) — net আসলে auto sync হবে") }
                 return@launch
             }
 
             when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, effectiveTag, subject, order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে — সব ইউজার দেখতে পাবে") }
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে (tag: $tagLabel) — এই audience-এর সব ইউজার দেখতে পাবে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
                     com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
                     _state.update { it.copy(isSavingOrder = false,
-                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}, tag: $tagLabel) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
                 }
             }
         }
     }
 
     fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
+
+    // ── Phase 4 (Serial Manager): admin সরাসরি প্রতিটা subject-এর পাশে নাম্বার
+    // বসিয়ে দিলে (ড্র্যাগ না করে), এই ফাংশন সেই নাম্বার-অনুযায়ী সাজানো নামের লিস্ট
+    // নিয়ে ঠিক moveSubject()-এর মতোই লোকাল state আপডেট করে persistSubjectOrder()
+    // কল করে — একই অফলাইন-সেফ/sync পাইপলাইন রিইউজ হয়। ──
+    fun applySubjectSerialOrder(orderedNames: List<String>) {
+        if (!_state.value.isAdmin) return
+        val byName = _state.value.subjects.associateBy { it.name }
+        val reordered = orderedNames.mapNotNull { byName[it] }
+        if (reordered.size != _state.value.subjects.size) return // safety: mismatch হলে কিছু করব না
+        _state.update { it.copy(subjects = reordered) }
+        persistSubjectOrder(orderedNames)
+    }
+
+    /** Serial Manager — subTopic লেভেল, উপরের applySubjectSerialOrder()-এর মতোই যুক্তি। */
+    fun applySubTopicSerialOrder(orderedNames: List<String>) {
+        if (!_state.value.isAdmin) return
+        val subject = _state.value.navPath.subject ?: return
+        val byName = _state.value.subTopics.associateBy { it.name }
+        val reordered = orderedNames.mapNotNull { byName[it] }
+        if (reordered.size != _state.value.subTopics.size) return
+        _state.update { it.copy(subTopics = reordered) }
+        persistSubTopicOrder(subject, orderedNames)
+    }
 
     /** Pagination: নির্দিষ্ট page-এ যাও — Room থেকে instant load */
     fun goToPage(page: Int) {
