@@ -68,7 +68,10 @@ class SessionManager(private val context: Context) {
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
-        // Settings → "Data Source" ড্রপডাউন — "firebase" | "google_sheet" (দেখুন DataSourceMode.kt)
+        // ⚠️ DEPRECATED — আগে "Data Source" টগলের জন্য ব্যবহৃত হতো, ফিচারটাই সরানো
+        // হয়েছে, এখন আর কোথাও পড়া/লেখা হয় না। পুরনো ডিভাইসে stale ভ্যালু থাকতে
+        // পারে (নিরীহ, অব্যবহৃত)। key-টা রাখা হলো যাতে DataStore-এ পুরনো এন্ট্রি
+        // থাকলেও কোনো crash/conflict না হয়।
         val KEY_DATA_SOURCE_MODE = stringPreferencesKey("data_source_mode")
         val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
@@ -411,22 +414,12 @@ class SessionManager(private val context: Context) {
         context.dataStore.edit { it[KEY_OFFLINE_MODE] = on }
     }
 
-    // ── Data Source (Firebase / Google Sheet) ─────────────────
-    // Settings-এ একবার সিলেক্ট করলে এখানে সেভ থাকে — Quiz/QBank/Study কনটেন্টের
-    // read + admin edit/update + subject তালিকা এই মোড অনুযায়ী রুট হয়
-    // (দেখুন ContentFetchService.kt ও MenuViewModel-এর admin ফাংশনগুলো)।
-
-    fun getDataSourceMode(): com.hanif.smartstudy.data.model.DataSourceMode = runBlocking {
-        val raw = context.dataStore.data.first()[KEY_DATA_SOURCE_MODE]
-        com.hanif.smartstudy.data.model.DataSourceMode.fromStorageOrDefault(raw)
-    }
-
-    fun dataSourceModeFlow(): Flow<com.hanif.smartstudy.data.model.DataSourceMode> =
-        context.dataStore.data.map { com.hanif.smartstudy.data.model.DataSourceMode.fromStorageOrDefault(it[KEY_DATA_SOURCE_MODE]) }
-
-    suspend fun setDataSourceMode(mode: com.hanif.smartstudy.data.model.DataSourceMode) {
-        context.dataStore.edit { it[KEY_DATA_SOURCE_MODE] = mode.storageKey }
-    }
+    // ── Data Source ফিচার সম্পূর্ণ সরানো হয়েছে ─────────────────
+    // আগে এখানে Firebase/Google Sheet টগল সেভ হতো (Settings থেকে ইউজার বদলাতে
+    // পারত)। এখন ডেটা-সোর্স কোড-লেভেলে ফিক্সড — কোনো user-facing সুইচ নেই,
+    // তাই এই storage/getter/setter দরকার নেই। পুরনো ডিভাইসে DataStore-এ যদি
+    // এখনো "data_source_mode" key থেকে যায় (আগের ভার্সন থেকে), সেটা এখন আর
+    // কোথাও পড়া হয় না — নিরীহভাবে অব্যবহৃত পড়ে থাকবে।
 
     // ── Onboarding ────────────────────────────────────────────
 
