@@ -338,6 +338,8 @@ fun CoreScreen(
                 orderSavedMsg   = state.orderSavedMsg,
                 onToggleReorder = { viewModel.toggleReorderMode() },
                 onMoveSubTopic  = { from, to -> viewModel.moveSubTopic(from, to) },
+                enableSerialManager = true,
+                onSaveSerialOrder = { viewModel.applySubTopicSerialOrder(it) },
                 onRenameSubTopic = { old, new ->
                     onAdminRenameSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", old, new)
                 },
@@ -554,6 +556,8 @@ fun CoreScreen(
                 orderSavedMsg   = state.orderSavedMsg,
                 onToggleReorder = { viewModel.toggleReorderMode() },
                 onMoveSubject   = { from, to -> viewModel.moveSubject(from, to) },
+                enableSerialManager = true,
+                onSaveSerialOrder = { viewModel.applySubjectSerialOrder(it) },
                 onRenameSubject = { old, new -> onAdminRenameSubject?.invoke(sheetKey, old, new) },
                 onDeleteSubject = { name -> onAdminDeleteSubject?.invoke(sheetKey, name) },
                 // ── App feature request ৪: Subject-এরও ইমুজি বদলানো যাবে (Quiz/Study/QBank
