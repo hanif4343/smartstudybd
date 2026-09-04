@@ -63,6 +63,15 @@ data class QuizUiState(
     val isGeneratingModelTest    : Boolean         = false,
     val modelTestGenWarning      : String?         = null,    // জেনারেটরের warning (যেমন প্রশ্ন কম থাকলে)
     val readingIndex  : Int              = 0,
+    // ── FIX ("৮ নম্বর টপিকে ঢুকে প্রশ্ন দেখে Back করলে টপিক লিস্ট আবার প্রথম থেকে
+    // দেখায়"): SubTopicListScreen()-এর LazyColumn নিজের ভেতরের rememberLazyListState()
+    // ব্যবহার করত, কিন্তু CoreScreen-এর when(depth) ব্লকে টপিক-লিস্ট (depth 1) আর
+    // প্রশ্ন-লিস্ট (depth 2) আলাদা branch — একটায় গেলে অন্যটার পুরো composable
+    // dispose হয়ে যায়, তাই ফিরে এলে ওই internal scroll state হারিয়ে যেত (সবসময়
+    // ০-তে রিসেট)। এখন scroll position ViewModel-এ (SubTopicListScreen-এর
+    // onScrollIndexChanged থেকে) রাখা হচ্ছে, back করলে সেই ইনডেক্স দিয়েই
+    // LazyListState তৈরি হয় (দেখো SubTopicListScreen-এর initialScrollIndex)। ──
+    val subTopicScrollIndex : Int        = 0,
     val bookmarkedIds : Set<String>      = emptySet(),
     val weakTopics    : List<WeakTopic>  = emptyList(),
     val contentLoaded : Boolean          = false,
@@ -1673,6 +1682,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateReadingIndex(index: Int) {
         _state.update { it.copy(readingIndex = index) }
+    }
+
+    // ── SubTopicListScreen থেকে স্ক্রল পজিশন রিপোর্ট হয়, যাতে প্রশ্ন-লিস্টে ঢুকে
+    // Back করলে ঠিক আগের স্ক্রল পজিশনেই টপিক লিস্ট আবার দেখা যায় ──
+    fun updateSubTopicScrollIndex(index: Int) {
+        if (_state.value.subTopicScrollIndex == index) return
+        _state.update { it.copy(subTopicScrollIndex = index) }
     }
 
     fun startTimer(questionCount: Int) {
