@@ -89,12 +89,24 @@ class ContentRepository(private val context: Context) {
         }
         return when (val result = ContentFetchService.fetchSubjectsOnly(context)) {
             is ContentResult.Success -> {
-                // শুধু subjectOrder/subTopicOrder মেমরিতে রাখি
-                // questions না আসা পর্যন্ত memCache এ questions empty থাকবে
-                val partial = result.data
-                _memCache = partial
-                Log.d("Repo", "getSubjectsQuick: Firebase OK")
-                DataState.Success(partial)
+                // ── FIX ("সিরিয়াল কখনো দেখা যায় কখনো যায় না" — getContent()-এর
+                // পাশাপাশি এই দ্বিতীয় কারণ): এই fetch শুধু subjectOrder/subTopicOrder
+                // আনে (questions না)। আগে এখানে `_memCache = partial` দিয়ে *পুরো*
+                // cache-টাই replace হয়ে যেত — অন্য কোনো flow যদি ইতিমধ্যে quiz/qbank/
+                // study প্রশ্ন লোড করে রেখে থাকে, সেটা মুছে যেত এই কলেই। এখন আগের
+                // memCache-এর questions ঠিক রেখে শুধু order/modelTests অংশটুকু merge
+                // করা হচ্ছে। ──
+                val prev = _memCache
+                val merged = (prev ?: AppContent()).copy(
+                    subjectOrder  = result.data.subjectOrder,
+                    subTopicOrder = result.data.subTopicOrder,
+                    modelTests    = if (result.data.modelTests.isNotEmpty()) result.data.modelTests else (prev?.modelTests ?: emptyMap()),
+                    fetchedAt     = result.data.fetchedAt,
+                    remoteUpdatedAt = result.data.remoteUpdatedAt
+                )
+                _memCache = merged
+                Log.d("Repo", "getSubjectsQuick: Firebase OK (merged, prevQuestions=${prev?.quiz?.size ?: 0}+${prev?.qbank?.size ?: 0}+${prev?.study?.size ?: 0})")
+                DataState.Success(merged)
             }
             is ContentResult.Error -> DataState.Error(result.message)
         }
@@ -538,11 +550,27 @@ class ContentRepository(private val context: Context) {
         }
         val sync = topicSyncDao.get(topicId)
         val cachedCount = dao.countByTopicId(sheet.uppercase(), topicId)
-        if (sync != null && !sync.hasMore && cachedCount > 0) return@withContext false
+        // ── FIX ("QBank group_heading মাঝে মাঝে দেখায় না" — dev-notes/DIAGNOSTIC_NOTES.md
+        // Active #2 — root cause কনফার্ম): আগে এখানে
+        // `if (sync != null && !sync.hasMore && cachedCount > 0) return@withContext false`
+        // ছিল — এই গার্ডটা hash-check-এর *আগেই* unconditionally skip করে দিত, যেহেতু
+        // `hasMore` প্রতিটা সফল ফুল-টপিক ফেচের পরে সবসময় `false` বসানো হয় (নিচের
+        // `TopicSyncEntity(topicId, null, false, now, hash)`)। ফলে একবার কোনো topic
+        // Room-এ ক্যাশ হয়ে গেলে, নিচের hash-comparison কোডটা (যেটা আসলে staleness
+        // ধরার জন্য বানানো হয়েছিল) কখনোই রান হতো না — dead code। মানে admin কোনো
+        // প্রশ্ন এডিট করে CDN-এ রিপাবলিশ করলেও (group_heading, প্রশ্নের টেক্সট,
+        // উত্তর — যা-ই বদলাক), যেই ছাত্র আগে একবার ওই topic খুলে ফেলেছে, তার
+        // ফোনে *কখনোই* আপডেট আসত না — Admin-only "Force Full Resync" ছাড়া কোনো
+        // উপায় ছিল না। এখন `hasMore`-ভিত্তিক এই প্রি-ম্যাচিওর গার্ড সরিয়ে,
+        // hash-comparison-কেই একমাত্র সিদ্ধান্ত নেওয়ার জায়গা বানানো হলো (নিচে) ──
         if (!isOnline()) return@withContext false
 
         val manifest = getCachedManifest()
         if (manifest == null) {
+            // Manifest আনা যায়নি (নেট আছে কিন্তু fetch fail) — staleness যাচাই করা
+            // সম্ভব না, তাই ক্যাশড থাকলে সেটাই বিশ্বাস করি (safe fallback, ইউজারকে
+            // ভুল করে খালি স্ক্রিন দেখানো এড়াতে)
+            if (cachedCount > 0) return@withContext false
             com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Manifest আনা যায়নি")
             return@withContext false
         }
@@ -554,11 +582,17 @@ class ContentRepository(private val context: Context) {
         }
         val hash = entry.hash ?: ""
         // ── hash অপরিবর্তিত + Room-এ ইতিমধ্যে প্রশ্ন আছে মানে এই ভার্সন আগেই
-        // cache করা — network call পুরোপুরি স্কিপ ──
-        if (hash.isNotBlank() && sync?.lastHash == hash && cachedCount > 0) {
-            if (sync.hasMore) topicSyncDao.upsert(sync.copy(hasMore = false))
+        // cache করা — network call স্কিপ। hash ফাঁকা (পুরনো/legacy manifest) হলে
+        // staleness ধরার উপায় নেই, cachedCount থাকলে বিশ্বাস করে স্কিপ করি (নাহলে
+        // প্রতিবার নেটওয়ার্ক কল হতো, offline-first ডিজাইনের বিরুদ্ধে) ──
+        if (cachedCount > 0 && (hash.isBlank() || sync?.lastHash == hash)) {
+            if (hash.isNotBlank() && sync?.hasMore == true) topicSyncDao.upsert(sync.copy(hasMore = false))
             return@withContext false
         }
+        // ── এখানে পৌঁছালে মানে: হয় এই topic প্রথমবার ক্যাশ হচ্ছে, নয়তো hash বদলে
+        // গেছে (admin কনটেন্ট আপডেট করেছে) — দুই ক্ষেত্রেই নিচে ফ্রেশ ফেচ হবে,
+        // পুরনো row upsert দিয়ে ওভাররাইট হবে (fbKey/id একই থাকে বলে নতুন row না
+        // বেড়ে existing row-ই আপডেট হয়) ──
 
         val now = System.currentTimeMillis()
         val items: List<*>? = when (sheet) {
@@ -703,7 +737,29 @@ class ContentRepository(private val context: Context) {
         val qbank = dao.getAll("QBANK").map { it.toQBankItem() }
         val study = dao.getAll("STUDY").map { it.toStudyItem() }
         val now = System.currentTimeMillis()
-        val content = AppContent(quiz = quiz, qbank = qbank, study = study, fetchedAt = now, remoteUpdatedAt = now)
+        // ── FIX ("সাবজেক্ট/টপিক সিরিয়াল কখনো দেখা যায় কখনো যায় না"): Room-এ
+        // subjectOrder/subTopicOrder/modelTests কিছুই সেভ থাকে না (এই তিনটে শুধু
+        // in-memory/disk AppContent cache-এই থাকে — getSubjectsQuick()/patch*
+        // ফাংশনগুলো দিয়ে ভরা হয়)। কিন্তু এই ফাংশন আগে একটা *একদম ফ্রেশ* AppContent(...)
+        // বানাত (ওই তিনটে ফিল্ড ডিফল্ট emptyMap() রেখেই), তারপর _memCache = content
+        // দিয়ে পুরো cache replace করত। এই ফাংশন app-জুড়ে (প্রতিটা subject/topic
+        // ভিজিট, pagination, ইত্যাদি) এত ঘনঘন কল হয় যে, getSubjectsQuick() কোনো
+        // এক মুহূর্তে order ভরে রাখলেও তার পরের getContent() কলেই সেটা মুছে
+        // যেত — কোনটা শেষে চলছে তার ওপর নির্ভর করে ক্রম "কখনো দেখা যেত, কখনো
+        // যেত না"। এখন আগের _memCache (না থাকলে disk cache) থেকে এই তিনটে
+        // ফিল্ড ক্যারি-ফরওয়ার্ড করা হচ্ছে, যাতে questions রিফ্রেশ হলেও order
+        // কখনো হারিয়ে না যায়। ──
+        val previous = _memCache ?: cache.loadContent()
+        val content = AppContent(
+            quiz            = quiz,
+            qbank           = qbank,
+            study           = study,
+            subjectOrder    = previous?.subjectOrder ?: emptyMap(),
+            subTopicOrder   = previous?.subTopicOrder ?: emptyMap(),
+            modelTests      = previous?.modelTests ?: emptyMap(),
+            fetchedAt       = now,
+            remoteUpdatedAt = now
+        )
         _memCache = content
         DataState.Success(content, fromCache = true)
     }
