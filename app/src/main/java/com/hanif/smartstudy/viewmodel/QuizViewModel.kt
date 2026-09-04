@@ -181,6 +181,59 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     // চলে যাওয়া হয়েছে) সেই stale রেসপন্স চুপচাপ ফেলে দেওয়া হয়, state আপডেট হয় না। ──
     private var subTopicLoadJob: Job? = null
     private var subTopicLoadToken: Long = 0L
+
+    // ── PERF FIX ("প্রচুর slow হচ্ছে" রুট কজ): isMastered-sort সহ পুরো টপিক
+    // fetch করা ভারী কাজ (বড় টপিকে শত-শত SharedPreferences read + sort)। আগে
+    // এটা navigateToSubTopicLazy (টপিক-ওপেন) আর loadQuestionsFromRoomByTopic/
+    // loadQuestionsFromRoom (goToPage, মানে Next/Prev-এর প্রতি ক্লিকে) — দুই
+    // জায়গাতেই আলাদাভাবে, কোনো cache ছাড়াই চলত। এখন টপিক-ওপেনের সময় একবার sort
+    // হয়ে এই cache-এ থেকে যায়, Next/Prev শুধু cache থেকে page slice করে — নতুন
+    // করে fetch/sort হয় না। টপিক বদলালে (key না মিললে) বা app process আবার শুরু
+    // হলে (cache খালি) স্বাভাবিকভাবেই fresh fetch হয় — reorder ফিচার ("পরের বার
+    // topic open করলে নতুন/ভুল প্রশ্ন সামনে আসবে") অক্ষত থাকে, কারণ প্রতিটা fresh
+    // টপিক-ওপেনেই নতুন করে sort হয়। ──
+    private var sortedQuestionsCache    : List<QuestionItem>? = null
+    private var sortedQuestionsCacheKey : String? = null
+
+    private fun sortedCacheKey(sheet: String, topicKey: String, mode: StudyMode) = "$sheet|$topicKey|${mode.name}"
+
+    /** topicId দিয়ে — টপিকের সব প্রশ্ন mastery-sort করে আনে, cache থাকলে reuse করে।
+     * `forceRefresh=true` দিলে (টপিক নতুন করে open করার সময়) সবসময় fresh sort হয়,
+     * যাতে reorder ফিচারটা ("পরের বার topic open করলে নতুন/ভুল প্রশ্ন সামনে আসবে") কাজ করে। */
+    private suspend fun getSortedQuestionsByTopicCached(
+        sheet: String, topicId: String, tag: String, forceRefresh: Boolean
+    ): List<QuestionItem> {
+        val mode = _state.value.mode
+        val key  = sortedCacheKey(sheet, topicId, mode)
+        val cached = sortedQuestionsCache
+        if (!forceRefresh && cached != null && sortedQuestionsCacheKey == key) return cached
+
+        val bookmarks = _state.value.bookmarkedIds
+        val sorted = repo.getRoomAllQuestionsByTopic(sheet, topicId, tag)
+            .map { q -> q.copy(isBookmarked = bookmarks.contains(q.id), isWeakTopic = isWeak(q.subTopic), isStudyDone = isStudyDone(q.id)) }
+            .sortedBy { isMastered(it.id, mode) || it.isStudyDone }
+        sortedQuestionsCache = sorted
+        sortedQuestionsCacheKey = key
+        return sorted
+    }
+
+    /** subject+subTopic (টেক্সট-ভিত্তিক) দিয়ে — একই cache-নীতি, উপরের ফাংশনের মতোই */
+    private suspend fun getSortedQuestionsCached(
+        sheet: String, subject: String, subTopic: String, tag: String, forceRefresh: Boolean
+    ): List<QuestionItem> {
+        val mode = _state.value.mode
+        val key  = sortedCacheKey(sheet, "$subject/$subTopic", mode)
+        val cached = sortedQuestionsCache
+        if (!forceRefresh && cached != null && sortedQuestionsCacheKey == key) return cached
+
+        val bookmarks = _state.value.bookmarkedIds
+        val sorted = repo.getRoomAllQuestions(sheet, subject, subTopic, tag)
+            .map { q -> q.copy(isBookmarked = bookmarks.contains(q.id), isWeakTopic = isWeak(q.subTopic), isStudyDone = isStudyDone(q.id)) }
+            .sortedBy { isMastered(it.id, mode) || it.isStudyDone }
+        sortedQuestionsCache = sorted
+        sortedQuestionsCacheKey = key
+        return sorted
+    }
     // ── FIX ("QBank প্রতিষ্ঠান/পদের ভিতর ঢুকলে ২-৩ সেকেন্ড 'কোনো প্রশ্ন নেই' দেখায়,
     // তারপর নিজে থেকেই ঠিক হয়ে যায়") — নিচে selectQBankYear()-এ ব্যবহার হয় ──
     private var qbankYearLoadToken: Long = 0L
@@ -556,7 +609,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            val bookmarks = _state.value.bookmarkedIds
             // ── FIX ("এক পেজে ৫০ না, সব একসাথে আসছে" সমস্যা): আগে এখানে
             // getRoomQuestionsForTopic() দিয়ে Room-এ ক্যাশ হওয়া টপিকের ALL প্রশ্ন
             // একসাথে state.questions-এ বসানো হতো (পেজিনেশন ছাড়াই) — তাই ১ম পাতাতেই
@@ -575,15 +627,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // প্রশ্ন একসাথে এনে গ্লোবালি isMastered/isStudyDone দিয়ে sort করে, *তারপর*
             // প্রথম পাতা কাটা হচ্ছে — তাই সঠিক-উত্তর-দেওয়া প্রশ্ন সত্যিই নিচে যাবে, আর
             // নতুন/ভুল প্রশ্ন পরের বার টপিক খুললে সামনে আসবে। ──
-            val allSorted = repo.getRoomAllQuestionsByTopic(sheet, topicId, tag)
-                .map { q ->
-                    q.copy(
-                        isBookmarked = bookmarks.contains(q.id),
-                        isWeakTopic  = isWeak(q.subTopic),
-                        isStudyDone  = isStudyDone(q.id)
-                    )
-                }
-                .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+            val allSorted = getSortedQuestionsByTopicCached(sheet, topicId, tag, forceRefresh = true)
             val total = allSorted.size
             val items = allSorted.take(PAGE_SIZE)
             Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=$total loaded_page1=${items.size}")
@@ -707,7 +751,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (roomCount > 0) {
                 // ── Room-first: instant load ──────────────────────────────────
                 Log.d("QuizVM", "Room hit: $roomCount questions for $subject/$subTopic")
-                loadQuestionsFromRoom(sheet, subject, subTopic, tag, page = 0)
+                loadQuestionsFromRoom(sheet, subject, subTopic, tag, page = 0, forceRefresh = true)
 
                 // Background-এ Firebase sync (REALTIME_DATA=true হলে)
                 if (BuildConfig.REALTIME_DATA) {
@@ -2704,21 +2748,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         _state.update { it.copy(questionsLoading = true) }
 
-        // ── FIX: আগে getRoomPagedQuestionsByTopic দিয়ে SQL LIMIT/OFFSET-এ আগে
-        // পেজ কাটা হতো, *তারপর* isMastered sort হতো — sort তখন শুধু ওই পেজের
-        // ভেতরেই কাজ করত। এখন পুরো টপিকের সব প্রশ্ন একসাথে এনে গ্লোবালি sort
-        // করে, তারপর পেজ কাটা হচ্ছে — তাই সঠিক-উত্তর-দেওয়া প্রশ্ন এখন সত্যিই
-        // "নিচের পেজে" চলে যায় (আগের মতো নিজের পেজেই আটকে থাকে না)। ──
-        val bookmarks  = _state.value.bookmarkedIds
-        val allSorted  = repo.getRoomAllQuestionsByTopic(sheet, topicId, tag)
-            .map { q ->
-                q.copy(
-                    isBookmarked = bookmarks.contains(q.id),
-                    isWeakTopic  = isWeak(q.subTopic),
-                    isStudyDone  = isStudyDone(q.id)
-                )
-            }
-            .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+        // ── PERF FIX: আগে এখানে প্রতিবার (Next/Prev-এর প্রতি ক্লিকে) fresh fetch+sort
+        // হতো — এখন cache থাকলে (একই টপিক, একই মোড) reuse করে, শুধু page slice
+        // করে। ক্যাশ miss হলে (যেমন ViewModel recreate) স্বাভাবিকভাবেই fresh sort
+        // হবে — নিচের কমেন্টে বিস্তারিত। ──
+        val allSorted = getSortedQuestionsByTopicCached(sheet, topicId, tag, forceRefresh = false)
 
         val total     = allSorted.size
         val questions = allSorted.drop(page * PAGE_SIZE).take(PAGE_SIZE)
@@ -2745,27 +2779,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Room DB থেকে paginated questions load করো — instant, Firebase call নেই।
      * goToPage() থেকেও এটা call হয়।
+     * `forceRefresh`: টপিক নতুন করে open করার সময় true দিতে হবে (fresh mastery-sort,
+     * "reorder" ফিচারের জন্য জরুরি) — goToPage (Next/Prev)-এর সময় false (ডিফল্ট),
+     * তাহলে cache থেকেই page slice হবে, বারবার পুরো টপিক re-sort হবে না।
      */
     private suspend fun loadQuestionsFromRoom(
-        sheet    : String,
-        subject  : String,
-        subTopic : String,
-        tag      : String,
-        page     : Int
+        sheet       : String,
+        subject     : String,
+        subTopic    : String,
+        tag         : String,
+        page        : Int,
+        forceRefresh: Boolean = false
     ) {
         _state.update { it.copy(questionsLoading = true) }
 
-        // ── একই FIX — loadQuestionsFromRoomByTopic()-এর উপরের কমেন্ট দ্রষ্টব্য ──
-        val bookmarks = _state.value.bookmarkedIds
-        val allSorted = repo.getRoomAllQuestions(sheet, subject, subTopic, tag)
-            .map { q ->
-                q.copy(
-                    isBookmarked = bookmarks.contains(q.id),
-                    isWeakTopic  = isWeak(q.subTopic),
-                    isStudyDone  = isStudyDone(q.id)
-                )
-            }
-            .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
+        // ── একই PERF FIX — loadQuestionsFromRoomByTopic()-এর উপরের কমেন্ট দ্রষ্টব্য ──
+        val allSorted = getSortedQuestionsCached(sheet, subject, subTopic, tag, forceRefresh = forceRefresh)
 
         val total     = allSorted.size
         val questions = allSorted.drop(page * PAGE_SIZE).take(PAGE_SIZE)
