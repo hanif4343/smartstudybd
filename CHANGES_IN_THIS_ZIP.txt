@@ -1,0 +1,27 @@
+এই zip-এ শুধু এই সেশনে বদলানো/নতুন ফাইলগুলোই আছে (folder structure অরিজিনাল রিপোর মতোই) —
+বাকি সব ফাইল অপরিবর্তিত, এখানে নেই। আপনার আসল রিপোতে এই ফাইলগুলো শুধু replace/copy-paste
+করে দিন।
+
+EDITED (৭টা ফাইল):
+  app/src/main/java/com/hanif/smartstudy/ui/menu/SettingsScreen.kt
+  app/src/main/java/com/hanif/smartstudy/util/TypingPassageProvider.kt
+  app/src/main/java/com/hanif/smartstudy/util/CurriculumStageContentProvider.kt
+  app/src/main/java/com/hanif/smartstudy/ui/typing/CurriculumStageAdminScreen.kt
+  app/src/main/java/com/hanif/smartstudy/data/repository/ContentRepository.kt
+  app/src/main/java/com/hanif/smartstudy/util/SessionManager.kt
+  app/src/main/java/com/hanif/smartstudy/viewmodel/MenuViewModel.kt
+
+NEW (১টা ফাইল):
+  README_FIRST.md   ← রিপোর রুটে রাখার জন্য
+
+⚠️ DELETE করতে হবে (zip দিয়ে ডিলিশন পাঠানো যায় না, তাই ম্যানুয়ালি করতে হবে):
+  app/src/main/java/com/hanif/smartstudy/data/model/DataSourceMode.kt
+  → আপনার রিপো থেকে এই ফাইলটা নিজে হাতে ডিলিট করে দিন, এটা আর ব্যবহৃত হচ্ছে না।
+
+পুশ করার আগে:
+  ১. উপরের ৭টা ফাইল আপনার রিপোতে replace করুন
+  ২. DataSourceMode.kt ফাইলটা ডিলিট করুন
+  ৩. README_FIRST.md রুটে যোগ করুন
+  ৪. Android Studio-তে একবার build/run করে Settings স্ক্রিন + Typing + Curriculum-Stage
+     সেকশন চেক করে নিন (আমি এই সেশনে build-verify করতে পারিনি — sandbox-এ ইন্টারনেট নেই)
+  ৫. সব ঠিক থাকলে push করুন
