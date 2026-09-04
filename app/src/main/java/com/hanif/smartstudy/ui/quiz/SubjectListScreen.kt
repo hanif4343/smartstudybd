@@ -1029,7 +1029,15 @@ fun SubTopicListScreen(
     onDeleteSubTopic: (name: String) -> Unit = {},
     otherSubjectsForMove : List<String> = emptyList(),
     onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
-    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap()
+    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    // ── FIX ("টপিকে ঢুকে প্রশ্ন দেখে Back করলে লিস্ট আবার প্রথম থেকে দেখায়"):
+    // এই স্ক্রিনের LazyColumn আগে নিজের ভেতরেই rememberLazyListState() বানাত,
+    // যেটা depth-1 (এই স্ক্রিন) ↔ depth-2 (প্রশ্ন-লিস্ট) এর মধ্যে CoreScreen-এর
+    // when-branch বদলানোর সময় dispose হয়ে যেত (state হারিয়ে ফেলত)। এখন স্ক্রল
+    // ইনডেক্স বাইরে থেকে (ViewModel-এ) সংরক্ষণ করে ফিরে আসার সময় সেখান থেকেই
+    // পুনরুদ্ধার করা হয়। ──
+    initialScrollIndex: Int = 0,
+    onScrollIndexChanged: (Int) -> Unit = {}
 ) {
     val isQBank = mode == StudyMode.QBANK
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -1045,7 +1053,20 @@ fun SubTopicListScreen(
     val visibleSubTopics = if (isAdmin && isReorderMode) subTopics
                             else subTopics.filter { it.hasQuestions() }
 
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
+
+    // ── স্ক্রল থামলেই (scrollInProgress == false) সবশেষ প্রথম-দৃশ্যমান index
+    // ViewModel-এ রিপোর্ট হয় — প্রতি ফ্রেমে না পাঠিয়ে শুধু থামার পরে, যাতে অযথা
+    // অনেকবার state আপডেট না হয় ──
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { inProgress ->
+                if (!inProgress) onScrollIndexChanged(listState.firstVisibleItemIndex)
+            }
+    }
+
     LazyColumn(
+        state          = listState,
         modifier       = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
