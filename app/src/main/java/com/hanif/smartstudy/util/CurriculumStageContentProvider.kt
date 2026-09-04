@@ -4,9 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.TypingCurriculumStageContentEntity
-import com.hanif.smartstudy.data.model.DataSourceMode
 import com.hanif.smartstudy.data.model.TypingSheetStageContent
-import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.GasContentService
 
 /**
@@ -25,7 +23,6 @@ object CurriculumStageContentProvider {
     private const val TAG = "CurriculumStageContentProvider"
 
     @Volatile private var ramCache: Map<String, List<String>>? = null
-    @Volatile private var ramCacheMode: DataSourceMode? = null
 
     private fun key(track: String, stage: Int) = "$track:$stage"
 
@@ -37,16 +34,14 @@ object CurriculumStageContentProvider {
     }
 
     private suspend fun getAllGrouped(context: Context): Map<String, List<String>> {
-        val mode = SessionManager(context).getDataSourceMode()
-        ramCache?.let { if (ramCacheMode == mode) return it }
+        ramCache?.let { return it }
 
         val dao = AppDatabase.getInstance(context).typingCurriculumStageContentDao()
 
         val fresh: List<TypingSheetStageContent> = try {
-            if (mode == DataSourceMode.GOOGLE_SHEET) GasContentService.fetchCurriculumStageContent()
-            else ContentFetchService.fetchCurriculumStageContent()
+            GasContentService.fetchCurriculumStageContent()
         } catch (e: Exception) {
-            Log.w(TAG, "fetch failed (mode=$mode): ${e.message}")
+            Log.w(TAG, "fetch failed: ${e.message}")
             emptyList()
         }
 
@@ -76,7 +71,7 @@ object CurriculumStageContentProvider {
         val grouped = rows.filter { it.content.isNotBlank() && it.stageInt() != null }
             .groupBy({ key(it.track, it.stageInt()!!) }, { it.content })
 
-        if (rows.isNotEmpty()) { ramCache = grouped; ramCacheMode = mode }
+        if (rows.isNotEmpty()) { ramCache = grouped }
         return grouped
     }
 
@@ -85,6 +80,5 @@ object CurriculumStageContentProvider {
      *  এডমিন সাথে সাথে নিজের পরিবর্তন যাচাই করতে পারবে (অ্যাপ রিস্টার্ট ছাড়াই)। */
     fun forceRefreshNextTime() {
         ramCache = null
-        ramCacheMode = null
     }
 }
