@@ -276,9 +276,6 @@ class ContentRepository(private val context: Context) {
      * অপরিবর্তিত থাকে + local notification দেখানো হয়।
      */
     suspend fun syncReferenceData(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
-            return@withContext false
-        }
         val now = System.currentTimeMillis()
         if (!force && (now - _lastRefSyncAt) < REF_SYNC_MIN_GAP_MS) {
             val hasCached = refDao.getAllSubjects().isNotEmpty()
@@ -369,9 +366,6 @@ class ContentRepository(private val context: Context) {
      * অপরিবর্তিত থাকে + local notification।
      */
     suspend fun syncExamAppearances(): Boolean = withContext(Dispatchers.IO) {
-        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
-            return@withContext false
-        }
         if (!isOnline()) return@withContext false
         val appearances = com.hanif.smartstudy.data.remote.CdnService
             .fetchReferenceJson<com.hanif.smartstudy.data.model.ExamAppearanceRef>("exam-appearances.json")
@@ -492,9 +486,6 @@ class ContentRepository(private val context: Context) {
      * মোডে কাজ করে, ব্যর্থ হলে খালি map রিটার্ন করে (progress bar দেখাবে না, crash করবে না)।
      */
     suspend fun getReviewProgress(sheet: String): com.hanif.smartstudy.data.remote.GasContentService.ReviewProgress {
-        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
-            return com.hanif.smartstudy.data.remote.GasContentService.ReviewProgress()
-        }
         return com.hanif.smartstudy.data.remote.GasContentService.fetchReviewProgress(sheet)
     }
 
@@ -667,9 +658,6 @@ class ContentRepository(private val context: Context) {
         cursor     : String? = null,
         limit      : Int = 50
     ): DataState<QuestionsPage> {
-        if (session.getDataSourceMode() != com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
-            return DataState.Error("getQuestionsPage শুধু Google Sheet ডেটা-সোর্স মোডে কাজ করে")
-        }
         return withContext(Dispatchers.IO) {
             try {
                 when (sheet) {
