@@ -228,10 +228,6 @@ fun QuestionListScreen(
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
     var activeHighlightId by remember { mutableStateOf<String?>(null) }
-    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট — কোন প্রশ্ন (local index, pagedQuestions-এর
-    // ভেতরে) নিয়ে চ্যাট খোলা আছে। null মানে বন্ধ। "পরের প্রশ্ন" চাপলে/বললে +1 হয়ে
-    // পরের প্রশ্নে চলে যায়, পেজের শেষ প্রশ্নে থাকলে বাটন/কমান্ড কাজ করে না (hasNext=false)। ──
-    var voiceAiIdx by remember { mutableStateOf<Int?>(null) }
 
     // ── Study: "শুধু প্রশ্ন দেখ" মোড — এই টগলটা শুধু Study screen-এর
     //    টপবারেই থাকে (Settings/Menu-তে না), Quiz/QBank-এ এফেক্ট নেই।
@@ -676,7 +672,9 @@ fun QuestionListScreen(
                                     onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     },
-                                    onAskAi = { voiceAiIdx = localIdx }
+                                    onAskAiExplain = { question, correctAnswer, subjectTopic ->
+                                        viewModel.explainQuestionWithAi(question, correctAnswer, subjectTopic)
+                                    }
                                 )
                             }
                         } else {
@@ -716,7 +714,9 @@ fun QuestionListScreen(
                             onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             },
-                            onAskAi = { voiceAiIdx = localIdx }
+                            onAskAiExplain = { question, correctAnswer, subjectTopic ->
+                                viewModel.explainQuestionWithAi(question, correctAnswer, subjectTopic)
+                            }
                         )
                         }
                         }
@@ -1203,36 +1203,6 @@ fun QuestionListScreen(
             onReport     = { viewModel.reportQuestion(reportIdx, it); reportIdx = -1 },
             onDismiss    = { reportIdx = -1 }
         )
-    }
-
-    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট — "পরের প্রশ্ন"-এ voiceAiIdx+1 হয়ে পরের
-    // QuestionCard-এর context লোড হয়, পেজের শেষ প্রশ্নে পৌঁছালে hasNext=false
-    // (পরের পেজ automatically টানার দরকার নেই — এটুকুই যথেষ্ট প্রথম ভার্সনের জন্য)। ──
-    voiceAiIdx?.let { idx ->
-        val vq = pagedQuestions.getOrNull(idx)
-        if (vq != null) {
-            // ── "একই ক্যাটাগরির আরও দেখুন" বাটনের জন্য — এখন লোড করা pagedQuestions
-            // থেকেই একই subject+subTopic-এর বাকি প্রশ্নগুলো (নিজেরটা বাদ দিয়ে) ──
-            val related = remember(vq.id) {
-                pagedQuestions.filter {
-                    it.id != vq.id && it.subject == vq.subject && it.subTopic == vq.subTopic
-                }
-            }
-            com.hanif.smartstudy.ui.aichat.QuestionVoiceAiSheet(
-                item             = vq,
-                mode             = mode,
-                hasNext          = idx < pagedQuestions.lastIndex,
-                onNext           = { voiceAiIdx = (idx + 1).coerceAtMost(pagedQuestions.lastIndex) },
-                onClose          = { voiceAiIdx = null },
-                relatedQuestions = related,
-                onSwitchTo       = { target ->
-                    val targetIdx = pagedQuestions.indexOfFirst { it.id == target.id }
-                    if (targetIdx >= 0) voiceAiIdx = targetIdx
-                }
-            )
-        } else {
-            voiceAiIdx = null
-        }
     }
 }
 
