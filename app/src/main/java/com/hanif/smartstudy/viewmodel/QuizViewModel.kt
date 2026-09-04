@@ -1469,6 +1469,25 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * ── 🤖 "AI ব্যাখ্যা" বাটন (উত্তর সাবমিট করার পর প্রতিটা প্রশ্নে দেখা যায়) ──
+     * Settings-এ সেভ করা key দিয়ে Groq → Mistral → Cerebras → Gemini ক্রমে চেষ্টা হয়
+     * (gradeWrittenWithAi-এর মতোই একই key/একই রোটেশন — একটা ব্যর্থ হলে সাথে সাথেই
+     * পরেরটা চেষ্টা হয়, তাই দ্রুত)। কোনো key সেভ করা না থাকলে বা সব ব্যর্থ হলে null —
+     * তখন UI-তে "ব্যাখ্যা আনা যায়নি" দেখানো হয়। রেজাল্ট শুধু ইউজারের ফোনেই ক্যাশ হয়
+     * (AiExplanationCache), কোনো সার্ভার/ডাটাবেসে সেভ হয় না।
+     */
+    suspend fun explainQuestionWithAi(question: String, correctAnswer: String, subjectTopic: String): String? {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey()) return null
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.explainQuestion(
+            question      = question,
+            correctAnswer = correctAnswer,
+            subjectTopic  = subjectTopic,
+            keys          = keys
+        )
+    }
+
+    /**
      * ── "প্রশ্ন এডিট করুন" ডায়ালগে "🔄 Regenerate" বাটনে ব্যবহারের জন্য — প্রশ্ন
      * এডিট/পুনর্লিখন করার পর তার সাথে মিলিয়ে ৪টা অপশন ও সঠিক উত্তর AI দিয়ে আবার
      * তৈরি করে দেয় (SharedComponents.kt-এর AdminFieldEditDialog থেকে কল হয়)।
