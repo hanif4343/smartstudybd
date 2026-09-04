@@ -42,6 +42,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.local.LocalTechniqueStore
+import com.hanif.smartstudy.util.AiExplanationCache
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.data.remote.ImgBbResult
@@ -254,10 +255,17 @@ fun QuestionCard(
     // ── "প্রশ্ন" এডিট করার সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে ৪টা অপশন + সঠিক
     // উত্তর আবার জেনারেট করা — শুধু AdminFieldEditDialog-এ পাস-থ্রু হয়, null থাকলে
     // বাটনটাই দেখা যাবে না (আগের আচরণ অপরিবর্তিত থাকে) ──
+    // ── 🔄 "প্রশ্ন এডিট করুন" ডায়ালগে "Regenerate" বাটনে ব্যবহৃত ──
     onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? = null,
-    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট বাটন — Quiz/QBank/Study তিনটাতেই দেখা যায়।
-    // null থাকলে বাটনটাই রেন্ডার হয় না (যেমন ChallengeExamScreen-এ এখনো ব্যবহার হয়নি)। ──
-    onAskAi        : (() -> Unit)? = null,
+    // ── 🤖 "AI ব্যাখ্যা" বাটন — উত্তর সাবমিট করার পর দেখা যায় (Quiz/QBank/Study
+    // তিনটাতেই)। ক্লিক করলে প্রশ্নের পূর্ণ, শিক্ষকের মতো ব্যাখ্যা আনে (অঙ্ক হলে ধাপে
+    // ধাপে সমাধান, ইংরেজি গ্রামার হলে বাংলা-ইংরেজি মিশিয়ে) — Settings-এ সেভ করা
+    // key দিয়ে Groq→Mistral→Cerebras→Gemini ক্রমে চেষ্টা হয় (একটা ব্যর্থ হলে সাথে
+    // সাথে পরেরটা)। null থাকলে বাটনটাই দেখা যাবে না। রেজাল্ট শুধু ডিভাইসে ক্যাশ হয়
+    // (AiExplanationCache) — ডাটাবেসে সেভ হয় না। আগে এখানে একটা প্রশ্ন-ভিত্তিক
+    // ভয়েস AI চ্যাট বাটন (onAskAi) ছিল, সেটা সরিয়ে এই ফিচার দিয়ে প্রতিস্থাপন
+    // করা হয়েছে। ──
+    onAskAiExplain: (suspend (question: String, correctAnswer: String, subjectTopic: String) -> String?)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
@@ -349,20 +357,6 @@ fun QuestionCard(
                                 tint = if (isThisSpeaking || isThisPaused) Indigo600 else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp)
                             )
-                        }
-                    }
-                    if (onAskAi != null) {
-                        // ── আগে এখানে শুধু 🤖 ইমোজি ছিল — অনেকেই বুঝতে পারতো না এটা কিসের
-                        // বাটন, তাই এখন স্পষ্ট "AI" লেখা একটা ছোট্ট ব্যাজ ──
-                        IconButton(onClick = onAskAi, modifier = Modifier.size(28.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Indigo600.copy(alpha = 0.12f))
-                                    .padding(horizontal = 5.dp, vertical = 2.dp)
-                            ) {
-                                Text("AI", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
-                            }
                         }
                     }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
@@ -706,6 +700,18 @@ fun QuestionCard(
                 }
             }
 
+            // ── 🤖 AI ব্যাখ্যা — উত্তর সাবমিট করার পরই দেখা যায় ──
+            if (showAnswerBox && onAskAiExplain != null) {
+                Spacer(Modifier.height(8.dp))
+                AiExplanationSection(
+                    questionKey   = item.sourceKey(),
+                    question      = displayQuestion,
+                    correctAnswer = item.answer,
+                    subjectTopic  = "${item.subject} ${item.subTopic}".trim(),
+                    onFetch       = onAskAiExplain
+                )
+            }
+
             // ── AI ফলাফল (ঠিক/ভুল) নির্ধারণ হয়ে গেলে সাথে সাথেই পরের প্রশ্নে
             // না গিয়ে ৫ সেকেন্ড এই ব্যানারে ফলাফল দেখানো হয় (উপরের LaunchedEffect-এ
             // delay(5000) চলাকালীন) — তারপর অটো পরের প্রশ্নে চলে যায়। ──
@@ -872,6 +878,120 @@ fun QuestionCard(
             onAdminDelete = onAdminDelete,
             onRegenerateOptions = onRegenerateOptions
         )
+    }
+}
+
+/**
+ * ── 🤖 "AI ব্যাখ্যা" — উত্তর সাবমিট করার পর প্রতিটা প্রশ্নে দেখা যায় ──
+ * বাটনে ক্লিক করলে প্রথমে ডিভাইসের লোকাল ক্যাশ চেক করে (AiExplanationCache) —
+ * আগে একবার আনা থাকলে সাথে সাথেই দেখায়, ফের API কল করে না। না থাকলে
+ * onFetch (Groq→Mistral→Cerebras→Gemini রোটেশন) দিয়ে আনে, সফল হলে লোকালি
+ * সেভ করে রাখে (শুধু এই ডিভাইসে — কোনো সার্ভার/ডাটাবেসে যায় না)।
+ */
+@Composable
+private fun AiExplanationSection(
+    questionKey  : String,
+    question     : String,
+    correctAnswer: String,
+    subjectTopic : String,
+    onFetch      : suspend (question: String, correctAnswer: String, subjectTopic: String) -> String?
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var explanation by remember(questionKey) { mutableStateOf<String?>(null) }
+    var loading by remember(questionKey) { mutableStateOf(false) }
+    var failed by remember(questionKey) { mutableStateOf(false) }
+    var checkedCache by remember(questionKey) { mutableStateOf(false) }
+
+    // ── প্রশ্ন বদলালেই (questionKey বদলালে) আগে থেকে ডিভাইসে সেভ করা ব্যাখ্যা
+    // আছে কিনা নিঃশব্দে একবার চেক করে নেয় — থাকলে বাটনে ক্লিক করার আগেই
+    // "✅ আগে দেখা হয়েছে" ইঙ্গিত হিসেবে সরাসরি দেখানো যেতে পারে, তবে UI সহজ
+    // রাখতে শুধু cache থাকলে সেটা মনে রাখা হলো, বাটনেই দেখাবে। ──
+    LaunchedEffect(questionKey) {
+        checkedCache = false
+        explanation = AiExplanationCache.get(ctx, questionKey)
+        checkedCache = true
+    }
+
+    fun fetchNow() {
+        if (loading) return
+        scope.launch {
+            loading = true
+            failed = false
+            val result = runCatching { onFetch(question, correctAnswer, subjectTopic) }.getOrNull()
+            loading = false
+            if (result.isNullOrBlank()) {
+                failed = true
+            } else {
+                explanation = result
+                AiExplanationCache.save(ctx, questionKey, result)
+            }
+        }
+    }
+
+    val current = explanation
+    when {
+        current != null -> {
+            Card(
+                shape  = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Indigo600.copy(alpha = 0.06f)),
+                border = BorderStroke(1.dp, Indigo600.copy(alpha = 0.25f))
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🤖", fontSize = 13.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "AI ব্যাখ্যা",
+                            fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Indigo600, fontFamily = NotoSansBengali
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        current,
+                        fontSize   = 13.sp,
+                        lineHeight = 19.sp,
+                        fontFamily = NotoSansBengali,
+                        color      = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+        loading -> {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(15.dp), strokeWidth = 2.dp, color = Indigo600)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "🤖 AI ব্যাখ্যা আনা হচ্ছে…",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        else -> {
+            OutlinedButton(
+                onClick  = { fetchNow() },
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(10.dp),
+                colors   = ButtonDefaults.outlinedButtonColors(contentColor = Indigo600),
+                border   = BorderStroke(1.dp, Indigo600.copy(alpha = 0.4f))
+            ) {
+                Text("🤖 AI ব্যাখ্যা", fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            if (failed) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "⚠️ AI ব্যাখ্যা আনা যায়নি — Settings-এ API key দেওয়া আছে কিনা দেখুন, অথবা আবার চেষ্টা করুন",
+                    fontSize = 10.sp, fontFamily = NotoSansBengali,
+                    color = Color(0xFFF59E0B)
+                )
+            }
+        }
     }
 }
 
