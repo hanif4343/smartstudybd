@@ -19,6 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.ads.AdBannerView
@@ -85,6 +87,12 @@ fun SubjectListScreen(
     onMoveSubject  : (Int, Int) -> Unit = { _, _ -> },
     onRenameSubject: (old: String, new: String) -> Unit = { _, _ -> },
     onDeleteSubject: (name: String) -> Unit = {},
+    // ── Phase 4 (Serial Manager) — শুধু যেসব caller আসলে onSaveSerialOrder ওয়্যার
+    // করেছে সেখানেই এই মেনু-অপশন দেখানো হবে (ডিফল্ট false), নাহলে QBank-এর নেস্টেড
+    // প্রতিষ্ঠান/পদ/সাল-ভিত্তিক লিস্টে (যেগুলো এখনো এই ফিচার ওয়্যার করেনি) বাটন
+    // দেখা যেত কিন্তু Save করলে চুপচাপ কিছুই হতো না ──
+    enableSerialManager: Boolean = false,
+    onSaveSerialOrder: (List<String>) -> Unit = {},
     // ── Review System (Admin-only) — subjectId ধরে {total, reviewed} % — খালি map হলে
     // কোনো badge দেখাবে না (non-admin/non-lazy স্ক্রিনে এটা পাস করা হয় না) ──
     reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
@@ -151,6 +159,8 @@ fun SubjectListScreen(
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
+    var showSerialManager by remember { mutableStateOf(false) }
     // ── App feature request ৪: কোন subjectId-এর ইমুজি এডিট হচ্ছে (null মানে বন্ধ) ──
     var emojiEditTargetId by remember { mutableStateOf<String?>(null) }
     var emojiEditCurrentEmoji by remember { mutableStateOf("") }
@@ -191,7 +201,8 @@ fun SubjectListScreen(
                             isReorderMode   = isReorderMode,
                             onToggleReorder = onToggleReorder,
                             onRenameClick   = { showRenameDialog = true },
-                            onDeleteClick   = { showDeleteDialog = true }
+                            onDeleteClick   = { showDeleteDialog = true },
+                            onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
                         )
                     }
                 }
@@ -366,6 +377,16 @@ fun SubjectListScreen(
             onDismiss = { showDeleteDialog = false }
         )
     }
+    // ── Phase 4: Serial Manager — subjects এখানে ইতিমধ্যে বর্তমান display-ক্রমেই আসে,
+    // তাই এন্ট্রি নাম্বার = তাদের বর্তমান পজিশন + ১ ──
+    if (isAdmin && showSerialManager) {
+        SerialManagerDialog(
+            title     = "$modeLabel — বিষয়ের ক্রম",
+            entries   = subjects.mapIndexed { idx, s -> s.name to (idx + 1) },
+            onDismiss = { showSerialManager = false },
+            onSave    = { orderedNames -> onSaveSerialOrder(orderedNames) }
+        )
+    }
     // ── App feature request ৪: এডমিন ইমুজি এডিট ডায়ালগ — আইকনে ট্যাপ করলে খোলে ──
     emojiEditTargetId?.let { targetId ->
         AdminEmojiEditDialog(
@@ -388,7 +409,10 @@ private fun AdminMenuButton(
     onMoveClick    : (() -> Unit)? = null,
     // ── "🔄 Force Full Resync" — শুধু Admin-এর ড্রপডাউনে, দেখো
     // QuizViewModel.forceFullResync()/ContentRepository.forceFullResync() এর কমেন্ট ──
-    onForceResyncClick: (() -> Unit)? = null
+    onForceResyncClick: (() -> Unit)? = null,
+    // ── Phase 4 (Serial Manager): ড্র্যাগ করে সাজানোর বদলে সরাসরি প্রতিটার পাশে
+    // নাম্বার বসিয়ে ক্রম ঠিক করার শর্টকাট — দেখো SerialManagerDialog ──
+    onOpenSerialManager: (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -412,11 +436,18 @@ private fun AdminMenuButton(
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
                 text = {
-                    Text(if (isReorderMode) "✖️ ক্রম সাজানো শেষ করুন" else "🔢 ক্রম ঠিক করুন",
+                    Text(if (isReorderMode) "✖️ ক্রম সাজানো শেষ করুন" else "🔢 ক্রম ঠিক করুন (ড্র্যাগ করে)",
                         fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                 },
                 onClick = { expanded = false; onToggleReorder() }
             )
+            if (onOpenSerialManager != null) {
+                DropdownMenuItem(
+                    text = { Text("🔢 সরাসরি নাম্বার বসান", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4F46E5)) },
+                    onClick = { expanded = false; onOpenSerialManager() }
+                )
+            }
             DropdownMenuItem(
                 text = { Text("✏️ Rename", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 onClick = { expanded = false; onRenameClick() }
@@ -440,6 +471,132 @@ private fun AdminMenuButton(
                     color = Color(0xFFEF4444)) },
                 onClick = { expanded = false; onDeleteClick() }
             )
+        }
+    }
+}
+
+/**
+ * Phase 4 — Serial Manager: ড্র্যাগ করে এক-এক করে সরানোর বদলে, admin প্রতিটা
+ * item-এর পাশে সরাসরি একটা নাম্বার টাইপ করে দিতে পারেন। Save করলে নাম্বার
+ * অনুযায়ী sort হয়ে (duplicate থাকলে আগের আপেক্ষিক ক্রম বজায় রেখে stable-sort)
+ * চূড়ান্ত ১,২,৩...N ক্রম হিসেবে persist হয় — দেখো QuizViewModel.applySubjectSerialOrder/
+ * applySubTopicSerialOrder, যেগুলো একই persistSubjectOrder/persistSubTopicOrder
+ * পাইপলাইন (offline queue/Firebase sync) রিইউজ করে।
+ */
+@Composable
+private fun SerialManagerDialog(
+    title  : String,
+    entries: List<Pair<String, Int>>,   // name to current-serial (order না থাকলে বড় নাম্বার/শেষে)
+    onDismiss: () -> Unit,
+    onSave   : (List<String>) -> Unit
+) {
+    // ── আইটেমগুলোর জন্য এডিটেবল টেক্সট — শুরুতে বর্তমান ক্রম-অনুযায়ী ১,২,৩...N বসানো
+    // থাকে (entries ইতিমধ্যে ওই ক্রমেই আসে), যাতে খালি থেকে শুরু করা না লাগে ──
+    val numbers = remember {
+        mutableStateMapOf<String, String>().apply {
+            entries.forEachIndexed { idx, (name, _) -> put(name, (idx + 1).toString()) }
+        }
+    }
+    // ── কোন নাম্বারগুলো duplicate (একাধিক আইটেম একই নাম্বারে) — সেভের আগে admin-কে
+    // ভিজ্যুয়ালি সতর্ক করার জন্য, ব্লক করার জন্য না (সেভ করলে stable-sort দিয়ে
+    // ঠিকই ১..N compact হয়ে যাবে) ──
+    val duplicateNames by remember {
+        derivedStateOf {
+            val counts = numbers.values.filter { it.toIntOrNull() != null }.groupingBy { it }.eachCount()
+            numbers.filterValues { (counts[it] ?: 0) > 1 }.keys
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape    = RoundedCornerShape(18.dp),
+            color    = Color.White,
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.85f)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("🔢 সিরিয়াল ম্যানেজার", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+                        Text(title, fontSize = 12.sp, color = Color.Gray, fontFamily = NotoSansBengali)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন")
+                    }
+                }
+                if (duplicateNames.isNotEmpty()) {
+                    Surface(
+                        color    = Color(0xFFFFF3CD),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            "⚠️ একই নাম্বার একাধিক জায়গায় আছে — Save করলে ওপরে যেটা আছে সেটাই আগে বসবে। " +
+                                "নিশ্চিত না হলে নাম্বারগুলো আলাদা করে দিন।",
+                            fontSize = 11.sp, color = Color(0xFF92400E), fontFamily = NotoSansBengali,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    items(entries, key = { it.first }) { (name, _) ->
+                        val isDup = duplicateNames.contains(name)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(
+                                    if (isDup) Color(0xFFFFF3CD) else Color(0xFFF8FAFC),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(name, fontSize = 13.sp, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                            OutlinedTextField(
+                                value         = numbers[name] ?: "",
+                                onValueChange = { v -> if (v.length <= 4 && v.all { it.isDigit() }) numbers[name] = v },
+                                singleLine    = true,
+                                modifier      = Modifier.width(70.dp),
+                                textStyle     = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                            )
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text("বাতিল", fontFamily = NotoSansBengali)
+                    }
+                    Button(
+                        onClick = {
+                            // ── stable sort by (number, original index) — number না দিলে
+                            // (blank/invalid) সবচেয়ে বড় ধরে শেষে চলে যাবে ──
+                            val originalIndex = entries.mapIndexed { idx, (name, _) -> name to idx }.toMap()
+                            val sortedNames = entries.map { it.first }
+                                .sortedWith(
+                                    compareBy(
+                                        { numbers[it]?.toIntOrNull() ?: Int.MAX_VALUE },
+                                        { originalIndex[it] ?: 0 }
+                                    )
+                                )
+                            onSave(sortedNames)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                    ) {
+                        Text("✅ সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
@@ -1029,6 +1186,9 @@ fun SubTopicListScreen(
     onDeleteSubTopic: (name: String) -> Unit = {},
     otherSubjectsForMove : List<String> = emptyList(),
     onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
+    // ── Phase 4 (Serial Manager) — দেখো SubjectListScreen-এর একই প্যারামিটারের কমেন্ট ──
+    enableSerialManager: Boolean = false,
+    onSaveSerialOrder: (List<String>) -> Unit = {},
     reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
     // ── FIX ("টপিকে ঢুকে প্রশ্ন দেখে Back করলে লিস্ট আবার প্রথম থেকে দেখায়"):
     // এই স্ক্রিনের LazyColumn আগে নিজের ভেতরেই rememberLazyListState() বানাত,
@@ -1043,6 +1203,8 @@ fun SubTopicListScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveDialog   by remember { mutableStateOf(false) }
+    // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
+    var showSerialManager by remember { mutableStateOf(false) }
 
     // ── প্রশ্ন-শূন্য অধ্যায় সাধারণ ব্রাউজিং-এ কখনোই দেখানো হবে না (student ভুল করে
     // ফাঁকা টপিকে ঢুকবে না, আর হেডারের "X টি অধ্যায়" কাউন্টও লিস্টে যা দেখা যাচ্ছে
@@ -1092,7 +1254,8 @@ fun SubTopicListScreen(
                             onToggleReorder = onToggleReorder,
                             onRenameClick   = { showRenameDialog = true },
                             onDeleteClick   = { showDeleteDialog = true },
-                            onMoveClick     = if (otherSubjectsForMove.isNotEmpty()) { { showMoveDialog = true } } else null
+                            onMoveClick     = if (otherSubjectsForMove.isNotEmpty()) { { showMoveDialog = true } } else null,
+                            onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
                         )
                     }
                 }
@@ -1169,6 +1332,17 @@ fun SubTopicListScreen(
             otherSubjects = otherSubjectsForMove,
             onConfirm     = { oldTopic, newSubject, newTopicName -> onMoveSubTopicToSubject(oldTopic, newSubject, newTopicName) },
             onDismiss     = { showMoveDialog = false }
+        )
+    }
+    // ── Phase 4: Serial Manager — subTopics এখানে ইতিমধ্যে বর্তমান display-ক্রমেই
+    // আসে (visibleSubTopics নয়, পুরো subTopics — model test বাদ দিয়ে, কারণ ওটার
+    // আলাদা কোনো serial নেই) ──
+    if (isAdmin && showSerialManager) {
+        SerialManagerDialog(
+            title     = "$subject — অধ্যায়ের ক্রম",
+            entries   = subTopics.filterNot { it.isModelTest }.mapIndexed { idx, st -> st.name to (idx + 1) },
+            onDismiss = { showSerialManager = false },
+            onSave    = { orderedNames -> onSaveSerialOrder(orderedNames) }
         )
     }
 }
