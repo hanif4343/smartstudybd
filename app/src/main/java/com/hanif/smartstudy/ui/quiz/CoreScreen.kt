@@ -330,6 +330,8 @@ fun CoreScreen(
                 reviewProgress = state.reviewProgressTopics,
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.navigateBack() },
+                initialScrollIndex   = state.subTopicScrollIndex,
+                onScrollIndexChanged = { viewModel.updateSubTopicScrollIndex(it) },
                 isAdmin         = state.isAdmin,
                 isReorderMode   = state.isReorderMode,
                 isSavingOrder   = state.isSavingOrder,
@@ -361,7 +363,9 @@ fun CoreScreen(
                 weakTopics = emptyList(),
                 isLoading  = state.isLoading,
                 error      = state.error,
-                onSubject  = { viewModel.selectQBankInstitution(it) },
+                // ── প্রতিটা নতুন প্রতিষ্ঠান খোলার সময় স্ক্রল ইনডেক্স রিসেট — নাহলে আগের
+                // যেকোনো লিস্টের পুরনো স্ক্রল পজিশন ভুল করে এখানে দেখাতে পারে ──
+                onSubject  = { viewModel.updateSubTopicScrollIndex(0); viewModel.selectQBankInstitution(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
                 // ── App feature request ৩: Institution লিস্টে Rename/Delete (Quiz-এর
@@ -400,6 +404,8 @@ fun CoreScreen(
                 onSubTopic  = { viewModel.selectQBankDesignationUnderInstitution(it) },
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.qbankFilterBack() },
+                initialScrollIndex   = state.subTopicScrollIndex,
+                onScrollIndexChanged = { viewModel.updateSubTopicScrollIndex(it) },
                 // ── App feature request ৩: এই নেস্টেড লিস্টে পদবী Rename/Delete/Move —
                 // topicId এখানে আসলে postId (দেখো rebuildQBankInstitutions()-এ
                 // SubTopicEntry.topicId = postId) ──
@@ -466,7 +472,7 @@ fun CoreScreen(
                 weakTopics = emptyList(),
                 isLoading  = state.isLoading,
                 error      = state.error,
-                onSubject  = { viewModel.selectQBankPost(it) },
+                onSubject  = { viewModel.updateSubTopicScrollIndex(0); viewModel.selectQBankPost(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
                 // ── App feature request ৩: পদবী লিস্টে Rename/Delete (Institution লিস্টের
@@ -505,6 +511,8 @@ fun CoreScreen(
                 onSubTopic  = { viewModel.selectQBankInstitutionUnderPost(it) },
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.qbankFilterBack() },
+                initialScrollIndex   = state.subTopicScrollIndex,
+                onScrollIndexChanged = { viewModel.updateSubTopicScrollIndex(it) },
                 // ── App feature request ৩: এই নেস্টেড লিস্টে প্রতিষ্ঠান Rename/Delete/Move —
                 // topicId এখানে আসলে institutionId (দেখো rebuildQBankPosts()-এ
                 // SubTopicEntry.topicId = instId) ──
@@ -536,7 +544,7 @@ fun CoreScreen(
                 weakTopics = state.weakTopics,
                 isLoading  = state.isLoading,
                 error      = state.error,
-                onSubject  = { viewModel.navigateToSubjectLazy(it) },
+                onSubject  = { viewModel.updateSubTopicScrollIndex(0); viewModel.navigateToSubjectLazy(it) },
                 reviewProgress = state.reviewProgressSubjects,
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
