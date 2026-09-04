@@ -4,8 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.hanif.smartstudy.data.local.AppDatabase
 import com.hanif.smartstudy.data.local.TypingSheetPassageEntity
-import com.hanif.smartstudy.data.model.DataSourceMode
-import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.GasContentService
 import com.hanif.smartstudy.ui.typing.PassageInfo
 
@@ -15,10 +13,10 @@ import com.hanif.smartstudy.ui.typing.PassageInfo
  * updatedAt) থেকে রানটাইমে লোড হয়। Admin App থেকে Typing ট্যাবে যোগ করা যেকোনো
  * কনটেন্ট এই একই পথে সরাসরি অ্যাপে চলে আসবে।
  *
- * Settings-এ "Data Source" ড্রপডাউন অনুযায়ী উৎস বদলায় — ঠিক Quiz/QBank/Study-এর
- * মতোই (দেখো ContentFetchService.kt/GasContentService.kt):
- *   - FIREBASE     → Firebase "Typing" node (GAS syncToFirebase() যেটা সিঙ্ক করে)
- *   - GOOGLE_SHEET → GAS getSheetRows action দিয়ে সরাসরি Google Sheet (Firebase বাইপাস)
+ * ডেটা-সোর্স এখন কোড-লেভেলে ফিক্সড (ইউজারকে কোনো সুইচ দেখানো হয় না) — সবসময়
+ * সরাসরি GAS/Google Sheet থেকে আসে (GasContentService.fetchTypingPassages())।
+ * আগে একটা "Data Source" টগল (Firebase/Google Sheet) ছিল, সেটা সম্পূর্ণ সরিয়ে
+ * ফেলা হয়েছে — কোনো user-facing UI বা user-level পছন্দ আর নেই।
  *
  * ক্রম: (১) এই app-process-এ একবার fetch হয়ে গেলে (একই mode-এর জন্য) RAM cache থেকেই সার্ভ হয়
  *       (২) নেট থাকলে ফ্রেশ fetch, সফল হলে Room-এ cache করে রাখে (অফলাইন fallback-এর জন্য)
@@ -34,19 +32,16 @@ object TypingPassageProvider {
     private const val TAG = "TypingPassageProvider"
 
     @Volatile private var ramCache: List<PassageInfo>? = null
-    @Volatile private var ramCacheMode: DataSourceMode? = null
 
     suspend fun getPassages(context: Context): List<PassageInfo> {
-        val mode = SessionManager(context).getDataSourceMode()
-        ramCache?.let { if (ramCacheMode == mode) return it }
+        ramCache?.let { return it }
 
         val dao = AppDatabase.getInstance(context).typingSheetPassageDao()
 
         val fresh = try {
-            if (mode == DataSourceMode.GOOGLE_SHEET) GasContentService.fetchTypingPassages()
-            else ContentFetchService.fetchTypingPassages()
+            GasContentService.fetchTypingPassages()
         } catch (e: Exception) {
-            Log.w(TAG, "fetch failed (mode=$mode): ${e.message}")
+            Log.w(TAG, "fetch failed: ${e.message}")
             emptyList()
         }
 
@@ -99,16 +94,14 @@ object TypingPassageProvider {
             }
         }
 
-        if (result.isNotEmpty()) { ramCache = result; ramCacheMode = mode }
+        if (result.isNotEmpty()) { ramCache = result }
         return result
     }
 
-    /** Settings-এ Data Source বদলালে (Firebase ↔ Google Sheet) MenuViewModel এটা কল করে,
-     *  যাতে পরের getPassages() পুরনো mode-এর RAM cache না ব্যবহার করে নতুন সোর্স থেকে
-     *  আবার fetch করে। */
+    /** RAM cache ফোর্স-ক্লিয়ার করে — admin কোনো নতুন কনটেন্ট যোগ/এডিট করলে পরের
+     *  getPassages() কল আবার fresh fetch করবে (পুরনো RAM cache আটকে থাকবে না)। */
     fun forceRefreshNextTime() {
         ramCache = null
-        ramCacheMode = null
     }
 
     // ── সহজ/মাঝারি/কঠিন — Sheet-এ আলাদা "level" কলাম নেই (আগে ছিল, বাদ দেওয়া হয়েছে),
