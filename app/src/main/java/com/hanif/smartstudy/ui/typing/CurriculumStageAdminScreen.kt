@@ -12,19 +12,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hanif.smartstudy.data.model.DataSourceMode
 import com.hanif.smartstudy.data.model.TypingSheetStageContent
 import com.hanif.smartstudy.data.remote.ApiResult
-import com.hanif.smartstudy.data.remote.ContentFetchService
 import com.hanif.smartstudy.data.remote.GasContentService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.util.CurriculumStageContentProvider
-import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.launch
 
 /**
@@ -43,8 +39,6 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CurriculumStageAdminScreen(onBack: () -> Unit, initialTrack: String = "bn", initialStage: Int = 1) {
-    val ctx = LocalContext.current
-    val session = remember { SessionManager(ctx) }
     val scope = rememberCoroutineScope()
 
     var track by remember { mutableStateOf(initialTrack) }
@@ -61,10 +55,8 @@ fun CurriculumStageAdminScreen(onBack: () -> Unit, initialTrack: String = "bn", 
 
     suspend fun reload() {
         loading = true
-        val mode = session.getDataSourceMode()
         val all = try {
-            if (mode == DataSourceMode.GOOGLE_SHEET) GasContentService.fetchCurriculumStageContent()
-            else ContentFetchService.fetchCurriculumStageContent()
+            GasContentService.fetchCurriculumStageContent()
         } catch (e: Exception) { emptyList() }
         existing = all.filter { it.track == track && it.stageInt() == stage }
         loading = false
