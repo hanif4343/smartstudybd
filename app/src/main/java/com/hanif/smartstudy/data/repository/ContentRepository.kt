@@ -338,6 +338,26 @@ class ContentRepository(private val context: Context) {
         else    -> emptyList()
     }.toSet()
     suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
+    // ── PERF/UX FIX ("Subject list এ প্রশ্নসংখ্যা/প্রগ্রেস দেখানো দরকার, কিন্তু পুরো
+    // content ডাউনলোড না করেই"): Topics reference-টেবিলে প্রতিটা topic-এর rowCount
+    // (Quiz/QBank/Study — mode অনুযায়ী আলাদা কলাম, দেখো TopicEntity-এর কমেন্ট)
+    // আগে থেকেই আছে — এখানে শুধু subjectId ধরে যোগফল করা হচ্ছে, কোনো নতুন নেটওয়ার্ক
+    // কল বা প্রশ্ন-ডাউনলোড লাগছে না (Room-only, তাৎক্ষণিক)। ──
+    suspend fun getRoomSubjectQuestionCounts(sheet: String): Map<String, Int> {
+        val topics = refDao.getAllTopics()
+        return topics.groupBy { it.subjectId }
+            .mapValues { (_, ts) ->
+                ts.sumOf { t ->
+                    val perSheet = when (sheet) {
+                        "Quiz"  -> t.rowCountQuiz
+                        "QBank" -> t.rowCountQbank
+                        "Study" -> t.rowCountStudy
+                        else    -> 0
+                    }
+                    if (perSheet > 0) perSheet else if (t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0) t.rowCount else 0
+                }
+            }
+    }
     suspend fun getRoomSubTopicsForTopic(topicId: String)  = refDao.getSubTopicsForTopic(topicId)
     suspend fun getRoomTags()                             = refDao.getAllTags()
     suspend fun getRoomPosts()                            = refDao.getAllPosts()
