@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -692,6 +693,12 @@ private fun AiApiKeysSection(state: MenuUiState, vm: MenuViewModel) {
     var cerebrasKey by remember(state.cerebrasApiKey) { mutableStateOf(state.cerebrasApiKey) }
     var geminiKey   by remember(state.geminiApiKey)   { mutableStateOf(state.geminiApiKey) }
 
+    // ── প্রতিটা প্রোভাইডারের নির্বাচিত মডেল — key-এর পাশেই ড্রপডাউনে দেখানো/বদলানো যায় ──
+    var groqModel     by remember(state.groqModel)     { mutableStateOf(state.groqModel) }
+    var mistralModel  by remember(state.mistralModel)  { mutableStateOf(state.mistralModel) }
+    var cerebrasModel by remember(state.cerebrasModel) { mutableStateOf(state.cerebrasModel) }
+    var geminiModel   by remember(state.geminiModel)   { mutableStateOf(state.geminiModel) }
+
     val context = LocalContext.current
     LaunchedEffect(state.aiKeysSavedMsg) {
         state.aiKeysSavedMsg?.let {
@@ -705,23 +712,91 @@ private fun AiApiKeysSection(state: MenuUiState, vm: MenuViewModel) {
             "স্টাডিতে ⌨️ (টাইপ করে উত্তর মেলানো) মোড চালু থাকলে, নিজের লেখা Written " +
             "উত্তর জমা দেওয়ার সাথে সাথে এই key গুলো দিয়ে AI সঠিক/ভুল ধরে দেবে। " +
             "চেষ্টার ক্রম: Groq → Mistral → Cerebras → Gemini। একটা ফেইল করলে পরেরটা " +
-            "চেষ্টা হয়, সব ব্যর্থ হলে বা key না দিলে আগের মতোই নিজে ঠিক/ভুল বেছে নেওয়া যাবে।",
+            "চেষ্টা হয়, সব ব্যর্থ হলে বা key না দিলে আগের মতোই নিজে ঠিক/ভুল বেছে নেওয়া যাবে। " +
+            "কোনো প্রোভাইডারের মডেল বন্ধ/deprecated হয়ে গেলে (এরর আসতে থাকলে) নিচে থেকে " +
+            "অন্য মডেল বেছে নিন।",
             fontFamily = NotoSansBengali, fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
         )
 
         AiApiKeyField(label = "Groq API Key", value = groqKey, onChange = { groqKey = it })
+        AiModelDropdown(
+            label = "Groq মডেল", selected = groqModel,
+            options = com.hanif.smartstudy.data.model.AiApiKeys.GROQ_MODEL_OPTIONS,
+            onSelect = { groqModel = it }
+        )
+
         AiApiKeyField(label = "Mistral API Key", value = mistralKey, onChange = { mistralKey = it })
+        AiModelDropdown(
+            label = "Mistral মডেল", selected = mistralModel,
+            options = com.hanif.smartstudy.data.model.AiApiKeys.MISTRAL_MODEL_OPTIONS,
+            onSelect = { mistralModel = it }
+        )
+
         AiApiKeyField(label = "Cerebras API Key", value = cerebrasKey, onChange = { cerebrasKey = it })
+        AiModelDropdown(
+            label = "Cerebras মডেল", selected = cerebrasModel,
+            options = com.hanif.smartstudy.data.model.AiApiKeys.CEREBRAS_MODEL_OPTIONS,
+            onSelect = { cerebrasModel = it }
+        )
+
         AiApiKeyField(label = "Gemini API Key", value = geminiKey, onChange = { geminiKey = it })
+        AiModelDropdown(
+            label = "Gemini মডেল", selected = geminiModel,
+            options = com.hanif.smartstudy.data.model.AiApiKeys.GEMINI_MODEL_OPTIONS,
+            onSelect = { geminiModel = it }
+        )
 
         Button(
-            onClick  = { vm.saveAiApiKeys(groqKey, mistralKey, cerebrasKey, geminiKey) },
+            onClick  = {
+                vm.saveAiApiKeys(
+                    groqKey, mistralKey, cerebrasKey, geminiKey,
+                    groqModel, mistralModel, cerebrasModel, geminiModel
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
             shape    = RoundedCornerShape(12.dp),
             colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
         ) {
             Text("সংরক্ষণ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+/**
+ * ── প্রোভাইডারের key টেক্সটবক্সের ঠিক নিচে বসে — কোন মডেল/ভ্যারিয়েন্ট ব্যবহার হবে
+ * সেটা বেছে নেওয়ার জন্য। প্রোভাইডার কোনো মডেল বন্ধ করে দিলে (deprecated/৪০৪ এরর)
+ * ইউজার কোড এডিট ছাড়াই এখান থেকে অন্য মডেলে সুইচ করতে পারবেন। প্রিসেট লিস্টে না
+ * থাকা কোনো মডেলও চাইলে সরাসরি টাইপ করে বসানো যায় (dropdown + editable টেক্সট)। ──
+ */
+@Composable
+private fun AiModelDropdown(label: String, selected: String, options: List<String>, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value         = selected,
+            onValueChange = onSelect,
+            label         = { Text(label, fontSize = 11.sp) },
+            singleLine    = true,
+            modifier      = Modifier.fillMaxWidth(),
+            shape         = RoundedCornerShape(12.dp),
+            trailingIcon  = {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "মডেল বেছে নিন")
+                }
+            },
+            colors        = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = Indigo600,
+                unfocusedBorderColor = Color(0xFFE2E8F0)
+            )
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { opt ->
+                DropdownMenuItem(
+                    text    = { Text(opt, fontSize = 13.sp) },
+                    onClick = { onSelect(opt); expanded = false }
+                )
+            }
         }
     }
 }
