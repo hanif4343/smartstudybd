@@ -147,6 +147,20 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val localModelTestStore = LocalModelTestStore(app)
     private val emojiStore = com.hanif.smartstudy.data.local.EmojiOverrideStore(app)
 
+    // ── BUG FIX ("Subject খুললে প্রথমবার ফাঁকা/০ টি অধ্যায় দেখায়, back দিয়ে আবার
+    // ঢুকলে ঠিক দেখায়"): rebuildSubjectsLazy() Room-cache থেকে subjects সাথে সাথে
+    // দেখিয়ে ব্যাকগ্রাউন্ডে syncReferenceData() (Topics টেবিলও এখানেই আপডেট হয়)
+    // fire-and-forget করে দেয়। ইউজার যদি সেই ব্যাকগ্রাউন্ড sync শেষ হওয়ার ঠিক
+    // মাঝখানে (Topics টেবিল তখনো আংশিক/পুরনো) কোনো Subject-এ ক্লিক করে,
+    // navigateToSubjectLazy() তখনই Topics পড়ে ফেলত — খালি/অসম্পূর্ণ ফলাফল পেয়ে
+    // "০ টি অধ্যায়" দেখাতো, আর কেউ পরে আবার রিফ্রেশ করত না (background sync
+    // সফল হয়ে গেলেও subTopics state আর টাচ হতো না)। Back দিয়ে আবার ঢুকলে ততক্ষণে
+    // sync শেষ হয়ে গেছে বলে ঠিক দেখাতো। ফিক্স: এই Job-টা রেফারেন্স রেখে
+    // navigateToSubjectLazy()-এ Topics পড়ার ঠিক আগে join() করা হচ্ছে — sync
+    // চলমান থাকলে অল্প অপেক্ষা করবে (join() করা job আগে থেকেই শেষ হয়ে থাকলে
+    // সাথে সাথেই রিটার্ন করে, তাই সাধারণ অবস্থায় কোনো বাড়তি delay নেই)। ──
+    private var refSyncJob: Job? = null
+
     // ── Admin "Move Question(s)" ডায়ালগের Subject-এর পাশে Expand বাটনে ট্যাপ করলে
     // ওই Subject-এর Topic লিস্ট Room থেকে লাইভ আনতে (নাম দিয়ে subjectId রিজলভ করে) ──
     suspend fun adminTopicsForSubject(sheet: String, subject: String): List<String> {
@@ -423,8 +437,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${cachedSubjects.size} (from Room cache, instant)")
             _state.update { it.copy(subjects = cachedSubjects, contentLoaded = true, error = null) }
             // ব্যাকগ্রাউন্ডে ফ্রেশ করো — cache-gate-এর কারণে বেশিরভাগ সময় এটা নেটওয়ার্ক
-            // কলই করবে না, gap পার হয়ে গেলে চুপচাপ রিফ্রেশ করবে
-            viewModelScope.launch {
+            // কলই করবে না, gap পার হয়ে গেলে চুপচাপ রিফ্রেশ করবে। Job রেফারেন্স রাখা
+            // হচ্ছে (দেখো refSyncJob-এর ওপরের কমেন্ট) যাতে ঠিক এই মুহূর্তে কেউ কোনো
+            // Subject-এ ক্লিক করলে navigateToSubjectLazy() Topics পড়ার আগে এটা শেষ
+            // হওয়া পর্যন্ত অপেক্ষা করতে পারে।
+            refSyncJob = viewModelScope.launch {
                 if (repo.syncReferenceData()) {
                     val freshRows = repo.getRoomSubjectsRefBySheet(sheet)
                     if (freshRows.isNotEmpty()) {
@@ -466,6 +483,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         val mode = _state.value.mode
         viewModelScope.launch {
+            // ── BUG FIX ("প্রথমবার ০ টি অধ্যায়, back দিয়ে আবার ঢুকলে ঠিক দেখায়"):
+            // rebuildSubjectsLazy()-এর ব্যাকগ্রাউন্ড reference-sync তখনো চলমান থাকলে
+            // (Topics টেবিল আপডেট হচ্ছে) তার শেষ হওয়া পর্যন্ত অপেক্ষা করো, নাহলে
+            // নিচের getRoomTopicsForSubject() পুরনো/অসম্পূর্ণ Topics ডেটা পড়ে ফেলতে
+            // পারে। Job আগেই শেষ হয়ে থাকলে join() সাথে সাথেই রিটার্ন করে — সাধারণ
+            // অবস্থায় (বেশিরভাগ ক্লিকেই) কোনো বাড়তি অপেক্ষা হয় না। ──
+            refSyncJob?.join()
             val topicRows = repo.getRoomTopicsForSubject(subjectId)
             val subTopics = topicRows.map { t ->
                 // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
