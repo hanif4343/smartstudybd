@@ -13,6 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -184,9 +187,16 @@ class MainActivity : ComponentActivity() {
             val darkFlow  = remember { session.darkModeFlow() }
             val themeFlow = remember { session.themeColorFlow() }
             val scaleFlow = remember { session.fontScaleFlow() }
-            val isDark    by darkFlow.collectAsState(initial = session.isDarkMode())
-            val themeStr  by themeFlow.collectAsState(initial = session.getThemeColor())
-            val uiScale   by scaleFlow.collectAsState(initial = session.getFontScale())
+            // ── PERF FIX: আগে initial ভ্যালু হিসেবে session.isDarkMode()/getThemeColor()/
+            // getFontScale() সরাসরি কল হতো — এগুলো Composable body-র সাধারণ argument
+            // বলে প্রতিবার recomposition এ আবার কল হতো। remember দিয়ে শুধু প্রথমবারই
+            // (composition-এ ঢোকার সময়) একবার নেওয়া হচ্ছে, পরের recomposition এ আর না। ──
+            val initialDark  = remember { session.isDarkMode() }
+            val initialTheme = remember { session.getThemeColor() }
+            val initialScale = remember { session.getFontScale() }
+            val isDark    by darkFlow.collectAsState(initial = initialDark)
+            val themeStr  by themeFlow.collectAsState(initial = initialTheme)
+            val uiScale   by scaleFlow.collectAsState(initial = initialScale)
             val appTheme  = themeFromString(themeStr)
 
             val isOnline by ConnectivityObserver.observe(this@MainActivity)
@@ -249,7 +259,11 @@ class MainActivity : ComponentActivity() {
         val sessionMin = ((System.currentTimeMillis() - sessionStartMs) / 60000).toInt()
         if (sessionMin > 0) {
             SmartStudyFirebaseService.recordAppSession(this, sessionMin)
-            kotlinx.coroutines.runBlocking { session.recordSessionMinutes(sessionMin) }
+            // ── PERF FIX: আগে এখানে runBlocking দিয়ে DataStore write শেষ হওয়া পর্যন্ত
+            // মেইন থ্রেড আটকে থাকত — প্রতিবার app minimize/screen-off/অন্য অ্যাপে সুইচ
+            // করার সময়ই এই freeze টা হতো (transition animation-ও আটকে যেত)। এখন
+            // background coroutine এ fire-and-forget করা হচ্ছে, UI থ্রেড ব্লক হয় না।
+            lifecycleScope.launch(Dispatchers.IO) { session.recordSessionMinutes(sessionMin) }
         }
         SmartStudyFirebaseService.updatePresence(this, false)
     }
