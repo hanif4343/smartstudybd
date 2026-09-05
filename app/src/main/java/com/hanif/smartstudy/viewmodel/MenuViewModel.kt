@@ -651,6 +651,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(aiKeysSavedMsg = null) }
     }
 
+    /** ── 🔍 Settings-এ "টেস্ট করুন" বাটন — সেভ করার আগেই key+মডেল সত্যিকারের
+     * একটা রিকোয়েস্ট পাঠিয়ে যাচাই করে দেখে। এখনো সেভ না করা মান দিয়েও টেস্ট করা
+     * যায় (তাই সরাসরি text field-এর মান পাঠানো হয়, session থেকে না)। ── */
+    suspend fun testAiModel(provider: String, apiKey: String, model: String):
+            com.hanif.smartstudy.data.remote.WrittenAnswerAiService.ModelTestResult {
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.testProviderModel(provider, apiKey, model)
+    }
+
     // ── Reminder ─────────────────────────────────────────────
 
     fun setReminder(on: Boolean, hour: Int = _state.value.reminderHour, minute: Int = _state.value.reminderMinute) {
