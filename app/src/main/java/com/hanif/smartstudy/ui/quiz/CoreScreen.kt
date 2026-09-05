@@ -326,6 +326,7 @@ fun CoreScreen(
                 subject     = state.navPath.subject ?: "",
                 mode        = state.mode,
                 subTopics   = state.subTopics,
+                isLoading   = state.isLoading,
                 onSubTopic  = { viewModel.navigateToSubTopicLazy(it) },
                 reviewProgress = state.reviewProgressTopics,
                 onModelTest = { viewModel.openModelTestZone(it) },
