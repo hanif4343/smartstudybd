@@ -302,6 +302,74 @@ object WrittenAnswerAiService {
         }
     }
 
+    /**
+     * ── 🔍 Settings-এ প্রতিটা মডেলের পাশের "টেস্ট করুন" বাটন ──
+     * key ও মডেল দিয়ে একটা ছোট্ট ("Say OK") রিকোয়েস্ট সরাসরি পাঠিয়ে দেখে key+মডেল
+     * আসলেই কাজ করছে কিনা — গেস করার দরকার নেই। httpFast (কম timeout) ব্যবহার করে,
+     * তাই দ্রুত ফলাফল আসে। এরর কোড অনুযায়ী স্পষ্ট বাংলা বার্তা দেয় (ভুল key vs
+     * বন্ধ/ভুল মডেল vs rate-limit vs নেটওয়ার্ক) — যাতে ইউজার ঠিক বুঝতে পারে কোনটা
+     * বদলাতে হবে।
+     */
+    data class ModelTestResult(val ok: Boolean, val message: String)
+
+    suspend fun testProviderModel(provider: String, apiKey: String, model: String): ModelTestResult =
+        withContext(Dispatchers.IO) {
+            if (apiKey.isBlank()) return@withContext ModelTestResult(false, "❌ আগে API key দিন")
+            if (model.isBlank()) return@withContext ModelTestResult(false, "❌ মডেলের নাম ফাঁকা")
+
+            try {
+                val req = if (provider == "gemini") {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                    val payload = JSONObject().apply {
+                        put("contents", JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("parts", JSONArray().apply { put(JSONObject().apply { put("text", "Say OK") }) })
+                            })
+                        })
+                    }
+                    Request.Builder().url(url)
+                        .addHeader("Content-Type", "application/json")
+                        .post(payload.toString().toRequestBody(JSON_MT))
+                        .build()
+                } else {
+                    val url = when (provider) {
+                        "groq"     -> "https://api.groq.com/openai/v1/chat/completions"
+                        "mistral"  -> "https://api.mistral.ai/v1/chat/completions"
+                        "cerebras" -> "https://api.cerebras.ai/v1/chat/completions"
+                        else       -> return@withContext ModelTestResult(false, "❌ অজানা প্রোভাইডার")
+                    }
+                    val payload = JSONObject().apply {
+                        put("model", model)
+                        put("messages", JSONArray().apply {
+                            put(JSONObject().apply { put("role", "user"); put("content", "Say OK") })
+                        })
+                        put("max_tokens", 5)
+                    }
+                    Request.Builder().url(url)
+                        .addHeader("Authorization", "Bearer $apiKey")
+                        .addHeader("Content-Type", "application/json")
+                        .post(payload.toString().toRequestBody(JSON_MT))
+                        .build()
+                }
+
+                httpFast.newCall(req).execute().use { resp ->
+                    when {
+                        resp.isSuccessful -> ModelTestResult(true, "✅ কাজ করছে")
+                        resp.code == 401 || resp.code == 403 ->
+                            ModelTestResult(false, "❌ API key ভুল/অবৈধ")
+                        resp.code == 404 ->
+                            ModelTestResult(false, "❌ এই মডেল খুঁজে পাওয়া যায়নি — নাম ভুল বা বন্ধ হয়ে গেছে, অন্য মডেল ট্রাই করুন")
+                        resp.code == 429 ->
+                            ModelTestResult(false, "⚠️ Rate limit — key/মডেল ঠিক আছে, একটু পর আবার চেষ্টা করুন")
+                        else ->
+                            ModelTestResult(false, "❌ এরর কোড ${resp.code} — অন্য মডেল/key ট্রাই করুন")
+                    }
+                }
+            } catch (e: Exception) {
+                ModelTestResult(false, "❌ নেটওয়ার্ক এরর: ${e.message ?: "অজানা সমস্যা"}")
+            }
+        }
+
     private fun buildExplainQuestionPrompt(question: String, correctAnswer: String, subjectTopic: String): String = """
 তুমি একজন অভিজ্ঞ, বন্ধুত্বপূর্ণ শিক্ষক। নিচের প্রশ্নটা একজন শিক্ষার্থীকে বুঝিয়ে দাও, ঠিক যেভাবে
 ক্লাসে সামনাসামনি বোঝাতে — এমনভাবে যেন শিক্ষার্থী পড়েই পুরো ব্যাপারটা বুঝে যায়।
