@@ -411,16 +411,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // কেন, ব্যাকএন্ড ডেটার সেই অসামঞ্জস্য এখানেই এখন client-সাইডে ঢেকে দেওয়া হলো। ──
         val subjectIdsWithContent = repo.getRoomSubjectIdsWithContent(sheet)
 
-        fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>) =
+        fun toSubjects(rows: List<com.hanif.smartstudy.data.local.SubjectEntity>, counts: Map<String, Int>) =
             rows
                 .filter { s ->
                     com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
                         && subjectIdsWithContent.contains(s.subjectId)
                 }
                 .map { s ->
-                    // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
-                    // করা লাগতো, যেটা ঠিক যেই সমস্যা এড়াতে চাইছি সেটাই আবার তৈরি করত।
-                    SubjectEntry(name = s.name, totalQ = 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
+                    // ── PERF/UX FIX ("Subject list এ 0 প্রশ্ন/0% দেখায় সবসময়"): totalQ
+                    // এখন Topics reference-টেবিলের rowCount যোগফল থেকে আসে (Room-only,
+                    // প্রশ্ন ডাউনলোড ছাড়াই — দেখো ContentRepository.getRoomSubjectQuestionCounts())।
+                    // doneQ এখনো ০-ই রাখা হলো — প্রকৃত "কতগুলো উত্তর দেওয়া হয়েছে" জানতে
+                    // পুরো প্রশ্ন-কনটেন্ট লাগত, যেটা এড়াতেই এই লেজি আর্কিটেকচার। ভুল/মিথ্যা
+                    // progress% দেখানোর চেয়ে ০% দেখানো নিরাপদ — Topic-এ ঢুকলে (SubTopicEntry
+                    // পর্যায়ে) আসল progress ঠিকই দেখা যায়।
+                    SubjectEntry(name = s.name, totalQ = counts[s.subjectId] ?: 0, doneQ = 0, subTopics = emptyList(), subjectId = s.subjectId)
                 }.sortedBy { it.name }
 
         // ⚠️ BUG FIX ("subject list ashte onek slow"): আগে এখানে repo.syncReferenceData()
@@ -433,7 +438,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // মতো ডেটাই নেই বলে), কিন্তু বারবার ভিজিটে আর অপেক্ষা করা লাগবে না।
         val cachedRows = repo.getRoomSubjectsRefBySheet(sheet)
         if (cachedRows.isNotEmpty()) {
-            val cachedSubjects = toSubjects(cachedRows)
+            val cachedCounts   = repo.getRoomSubjectQuestionCounts(sheet)
+            val cachedSubjects = toSubjects(cachedRows, cachedCounts)
             Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${cachedSubjects.size} (from Room cache, instant)")
             _state.update { it.copy(subjects = cachedSubjects, contentLoaded = true, error = null) }
             // ব্যাকগ্রাউন্ডে ফ্রেশ করো — cache-gate-এর কারণে বেশিরভাগ সময় এটা নেটওয়ার্ক
@@ -445,7 +451,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 if (repo.syncReferenceData()) {
                     val freshRows = repo.getRoomSubjectsRefBySheet(sheet)
                     if (freshRows.isNotEmpty()) {
-                        val freshSubjects = toSubjects(freshRows)
+                        val freshCounts   = repo.getRoomSubjectQuestionCounts(sheet)
+                        val freshSubjects = toSubjects(freshRows, freshCounts)
                         _state.update { it.copy(subjects = freshSubjects) }
                     }
                 }
@@ -456,7 +463,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // Room-এ এখনো কিছু নেই (প্রথমবার/ফ্রেশ ইনস্টল) — এবারই একমাত্র সময় যখন
         // Subject list দেখানোর আগে সত্যিই GAS fetch শেষ হওয়া লাগবে
         repo.syncReferenceData()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে
-        val subjects = toSubjects(repo.getRoomSubjectsRefBySheet(sheet))
+        val subjects = toSubjects(repo.getRoomSubjectsRefBySheet(sheet), repo.getRoomSubjectQuestionCounts(sheet))
         Log.d("QuizVM", "rebuildSubjectsLazy mode=$mode subjects=${subjects.size} (first load)")
         _state.update {
             it.copy(subjects = subjects, contentLoaded = true, error = if (subjects.isEmpty()) "কোনো Subject পাওয়া যায়নি" else null)
