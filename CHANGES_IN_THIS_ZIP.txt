@@ -1,0 +1,31 @@
+এই zip-এ শুধু "AI মডেল সিলেক্টর" ফিচারের জন্য বদলানো ৫টা ফাইল আছে। আগের সব zip
+(Data Source removal, AI Explanation feature, timeout fix) আগে বসানো থাকতে হবে।
+
+EDITED (৫টা ফাইল):
+  app/src/main/java/com/hanif/smartstudy/data/model/AiApiKeys.kt
+  app/src/main/java/com/hanif/smartstudy/util/SessionManager.kt
+  app/src/main/java/com/hanif/smartstudy/viewmodel/MenuViewModel.kt
+  app/src/main/java/com/hanif/smartstudy/ui/menu/SettingsScreen.kt
+  app/src/main/java/com/hanif/smartstudy/data/remote/WrittenAnswerAiService.kt
+
+কী যোগ হলো:
+  - Settings-এ প্রতিটা API key বক্সের ঠিক নিচে একটা "মডেল" ড্রপডাউন (Groq/Mistral/
+    Cerebras/Gemini প্রতিটার জন্য আলাদা) — প্রিসেট কয়েকটা মডেল থেকে বেছে নেওয়া যায়,
+    অথবা লিস্টে না থাকা কোনো মডেলের নামও সরাসরি টাইপ করে বসানো যায় (editable dropdown)।
+  - এই মডেলগুলো এখন DataStore-এ সেভ থাকে, এবং WrittenAnswerAiService-এর প্রতিটা
+    Groq/Mistral/Cerebras/Gemini কলে (grading, explain-mistake, AI ব্যাখ্যা,
+    regenerate-mcq, resolve-from-list, viva — সবগুলোতে) আগের হার্ডকোড করা মডেল
+    নামের বদলে এই সেভ করা মডেলটাই ব্যবহার হবে।
+  - পুরনো ইউজার (যাদের এখনো মডেল বেছে নেওয়া নেই) — তাদের জন্য আগে যা হার্ডকোড
+    ছিল ঠিক সেই মডেলই ডিফল্ট হিসেবে থাকবে, কিছু বদলাবে না।
+
+কেন এটা করা হলো: কোনো প্রোভাইডার কোনো মডেল বন্ধ/deprecated করে দিলে (যেমন হঠাৎ
+এরর আসা শুরু করলে), এখন থেকে কোড এডিট/নতুন APK release ছাড়াই শুধু Settings থেকে
+গিয়ে অন্য মডেলে সুইচ করা যাবে।
+
+পুশ করার আগে:
+  ১. উপরের ৫টা ফাইল রিপোতে replace করুন
+  ২. build/run করে Settings > AI Key সেকশনে গিয়ে দেখুন key-এর নিচে মডেল ড্রপডাউন
+     আসছে কিনা, একটা মডেল বদলে "সংরক্ষণ করুন" চাপুন, তারপর কোনো প্রশ্নে "AI ব্যাখ্যা"
+     বা Study-র AI-চেক ব্যবহার করে দেখুন কাজ করছে কিনা
+  ৩. সব ঠিক থাকলে push করুন
