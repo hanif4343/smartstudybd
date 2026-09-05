@@ -1190,6 +1190,13 @@ fun SubTopicListScreen(
     enableSerialManager: Boolean = false,
     onSaveSerialOrder: (List<String>) -> Unit = {},
     reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    // ── PERF/UX FIX ("Subject খুলে ১-২ সেকেন্ড সাদা স্ক্রিন, তারপর লিস্ট আসে"):
+    // Topics Room থেকে আসতে (বা background reference-sync শেষ হতে) সামান্য সময়
+    // লাগলে আগে এই স্ক্রিন পুরো ফাঁকা/সাদা দেখাত (হেডারে "0 টি অধ্যায়" + খালি বডি) —
+    // এখন isLoading=true থাকা অবস্থায় (subTopics এখনো খালি) সাথে সাথেই একটা
+    // স্পিনার দেখানো হয়, SubjectListScreen-এর isLoading প্যাটার্নের সাথে
+    // সামঞ্জস্যপূর্ণ রেখে। ──
+    isLoading: Boolean = false,
     // ── FIX ("টপিকে ঢুকে প্রশ্ন দেখে Back করলে লিস্ট আবার প্রথম থেকে দেখায়"):
     // এই স্ক্রিনের LazyColumn আগে নিজের ভেতরেই rememberLazyListState() বানাত,
     // যেটা depth-1 (এই স্ক্রিন) ↔ depth-2 (প্রশ্ন-লিস্ট) এর মধ্যে CoreScreen-এর
@@ -1245,8 +1252,11 @@ fun SubTopicListScreen(
                     Column(Modifier.weight(1f)) {
                         Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali)
-                        Text("${visibleSubTopics.size} টি অধ্যায়", fontSize = 11.sp, color = Color.White.copy(0.65f),
-                            fontFamily = NotoSansBengali)
+                        Text(
+                            if (isLoading && visibleSubTopics.isEmpty()) "লোড হচ্ছে…" else "${visibleSubTopics.size} টি অধ্যায়",
+                            fontSize = 11.sp, color = Color.White.copy(0.65f),
+                            fontFamily = NotoSansBengali
+                        )
                     }
                     if (isAdmin) {
                         AdminMenuButton(
@@ -1270,6 +1280,20 @@ fun SubTopicListScreen(
         }
 
         val reorderEnabled = isAdmin && isReorderMode
+
+        // ── PERF/UX FIX: subTopics এখনো খালি এবং লোড চলছে হলে সাদা ফাঁকা বডির বদলে
+        // স্পিনার দেখাও — SubTopics আসা মাত্রই (state আপডেট হলেই) এই item সরে গিয়ে
+        // আসল লিস্ট রেন্ডার হবে। ──
+        if (isLoading && visibleSubTopics.isEmpty()) {
+            item {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = if (isQBank) Color(0xFF0891B2) else Indigo600)
+                }
+            }
+        }
 
         if (isQBank) {
             item {
