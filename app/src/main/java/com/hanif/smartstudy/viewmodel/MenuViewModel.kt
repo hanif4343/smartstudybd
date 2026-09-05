@@ -162,6 +162,11 @@ data class MenuUiState(
     val mistralApiKey     : String           = "",
     val cerebrasApiKey    : String           = "",
     val geminiApiKey      : String           = "",
+    // ── প্রতিটা প্রোভাইডারের নির্বাচিত মডেল — Settings-এ key-এর পাশের ড্রপডাউনে দেখানো হয় ──
+    val groqModel         : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GROQ_MODEL,
+    val mistralModel      : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_MISTRAL_MODEL,
+    val cerebrasModel     : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_CEREBRAS_MODEL,
+    val geminiModel       : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GEMINI_MODEL,
     val aiKeysSavedMsg    : String?          = null,
 
     // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস" কার্ড) ──
@@ -407,6 +412,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = aiKeys.mistral,
                     cerebrasApiKey = aiKeys.cerebras,
                     geminiApiKey   = aiKeys.gemini,
+                    groqModel      = aiKeys.groqModel,
+                    mistralModel   = aiKeys.mistralModel,
+                    cerebrasModel  = aiKeys.cerebrasModel,
+                    geminiModel    = aiKeys.geminiModel,
                     smartTypingEnabled = smartTypingOn,
                     typingTargetWpm    = typingTargetWpm,
                     typingSoundPreset  = typingSoundPr,
@@ -602,16 +611,24 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ ──
+    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key + মডেল সেভ ──
     // একবার সেভ করলে DataStore-এ থেকে যায়, পরের বার আবার বসাতে হয় না।
     // চেষ্টার ক্রম Study/QBank উভয় জায়গাতেই: Groq → Mistral → Cerebras → Gemini।
-    fun saveAiApiKeys(groq: String, mistral: String, cerebras: String, gemini: String) {
+    fun saveAiApiKeys(
+        groq: String, mistral: String, cerebras: String, gemini: String,
+        groqModel: String, mistralModel: String, cerebrasModel: String, geminiModel: String
+    ) {
         viewModelScope.launch {
+            val defaults = com.hanif.smartstudy.data.model.AiApiKeys()
             val keys = com.hanif.smartstudy.data.model.AiApiKeys(
                 groq     = groq.trim(),
                 mistral  = mistral.trim(),
                 cerebras = cerebras.trim(),
-                gemini   = gemini.trim()
+                gemini   = gemini.trim(),
+                groqModel     = groqModel.trim().ifBlank { defaults.groqModel },
+                mistralModel  = mistralModel.trim().ifBlank { defaults.mistralModel },
+                cerebrasModel = cerebrasModel.trim().ifBlank { defaults.cerebrasModel },
+                geminiModel   = geminiModel.trim().ifBlank { defaults.geminiModel }
             )
             session.setAiApiKeys(keys)
             _state.update {
@@ -620,7 +637,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = keys.mistral,
                     cerebrasApiKey = keys.cerebras,
                     geminiApiKey   = keys.gemini,
-                    aiKeysSavedMsg = "✅ API key সংরক্ষণ করা হয়েছে"
+                    groqModel      = keys.groqModel,
+                    mistralModel   = keys.mistralModel,
+                    cerebrasModel  = keys.cerebrasModel,
+                    geminiModel    = keys.geminiModel,
+                    aiKeysSavedMsg = "✅ API key ও মডেল সংরক্ষণ করা হয়েছে"
                 )
             }
         }
