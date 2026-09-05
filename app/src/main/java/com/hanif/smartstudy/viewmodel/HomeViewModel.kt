@@ -33,15 +33,6 @@ data class HomeUiState(
     val notifications      : List<AppNotification> = emptyList(),
     val unreadNotifCount   : Int                    = 0,
     val isLoadingNotifs    : Boolean                = false,
-    // ── App feature (এডমিন-অনলি): Home-এ "কোথায় কমতি হয়েছে" ড্যাশবোর্ড —
-    // CDN (manifest.json-এ publish হওয়া count) বনাম App (এই মুহূর্তে ডিভাইসে
-    // cache/lazy-load হওয়া count) — key = "Quiz"|"QBank"|"Study"।
-    // 🐛 ফিক্স: আগে এখানে "Sheet" (আসল Google Sheet raw row count, GAS দিয়ে) নামে
-    // আরেকটা সোর্সও ছিল — বড় শিটে (~১৪,০০০+ রো) সেই GAS কল-ই ছিল app hang-এর মূল
-    // কারণ, তাই সম্পূর্ণ সরিয়ে দেওয়া হলো (ব্যবহারকারীর সিদ্ধান্তে) — শুধু CDN/App থাকছে। ──
-    val cdnCounts           : Map<String, Int>  = emptyMap(),
-    val cdnConfigured      : Boolean           = true,   // false হলে UI-তে "CDN কনফিগার নেই" দেখাবে
-    val isLoadingAdminCounts: Boolean          = false,
     // ── Admin-only "🔄 Force Full Resync" (Home হেডারের top-right) — দেখো
     // ContentRepository.forceFullResync()-এর কমেন্ট। isRefreshingAll পুরো বাটনে
     // স্পিনার দেখায়, forceResyncMsg শেষ হলে ছোট ফিডব্যাক (কয়েক সেকেন্ড পর/ট্যাপে বন্ধ)। ──
@@ -117,56 +108,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
             // 🔔 badge count-এর জন্য ব্যাকগ্রাউন্ডে notification ও রিফ্রেশ করো
             loadNotifications()
-
-            // ── App feature (এডমিন-অনলি): Sheet/CDN/App count ড্যাশবোর্ড —
-            // আলাদা coroutine-এ fire-and-forget (loadHomeData()-কে ব্লক করে
-            // না, তাই issue #২-এর মতো ধীরগতির ঝুঁকি নেই — এডমিন-অনলি এক্সট্রা
-            // নেটওয়ার্ক কল, বাকি সবার জন্য কোনো প্রভাব নেই) ──
-            if (user?.isAdmin() == true) loadAdminContentCounts()
-        }
-    }
-
-    /**
-     * App feature (এডমিন-অনলি Home ড্যাশবোর্ড, "কোন জায়গায় কমতি হয়েছে"):
-     * ১) CDN — CDN Worker-এর manifest.json (topic_id প্রিফিক্স QZ/QB/ST দিয়ে
-     *          গ্রুপ করে count যোগ করা হয়) — কনফিগার না থাকলে cdnConfigured=false
-     * ২) App — এই মুহূর্তে ডিভাইসে cache/lazy-load হয়ে থাকা content (HomeUiState.content)
-     *
-     * 🐛 ফিক্স (App hang/crash — "Sheet, CDN, App question count এর জন্য"):
-     * আগে এখানে GAS-এর `countOrphanQuestions` অ্যাকশনও কল হতো, যেটা Quiz/QBank/Study
-     * তিনটা শিটেরই **পুরো ডেটা** (getDataRange().getValues()) পড়ত — শিট এখন ~১৪,০০০+
-     * রো-তে পৌঁছে যাওয়ায় এই একটা কলই GAS-সাইডে অনেক সময় নিতো (readTimeout ২৮০ সেকেন্ড
-     * পর্যন্ত সেট করা ছিল ঠিক এই কারণেই), আর এটা Home-এ যতবার আসা হতো ততবার অটো-চলত —
-     * এটাই মূল hang-এর উৎস ছিল। ব্যবহারকারীর সিদ্ধান্তে Sheet count সম্পূর্ণ সরিয়ে দেওয়া
-     * হলো — শুধু CDN (হালকা manifest.json) আর App (লোকাল, নেটওয়ার্কই লাগে না) রইলো, তাই
-     * এখন এই ড্যাশবোর্ড সবসময় দ্রুত। ── */
-    fun loadAdminContentCounts() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoadingAdminCounts = true)
-
-            val cdnConfigured = com.hanif.smartstudy.data.remote.CdnService.isConfigured()
-            val cdnCounts = if (!cdnConfigured) emptyMap() else {
-                val manifest = com.hanif.smartstudy.data.remote.CdnService.fetchManifest()
-                if (manifest == null) emptyMap() else {
-                    val out = mutableMapOf("Quiz" to 0, "QBank" to 0, "Study" to 0)
-                    for ((topicId, entry) in manifest.topics) {
-                        val sheetName = when {
-                            topicId.startsWith("QZ") -> "Quiz"
-                            topicId.startsWith("QB") -> "QBank"
-                            topicId.startsWith("ST") -> "Study"
-                            else -> null
-                        } ?: continue
-                        out[sheetName] = (out[sheetName] ?: 0) + entry.count
-                    }
-                    out
-                }
-            }
-
-            _uiState.value = _uiState.value.copy(
-                cdnCounts            = cdnCounts,
-                cdnConfigured        = cdnConfigured,
-                isLoadingAdminCounts = false
-            )
         }
     }
 
@@ -185,7 +126,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.value = _uiState.value.copy(isRefreshingAll = true, forceResyncMsg = null)
             val ok = repo.forceFullResync()
             loadHomeData(forceRefresh = true)
-            loadAdminContentCounts()
             _uiState.value = _uiState.value.copy(
                 isRefreshingAll = false,
                 forceResyncMsg  = if (ok) "✅ ক্যাশ মুছে CDN থেকে টাটকা ডেটা আনা হয়েছে"
