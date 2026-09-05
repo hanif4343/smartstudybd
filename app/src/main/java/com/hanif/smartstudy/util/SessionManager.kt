@@ -7,12 +7,41 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.hanif.smartstudy.data.model.User
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "smart_study_prefs")
+
+// ── PERF FIX (app-hang issue): সব getter আগে প্রতিবার `runBlocking { dataStore.data.first() }`
+// দিয়ে ডিস্ক থেকে সরাসরি ব্লকিং-রিড করত। SessionManager সারা অ্যাপ জুড়ে (২৩০+ জায়গায়) Composable/
+// LaunchedEffect-এর ভেতর সরাসরি কল হয় বলে প্রতিটা স্ক্রিন/রিকম্পোজিশনেই মেইন থ্রেড ব্লক হয়ে
+// "hang" এর মতো লাগত। ফিক্স: DataStore-এর Flow একবারই ব্যাকগ্রাউন্ডে collect করে সবসময়
+// আপ-টু-ডেট রাখা একটা ইন-মেমরি ক্যাশ — getter গুলো এখন ডিস্কে না গিয়ে সরাসরি এই ক্যাশ থেকে
+// (মেমরি রিড, প্রায় ফ্রি) মান পড়ে। কোনো getter/setter-এর সিগনেচার পরিবর্তন হয়নি বলে
+// বাকি কোডবেসের কোথাও কিছু বদলাতে হয়নি।
+private object PrefsCache {
+    @Volatile var snapshot: Preferences? = null
+    @Volatile private var started = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun ensureStarted(context: Context) {
+        if (started) return
+        synchronized(this) {
+            if (started) return
+            started = true
+            val appContext = context.applicationContext
+            scope.launch {
+                appContext.dataStore.data.collect { prefs -> snapshot = prefs }
+            }
+        }
+    }
+}
 
 // ── Typing Practice: একটা সেশনের সংক্ষিপ্ত রেকর্ড (হিস্ট্রি লিস্টে দেখানোর জন্য) ──
 data class TypingHistoryEntry(
@@ -38,6 +67,21 @@ data class RoadmapPlan(
 
 class SessionManager(private val context: Context) {
     private val gson = Gson()
+
+    init {
+        // অ্যাপে যেখান থেকেই প্রথম SessionManager তৈরি হয় (SmartStudyApp/MainActivity/
+        // Worker/Receiver) সেখান থেকেই ব্যাকগ্রাউন্ড ক্যাশ-কালেকশন শুরু হয়ে যায় — dataStore
+        // একটাই প্রসেস-ওয়াইড সিঙ্গেলটন বলে বারবার SessionManager(context) বানালেও (যেমন
+        // অনেক স্ক্রিনে হয়) নতুন করে কিছু শুরু হয় না, একবারই কাজ করে।
+        PrefsCache.ensureStarted(context)
+    }
+
+    // ক্যাশ থেকে বর্তমান Preferences স্ন্যাপশট — সাধারণত মেমরি রিড (তাৎক্ষণিক)।
+    // অ্যাপ প্রসেস স্টার্ট হওয়ার একদম প্রথম মুহূর্তে (প্রথম Flow emission আসার আগেই)
+    // কল হলে ক্যাশ এখনো ফাঁকা থাকতে পারে — সেই বিরল কেসেই শুধু একবার blocking read হবে,
+    // এরপর থেকে সবসময় ক্যাশ থেকেই মিলবে।
+    private fun cachedPrefs(): Preferences =
+        PrefsCache.snapshot ?: runBlocking { context.dataStore.data.first() }
 
     // ── XP → লেভেল রূপান্তর — প্রতি ৫০০ XP-তে ১ লেভেল, সহজ/অনুমানযোগ্য রাখা হয়েছে
     // (কোনো exponential curve না, যাতে ইউজার সহজে বুঝতে পারে পরের লেভেলে যেতে কত বাকি) ──
@@ -222,13 +266,13 @@ class SessionManager(private val context: Context) {
     // ── User ──────────────────────────────────────────────────
 
     fun isLoggedIn(): Boolean = runBlocking {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         !prefs[KEY_USER_JSON].isNullOrEmpty()
     }
 
     fun getCurrentUser(): User? = runBlocking {
         try {
-            val json = context.dataStore.data.first()[KEY_USER_JSON] ?: return@runBlocking null
+            val json = cachedPrefs()[KEY_USER_JSON] ?: return@runBlocking null
             gson.fromJson(json, User::class.java)
         } catch (e: Exception) { null }
     }
@@ -253,7 +297,7 @@ class SessionManager(private val context: Context) {
     // ── Theme ─────────────────────────────────────────────────
 
     fun isDarkMode(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_DARK_MODE] ?: false
+        cachedPrefs()[KEY_DARK_MODE] ?: false
     }
 
     fun darkModeFlow(): Flow<Boolean> = context.dataStore.data.map { it[KEY_DARK_MODE] ?: false }
@@ -263,7 +307,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun getThemeColor(): String = runBlocking {
-        context.dataStore.data.first()[KEY_THEME_COLOR] ?: "indigo"
+        cachedPrefs()[KEY_THEME_COLOR] ?: "indigo"
     }
 
     fun themeColorFlow(): Flow<String> = context.dataStore.data.map { it[KEY_THEME_COLOR] ?: "indigo" }
@@ -275,7 +319,7 @@ class SessionManager(private val context: Context) {
     // ── Sound ─────────────────────────────────────────────────
 
     fun isSoundOff(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_SOUND_OFF] ?: false
+        cachedPrefs()[KEY_SOUND_OFF] ?: false
     }
 
     suspend fun setSoundOff(off: Boolean) {
@@ -286,7 +330,7 @@ class SessionManager(private val context: Context) {
 
     /** ইউজারের নিজের সেট করা লক্ষ্য WPM — ডিফল্ট ২০ (সরকারি চাকরির সাধারণ মান) */
     fun getTypingTargetWpm(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_TARGET_WPM] ?: 20
+        cachedPrefs()[KEY_TYPING_TARGET_WPM] ?: 20
     }
 
     suspend fun setTypingTargetWpm(wpm: Int) {
@@ -295,7 +339,7 @@ class SessionManager(private val context: Context) {
 
     /** "off" | "soft" | "mechanical" — ডিফল্ট "soft" */
     fun getTypingSoundPreset(): String = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_SOUND_PRESET] ?: "soft"
+        cachedPrefs()[KEY_TYPING_SOUND_PRESET] ?: "soft"
     }
 
     suspend fun setTypingSoundPreset(preset: String) {
@@ -307,7 +351,7 @@ class SessionManager(private val context: Context) {
      *  দুর্বল-কী/চিহ্ন ড্রিল, Govt Mock, BCC, Key-unlock কারিকুলাম, Roadmap,
      *  প্রোফাইল/Cloud Sync, আঙুল-পজিশন — সবগুলো একসাথে দেখা যাবে (TypingPracticeScreen.kt)। */
     fun getSmartTypingEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_SMART_TYPING_ON] ?: false
+        cachedPrefs()[KEY_SMART_TYPING_ON] ?: false
     }
 
     suspend fun setSmartTypingEnabled(on: Boolean) {
@@ -316,7 +360,7 @@ class SessionManager(private val context: Context) {
 
     /** Normal Typing স্ক্রিনের Timer On/Off পছন্দ — ডিফল্ট চালু (আগের আচরণ)। */
     fun getTypingTimerEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_TIMER_ENABLED] ?: true
+        cachedPrefs()[KEY_TYPING_TIMER_ENABLED] ?: true
     }
 
     suspend fun setTypingTimerEnabled(on: Boolean) {
@@ -325,28 +369,28 @@ class SessionManager(private val context: Context) {
 
     // ── Speed Plan Task 4: লাইভ ফিচার হোল্ড/আনহোল্ড টগল — ডিফল্ট false (হোল্ড করা) ──
     fun getChallengesEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_CHALLENGES_ENABLED] ?: false
+        cachedPrefs()[KEY_CHALLENGES_ENABLED] ?: false
     }
     suspend fun setChallengesEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_CHALLENGES_ENABLED] = on }
     }
 
     fun getBuddyEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_BUDDY_ENABLED] ?: false
+        cachedPrefs()[KEY_BUDDY_ENABLED] ?: false
     }
     suspend fun setBuddyEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_BUDDY_ENABLED] = on }
     }
 
     fun getTypingRaceEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_RACE_ENABLED] ?: false
+        cachedPrefs()[KEY_TYPING_RACE_ENABLED] ?: false
     }
     suspend fun setTypingRaceEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_TYPING_RACE_ENABLED] = on }
     }
 
     fun getTypingLeaderboardEnabled(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_LEADERBOARD_ENABLED] ?: false
+        cachedPrefs()[KEY_TYPING_LEADERBOARD_ENABLED] ?: false
     }
     suspend fun setTypingLeaderboardEnabled(on: Boolean) {
         context.dataStore.edit { it[KEY_TYPING_LEADERBOARD_ENABLED] = on }
@@ -355,7 +399,7 @@ class SessionManager(private val context: Context) {
     // ── Phase ৩: Roadmap Wizard ──
 
     fun getRoadmapPlan(): RoadmapPlan? = runBlocking {
-        val json = context.dataStore.data.first()[KEY_ROADMAP_PLAN_JSON] ?: return@runBlocking null
+        val json = cachedPrefs()[KEY_ROADMAP_PLAN_JSON] ?: return@runBlocking null
         try { gson.fromJson(json, RoadmapPlan::class.java) } catch (e: Exception) { null }
     }
 
@@ -370,7 +414,7 @@ class SessionManager(private val context: Context) {
     // ── Study: "শুধু প্রশ্ন দেখ" মোড ──────────────────────────
 
     fun isStudyRevealMode(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_STUDY_REVEAL_MODE] ?: false
+        cachedPrefs()[KEY_STUDY_REVEAL_MODE] ?: false
     }
 
     suspend fun setStudyRevealMode(on: Boolean) {
@@ -380,7 +424,7 @@ class SessionManager(private val context: Context) {
     // ── Study: টাইপ করে উত্তর রিকল-প্র্যাকটিস মোড (⌨️ আইকন) ────
 
     fun isStudyRecallMode(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_STUDY_RECALL_MODE] ?: false
+        cachedPrefs()[KEY_STUDY_RECALL_MODE] ?: false
     }
 
     suspend fun setStudyRecallMode(on: Boolean) {
@@ -390,7 +434,7 @@ class SessionManager(private val context: Context) {
     // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ/লোড ────
 
     fun getAiApiKeys(): com.hanif.smartstudy.data.model.AiApiKeys = runBlocking {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val default = com.hanif.smartstudy.data.model.AiApiKeys()
         com.hanif.smartstudy.data.model.AiApiKeys(
             groq         = prefs[KEY_AI_GROQ_KEY] ?: "",
@@ -420,7 +464,7 @@ class SessionManager(private val context: Context) {
     // ── Offline mode (ম্যানুয়াল বাটন — Firebase সম্পূর্ণ বন্ধ) ───
 
     fun isOfflineMode(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_OFFLINE_MODE] ?: false
+        cachedPrefs()[KEY_OFFLINE_MODE] ?: false
     }
 
     fun offlineModeFlow(): Flow<Boolean> = context.dataStore.data.map { it[KEY_OFFLINE_MODE] ?: false }
@@ -439,7 +483,7 @@ class SessionManager(private val context: Context) {
     // ── Onboarding ────────────────────────────────────────────
 
     fun isOnboardingDone(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_OB_DONE] ?: false
+        cachedPrefs()[KEY_OB_DONE] ?: false
     }
 
     suspend fun setOnboardingDone() {
@@ -449,7 +493,7 @@ class SessionManager(private val context: Context) {
     // ── App-open permission prompts (শুধু একবার দেখানোর জন্য) ────
 
     fun hasAskedExactAlarmPermission(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_ASKED_EXACT_ALARM] ?: false
+        cachedPrefs()[KEY_ASKED_EXACT_ALARM] ?: false
     }
 
     fun setAskedExactAlarmPermission() = runBlocking {
@@ -457,7 +501,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun hasAskedBatteryOptPermission(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_ASKED_BATTERY_OPT] ?: false
+        cachedPrefs()[KEY_ASKED_BATTERY_OPT] ?: false
     }
 
     fun setAskedBatteryOptPermission() = runBlocking {
@@ -467,7 +511,7 @@ class SessionManager(private val context: Context) {
     // ── Daily Goal ────────────────────────────────────────────
 
     fun getDailyGoal(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_DAILY_GOAL] ?: 20
+        cachedPrefs()[KEY_DAILY_GOAL] ?: 20
     }
 
     suspend fun setDailyGoal(goal: Int) {
@@ -478,7 +522,7 @@ class SessionManager(private val context: Context) {
     /** আজকে (ডিভাইসের লোকাল তারিখ অনুযায়ী) Streak popup এখনো দেখানো হয়নি কিনা */
     fun shouldShowStreakPopupToday(): Boolean = runBlocking {
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-        val last  = context.dataStore.data.first()[KEY_LAST_STREAK_POPUP_DATE]
+        val last  = cachedPrefs()[KEY_LAST_STREAK_POPUP_DATE]
         last != today
     }
 
@@ -500,16 +544,16 @@ class SessionManager(private val context: Context) {
         }
     }
     fun isMorningReminderOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_MORNING_ON] ?: false
+        cachedPrefs()[KEY_MORNING_ON] ?: false
     }
     fun getMorningHour(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_MORNING_HOUR] ?: 7
+        cachedPrefs()[KEY_MORNING_HOUR] ?: 7
     }
     fun getMorningMinute(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_MORNING_MIN] ?: 0
+        cachedPrefs()[KEY_MORNING_MIN] ?: 0
     }
     fun isMorningRepeatDaily(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_MORNING_REPEAT] ?: true
+        cachedPrefs()[KEY_MORNING_REPEAT] ?: true
     }
 
     // ── Night reminder ──
@@ -522,16 +566,16 @@ class SessionManager(private val context: Context) {
         }
     }
     fun isNightReminderOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_NIGHT_ON] ?: false
+        cachedPrefs()[KEY_NIGHT_ON] ?: false
     }
     fun getNightHour(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_NIGHT_HOUR] ?: 21
+        cachedPrefs()[KEY_NIGHT_HOUR] ?: 21
     }
     fun getNightMinute(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_NIGHT_MIN] ?: 0
+        cachedPrefs()[KEY_NIGHT_MIN] ?: 0
     }
     fun isNightRepeatDaily(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_NIGHT_REPEAT] ?: true
+        cachedPrefs()[KEY_NIGHT_REPEAT] ?: true
     }
 
     // ── Midday progress check ──
@@ -544,16 +588,16 @@ class SessionManager(private val context: Context) {
         }
     }
     fun isMiddayReminderOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_MIDDAY_ON] ?: false
+        cachedPrefs()[KEY_MIDDAY_ON] ?: false
     }
     fun getMiddayHour(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_MIDDAY_HOUR] ?: 14
+        cachedPrefs()[KEY_MIDDAY_HOUR] ?: 14
     }
     fun getMiddayMinute(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_MIDDAY_MIN] ?: 0
+        cachedPrefs()[KEY_MIDDAY_MIN] ?: 0
     }
     fun isMiddayRepeatDaily(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_MIDDAY_REPEAT] ?: true
+        cachedPrefs()[KEY_MIDDAY_REPEAT] ?: true
     }
 
     // ── Evening urgency check ──
@@ -566,36 +610,36 @@ class SessionManager(private val context: Context) {
         }
     }
     fun isEveningReminderOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_EVENING_ON] ?: false
+        cachedPrefs()[KEY_EVENING_ON] ?: false
     }
     fun getEveningHour(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_EVENING_HOUR] ?: 19
+        cachedPrefs()[KEY_EVENING_HOUR] ?: 19
     }
     fun getEveningMinute(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_EVENING_MIN] ?: 0
+        cachedPrefs()[KEY_EVENING_MIN] ?: 0
     }
     fun isEveningRepeatDaily(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_EVENING_REPEAT] ?: true
+        cachedPrefs()[KEY_EVENING_REPEAT] ?: true
     }
 
     // ── Notification polling ──
     fun getLastNotifCheck(): Long = runBlocking {
-        context.dataStore.data.first()[KEY_LAST_NOTIF_CHECK] ?: 0L
+        cachedPrefs()[KEY_LAST_NOTIF_CHECK] ?: 0L
     }
     fun setLastNotifCheck(t: Long) = runBlocking {
         context.dataStore.edit { it[KEY_LAST_NOTIF_CHECK] = t }
     }
 
     fun isReminderOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_REMINDER_ON] ?: false
+        cachedPrefs()[KEY_REMINDER_ON] ?: false
     }
 
     fun getReminderHour(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_REMINDER_HOUR] ?: 20
+        cachedPrefs()[KEY_REMINDER_HOUR] ?: 20
     }
 
     fun getReminderMinute(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_REMINDER_MINUTE] ?: 0
+        cachedPrefs()[KEY_REMINDER_MINUTE] ?: 0
     }
 
     suspend fun setReminder(on: Boolean, hour: Int, minute: Int) {
@@ -610,7 +654,7 @@ class SessionManager(private val context: Context) {
 
     suspend fun recordDailyXp(xp: Int) {
         val today  = todayString()
-        val prefs  = context.dataStore.data.first()
+        val prefs  = cachedPrefs()
         val json   = prefs[KEY_XP_HISTORY] ?: "[]"
         val type   = object : com.google.gson.reflect.TypeToken<MutableList<Map<String, Any>>>() {}.type
         val list: MutableList<Map<String, Any>> = try { gson.fromJson(json, type) } catch (e: Exception) { mutableListOf() }
@@ -624,7 +668,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun getXpHistory(): List<Pair<String, Int>> = runBlocking {
-        val json  = context.dataStore.data.first()[KEY_XP_HISTORY] ?: return@runBlocking emptyList()
+        val json  = cachedPrefs()[KEY_XP_HISTORY] ?: return@runBlocking emptyList()
         return@runBlocking try {
             val type = object : TypeToken<List<Map<String, Any>>>() {}.type
             val list: List<Map<String, Any>> = gson.fromJson(json, type) ?: emptyList()
@@ -637,12 +681,12 @@ class SessionManager(private val context: Context) {
     // দিয়ে খুলত, ফলে "🏆 Best WPM"/"নতুন Record!" ফিচারটা আসলে কখনো কাজ করত না।
 
     fun getTypingBestWpm(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_BEST_WPM] ?: 0
+        cachedPrefs()[KEY_TYPING_BEST_WPM] ?: 0
     }
 
     /** একটা সেশন শেষ হলে কল করো — বেস্ট WPM আপডেট (দরকার হলে) + হিস্ট্রিতে যোগ (সর্বশেষ ১৫টা রাখা হয়) */
     suspend fun recordTypingResult(wpm: Int, rawWpm: Int, accuracy: Int, timeSec: Int) {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val bestSoFar = prefs[KEY_TYPING_BEST_WPM] ?: 0
         val json  = prefs[KEY_TYPING_HISTORY] ?: "[]"
         val type  = object : TypeToken<MutableList<Map<String, Any>>>() {}.type
@@ -659,7 +703,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun getTypingHistory(): List<TypingHistoryEntry> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
+        val json = cachedPrefs()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
         return@runBlocking try {
             val type = object : TypeToken<List<Map<String, Any>>>() {}.type
             val list: List<Map<String, Any>> = gson.fromJson(json, type) ?: emptyList()
@@ -678,7 +722,7 @@ class SessionManager(private val context: Context) {
     /** Cloud Sync-এর জন্য raw (chronological, না-reversed) history — TypingCloudSyncService.push()
      *  এই ফরম্যাটই cloud-এ পাঠায়, pull()-ও একই ফরম্যাটে ফেরত দেয় ──*/
     fun getRawTypingHistory(): List<Map<String, Any>> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
+        val json = cachedPrefs()[KEY_TYPING_HISTORY] ?: return@runBlocking emptyList()
         try {
             val type = object : TypeToken<List<Map<String, Any>>>() {}.type
             gson.fromJson(json, type) ?: emptyList()
@@ -707,12 +751,12 @@ class SessionManager(private val context: Context) {
     // non-coercive — hard-lock করা হয় না, শুধু progress track ও দেখানো হয়
 
     fun isTypingDisciplineOn(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_DISCIPLINE_ON] ?: false
+        cachedPrefs()[KEY_TYPING_DISCIPLINE_ON] ?: false
     }
 
     /** কখনো explicit সেট করা না থাকলে null ফেরত দেয় — caller admin-কিনা দেখে ডিফল্ট ঠিক করতে পারে */
     fun getTypingDisciplineRaw(): Boolean? = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_DISCIPLINE_ON]
+        cachedPrefs()[KEY_TYPING_DISCIPLINE_ON]
     }
 
     suspend fun setTypingDisciplineOn(on: Boolean) {
@@ -720,7 +764,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun getTypingDailyGoalMinutes(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_DAILY_GOAL_MIN] ?: 60
+        cachedPrefs()[KEY_TYPING_DAILY_GOAL_MIN] ?: 60
     }
 
     suspend fun setTypingDailyGoalMinutes(minutes: Int) {
@@ -729,14 +773,14 @@ class SessionManager(private val context: Context) {
 
     /** আজকে এখন পর্যন্ত মোট কত সেকেন্ড টাইপ করা হয়েছে — তারিখ বদলালে স্বয়ংক্রিয়ভাবে ০ থেকে শুরু হয় */
     fun getTypingTodaySeconds(): Int = runBlocking {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val savedDate = prefs[KEY_TYPING_TODAY_DATE] ?: ""
         if (savedDate != todayString()) 0 else (prefs[KEY_TYPING_TODAY_SECONDS] ?: 0)
     }
 
     /** একটা টাইপিং সেশন শেষ হলে কল করো — আজকের মোট সময়ে যোগ হবে (তারিখ বদলালে আগে রিসেট হয়) */
     suspend fun addTypingSecondsToday(seconds: Int) {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val savedDate = prefs[KEY_TYPING_TODAY_DATE] ?: ""
         val today = todayString()
         val base = if (savedDate == today) (prefs[KEY_TYPING_TODAY_SECONDS] ?: 0) else 0
@@ -751,7 +795,7 @@ class SessionManager(private val context: Context) {
      *  স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — addTypingSecondsToday()-এর ভেতর থেকেই কল হয়,
      *  আলাদা করে কল করার দরকার নেই। */
     private suspend fun addTypingSecondsToDailyMap(seconds: Int) {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val json  = prefs[KEY_TYPING_DAILY_MAP] ?: "{}"
         val type  = object : TypeToken<MutableMap<String, Double>>() {}.type
         val map: MutableMap<String, Double> = try { gson.fromJson(json, type) ?: mutableMapOf() } catch (e: Exception) { mutableMapOf() }
@@ -762,7 +806,7 @@ class SessionManager(private val context: Context) {
 
     /** স্ট্রিক-ক্যালেন্ডার হিটম্যাপের জন্য — date string ("YYYY-M-D") -> মিনিট */
     fun getDailyPracticeMinutes(): Map<String, Int> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_DAILY_MAP] ?: "{}"
+        val json = cachedPrefs()[KEY_TYPING_DAILY_MAP] ?: "{}"
         val type = object : TypeToken<Map<String, Double>>() {}.type
         val map: Map<String, Double> = try { gson.fromJson(json, type) ?: emptyMap() } catch (e: Exception) { emptyMap() }
         map.mapValues { (it.value / 60).toInt() }
@@ -772,7 +816,7 @@ class SessionManager(private val context: Context) {
      *  করুক বা না করুক) এটা কল করে জমা রাখা হয়, যাতে অ্যাপ রিস্টার্ট করলেও ঠিক ওই একই
      *  প্যাসেজটাই আবার প্রথমে ফিরে না আসে (শেষ ৮টার hash জমা থাকে, most-recent-last)। */
     suspend fun recordShownPassage(text: String) {
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val json  = prefs[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
         val type  = object : TypeToken<MutableList<Int>>() {}.type
         val list: MutableList<Int> = try { gson.fromJson(json, type) ?: mutableListOf() } catch (e: Exception) { mutableListOf() }
@@ -785,14 +829,14 @@ class SessionManager(private val context: Context) {
 
     /** getRecentPassageHashes() — এই hash-গুলো বাদ দিয়ে পরের প্যাসেজ বাছাই করা উচিত */
     fun getRecentPassageHashes(): Set<Int> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
+        val json = cachedPrefs()[KEY_TYPING_RECENT_PASSAGES] ?: "[]"
         val type = object : TypeToken<List<Int>>() {}.type
         try { (gson.fromJson(json, type) ?: emptyList<Int>()).toSet() } catch (e: Exception) { emptySet() }
     }
 
     /** পর্ব-১ #১৫: ইউজারের বেছে নেওয়া কীবোর্ড-লেআউট — ডিফল্ট "bijoy" */
     fun getKeyboardLayout(): String = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_KEYBOARD_LAYOUT] ?: "bijoy"
+        cachedPrefs()[KEY_TYPING_KEYBOARD_LAYOUT] ?: "bijoy"
     }
     suspend fun setKeyboardLayout(layout: String) {
         context.dataStore.edit { it[KEY_TYPING_KEYBOARD_LAYOUT] = layout }
@@ -807,7 +851,7 @@ class SessionManager(private val context: Context) {
     }
 
     fun getTotalAppMinutes(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TOTAL_APP_MIN] ?: 0
+        cachedPrefs()[KEY_TOTAL_APP_MIN] ?: 0
     }
 
     // ── Helpers ───────────────────────────────────────────────
@@ -822,7 +866,7 @@ class SessionManager(private val context: Context) {
     /** Call after each study session. Returns new streak count. */
     fun updateStreak(): Int = runBlocking {
         val today = todayString()
-        val prefs = context.dataStore.data.first()
+        val prefs = cachedPrefs()
         val lastDate = prefs[KEY_STREAK_LAST_DATE] ?: ""
         val current  = prefs[KEY_STREAK_COUNT] ?: 0
         if (lastDate == today) return@runBlocking current
@@ -841,13 +885,13 @@ class SessionManager(private val context: Context) {
     }
 
     fun getStreak(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_STREAK_COUNT] ?: 0
+        cachedPrefs()[KEY_STREAK_COUNT] ?: 0
     }
 
     // ── টাইপিং XP/লেভেল — লিডারবোর্ড না (সেটার জন্য ব্যাকএন্ড দরকার), শুধু
     // সেশন-শেষে ছোট্ট "Level Up!" সেলিব্রেশনের জন্য (রিটেনশন গেমিফিকেশন লেয়ার) ──
     fun getTypingXp(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_XP] ?: 0
+        cachedPrefs()[KEY_TYPING_XP] ?: 0
     }
 
     /** নতুন XP যোগ করে, রিটার্ন করে (আগের লেভেল, নতুন লেভেল) — caller এটা দিয়ে
@@ -861,7 +905,7 @@ class SessionManager(private val context: Context) {
 
     // ── টাইপিং প্লেসমেন্ট-টেস্ট — একবার সম্পূর্ণ হয়ে গেলে আর দেখানো হয় না ──
     fun hasCompletedTypingPlacement(): Boolean = runBlocking {
-        context.dataStore.data.first()[KEY_TYPING_PLACEMENT_DONE] ?: false
+        cachedPrefs()[KEY_TYPING_PLACEMENT_DONE] ?: false
     }
 
     suspend fun setTypingPlacementCompleted() {
@@ -871,7 +915,7 @@ class SessionManager(private val context: Context) {
     // ── Achievements ──────────────────────────────────────────
 
     fun getAchievements(): Set<String> = runBlocking {
-        val json = context.dataStore.data.first()[KEY_ACHIEVEMENTS] ?: return@runBlocking emptySet()
+        val json = cachedPrefs()[KEY_ACHIEVEMENTS] ?: return@runBlocking emptySet()
         try {
             val type = object : com.google.gson.reflect.TypeToken<Set<String>>() {}.type
             gson.fromJson(json, type) ?: emptySet()
@@ -890,7 +934,7 @@ class SessionManager(private val context: Context) {
     // ── Pending sync ──────────────────────────────────────────
 
     fun getPendingSyncCount(): Int = runBlocking {
-        context.dataStore.data.first()[KEY_PENDING_SYNC] ?: 0
+        cachedPrefs()[KEY_PENDING_SYNC] ?: 0
     }
 
     suspend fun setPendingSyncCount(count: Int) {
@@ -901,7 +945,7 @@ class SessionManager(private val context: Context) {
     // Default 1.0f = normal size, larger = bigger text
 
     fun getFontScale(): Float = runBlocking {
-        context.dataStore.data.first()[KEY_FONT_SIZE] ?: 1.0f
+        cachedPrefs()[KEY_FONT_SIZE] ?: 1.0f
     }
 
     fun fontScaleFlow(): Flow<Float> = context.dataStore.data.map { it[KEY_FONT_SIZE] ?: 1.0f }
@@ -912,7 +956,7 @@ class SessionManager(private val context: Context) {
 
     // ── Admin Audience Tag ────────────────────────────────────
     fun getAdminAudienceTag(): String = runBlocking {
-        context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+        cachedPrefs()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
     }
     suspend fun setAdminAudienceTag(tag: String) {
         context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
@@ -935,7 +979,7 @@ class SessionManager(private val context: Context) {
     // (ID-র ওপর না) নির্ভর করে, আর মাইগ্রেশনে subTopic-এর টেক্সট নাম বদলায়নি (শুধু নতুন
     // subject_id/topic_id কলাম যোগ হয়েছে) — তাই এগুলো নিরাপদ, মুছে দেওয়ার দরকার নেই।
     fun clearStaleContentIdCacheIfNeeded() = runBlocking {
-        val already = context.dataStore.data.first()[KEY_CONTENT_SCHEMA_V2_MIGRATED] ?: false
+        val already = cachedPrefs()[KEY_CONTENT_SCHEMA_V2_MIGRATED] ?: false
         if (already) return@runBlocking
 
         val quizPrefs = context.getSharedPreferences("quiz_prefs", Context.MODE_PRIVATE)
