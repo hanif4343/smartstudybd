@@ -33,37 +33,42 @@ data class AiApiKeys(
         groq.isNotBlank() || mistral.isNotBlank() || cerebras.isNotBlank() || gemini.isNotBlank()
 
     companion object {
-        const val DEFAULT_GROQ_MODEL     = "llama-3.3-70b-versatile"
+        // ── ⚠️ ২০২৬ সালের সেপ্টেম্বরে Anthropic/Google/Groq/Mistral/Cerebras-এর নিজস্ব
+        // ডকুমেন্টেশন যাচাই করে বসানো ডিফল্ট। আগের ডিফল্টগুলো (llama-3.3-70b-versatile,
+        // llama-3.3-70b, gemini-1.5-flash) সম্পূর্ণ বন্ধ/এন্টারপ্রাইজ-অনলি হয়ে গিয়েছিল —
+        // এই কারণেই আগে সব মডেল ব্যর্থ হচ্ছিল। ভবিষ্যতে আবার বন্ধ হয়ে গেলে Settings-এর
+        // "🔍 টেস্ট" বাটন দিয়ে যাচাই করে অন্য preset-এ সুইচ করুন। ──
+        const val DEFAULT_GROQ_MODEL     = "openai/gpt-oss-20b"
         const val DEFAULT_MISTRAL_MODEL  = "mistral-small-latest"
-        const val DEFAULT_CEREBRAS_MODEL = "llama-3.3-70b"
-        const val DEFAULT_GEMINI_MODEL   = "gemini-1.5-flash"
+        const val DEFAULT_CEREBRAS_MODEL = "llama3.1-8b"
+        const val DEFAULT_GEMINI_MODEL   = "gemini-2.5-flash-lite"
 
         // ── Settings-এর ড্রপডাউনে দেখানোর জন্য প্রিসেট অপশন ──
         // কোনো প্রোভাইডার নতুন মডেল আনলে বা পুরনোটা বন্ধ করলে শুধু এই লিস্টে
         // যোগ/বাদ দিলেই হবে, UI/সেভ-লজিক আলাদাভাবে বদলাতে হবে না। প্রতিটা
         // লিস্টের প্রথমটাই ডিফল্ট হিসেবে ধরা হয়।
         val GROQ_MODEL_OPTIONS = listOf(
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768"
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "groq/compound-mini",
+            "qwen/qwen3.8-27b"
         )
         val MISTRAL_MODEL_OPTIONS = listOf(
             "mistral-small-latest",
             "mistral-large-latest",
-            "open-mistral-7b",
-            "open-mixtral-8x7b"
+            "mistral-medium-latest",
+            "open-mistral-nemo"
         )
         val CEREBRAS_MODEL_OPTIONS = listOf(
-            "llama-3.3-70b",
             "llama3.1-8b",
-            "llama3.1-70b"
+            "gpt-oss-120b",
+            "qwen-3-32b"
         )
         val GEMINI_MODEL_OPTIONS = listOf(
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash"
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash"
         )
     }
 }
