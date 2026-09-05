@@ -65,6 +65,12 @@ class SessionManager(private val context: Context) {
         val KEY_AI_MISTRAL_KEY   = stringPreferencesKey("ai_mistral_api_key")
         val KEY_AI_CEREBRAS_KEY  = stringPreferencesKey("ai_cerebras_api_key")
         val KEY_AI_GEMINI_KEY    = stringPreferencesKey("ai_gemini_api_key")
+        // ── প্রতিটা প্রোভাইডারের জন্য নির্বাচিত মডেল/ভ্যারিয়েন্ট — ফাঁকা/না-থাকলে
+        // AiApiKeys-এর ডিফল্ট মডেল ব্যবহার হয় (দেখো getAiApiKeys() নিচে) ──
+        val KEY_AI_GROQ_MODEL      = stringPreferencesKey("ai_groq_model")
+        val KEY_AI_MISTRAL_MODEL   = stringPreferencesKey("ai_mistral_model")
+        val KEY_AI_CEREBRAS_MODEL  = stringPreferencesKey("ai_cerebras_model")
+        val KEY_AI_GEMINI_MODEL    = stringPreferencesKey("ai_gemini_model")
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
@@ -385,11 +391,16 @@ class SessionManager(private val context: Context) {
 
     fun getAiApiKeys(): com.hanif.smartstudy.data.model.AiApiKeys = runBlocking {
         val prefs = context.dataStore.data.first()
+        val default = com.hanif.smartstudy.data.model.AiApiKeys()
         com.hanif.smartstudy.data.model.AiApiKeys(
-            groq     = prefs[KEY_AI_GROQ_KEY] ?: "",
-            mistral  = prefs[KEY_AI_MISTRAL_KEY] ?: "",
-            cerebras = prefs[KEY_AI_CEREBRAS_KEY] ?: "",
-            gemini   = prefs[KEY_AI_GEMINI_KEY] ?: ""
+            groq         = prefs[KEY_AI_GROQ_KEY] ?: "",
+            mistral      = prefs[KEY_AI_MISTRAL_KEY] ?: "",
+            cerebras     = prefs[KEY_AI_CEREBRAS_KEY] ?: "",
+            gemini       = prefs[KEY_AI_GEMINI_KEY] ?: "",
+            groqModel     = prefs[KEY_AI_GROQ_MODEL]?.takeIf { it.isNotBlank() } ?: default.groqModel,
+            mistralModel  = prefs[KEY_AI_MISTRAL_MODEL]?.takeIf { it.isNotBlank() } ?: default.mistralModel,
+            cerebrasModel = prefs[KEY_AI_CEREBRAS_MODEL]?.takeIf { it.isNotBlank() } ?: default.cerebrasModel,
+            geminiModel   = prefs[KEY_AI_GEMINI_MODEL]?.takeIf { it.isNotBlank() } ?: default.geminiModel
         )
     }
 
@@ -399,6 +410,10 @@ class SessionManager(private val context: Context) {
             it[KEY_AI_MISTRAL_KEY]  = keys.mistral.trim()
             it[KEY_AI_CEREBRAS_KEY] = keys.cerebras.trim()
             it[KEY_AI_GEMINI_KEY]   = keys.gemini.trim()
+            it[KEY_AI_GROQ_MODEL]     = keys.groqModel.trim()
+            it[KEY_AI_MISTRAL_MODEL]  = keys.mistralModel.trim()
+            it[KEY_AI_CEREBRAS_MODEL] = keys.cerebrasModel.trim()
+            it[KEY_AI_GEMINI_MODEL]   = keys.geminiModel.trim()
         }
     }
 
