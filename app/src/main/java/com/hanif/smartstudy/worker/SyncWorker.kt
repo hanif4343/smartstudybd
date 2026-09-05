@@ -5,10 +5,7 @@ import android.util.Log
 import androidx.work.*
 import com.google.gson.Gson
 import com.hanif.smartstudy.BuildConfig
-import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.local.PendingQueue
-import com.hanif.smartstudy.data.remote.ContentFetchService
-import com.hanif.smartstudy.data.remote.ContentResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,7 +16,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * SyncWorker:
- * 1. Pending offline queue sync করে —
+ * শুধু Pending offline queue sync করে —
  *    - quiz_answer / xp_update / study_progress: সরাসরি Firebase-এ (এই তিনটা
  *      এখনো Firebase-native node, GAS/Sheet-এ নেই)
  *    - admin_edit_question / admin_add_question / admin_delete_question /
@@ -28,7 +25,21 @@ import java.util.concurrent.TimeUnit
  *      কনটেন্টের একমাত্র সোর্স-অফ-ট্রুথ এখন Sheet (FIX: আগে edit/add/delete
  *      সরাসরি Firebase-এ যেত, যেটা GAS/CDN থেকে disconnected ছিল এবং ডিলিট করা
  *      পুরনো Firebase node আবার "পুনরুজ্জীবিত" করে ফেলত)
- * 2. Content (Study/Quiz/QBank) refresh করে cache-এ
+ *
+ * ── PERF FIX (Speed Plan — "14000 row 6 hour por por keno?"): আগে এখানে একটা
+ * "Content (Study/Quiz/QBank) refresh" ধাপ ছিল, যেটা GAS/Google Sheet থেকে পুরো
+ * ~১৪,০০০ রো fetch করত (fetchAllContent/fetchIncrementalContent)। কিন্তু আসল
+ * app-flow (ContentRepository.getContent()) অনেক আগেই সম্পূর্ণ Room-only হয়ে গেছে,
+ * আর প্রশ্ন-কনটেন্ট এখন CDN থেকে topic-by-topic lazy আসে (cacheNextTopicBatch)।
+ * ওই GAS fetch যেই disk cache-এ সেভ করত (ContentCache), সেটার একমাত্র caller
+ * (getSubjectsQuick()) কোথাও থেকে call-ই হয় না — সম্পূর্ণ dead code ছিল। উপরন্তু
+ * SHEET_META_SAFE_GAP_MS (৬ ঘণ্টা) আর এই worker-এর periodic interval (৬ ঘণ্টা)
+ * সমান হওয়ায় "gap পার হয়ে গেছে" শর্ত প্রায় প্রতিবারই সত্যি হতো — মানে "শুধু
+ * নতুন থাকলে fetch হবে" বলা হলেও বাস্তবে প্রতি রান-এই পুরো ১৪,০০০ রো আবার
+ * ডাউনলোড হতো (ব্যাটারি/ডেটা নষ্ট + একই worker slot-এ থাকা আসল pending-queue
+ * sync (answers/xp/admin edits)ও দেরি করত)। পুরো ব্লকটা তাই এখন সরিয়ে ফেলা
+ * হলো — Study/Quiz/QBank/Subjects/Topics/Tags/Posts/Institutions/Exam-appearances
+ * সবকিছুর read এখনো ঠিকঠাক চলবে, কারণ সেগুলো এই worker-এর ওপর নির্ভরই করত না।
  */
 class SyncWorker(
     context: Context,
@@ -37,7 +48,6 @@ class SyncWorker(
 
     private val TAG   = "SyncWorker"
     private val queue = PendingQueue(context)
-    private val cache = ContentCache(context)
     private val gson  = Gson()
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -86,104 +96,13 @@ class SyncWorker(
         // 5+ বার fail হলে drop করো
         queue.dropFailed()
 
-        // ── 2. Content refresh (শুধু সার্ভারে আসলেই নতুন কিছু থাকলে) ──
-        // আগে শুধু TTL (1 ঘণ্টা) দেখেই পুরো Quiz+QBank+Study রিফেচ হতো — কনটেন্ট বদলাক
-        // বা না বদলাক। এখন প্রথমে ছোট "/meta/updatedAt" চেক করা হয়; সেটা লাস্ট সেভ করা
-        // remoteUpdatedAt এর চেয়ে নতুন হলে তবেই পুরো ডেটা টানা হয়। meta node না থাকলে
-        // (পুরনো/আনসাপোর্টেড ডেটাবেস) TTL fallback ব্যবহার হয়, যাতে ডেটা কখনো একদম আটকে না থাকে।
-        val cached = cache.loadContent()
-        val remoteUpdatedAt = ContentFetchService.fetchMetaUpdatedAt(applicationContext)
-        val needsRefresh = when {
-            cached == null -> true
-            remoteUpdatedAt > 0L -> remoteUpdatedAt > cached.remoteUpdatedAt
-            else -> cached.isStale(FALLBACK_TTL_MILLIS)
-        }
-
-        if (needsRefresh) {
-            if (cached == null) {
-                // কখনো fetch হয়নি — এই একবারই পুরো ডাউনলোড লাগবে
-                Log.d(TAG, "No cache yet — full fetch")
-                when (val result = ContentFetchService.fetchAllContent(applicationContext)) {
-                    is ContentResult.Success -> {
-                        val toSave = result.data.copy(
-                            remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
-                        )
-                        cache.saveContent(toSave)
-                        cache.markFullSyncDone(toSave.fetchedAt)
-                        Log.d(TAG, "Content refreshed (full): Study=${toSave.study.size}")
-                    }
-                    is ContentResult.Error -> {
-                        Log.w(TAG, "Content refresh failed: ${result.message}")
-                        allSuccess = false
-                    }
-                }
-            } else {
-                // ── DELTA SYNC — শুধু "updatedAt > lastSync" এমন row গুলো আনো, পুরো ১০,০০০
-                // প্রশ্ন না — এটাই ৬-ঘণ্টার periodic run এ bandwidth বাঁচানোর মূল অংশ ──
-                val lastFullSync = cache.getLastFullSync()
-                val now = System.currentTimeMillis()
-                val needsFullResync = lastFullSync == 0L ||
-                    (now - lastFullSync) > ContentCache.FULL_RESYNC_INTERVAL_MS
-
-                if (needsFullResync) {
-                    Log.d(TAG, "Periodic full resync due (deletion/edge-case reconcile)")
-                    when (val result = ContentFetchService.fetchAllContent(applicationContext)) {
-                        is ContentResult.Success -> {
-                            val toSave = result.data.copy(
-                                remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
-                            )
-                            cache.saveContent(toSave)
-                            cache.markFullSyncDone(toSave.fetchedAt)
-                            Log.d(TAG, "Content refreshed (full resync): Study=${toSave.study.size}")
-                        }
-                        is ContentResult.Error -> {
-                            Log.w(TAG, "Full resync failed: ${result.message}")
-                            allSuccess = false
-                        }
-                    }
-                } else {
-                    val sinceQuiz  = (cache.getQuizLastSync()  - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-                    val sinceQBank = (cache.getQBankLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-                    val sinceStudy = (cache.getStudyLastSync() - ContentCache.CLOCK_SKEW_BUFFER_MS).coerceAtLeast(1L)
-
-                    when (val delta = ContentFetchService.fetchIncrementalContent(applicationContext, sinceQuiz, sinceQBank, sinceStudy)) {
-                        is ContentResult.Success -> {
-                            val d = delta.data
-                            Log.d(TAG, "Delta sync: quiz+${d.quiz.size} qbank+${d.qbank.size} study+${d.study.size}")
-                            val merged = cached.copy(
-                                quiz          = mergeById(cached.quiz,  d.quiz)  { it.id },
-                                qbank         = mergeById(cached.qbank, d.qbank) { it.id },
-                                study         = mergeById(cached.study, d.study) { it.id },
-                                subjectOrder  = d.subjectOrder,
-                                subTopicOrder = d.subTopicOrder,
-                                modelTests    = d.modelTests,
-                                fetchedAt     = now,
-                                remoteUpdatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else now
-                            )
-                            cache.saveContent(merged)
-                            cache.setSyncCheckpoints(now, now, now)
-                        }
-                        is ContentResult.Error -> {
-                            Log.w(TAG, "Delta sync failed: ${delta.message}")
-                            allSuccess = false
-                        }
-                    }
-                }
-            }
-        } else {
-            Log.d(TAG, "Content unchanged on server, skipping refetch")
-        }
+        // ── Content (Study/Quiz/QBank/Subjects/Topics/...) এখন এখানে refresh
+        // হয় না — সেসব CDN + Room দিয়ে on-demand/lazy সরাসরি ভিজিট করার সময়ই
+        // আপ-টু-ডেট থাকে (দেখো ContentRepository.syncReferenceData()/
+        // cacheNextTopicBatch())। এই worker এখন শুধু pending-queue sync-এর
+        // জন্যই থাকে। ──
 
         if (allSuccess) Result.success() else Result.retry()
-    }
-
-    /** existing list-এ changed/new item গুলো id দিয়ে merge করে — id মিললে replace, না মিললে যোগ */
-    private fun <T> mergeById(existing: List<T>, changed: List<T>, idOf: (T) -> String?): List<T> {
-        if (changed.isEmpty()) return existing
-        val map = LinkedHashMap<String, T>()
-        existing.forEach { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
-        changed.forEach  { item -> idOf(item)?.let { if (it.isNotBlank()) map[it] = item } }
-        return map.values.toList()
     }
 
     private suspend fun syncAction(action: com.hanif.smartstudy.data.local.PendingAction): Boolean {
@@ -607,12 +526,7 @@ class SyncWorker(
     companion object {
         const val WORK_NAME = "SmartStudySyncWork"
 
-        // meta node না থাকলে (পুরনো ডেটাবেস) safety-net TTL — 12 ঘণ্টা।
-        // আগে 1 ঘণ্টা ছিল, যেটা meta-check না থাকা অবস্থায় প্রতি ঘণ্টায় পুরো
-        // Quiz+QBank+Study রিফেচ করাতো, কনটেন্ট বদলাক বা না বদলাক।
-        private const val FALLBACK_TTL_MILLIS = 12 * 60 * 60 * 1000L
-
-        // ── Internet আসলে একবার run ──
+        // ── Internet আসলে একবার run — pending queue (answers/xp/admin edits) সাথে সাথে flush ──
         fun scheduleOneTime(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -627,24 +541,26 @@ class SyncWorker(
                 .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
 
-        // ── প্রতি ৬ ঘণ্টায় periodic content refresh ──
-        // আগে ১ ঘণ্টা ছিল, TTL-ও ১ ঘণ্টা — ফলে অ্যাপ চালু/ব্যাকগ্রাউন্ডে থাকলেই প্রতি ঘণ্টায়
-        // পুরো Quiz+QBank+Study রিফেচ হতো, কনটেন্ট বদলাক বা না বদলাক। এখন meta/updatedAt
-        // চেক থাকায় বেশিরভাগ রান-এ আসলে কিছুই ডাউনলোড হবে না (শুধু ছোট meta node চেক হবে),
-        // তাই ৬ ঘণ্টায় নামিয়ে আনলেও bandwidth নষ্ট হবে না, বরং কমবে।
+        // ── PERF FIX (Speed Plan — "14000 row 6 hour por por keno?"): এই worker এখন
+        // শুধু pending-queue flush করে (কোনো ~১৪,০০০-রো content fetch আর নেই — দেখো
+        // class-level কমেন্ট), তাই প্রতি রান হালকা ও দ্রুত। ৬ ঘণ্টার বদলে ১৫ মিনিটে
+        // নামানো হলো যাতে অফলাইনে করা quiz-answer/xp/admin-edit action গুলো নেট
+        // ফিরলে অনেকক্ষণ আটকে না থেকে দ্রুত sync হয়ে যায় — এখন আর bandwidth/battery
+        // নিয়ে চিন্তার কিছু নেই কারণ pending queue খালি থাকলে worker প্রায় সাথে সাথেই
+        // শেষ হয়ে যায় (কোনো bulk network call নেই)। ──
         fun schedulePeriodic(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
 
-            // FIX: আগে KEEP পলিসি ছিল — মানে যাদের ফোনে আগেই ১ ঘণ্টার periodic work
-            // enqueue হয়ে গেছে, তাদের জন্য নতুন ৬-ঘণ্টার শিডিউল কখনো কার্যকর হতো না
-            // (app update করলেও আগের schedule-ই থেকে যেত)। UPDATE পলিসি দিলে বিদ্যমান
-            // request-এর constraints/interval নতুন করে বসে যায়।
+            // FIX: আগে KEEP পলিসি ছিল — মানে যাদের ফোনে আগেই পুরনো interval-এর
+            // periodic work enqueue হয়ে গেছে, তাদের জন্য নতুন schedule কখনো কার্যকর
+            // হতো না (app update করলেও আগের schedule-ই থেকে যেত)। UPDATE পলিসি দিলে
+            // বিদ্যমান request-এর constraints/interval নতুন করে বসে যায়।
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(
                     "${WORK_NAME}_periodic",
