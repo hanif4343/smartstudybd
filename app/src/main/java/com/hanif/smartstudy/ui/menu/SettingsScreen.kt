@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.*
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.viewmodel.MenuUiState
 import com.hanif.smartstudy.viewmodel.MenuViewModel
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────
 //  SettingsScreen — Dark mode, 4 themes, sound, reminder
@@ -721,30 +722,30 @@ private fun AiApiKeysSection(state: MenuUiState, vm: MenuViewModel) {
 
         AiApiKeyField(label = "Groq API Key", value = groqKey, onChange = { groqKey = it })
         AiModelDropdown(
-            label = "Groq মডেল", selected = groqModel,
+            provider = "groq", label = "Groq মডেল", apiKey = groqKey, selected = groqModel,
             options = com.hanif.smartstudy.data.model.AiApiKeys.GROQ_MODEL_OPTIONS,
-            onSelect = { groqModel = it }
+            onSelect = { groqModel = it }, vm = vm
         )
 
         AiApiKeyField(label = "Mistral API Key", value = mistralKey, onChange = { mistralKey = it })
         AiModelDropdown(
-            label = "Mistral মডেল", selected = mistralModel,
+            provider = "mistral", label = "Mistral মডেল", apiKey = mistralKey, selected = mistralModel,
             options = com.hanif.smartstudy.data.model.AiApiKeys.MISTRAL_MODEL_OPTIONS,
-            onSelect = { mistralModel = it }
+            onSelect = { mistralModel = it }, vm = vm
         )
 
         AiApiKeyField(label = "Cerebras API Key", value = cerebrasKey, onChange = { cerebrasKey = it })
         AiModelDropdown(
-            label = "Cerebras মডেল", selected = cerebrasModel,
+            provider = "cerebras", label = "Cerebras মডেল", apiKey = cerebrasKey, selected = cerebrasModel,
             options = com.hanif.smartstudy.data.model.AiApiKeys.CEREBRAS_MODEL_OPTIONS,
-            onSelect = { cerebrasModel = it }
+            onSelect = { cerebrasModel = it }, vm = vm
         )
 
         AiApiKeyField(label = "Gemini API Key", value = geminiKey, onChange = { geminiKey = it })
         AiModelDropdown(
-            label = "Gemini মডেল", selected = geminiModel,
+            provider = "gemini", label = "Gemini মডেল", apiKey = geminiKey, selected = geminiModel,
             options = com.hanif.smartstudy.data.model.AiApiKeys.GEMINI_MODEL_OPTIONS,
-            onSelect = { geminiModel = it }
+            onSelect = { geminiModel = it }, vm = vm
         )
 
         Button(
@@ -769,35 +770,92 @@ private fun AiApiKeysSection(state: MenuUiState, vm: MenuViewModel) {
  * ইউজার কোড এডিট ছাড়াই এখান থেকে অন্য মডেলে সুইচ করতে পারবেন। প্রিসেট লিস্টে না
  * থাকা কোনো মডেলও চাইলে সরাসরি টাইপ করে বসানো যায় (dropdown + editable টেক্সট)। ──
  */
+/**
+ * ── প্রোভাইডারের key টেক্সটবক্সের ঠিক নিচে বসে — কোন মডেল/ভ্যারিয়েন্ট ব্যবহার হবে
+ * সেটা বেছে নেওয়ার জন্য। প্রোভাইডার কোনো মডেল বন্ধ করে দিলে (deprecated/৪০৪ এরর)
+ * ইউজার কোড এডিট ছাড়াই এখান থেকে অন্য মডেলে সুইচ করতে পারবেন। প্রিসেট লিস্টে না
+ * থাকা কোনো মডেলও চাইলে সরাসরি টাইপ করে বসানো যায় (dropdown + editable টেক্সট)।
+ *
+ * পাশে "🔍 টেস্ট করুন" বাটন — গেস না করে সরাসরি key+মডেল দিয়ে একটা ছোট্ট রিকোয়েস্ট
+ * পাঠিয়ে সাথে সাথে বলে দেয় কাজ করছে কিনা (এখনো "সংরক্ষণ করুন" না চাপলেও টেস্ট করা
+ * যায়)। ──
+ */
 @Composable
-private fun AiModelDropdown(label: String, selected: String, options: List<String>, onSelect: (String) -> Unit) {
+private fun AiModelDropdown(
+    provider: String,
+    label   : String,
+    apiKey  : String,
+    selected: String,
+    options : List<String>,
+    onSelect: (String) -> Unit,
+    vm      : MenuViewModel
+) {
     var expanded by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value         = selected,
-            onValueChange = onSelect,
-            label         = { Text(label, fontSize = 11.sp) },
-            singleLine    = true,
-            modifier      = Modifier.fillMaxWidth(),
-            shape         = RoundedCornerShape(12.dp),
-            trailingIcon  = {
-                IconButton(onClick = { expanded = true }) {
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "মডেল বেছে নিন")
-                }
-            },
-            colors        = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor   = Indigo600,
-                unfocusedBorderColor = Color(0xFFE2E8F0)
-            )
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { opt ->
-                DropdownMenuItem(
-                    text    = { Text(opt, fontSize = 13.sp) },
-                    onClick = { onSelect(opt); expanded = false }
+    var testing  by remember(provider) { mutableStateOf(false) }
+    var result   by remember(provider) { mutableStateOf<com.hanif.smartstudy.data.remote.WrittenAnswerAiService.ModelTestResult?>(null) }
+    val scope = rememberCoroutineScope()
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            OutlinedTextField(
+                value         = selected,
+                onValueChange = { onSelect(it); result = null },
+                label         = { Text(label, fontSize = 11.sp) },
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth(),
+                shape         = RoundedCornerShape(12.dp),
+                trailingIcon  = {
+                    IconButton(onClick = { expanded = true }) {
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = "মডেল বেছে নিন")
+                    }
+                },
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = Indigo600,
+                    unfocusedBorderColor = Color(0xFFE2E8F0)
                 )
+            )
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { opt ->
+                    DropdownMenuItem(
+                        text    = { Text(opt, fontSize = 13.sp) },
+                        onClick = { onSelect(opt); result = null; expanded = false }
+                    )
+                }
             }
         }
+        Spacer(Modifier.width(6.dp))
+        OutlinedButton(
+            onClick = {
+                if (!testing) {
+                    testing = true
+                    result = null
+                    scope.launch {
+                        result = vm.testAiModel(provider, apiKey, selected)
+                        testing = false
+                    }
+                }
+            },
+            modifier = Modifier.height(56.dp),
+            shape    = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            colors   = ButtonDefaults.outlinedButtonColors(contentColor = Indigo600),
+            border   = BorderStroke(1.dp, Indigo600.copy(alpha = 0.4f))
+        ) {
+            if (testing) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Indigo600)
+            } else {
+                Text("🔍 টেস্ট", fontFamily = NotoSansBengali, fontSize = 11.sp)
+            }
+        }
+    }
+    result?.let {
+        Text(
+            it.message,
+            fontSize   = 11.sp,
+            fontFamily = NotoSansBengali,
+            color      = if (it.ok) Color(0xFF16A34A) else Color(0xFFDC2626),
+            modifier   = Modifier.padding(top = 2.dp, start = 4.dp)
+        )
     }
 }
 
