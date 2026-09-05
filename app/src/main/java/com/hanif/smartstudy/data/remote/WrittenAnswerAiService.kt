@@ -55,6 +55,21 @@ object WrittenAnswerAiService {
         .writeTimeout(12, TimeUnit.SECONDS)
         .build()
 
+    // ── 🤖 "AI ব্যাখ্যা" বাটনের জন্য আলাদা, কম-timeout ক্লায়েন্ট ──
+    // কারণ: এই বাটন সবসময় Groq→Mistral→Cerebras→Gemini ৪টাই ক্রমে চেষ্টা করতে পারে
+    // (grading/viva-এর মতো "একটা ঠিক উত্তর পেলেই থামা" না — এখানেও তাই হয়, কিন্তু
+    // ইউজার সরাসরি বাটনে চেপে অপেক্ষা করছে, তাই fail হলে দ্রুত বোঝা জরুরি)। উপরের
+    // `http` ক্লায়েন্টের timeout (12+20=32 সেকেন্ড/প্রোভাইডার) দিয়ে সব প্রোভাইডার
+    // fail করলে সর্বোচ্চ ~২ মিনিট পর্যন্ত "hang" মনে হতে পারে (ধীর নেটওয়ার্কে এটাই
+    // ঘটেছিল)। এই ক্লায়েন্ট দিয়ে প্রতিটা প্রোভাইডার দ্রুত fail করে পরেরটায় চলে যায়,
+    // সর্বোচ্চ সময় লাগে ~৪×১৩≈৫২ সেকেন্ড (আগের তুলনায় অনেক কম)। `http`-এর timeout
+    // ইচ্ছাকৃতভাবে অপরিবর্তিত রাখা হলো — grading/viva ফিচার এতে প্রভাবিত হবে না। ──
+    private val httpFast = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .build()
+
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
 
     /**
@@ -77,7 +92,7 @@ object WrittenAnswerAiService {
                 callOpenAiCompatible(
                     url    = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = keys.groq,
-                    model  = "llama-3.3-70b-versatile",
+                    model  = keys.groqModel,
                     prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Groq failed: ${it.message}") }
@@ -89,7 +104,7 @@ object WrittenAnswerAiService {
                 callOpenAiCompatible(
                     url    = "https://api.mistral.ai/v1/chat/completions",
                     apiKey = keys.mistral,
-                    model  = "mistral-small-latest",
+                    model  = keys.mistralModel,
                     prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Mistral failed: ${it.message}") }
@@ -101,7 +116,7 @@ object WrittenAnswerAiService {
                 callOpenAiCompatible(
                     url    = "https://api.cerebras.ai/v1/chat/completions",
                     apiKey = keys.cerebras,
-                    model  = "llama-3.3-70b",
+                    model  = keys.cerebrasModel,
                     prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Cerebras failed: ${it.message}") }
@@ -110,7 +125,7 @@ object WrittenAnswerAiService {
 
         // ── Gemini সবার শেষে চেষ্টা করা হয় — এটা প্রায়ই ফেইল করে (free-tier rate limit/region ইস্যু) ──
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGemini(keys.gemini, prompt) }
+            runCatching { callGemini(keys.gemini, keys.geminiModel, prompt) }
                 .onFailure { Log.w(TAG, "Gemini failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
         }
@@ -136,7 +151,7 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                    apiKey = keys.groq, model  = keys.groqModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Groq explain failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
@@ -145,7 +160,7 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.mistral.ai/v1/chat/completions",
-                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                    apiKey = keys.mistral, model  = keys.mistralModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Mistral explain failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
@@ -154,13 +169,13 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.cerebras.ai/v1/chat/completions",
-                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                    apiKey = keys.cerebras, model  = keys.cerebrasModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Cerebras explain failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
         }
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGeminiText(keys.gemini, prompt) }
+            runCatching { callGeminiText(keys.gemini, keys.geminiModel, prompt) }
                 .onFailure { Log.w(TAG, "Gemini explain failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
         }
@@ -187,7 +202,104 @@ object WrittenAnswerAiService {
     ): String? = withContext(Dispatchers.IO) {
         if (question.isBlank() || !keys.hasAnyKey()) return@withContext null
         val prompt = buildExplainQuestionPrompt(question, correctAnswer, subjectTopic)
-        tryAllProviders(prompt, keys)?.trim()?.takeIf { it.isNotBlank() }
+
+        // ── httpFast + বড় max_tokens (৪০০) — ৩-১০ লাইনের ব্যাখ্যা যেন মাঝপথে
+        // কেটে না যায় (tryAllProviders/callOpenAiCompatibleText-এর শেয়ার্ড
+        // max_tokens=120 এই দৈর্ঘ্যের জন্য যথেষ্ট না)। Groq → Mistral → Cerebras →
+        // Gemini ক্রমে, প্রতিটা দ্রুত fail করে পরেরটায় চলে যায় (httpFast timeout)। ──
+        if (keys.groq.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleTextFast(
+                    url = "https://api.groq.com/openai/v1/chat/completions",
+                    apiKey = keys.groq, model  = keys.groqModel, prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Groq explainQuestion failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it.trim() }
+        }
+        if (keys.mistral.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleTextFast(
+                    url = "https://api.mistral.ai/v1/chat/completions",
+                    apiKey = keys.mistral, model  = keys.mistralModel, prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Mistral explainQuestion failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it.trim() }
+        }
+        if (keys.cerebras.isNotBlank()) {
+            runCatching {
+                callOpenAiCompatibleTextFast(
+                    url = "https://api.cerebras.ai/v1/chat/completions",
+                    apiKey = keys.cerebras, model  = keys.cerebrasModel, prompt = prompt
+                )
+            }.onFailure { Log.w(TAG, "Cerebras explainQuestion failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it.trim() }
+        }
+        if (keys.gemini.isNotBlank()) {
+            runCatching { callGeminiTextFast(keys.gemini, keys.geminiModel, prompt) }
+                .onFailure { Log.w(TAG, "Gemini explainQuestion failed: ${it.message}") }
+                .getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it.trim() }
+        }
+        null
+    }
+
+    private fun callOpenAiCompatibleTextFast(url: String, apiKey: String, model: String, prompt: String): String? {
+        val messages = JSONArray().apply {
+            put(JSONObject().apply { put("role", "user"); put("content", prompt) })
+        }
+        val payload = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.3)
+            put("max_tokens", 400)
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        httpFast.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.trim()
+        }
+    }
+
+    private fun callGeminiTextFast(apiKey: String, model: String, prompt: String): String? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
+        val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
+        val payload = JSONObject().apply {
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.3)
+                put("maxOutputTokens", 400)
+            })
+        }
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+
+        httpFast.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val txt = resp.body?.string() ?: return null
+            return JSONObject(txt)
+                .optJSONArray("candidates")
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+                ?.optJSONObject(0)
+                ?.optString("text")
+                ?.trim()
+        }
     }
 
     private fun buildExplainQuestionPrompt(question: String, correctAnswer: String, subjectTopic: String): String = """
@@ -228,7 +340,7 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleJson(
                     url = "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                    apiKey = keys.groq, model  = keys.groqModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Groq regenerate failed: ${it.message}") }
                 .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
@@ -237,7 +349,7 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleJson(
                     url = "https://api.mistral.ai/v1/chat/completions",
-                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                    apiKey = keys.mistral, model  = keys.mistralModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Mistral regenerate failed: ${it.message}") }
                 .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
@@ -246,13 +358,13 @@ object WrittenAnswerAiService {
             runCatching {
                 callOpenAiCompatibleJson(
                     url = "https://api.cerebras.ai/v1/chat/completions",
-                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                    apiKey = keys.cerebras, model  = keys.cerebrasModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Cerebras regenerate failed: ${it.message}") }
                 .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
         }
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGeminiJson(keys.gemini, prompt) }
+            runCatching { callGeminiJson(keys.gemini, keys.geminiModel, prompt) }
                 .onFailure { Log.w(TAG, "Gemini regenerate failed: ${it.message}") }
                 .getOrNull()?.let { parseRegeneratedMcq(it) }?.let { return@withContext it }
         }
@@ -335,8 +447,8 @@ object WrittenAnswerAiService {
         }
     }
 
-    private fun callGeminiJson(apiKey: String, prompt: String): String? {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+    private fun callGeminiJson(apiKey: String, model: String, prompt: String): String? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
         val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
         val payload = JSONObject().apply {
@@ -478,7 +590,7 @@ FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে স�
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = keys.groq, model = "llama-3.3-70b-versatile", prompt = prompt
+                    apiKey = keys.groq, model  = keys.groqModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Groq failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
@@ -487,7 +599,7 @@ FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে স�
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.mistral.ai/v1/chat/completions",
-                    apiKey = keys.mistral, model = "mistral-small-latest", prompt = prompt
+                    apiKey = keys.mistral, model  = keys.mistralModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Mistral failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
@@ -496,13 +608,13 @@ FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে স�
             runCatching {
                 callOpenAiCompatibleText(
                     url = "https://api.cerebras.ai/v1/chat/completions",
-                    apiKey = keys.cerebras, model = "llama-3.3-70b", prompt = prompt
+                    apiKey = keys.cerebras, model  = keys.cerebrasModel, prompt = prompt
                 )
             }.onFailure { Log.w(TAG, "Cerebras failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
         }
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGeminiText(keys.gemini, prompt) }
+            runCatching { callGeminiText(keys.gemini, keys.geminiModel, prompt) }
                 .onFailure { Log.w(TAG, "Gemini failed: ${it.message}") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
         }
@@ -538,8 +650,8 @@ FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে স�
         }
     }
 
-    private fun callGeminiText(apiKey: String, prompt: String): String? {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+    private fun callGeminiText(apiKey: String, model: String, prompt: String): String? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
         val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
         val payload = JSONObject().apply {
@@ -630,8 +742,8 @@ FEEDBACK: একটা ছোট বাক্যে, ছাত্রকে স�
         }
     }
 
-    private fun callGemini(apiKey: String, prompt: String): Boolean? {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+    private fun callGemini(apiKey: String, model: String, prompt: String): Boolean? {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
         val parts = JSONArray().apply { put(JSONObject().apply { put("text", prompt) }) }
         val contents = JSONArray().apply { put(JSONObject().apply { put("parts", parts) }) }
         val payload = JSONObject().apply {
