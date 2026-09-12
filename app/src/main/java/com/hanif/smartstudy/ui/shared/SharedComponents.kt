@@ -44,8 +44,7 @@ import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.local.LocalTechniqueStore
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
-import com.hanif.smartstudy.data.remote.ImgBbResult
-import com.hanif.smartstudy.data.remote.ImgBbService
+import com.hanif.smartstudy.data.remote.CdnImageUploadService
 import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
@@ -1066,7 +1065,7 @@ private fun buildQuestionHighlight(raw: String): AnnotatedString = buildAnnotate
     var lastEnd = 0
     for (m in SharedHighlightRegex.findAll(raw)) {
         append(raw.substring(lastEnd, m.range.first))
-        withStyle(SpanStyle(fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline)) {
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Indigo600)) {
             append(m.groupValues[1])
         }
         lastEnd = m.range.last + 1
@@ -2149,11 +2148,12 @@ private fun AddTechniqueDialog(
         scope.launch {
             isUploadingImage = true
             imageUploadError = null
-            when (val result = ImgBbService.uploadImage(context, uri)) {
-                is ImgBbResult.Success -> {
-                    text = if (text.isBlank()) result.url else text.trimEnd() + "\n" + result.url
+            // ── Image/CDN Hosting Phase: ImgBB-এর বদলে GAS-proxy দিয়ে CDN-এ ──
+            when (val result = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(context, uri, "attachments", "att")) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    text = if (text.isBlank()) result.data else text.trimEnd() + "\n" + result.data
                 }
-                is ImgBbResult.Error -> {
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     imageUploadError = result.message
                 }
             }
