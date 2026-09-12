@@ -78,12 +78,27 @@ fun ProfilePage(
                   userTypeInput  != (state.user?.userType  ?: "") ||
                   classLevelInput != (state.user?.classLevel ?: "")
 
+    // ── Image/CDN Hosting Phase: crop স্ক্রিন যোগ (ProfileScreen.kt-এর একই প্যাটার্ন) ──
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+
     // Image picker
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        vm.uploadPhoto(uri)
+        pendingCropUri = uri
+    }
+
+    pendingCropUri?.let { cropUri ->
+        com.hanif.smartstudy.ui.components.ImageCropScreen(
+            imageUri  = cropUri,
+            onCancel  = { pendingCropUri = null },
+            onCropped = { bitmap ->
+                pendingCropUri = null
+                vm.uploadPhoto(bitmap)
+            }
+        )
+        return@ProfilePage
     }
 
     Scaffold(
