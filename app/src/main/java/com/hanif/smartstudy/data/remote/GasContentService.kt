@@ -970,4 +970,39 @@ object GasContentService {
                 ApiResult.Error(e.message ?: "Network error")
             }
         }
+
+    /**
+     * Image/CDN Hosting Phase — ImgBB সম্পূর্ণ বাদ দিয়ে ছবি (প্রোফাইল/অ্যাটাচমেন্ট/
+     * প্রশ্নের ছবি) এখন এই GAS "upload_image" action দিয়ে GitHub-এ commit হয়ে
+     * jsDelivr CDN URL হিসেবে ফেরত আসে। GitHub টোকেন কখনো ফোনে থাকে না — GAS-ই
+     * একমাত্র জায়গা যেখানে সেটা (Script Properties-এ) নিরাপদে থাকে। এই ফাংশন কল
+     * করার আগে ছবি ইতিমধ্যে resize+compress+crop হয়ে থাকা উচিত (দেখো
+     * ImageCropScreen.kt/ImgBbService.kt-এর কমেন্ট) — এখানে কোনো সাইজ-চেক ছাড়াই
+     * সরাসরি পাঠানো হয়, GAS নিজে ~1.4MB-এর বেশি হলে স্পষ্ট এরর ফেরত দেয়।
+     */
+    suspend fun uploadImage(base64Jpeg: String, folder: String, fileName: String): ApiResult<String> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("ছবি আপলোড সার্ভিস কনফিগার করা নেই (GAS_URL/GAS_SECRET)")
+            try {
+                val params = mapOf(
+                    "secret"      to SECRET,
+                    "type"        to "upload_image",
+                    "imageBase64" to base64Jpeg,
+                    "folder"      to folder,
+                    "fileName"    to fileName
+                )
+                val body = plainGson.toJson(params).toRequestBody(JSON_MT)
+                val resp = client.newCall(Request.Builder().url(BASE_URL).post(body).build()).execute()
+                val respBody = resp.body?.string() ?: ""
+                resp.close()
+                val obj = JsonParser.parseString(respBody).asJsonObject
+                if (obj.get("status")?.asString == "success") {
+                    ApiResult.Success(obj.get("url")?.asString ?: "")
+                } else {
+                    ApiResult.Error(obj.get("message")?.asString ?: "ছবি আপলোড ব্যর্থ হয়েছে")
+                }
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
 }
