@@ -42,7 +42,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.local.LocalTechniqueStore
-import com.hanif.smartstudy.util.AiExplanationCache
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.data.remote.ImgBbResult
@@ -206,6 +205,12 @@ fun ReadingProgressBar(current: Int, total: Int, modifier: Modifier = Modifier) 
     }
 }
 
+// ── UX ফিক্স: প্রশ্নের ইনলাইন সিরিয়াল নাম্বার বাংলা সংখ্যায় দেখানোর জন্য ("১." "২." ইত্যাদি) ──
+private fun toBengaliNumber(n: Int): String {
+    val bnDigits = charArrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+    return n.toString().map { c -> if (c.isDigit()) bnDigits[c - '0'] else c }.joinToString("")
+}
+
 @Composable
 fun QuestionCard(
     index          : Int,
@@ -255,17 +260,10 @@ fun QuestionCard(
     // ── "প্রশ্ন" এডিট করার সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে ৪টা অপশন + সঠিক
     // উত্তর আবার জেনারেট করা — শুধু AdminFieldEditDialog-এ পাস-থ্রু হয়, null থাকলে
     // বাটনটাই দেখা যাবে না (আগের আচরণ অপরিবর্তিত থাকে) ──
-    // ── 🔄 "প্রশ্ন এডিট করুন" ডায়ালগে "Regenerate" বাটনে ব্যবহৃত ──
     onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? = null,
-    // ── 🤖 "AI ব্যাখ্যা" বাটন — উত্তর সাবমিট করার পর দেখা যায় (Quiz/QBank/Study
-    // তিনটাতেই)। ক্লিক করলে প্রশ্নের পূর্ণ, শিক্ষকের মতো ব্যাখ্যা আনে (অঙ্ক হলে ধাপে
-    // ধাপে সমাধান, ইংরেজি গ্রামার হলে বাংলা-ইংরেজি মিশিয়ে) — Settings-এ সেভ করা
-    // key দিয়ে Groq→Mistral→Cerebras→Gemini ক্রমে চেষ্টা হয় (একটা ব্যর্থ হলে সাথে
-    // সাথে পরেরটা)। null থাকলে বাটনটাই দেখা যাবে না। রেজাল্ট শুধু ডিভাইসে ক্যাশ হয়
-    // (AiExplanationCache) — ডাটাবেসে সেভ হয় না। আগে এখানে একটা প্রশ্ন-ভিত্তিক
-    // ভয়েস AI চ্যাট বাটন (onAskAi) ছিল, সেটা সরিয়ে এই ফিচার দিয়ে প্রতিস্থাপন
-    // করা হয়েছে। ──
-    onAskAiExplain: (suspend (question: String, correctAnswer: String, subjectTopic: String) -> String?)? = null,
+    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট বাটন — Quiz/QBank/Study তিনটাতেই দেখা যায়।
+    // null থাকলে বাটনটাই রেন্ডার হয় না (যেমন ChallengeExamScreen-এ এখনো ব্যবহার হয়নি)। ──
+    onAskAi        : (() -> Unit)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
@@ -278,7 +276,7 @@ fun QuestionCard(
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
             // ── _studyNoQ logic — index.html এর মতো ──
             // Study mode এ প্রশ্ন না থাকলে explanation/answer কেই প্রশ্ন হিসেবে দেখাবে
             // (links সহ — PDF/image/video সব render হবে)
@@ -299,15 +297,9 @@ fun QuestionCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // ── UX ফিক্স: আলাদা "#১" ব্যাজ-রো সরিয়ে এই Row-এ এখন শুধু Written/
+                // বছরের চিপ থাকলেই সেটা দেখা যায় — নাম্বার নিচে প্রশ্নের সাথেই ইনলাইন। ──
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.clip(RoundedCornerShape(20.dp))
-                            .background(Indigo600.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text("#${index + 1}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Indigo600, fontFamily = NotoSansBengali)
-                    }
                     if (item.isWritten()) {
                         Box(
                             Modifier.clip(RoundedCornerShape(20.dp))
@@ -359,6 +351,20 @@ fun QuestionCard(
                             )
                         }
                     }
+                    if (onAskAi != null) {
+                        // ── আগে এখানে শুধু 🤖 ইমোজি ছিল — অনেকেই বুঝতে পারতো না এটা কিসের
+                        // বাটন, তাই এখন স্পষ্ট "AI" লেখা একটা ছোট্ট ব্যাজ ──
+                        IconButton(onClick = onAskAi, modifier = Modifier.size(28.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Indigo600.copy(alpha = 0.12f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text("AI", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
+                            }
+                        }
+                    }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
                         Icon(
                             if (item.isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -373,23 +379,41 @@ fun QuestionCard(
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
             // প্রশ্ন — QuestionText (LaTeX support আছে) + RichContentText (link support)
             // studyNoQ তে explanation-ই প্রশ্ন, সেটায় link থাকতে পারে
-            if (studyNoQ) {
-                // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
-                RichContentText(
-                    text      = displayQuestion,
-                    textColor = MaterialTheme.colorScheme.onSurface,
-                    fontSize  = 15
+            // ── UX ফিক্স ("#নাম্বার আলাদা লাইনে জায়গা নষ্ট করছে"): নাম্বার এখন
+            // প্রশ্নের টেক্সটের সাথেই একই লাইনে ইনলাইন বসে ("১. প্রশ্নের টেক্সট...",
+            // বাংলা সংখ্যা + ডট) — আলাদা ব্যাজ-রো সম্পূর্ণ বাদ, এক লাইন জায়গা বাঁচে। ──
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text       = "${toBengaliNumber(index + 1)}.",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = Indigo600,
+                    fontFamily = NotoSansBengali,
+                    modifier   = Modifier.padding(end = 5.dp)
                 )
-            } else {
-                // সাধারণ প্রশ্ন — QuestionText (LaTeX support + Study mode এ word-highlight TTS)
-                QuestionText(
-                    text   = displayQuestion,
-                    ttsKey = if (mode == StudyMode.STUDY) "${item.id}_qa" else null
-                )
+                Box(Modifier.weight(1f)) {
+                    if (studyNoQ) {
+                        // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
+                        RichContentText(
+                            text      = displayQuestion,
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            fontSize  = 14
+                        )
+                    } else {
+                        // সাধারণ প্রশ্ন — QuestionText (LaTeX support + Study mode এ word-highlight TTS +
+                        // formatStyle-aware highlight/fillblank রেন্ডারিং — দেখো QuestionText-এর কমেন্ট)
+                        QuestionText(
+                            text           = displayQuestion,
+                            ttsKey         = if (mode == StudyMode.STUDY) "${item.id}_qa" else null,
+                            formatStyle    = item.formatStyle,
+                            answerForBlank = item.answer
+                        )
+                    }
+                }
             }
 
             // ── প্রশ্নের বর্তমান Subject/Topic — ছোট এক লাইনের চিপ, নিচে edit
@@ -530,7 +554,7 @@ fun QuestionCard(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
             when {
                 item.isMcq() && mode != StudyMode.STUDY -> {
@@ -698,18 +722,6 @@ fun QuestionCard(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     StudyDoneCheckIcon(done = item.isStudyDone, onClick = onStudyDone)
                 }
-            }
-
-            // ── 🤖 AI ব্যাখ্যা — উত্তর সাবমিট করার পরই দেখা যায় ──
-            if (showAnswerBox && onAskAiExplain != null) {
-                Spacer(Modifier.height(8.dp))
-                AiExplanationSection(
-                    questionKey   = item.sourceKey(),
-                    question      = displayQuestion,
-                    correctAnswer = item.answer,
-                    subjectTopic  = "${item.subject} ${item.subTopic}".trim(),
-                    onFetch       = onAskAiExplain
-                )
             }
 
             // ── AI ফলাফল (ঠিক/ভুল) নির্ধারণ হয়ে গেলে সাথে সাথেই পরের প্রশ্নে
@@ -882,120 +894,6 @@ fun QuestionCard(
 }
 
 /**
- * ── 🤖 "AI ব্যাখ্যা" — উত্তর সাবমিট করার পর প্রতিটা প্রশ্নে দেখা যায় ──
- * বাটনে ক্লিক করলে প্রথমে ডিভাইসের লোকাল ক্যাশ চেক করে (AiExplanationCache) —
- * আগে একবার আনা থাকলে সাথে সাথেই দেখায়, ফের API কল করে না। না থাকলে
- * onFetch (Groq→Mistral→Cerebras→Gemini রোটেশন) দিয়ে আনে, সফল হলে লোকালি
- * সেভ করে রাখে (শুধু এই ডিভাইসে — কোনো সার্ভার/ডাটাবেসে যায় না)।
- */
-@Composable
-private fun AiExplanationSection(
-    questionKey  : String,
-    question     : String,
-    correctAnswer: String,
-    subjectTopic : String,
-    onFetch      : suspend (question: String, correctAnswer: String, subjectTopic: String) -> String?
-) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var explanation by remember(questionKey) { mutableStateOf<String?>(null) }
-    var loading by remember(questionKey) { mutableStateOf(false) }
-    var failed by remember(questionKey) { mutableStateOf(false) }
-    var checkedCache by remember(questionKey) { mutableStateOf(false) }
-
-    // ── প্রশ্ন বদলালেই (questionKey বদলালে) আগে থেকে ডিভাইসে সেভ করা ব্যাখ্যা
-    // আছে কিনা নিঃশব্দে একবার চেক করে নেয় — থাকলে বাটনে ক্লিক করার আগেই
-    // "✅ আগে দেখা হয়েছে" ইঙ্গিত হিসেবে সরাসরি দেখানো যেতে পারে, তবে UI সহজ
-    // রাখতে শুধু cache থাকলে সেটা মনে রাখা হলো, বাটনেই দেখাবে। ──
-    LaunchedEffect(questionKey) {
-        checkedCache = false
-        explanation = AiExplanationCache.get(ctx, questionKey)
-        checkedCache = true
-    }
-
-    fun fetchNow() {
-        if (loading) return
-        scope.launch {
-            loading = true
-            failed = false
-            val result = runCatching { onFetch(question, correctAnswer, subjectTopic) }.getOrNull()
-            loading = false
-            if (result.isNullOrBlank()) {
-                failed = true
-            } else {
-                explanation = result
-                AiExplanationCache.save(ctx, questionKey, result)
-            }
-        }
-    }
-
-    val current = explanation
-    when {
-        current != null -> {
-            Card(
-                shape  = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Indigo600.copy(alpha = 0.06f)),
-                border = BorderStroke(1.dp, Indigo600.copy(alpha = 0.25f))
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🤖", fontSize = 13.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "AI ব্যাখ্যা",
-                            fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                            color = Indigo600, fontFamily = NotoSansBengali
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        current,
-                        fontSize   = 13.sp,
-                        lineHeight = 19.sp,
-                        fontFamily = NotoSansBengali,
-                        color      = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-        }
-        loading -> {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(15.dp), strokeWidth = 2.dp, color = Indigo600)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "🤖 AI ব্যাখ্যা আনা হচ্ছে…",
-                    fontFamily = NotoSansBengali, fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        else -> {
-            OutlinedButton(
-                onClick  = { fetchNow() },
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(10.dp),
-                colors   = ButtonDefaults.outlinedButtonColors(contentColor = Indigo600),
-                border   = BorderStroke(1.dp, Indigo600.copy(alpha = 0.4f))
-            ) {
-                Text("🤖 AI ব্যাখ্যা", fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-            if (failed) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "⚠️ AI ব্যাখ্যা আনা যায়নি — Settings-এ API key দেওয়া আছে কিনা দেখুন, অথবা আবার চেষ্টা করুন",
-                    fontSize = 10.sp, fontFamily = NotoSansBengali,
-                    color = Color(0xFFF59E0B)
-                )
-            }
-        }
-    }
-}
-
-/**
  * ── ইংরেজি শব্দ চিনে আলাদা annotation tag বসিয়ে দেয় ──
  * AnnotatedString এর উপর "word" tag বসানো হয় শুধু ইংরেজি (A-Z/a-z ভিত্তিক) অংশে,
  * যাতে ক্লিক করলে বোঝা যায় কোন শব্দে ট্যাপ হয়েছে এবং সেটার শুদ্ধ ইংরেজি
@@ -1152,18 +1050,73 @@ fun HighlightedSpeakingText(
     }
 }
 
+// ── ফিক্স (Study_Database-এর আসল ডেটা যাচাই করে কনফার্ম): QBank "Exam Paper"
+// স্ক্রিনে (QBankExamPaperScreen.kt) formatStyle == "highlight"/"fillblank" অনুযায়ী
+// বিশেষ রেন্ডারিং আছে (single "*word*" / single "_word_" মার্কআপ পার্স করে বোল্ড+
+// আন্ডারলাইন করে দেখায়), কিন্তু এই শেয়ার্ড QuestionText — যেটা Quiz/QBank-list/Study
+// তিনটা মোডেই ব্যবহৃত হয় — সেটা করত না। বর্তমানে Quiz/Study-তে এই formatStyle-এর কোনো
+// ডেটা না থাকলেও (শুধু QBank-এ আছে), ভবিষ্যতে admin এই ফরম্যাট Quiz/Study-তেও ব্যবহার
+// করলে সেটা ঠিকভাবে দেখানোর জন্য এখানেও একই (ফিক্সড) regex রাখা হলো — সামঞ্জস্যপূর্ণ
+// থাকার জন্য QBankExamPaperScreen.kt-এর regex-এর সাথে হুবহু মিলিয়ে (single "*"/single "_")।
+private val SharedHighlightRegex = Regex("\\*(.+?)\\*")
+private val SharedFillBlankRegex = Regex("_(.+?)_")
+private val SharedLegacyBlankRegex = Regex("_{2,}|\\.{4,}|…{2,}")
+
+private fun buildQuestionHighlight(raw: String): AnnotatedString = buildAnnotatedString {
+    var lastEnd = 0
+    for (m in SharedHighlightRegex.findAll(raw)) {
+        append(raw.substring(lastEnd, m.range.first))
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline)) {
+            append(m.groupValues[1])
+        }
+        lastEnd = m.range.last + 1
+    }
+    append(raw.substring(lastEnd))
+}
+
+private fun buildQuestionFillBlank(question: String, answer: String): AnnotatedString? {
+    val blankRange = SharedFillBlankRegex.find(question)?.range
+        ?: SharedLegacyBlankRegex.find(question)?.range
+        ?: return null
+    return buildAnnotatedString {
+        append(question.substring(0, blankRange.first))
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline)) {
+            append(answer)
+        }
+        append(question.substring(blankRange.last + 1))
+    }
+}
+
 @Composable
-fun QuestionText(text: String, modifier: Modifier = Modifier, ttsKey: String? = null, ttsOffset: Int = 0) {
+fun QuestionText(
+    text: String,
+    modifier: Modifier = Modifier,
+    ttsKey: String? = null,
+    ttsOffset: Int = 0,
+    formatStyle: String = "",
+    answerForBlank: String = ""
+) {
+    val richFormatted = remember(text, formatStyle, answerForBlank) {
+        when {
+            formatStyle == "fillblank" && answerForBlank.isNotBlank() -> buildQuestionFillBlank(text, answerForBlank)
+            formatStyle == "highlight" -> buildQuestionHighlight(text)
+            else -> null
+        }
+    }
     val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
-    if (hasLatex) {
+    if (richFormatted != null) {
+        // highlight/fillblank মার্কআপ পার্স হয়ে গেছে — সরাসরি সেটাই দেখাও (LaTeX/TTS
+        // এখানে প্রযোজ্য না, কারণ এই দুই formatStyle সবসময় সাধারণ টেক্সট নিয়েই কাজ করে)
+        Text(text = richFormatted, fontSize = 14.sp, modifier = modifier)
+    } else if (hasLatex) {
         // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
         MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 300.dp))
     } else if (ttsKey != null) {
-        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 15, spokenOffset = ttsOffset)
+        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 14, spokenOffset = ttsOffset)
     } else {
         SelectableSmartText(
             text       = text,
-            fontSize   = 15,
+            fontSize   = 14,
             fontWeight = FontWeight.Bold,
             color      = MaterialTheme.colorScheme.onSurface,
             lineHeight = 22,
@@ -1218,7 +1171,7 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val correctBg = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
     val wrongBg   = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         options.forEach { (n, text) ->
             val isSelected  = answered?.option == n
             val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
@@ -1258,20 +1211,20 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
                     .background(bg)
                     .border(1.5.dp, border, RoundedCornerShape(12.dp))
                     .then(if (answered == null) Modifier.clickable { onAnswer(n) } else Modifier)
-                    .padding(12.dp),
+                    .padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(26.dp).clip(CircleShape)
+                    Modifier.size(24.dp).clip(CircleShape)
                         .background(border.copy(alpha = 0.15f))
                         .border(1.dp, border, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(icon, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = border)
                 }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    color = textColor, fontFamily = NotoSansBengali, lineHeight = 18.sp,
+                    color = textColor, fontFamily = NotoSansBengali, lineHeight = 17.sp,
                     modifier = Modifier.weight(1f))
             }
         }
