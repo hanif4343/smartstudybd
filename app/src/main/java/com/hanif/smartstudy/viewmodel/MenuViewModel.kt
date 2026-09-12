@@ -9,8 +9,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.local.ContentCache
 import com.hanif.smartstudy.data.model.User
-import com.hanif.smartstudy.data.remote.ImgBbResult
-import com.hanif.smartstudy.data.remote.ImgBbService
+import com.hanif.smartstudy.data.remote.CdnImageUploadService
 import com.hanif.smartstudy.receiver.ReminderReceiver
 import com.hanif.smartstudy.service.SmartStudyFirebaseService
 import com.hanif.smartstudy.ui.theme.AppTheme
@@ -58,6 +57,15 @@ data class MenuUiState(
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
     val isOfflineMode   : Boolean            = false,
+    // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
+    val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
+        com.hanif.smartstudy.data.model.DataSourceMode.FIREBASE,
+    // ── Google Sheet সিলেক্ট করার পর সাথে সাথেই একটা test fetch চলে — এই
+    // ৩টা field দিয়ে Settings স্ক্রিনে real-time প্রোগ্রেস (elapsed সেকেন্ড) ও
+    // ফলাফল (সফল/ব্যর্থ + আসল কারণ) দেখানো হয় ──
+    val isTestingDataSource      : Boolean = false,
+    val dataSourceTestElapsedSec : Int     = 0,
+    val dataSourceTestResultMsg  : String? = null,
     val isReminderOn    : Boolean            = false,
     val reminderHour    : Int                = 20,
     val reminderMinute  : Int                = 0,
@@ -162,11 +170,6 @@ data class MenuUiState(
     val mistralApiKey     : String           = "",
     val cerebrasApiKey    : String           = "",
     val geminiApiKey      : String           = "",
-    // ── প্রতিটা প্রোভাইডারের নির্বাচিত মডেল — Settings-এ key-এর পাশের ড্রপডাউনে দেখানো হয় ──
-    val groqModel         : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GROQ_MODEL,
-    val mistralModel      : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_MISTRAL_MODEL,
-    val cerebrasModel     : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_CEREBRAS_MODEL,
-    val geminiModel       : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GEMINI_MODEL,
     val aiKeysSavedMsg    : String?          = null,
 
     // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস" কার্ড) ──
@@ -187,12 +190,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     private val cache   = ContentCache(app)
     private val ctx     = app.applicationContext
 
-    // ── Data Source ফিচার সম্পূর্ণ সরানো হয়েছে — Content READ (Quiz/QBank/Study)
-    // সবসময় কোড-লেভেলে ফিক্সড পথে যায় (CDN প্রাইমারি, GAS শুধু targeted fallback/
-    // write-এ, দেখো ContentFetchService.kt/CdnService.kt), কোনো user-facing টগল
-    // নেই। admin WRITE (edit/delete/add/rename) GAS_URL/GAS_SECRET কনফিগার করা
-    // থাকলে সবসময় Sheet-ই প্রাইমারি/নির্ভরযোগ্য write টার্গেট, Firebase শুধু
-    // best-effort মিরর (ব্যর্থ হলেও Sheet write আটকায় না)। ──
+    // ── Settings-এ "Data Source" ড্রপডাউন থেকে "Google Sheet" সিলেক্ট করা থাকলে
+    // Content READ (Quiz/QBank/Study লোড) Firebase বাইপাস করে GasContentService দিয়ে যায়
+    // (দেখো session.getDataSourceMode() ব্যবহার নিচে fetchAllContent-এ)। কিন্তু admin
+    // WRITE (edit/delete/add/rename) এখন আর এই টগলের ওপর নির্ভর করে না — GAS_URL/GAS_SECRET
+    // কনফিগার করা থাকলে Sheet-ই সবসময় প্রাইমারি/নির্ভরযোগ্য write টার্গেট, Firebase শুধু
+    // best-effort মিরর (ব্যর্থ হলেও Sheet write আটকায় না)। কারণ: Firebase quota/permission
+    // মাঝেমধ্যে ব্যর্থ হয়, কিন্তু admin তখনও Sheet-এ কাজ চালিয়ে যেতে চায় — Data Source মোড
+    // শুধু "কোথা থেকে পড়বে" ঠিক করে, "কোথায় লিখবে" না। ──
 
     /** Firebase অ্যাকশন-টাকে try/catch এ মুড়ে দেয় — exception হলেও ApiResult.Error রিটার্ন করে, throw করে না */
     // ── Phase 6 পূর্ণ কাটওভার (single-user account) — আগে এখানে Firebase RTDB-তেও
@@ -308,6 +313,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
             val offlineOn  = session.isOfflineMode()
+            val dataSrcMode = session.getDataSourceMode()
             val remOn      = session.isReminderOn()
             val remH       = session.getReminderHour()
             val remM       = session.getReminderMinute()
@@ -375,6 +381,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     appTheme       = theme,
                     isSoundOff     = soundOff,
                     isOfflineMode  = offlineOn,
+                    dataSourceMode = dataSrcMode,
                     isReminderOn   = remOn,
                     reminderHour   = remH,
                     reminderMinute = remM,
@@ -412,10 +419,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = aiKeys.mistral,
                     cerebrasApiKey = aiKeys.cerebras,
                     geminiApiKey   = aiKeys.gemini,
-                    groqModel      = aiKeys.groqModel,
-                    mistralModel   = aiKeys.mistralModel,
-                    cerebrasModel  = aiKeys.cerebrasModel,
-                    geminiModel    = aiKeys.geminiModel,
                     smartTypingEnabled = smartTypingOn,
                     typingTargetWpm    = typingTargetWpm,
                     typingSoundPreset  = typingSoundPr,
@@ -458,20 +461,23 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Profile photo upload ──────────────────────────────────
-
-    fun uploadProfilePhoto(uri: Uri) {
+    // ── Image/CDN Hosting Phase: এখন Uri না, ইতিমধ্যে-ক্রপ-করা Bitmap নেয়
+    // (দেখো ImageCropScreen.kt) — resize+compress+upload সব CdnImageUploadService-এ,
+    // ImgBB সম্পূর্ণ বাদ ──
+    fun uploadProfilePhoto(cropped: android.graphics.Bitmap) {
         viewModelScope.launch {
             _state.update { it.copy(isUploadingPhoto = true, photoUploadError = null) }
-            when (val result = ImgBbService.uploadImage(ctx, uri)) {
-                is ImgBbResult.Success -> {
+            val phone = _state.value.user?.phone ?: "user"
+            when (val result = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadBitmap(cropped, "users", phone)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     val user = _state.value.user ?: return@launch
-                    val updated = user.copy(picture = result.url)
+                    val updated = user.copy(picture = result.data)
                     session.saveUser(updated)
                     // Save to Firebase RTDB
                     saveUserToFirebase(updated)
                     _state.update { it.copy(user = updated, isUploadingPhoto = false, toast = "✅ প্রোফাইল ছবি আপডেট হয়েছে") }
                 }
-                is ImgBbResult.Error -> {
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     _state.update { it.copy(isUploadingPhoto = false, photoUploadError = result.message) }
                 }
             }
@@ -611,24 +617,87 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key + মডেল সেভ ──
+    // ── Data Source (Firebase / Google Sheet) — Settings-এ ড্রপডাউন থেকে বদলায় ──
+    // বদলানোর সাথে সাথে content cache (Room + DataStore + in-memory) clear করে দেওয়া
+    // হয় — যাতে পুরনো ব্যাকএন্ডের ডেটা নতুন মোডের সাথে গুলিয়ে না যায় (getContent() পরের
+    // বার কল হলে নতুন মোড অনুযায়ী fresh fetch শুরু হবে, দেখো ContentFetchService.kt)।
+    fun setDataSourceMode(mode: com.hanif.smartstudy.data.model.DataSourceMode) {
+        viewModelScope.launch {
+            if (mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET &&
+                !com.hanif.smartstudy.data.remote.GasContentService.isConfigured()
+            ) {
+                _state.update { it.copy(
+                    toast = "❌ GAS_URL/GAS_SECRET বিল্ডে সেট করা নেই — Google Sheet মোড চালু করা যাবে না"
+                )}
+                return@launch
+            }
+            session.setDataSourceMode(mode)
+            cache.clearCache()
+            com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+            // ── Typing প্র্যাকটিসের প্যাসেজ পুলও এই সোর্স বদলের আওতায় — নাহলে RAM cache
+            // পুরনো সোর্সের ডেটা ধরে রাখবে, পরের getPassages() নতুন মোডে fetch করবে না ──
+            com.hanif.smartstudy.util.TypingPassageProvider.forceRefreshNextTime()
+            _state.update { it.copy(
+                dataSourceMode = mode,
+                dataSourceTestResultMsg = null,
+                toast = if (mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET)
+                    "📊 Data Source: Google Sheet — এখন থেকে সব প্রশ্ন/সাবজেক্ট Sheet থেকে আসবে (প্রথমবার একটু সময় লাগতে পারে)"
+                else
+                    "🔥 Data Source: Firebase — আগের মতোই দ্রুত sync",
+                contentEditVersion = it.contentEditVersion + 1
+            )}
+
+            // ── Google Sheet সিলেক্ট করার সাথে সাথেই একটা রিয়েল test fetch চালাই —
+            // "সিলেক্ট করলাম কিন্তু ডেটা আসছে না" এই অবস্থায় ইউজারকে অন্ধকারে
+            // রাখার বদলে সাথে সাথেই real progress (elapsed সেকেন্ড, ticking) ও
+            // ফলাফল (কতগুলো প্রশ্ন এলো, বা আসল error কারণ) দেখানো হয়। ──
+            if (mode == com.hanif.smartstudy.data.model.DataSourceMode.GOOGLE_SHEET) {
+                _state.update { it.copy(isTestingDataSource = true, dataSourceTestElapsedSec = 0) }
+                val tickerJob = launch {
+                    while (true) {
+                        kotlinx.coroutines.delay(1000)
+                        _state.update { it.copy(dataSourceTestElapsedSec = it.dataSourceTestElapsedSec + 1) }
+                    }
+                }
+                val result = com.hanif.smartstudy.data.remote.GasContentService.fetchAllContent()
+                tickerJob.cancel()
+                when (result) {
+                    is com.hanif.smartstudy.data.remote.ContentResult.Success -> {
+                        val d = result.data
+                        // test fetch-এই যে ডেটা পেলাম সেটা সরাসরি cache-এ বসিয়ে দিলাম —
+                        // ইউজারকে আলাদা করে Home/Quiz reload করে আবার অপেক্ষা করতে হবে না
+                        cache.saveContent(d)
+                        cache.markFullSyncDone(d.fetchedAt)
+                        com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                        _state.update { it.copy(
+                            isTestingDataSource = false,
+                            dataSourceTestResultMsg = "✅ সফল — Quiz ${d.quiz.size}টি, QBank ${d.qbank.size}টি, Study ${d.study.size}টি প্রশ্ন এসেছে",
+                            contentEditVersion = it.contentEditVersion + 1
+                        )}
+                    }
+                    is com.hanif.smartstudy.data.remote.ContentResult.Error -> {
+                        _state.update { it.copy(
+                            isTestingDataSource = false,
+                            dataSourceTestResultMsg = "❌ ব্যর্থ — ${result.message}"
+                        )}
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearDataSourceTestResult() { _state.update { it.copy(dataSourceTestResultMsg = null) } }
+
+    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ ──
     // একবার সেভ করলে DataStore-এ থেকে যায়, পরের বার আবার বসাতে হয় না।
     // চেষ্টার ক্রম Study/QBank উভয় জায়গাতেই: Groq → Mistral → Cerebras → Gemini।
-    fun saveAiApiKeys(
-        groq: String, mistral: String, cerebras: String, gemini: String,
-        groqModel: String, mistralModel: String, cerebrasModel: String, geminiModel: String
-    ) {
+    fun saveAiApiKeys(groq: String, mistral: String, cerebras: String, gemini: String) {
         viewModelScope.launch {
-            val defaults = com.hanif.smartstudy.data.model.AiApiKeys()
             val keys = com.hanif.smartstudy.data.model.AiApiKeys(
                 groq     = groq.trim(),
                 mistral  = mistral.trim(),
                 cerebras = cerebras.trim(),
-                gemini   = gemini.trim(),
-                groqModel     = groqModel.trim().ifBlank { defaults.groqModel },
-                mistralModel  = mistralModel.trim().ifBlank { defaults.mistralModel },
-                cerebrasModel = cerebrasModel.trim().ifBlank { defaults.cerebrasModel },
-                geminiModel   = geminiModel.trim().ifBlank { defaults.geminiModel }
+                gemini   = gemini.trim()
             )
             session.setAiApiKeys(keys)
             _state.update {
@@ -637,11 +706,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = keys.mistral,
                     cerebrasApiKey = keys.cerebras,
                     geminiApiKey   = keys.gemini,
-                    groqModel      = keys.groqModel,
-                    mistralModel   = keys.mistralModel,
-                    cerebrasModel  = keys.cerebrasModel,
-                    geminiModel    = keys.geminiModel,
-                    aiKeysSavedMsg = "✅ API key ও মডেল সংরক্ষণ করা হয়েছে"
+                    aiKeysSavedMsg = "✅ API key সংরক্ষণ করা হয়েছে"
                 )
             }
         }
@@ -649,14 +714,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearAiKeysSavedMsg() {
         _state.update { it.copy(aiKeysSavedMsg = null) }
-    }
-
-    /** ── 🔍 Settings-এ "টেস্ট করুন" বাটন — সেভ করার আগেই key+মডেল সত্যিকারের
-     * একটা রিকোয়েস্ট পাঠিয়ে যাচাই করে দেখে। এখনো সেভ না করা মান দিয়েও টেস্ট করা
-     * যায় (তাই সরাসরি text field-এর মান পাঠানো হয়, session থেকে না)। ── */
-    suspend fun testAiModel(provider: String, apiKey: String, model: String):
-            com.hanif.smartstudy.data.remote.WrittenAnswerAiService.ModelTestResult {
-        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.testProviderModel(provider, apiKey, model)
     }
 
     // ── Reminder ─────────────────────────────────────────────
@@ -754,20 +811,22 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Profile photo upload (Uri version) ────────────────────
-    fun uploadPhoto(uri: android.net.Uri) {
+    // ── Image/CDN Hosting Phase: এখন Uri না, ক্রপ করা Bitmap নেয় (দেখো ImageCropScreen.kt) ──
+    fun uploadPhoto(cropped: android.graphics.Bitmap) {
         viewModelScope.launch {
             _state.update { it.copy(isUploadingPhoto = true, uploadProgress = true, photoUploadError = null) }
             try {
-                val result = com.hanif.smartstudy.data.remote.ImgBbService.uploadImage(getApplication(), uri)
+                val phone = _state.value.user?.phone ?: "user"
+                val result = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadBitmap(cropped, "users", phone)
                 when (result) {
-                    is com.hanif.smartstudy.data.remote.ImgBbResult.Success -> {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                         val user = _state.value.user ?: return@launch
-                        val updated = user.copy(picture = result.url)
+                        val updated = user.copy(picture = result.data)
                         session.saveUser(updated)
                         saveUserToFirebase(updated)
                         _state.update { it.copy(user = updated, isUploadingPhoto = false, uploadProgress = false, successMsg = "প্রোফাইল ছবি আপডেট হয়েছে") }
                     }
-                    is com.hanif.smartstudy.data.remote.ImgBbResult.Error -> {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                         _state.update { it.copy(isUploadingPhoto = false, uploadProgress = false, error = result.message) }
                     }
                 }
