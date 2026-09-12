@@ -38,9 +38,25 @@ fun ProfileScreen(
     var name by remember { mutableStateOf(user?.name ?: "") }
     var editingName by remember { mutableStateOf(false) }
 
+    // ── Image/CDN Hosting Phase: ছবি বাছাইয়ের পর সরাসরি আপলোড না করে আগে
+    // ImageCropScreen দেখানো হয় (গোল ফ্রেমে পজিশন/জুম ঠিক করার জন্য) ──
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+
     // Image picker
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { vm.uploadProfilePhoto(it) }
+        pendingCropUri = uri
+    }
+
+    pendingCropUri?.let { cropUri ->
+        com.hanif.smartstudy.ui.components.ImageCropScreen(
+            imageUri  = cropUri,
+            onCancel  = { pendingCropUri = null },
+            onCropped = { bitmap ->
+                pendingCropUri = null
+                vm.uploadProfilePhoto(bitmap)
+            }
+        )
+        return@ProfileScreen
     }
 
     Scaffold(
