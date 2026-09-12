@@ -10,6 +10,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -42,6 +44,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.roundToInt
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
 import com.hanif.smartstudy.ui.ads.StickyBottomBannerView
@@ -228,6 +233,10 @@ fun QuestionListScreen(
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
     var activeHighlightId by remember { mutableStateOf<String?>(null) }
+    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট — কোন প্রশ্ন (local index, pagedQuestions-এর
+    // ভেতরে) নিয়ে চ্যাট খোলা আছে। null মানে বন্ধ। "পরের প্রশ্ন" চাপলে/বললে +1 হয়ে
+    // পরের প্রশ্নে চলে যায়, পেজের শেষ প্রশ্নে থাকলে বাটন/কমান্ড কাজ করে না (hasNext=false)। ──
+    var voiceAiIdx by remember { mutableStateOf<Int?>(null) }
 
     // ── Study: "শুধু প্রশ্ন দেখ" মোড — এই টগলটা শুধু Study screen-এর
     //    টপবারেই থাকে (Settings/Menu-তে না), Quiz/QBank-এ এফেক্ট নেই।
@@ -391,7 +400,7 @@ fun QuestionListScreen(
     // ── Back button = Android system back ──
     BackHandler { onBack() }
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
                 QuestionTopBar(
@@ -416,7 +425,9 @@ fun QuestionListScreen(
                             isSelectMode = !isSelectMode
                             if (!isSelectMode) selectedQuestionIds.clear()
                         }
-                    } else null
+                    } else null,
+                    isAdminControlsExpanded = vmState.isAdminControlsExpanded,
+                    onToggleAdminControls = { viewModel.toggleAdminControlsExpanded() }
                 )
             },
             snackbarHost = { SnackbarHost(moveSnackbarHostState) }
@@ -487,7 +498,7 @@ fun QuestionListScreen(
                     state               = listState,
                     modifier            = Modifier.weight(1f),
                     contentPadding      = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     itemsIndexed(pagedQuestions, key = { _, q -> q.id }) { localIdx, q ->
                         val globalIdx = pageOffset + localIdx
@@ -652,14 +663,17 @@ fun QuestionListScreen(
                                     onReport    = { reportIdx = globalIdx },
                                     currentUser = currentUser,
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
-                                    onAdminEdit = onAdminEdit,
-                                    onAdminDelete = onAdminDelete,
-                                    onMoveSubject = if (onAdminMoveQuestions != null) ({
+                                    // ── UX ফিক্স: Admin কন্ট্রোল ডিফল্ট-হাইড, "🔧 Admin Tools" টগল
+                                    // (vmState.isAdminControlsExpanded) অন করলেই সব কার্ডে একসাথে
+                                    // এই move-row/edit-pill-row দেখা যাবে ──
+                                    onAdminEdit = if (vmState.isAdminControlsExpanded) onAdminEdit else null,
+                                    onAdminDelete = if (vmState.isAdminControlsExpanded) onAdminDelete else null,
+                                    onMoveSubject = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                         singleMoveQuestionId = q.id
                                         moveDialogOpenTopicFirst = false
                                         showMoveQuestionsDialog = true
                                     }) else null,
-                                    onMoveTopic = if (onAdminMoveQuestions != null) ({
+                                    onMoveTopic = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                         singleMoveQuestionId = q.id
                                         moveDialogOpenTopicFirst = true
                                         showMoveQuestionsDialog = true
@@ -672,9 +686,7 @@ fun QuestionListScreen(
                                     onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     },
-                                    onAskAiExplain = { question, correctAnswer, subjectTopic ->
-                                        viewModel.explainQuestionWithAi(question, correctAnswer, subjectTopic)
-                                    }
+                                    onAskAi = { voiceAiIdx = localIdx }
                                 )
                             }
                         } else {
@@ -693,14 +705,14 @@ fun QuestionListScreen(
                             onReport    = { reportIdx = globalIdx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
-                            onAdminEdit = onAdminEdit,
-                            onAdminDelete = onAdminDelete,
-                            onMoveSubject = if (onAdminMoveQuestions != null) ({
+                            onAdminEdit = if (vmState.isAdminControlsExpanded) onAdminEdit else null,
+                            onAdminDelete = if (vmState.isAdminControlsExpanded) onAdminDelete else null,
+                            onMoveSubject = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                 singleMoveQuestionId = q.id
                                 moveDialogOpenTopicFirst = false
                                 showMoveQuestionsDialog = true
                             }) else null,
-                            onMoveTopic = if (onAdminMoveQuestions != null) ({
+                            onMoveTopic = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                 singleMoveQuestionId = q.id
                                 moveDialogOpenTopicFirst = true
                                 showMoveQuestionsDialog = true
@@ -714,9 +726,7 @@ fun QuestionListScreen(
                             onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             },
-                            onAskAiExplain = { question, correctAnswer, subjectTopic ->
-                                viewModel.explainQuestionWithAi(question, correctAnswer, subjectTopic)
-                            }
+                            onAskAi = { voiceAiIdx = localIdx }
                         )
                         }
                         }
@@ -968,6 +978,64 @@ fun QuestionListScreen(
                 }
             }
         }
+
+        // ── UX ফিক্স ("অপশন চাপার পর ব্যাখ্যা নিচে আছে কিনা বোঝা যায় না, স্ক্রল
+        // করে খুঁজতে হয়"): একটা ফ্লোটিং তীর বাটন — ড্র্যাগ করে (লং-প্রেস ধরে) উপরে-
+        // নিচে সরানো যায়, পজিশন SharedPreferences-এ persist হয় (viewModel.
+        // updateFloatingNavYFrac)। সাধারণ ট্যাপে বর্তমান প্রশ্নের পরের কার্ডটা
+        // স্মুথলি স্ক্রল হয়ে উপরে উঠে আসে (ঠিক Study "পড়া হয়েছে" টিকের মতোই
+        // animateScrollToItem রিইউজ — কোনো নতুন auto-scroll লজিক না, সম্পূর্ণ
+        // ইউজার-নিয়ন্ত্রিত ট্যাপেই কাজ হয়)। অপশন এখনো না বেছে থাকলে অর্ধেক-স্বচ্ছ
+        // (৫০%), উত্তর দেওয়ার পর পূর্ণ-অস্বচ্ছ (১০০%) — বোঝানোর জন্য যে নিচে
+        // ব্যাখ্যা/ফিডব্যাক দেখার আছে। Study mode-এ দেখানো হয় না, কারণ সেখানে
+        // ইতিমধ্যেই "পড়া হয়েছে" টিক দিলে একই কাজ (পরের প্রশ্নে স্ক্রল) হয়ে যায়। ──
+        if (mode != StudyMode.STUDY && pagedQuestions.isNotEmpty()) {
+            val density = LocalDensity.current
+            val maxHeightPx = with(density) { maxHeight.toPx() }
+            val btnSizePx = with(density) { 48.dp.toPx() }
+            var dragOffsetPx by remember { mutableStateOf(vmState.floatingNavYFrac * maxHeightPx) }
+            // অন্য কোথাও থেকে (অন্য প্রশ্ন-লিস্ট স্ক্রিন খুললে) persisted মান বদলালে সিঙ্ক করো
+            LaunchedEffect(vmState.floatingNavYFrac, maxHeightPx) {
+                dragOffsetPx = (vmState.floatingNavYFrac * maxHeightPx).coerceIn(0f, (maxHeightPx - btnSizePx).coerceAtLeast(0f))
+            }
+            val topVisibleIdx = listState.firstVisibleItemIndex.coerceIn(0, pagedQuestions.lastIndex)
+            val currentAnswered = pagedQuestions.getOrNull(topVisibleIdx)?.answerState !is AnswerState.Unanswered
+            val btnAlpha by animateFloatAsState(if (currentAnswered) 1f else 0.5f, label = "floatingNavAlpha")
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset { IntOffset(0, dragOffsetPx.roundToInt()) }
+                    .padding(end = 10.dp)
+                    .size(48.dp)
+                    .graphicsLayer(alpha = btnAlpha)
+                    .shadow(4.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(Indigo600)
+                    // ── লং-প্রেস ধরে ড্র্যাগ করলে সরানো যায় — সাধারণ ছোট ট্যাপে drag
+                    // detector কিছুই করে না, তাই নিচের .clickable ঠিকভাবে কাজ করে
+                    // (tap আর drag-to-move-এর মধ্যে কোনো বিভ্রান্তি হয় না) ──
+                    .pointerInput(maxHeightPx, btnSizePx) {
+                        detectDragGesturesAfterLongPress(
+                            onDragEnd = {
+                                viewModel.updateFloatingNavYFrac(dragOffsetPx / maxHeightPx)
+                            }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            dragOffsetPx = (dragOffsetPx + dragAmount.y)
+                                .coerceIn(0f, (maxHeightPx - btnSizePx).coerceAtLeast(0f))
+                        }
+                    }
+                    .clickable {
+                        scrollScope.launch {
+                            val nextIdx = (topVisibleIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
+                            listState.animateScrollToItem(nextIdx)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "পরের প্রশ্ন", tint = Color.White)
+            }
+        }
     }
 
     // ── Admin "Move" — destination Subject/Topic ডায়ালগ ──
@@ -1203,6 +1271,36 @@ fun QuestionListScreen(
             onReport     = { viewModel.reportQuestion(reportIdx, it); reportIdx = -1 },
             onDismiss    = { reportIdx = -1 }
         )
+    }
+
+    // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট — "পরের প্রশ্ন"-এ voiceAiIdx+1 হয়ে পরের
+    // QuestionCard-এর context লোড হয়, পেজের শেষ প্রশ্নে পৌঁছালে hasNext=false
+    // (পরের পেজ automatically টানার দরকার নেই — এটুকুই যথেষ্ট প্রথম ভার্সনের জন্য)। ──
+    voiceAiIdx?.let { idx ->
+        val vq = pagedQuestions.getOrNull(idx)
+        if (vq != null) {
+            // ── "একই ক্যাটাগরির আরও দেখুন" বাটনের জন্য — এখন লোড করা pagedQuestions
+            // থেকেই একই subject+subTopic-এর বাকি প্রশ্নগুলো (নিজেরটা বাদ দিয়ে) ──
+            val related = remember(vq.id) {
+                pagedQuestions.filter {
+                    it.id != vq.id && it.subject == vq.subject && it.subTopic == vq.subTopic
+                }
+            }
+            com.hanif.smartstudy.ui.aichat.QuestionVoiceAiSheet(
+                item             = vq,
+                mode             = mode,
+                hasNext          = idx < pagedQuestions.lastIndex,
+                onNext           = { voiceAiIdx = (idx + 1).coerceAtMost(pagedQuestions.lastIndex) },
+                onClose          = { voiceAiIdx = null },
+                relatedQuestions = related,
+                onSwitchTo       = { target ->
+                    val targetIdx = pagedQuestions.indexOfFirst { it.id == target.id }
+                    if (targetIdx >= 0) voiceAiIdx = targetIdx
+                }
+            )
+        } else {
+            voiceAiIdx = null
+        }
     }
 }
 
@@ -1556,7 +1654,11 @@ private fun QuestionTopBar(
     onToggleReviewMode      : (() -> Unit)? = null,
     // ── Admin "Move" সিলেক্ট-মোড টগল — Review আইকনের পাশেই, একই স্টাইলে ──
     isSelectMode            : Boolean = false,
-    onToggleSelectMode      : (() -> Unit)? = null
+    onToggleSelectMode      : (() -> Unit)? = null,
+    // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে"): এই টগল অন করলেই সব কার্ডে
+    // একসাথে Subject/Topic move-row + এডিট-পিল রো দেখা যাবে, ডিফল্ট বন্ধ (হাইড) ──
+    isAdminControlsExpanded : Boolean = false,
+    onToggleAdminControls   : (() -> Unit)? = null
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -1582,6 +1684,18 @@ private fun QuestionTopBar(
             }
         },
         actions = {
+            // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে, জায়গা নষ্ট হচ্ছে"): এই
+            // একটা 🔧 টগল দিয়ে সব কার্ডের move-row/edit-pill-row একসাথে দেখানো/লুকানো
+            // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
+            if (isAdmin && onToggleAdminControls != null) {
+                IconButton(onClick = onToggleAdminControls) {
+                    Text(
+                        "🔧",
+                        fontSize = 16.sp,
+                        color = if (isAdminControlsExpanded) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             // ── Review System (Admin-only) — শুধু Admin দেখে, student-দের কাছে অদৃশ্য।
             // ইতিমধ্যে থাকা 👁️/⌨️ আইকনের পাশেই বসে, একই স্টাইলে ──
             if (isAdmin && onToggleReviewMode != null) {
