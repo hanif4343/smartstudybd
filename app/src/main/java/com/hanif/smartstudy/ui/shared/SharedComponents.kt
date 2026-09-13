@@ -1812,6 +1812,12 @@ fun UserTechniqueSection(
     currentUser : User?
 ) {
     if (questionId.isBlank() || currentUser == null) return
+    // ── UX ফিক্স ("ছবি আপলোড সবার জন্য available হওয়া উচিত না"): টেকনিক/ব্যাখ্যা
+    // টেক্সট যোগ করা community ফিচার হিসেবে সব ইউজারের জন্যই খোলা থাকবে (আগের
+    // মতোই), কিন্তু এর ভেতরের ছবি-আপলোড বাটনটা এখন শুধু Admin দেখবে/ব্যবহার
+    // করবে — না হলে যেকোনো ইউজার ইচ্ছামতো GitHub মিডিয়া রিপোতে ছবি জমা করতে
+    // পারত (স্টোরেজ/rate-limit/moderation ঝুঁকি) ──
+    val isAdminUser = currentUser.isAdmin()
 
     val context        = LocalContext.current
     val scope          = rememberCoroutineScope()
@@ -1928,6 +1934,7 @@ fun UserTechniqueSection(
     if (showAddDialog) {
         AddTechniqueDialog(
             existing    = editTarget,
+            isAdmin     = isAdminUser,
             onDismiss   = { showAddDialog = false; editTarget = null },
             onSave      = { text, isPublic, type ->
                 scope.launch {
@@ -2124,6 +2131,7 @@ private fun UserTechniqueCard(
 @Composable
 private fun AddTechniqueDialog(
     existing  : UserTechnique?,
+    isAdmin   : Boolean = false,
     onDismiss : () -> Unit,
     onSave    : (text: String, isPublic: Boolean, type: String) -> Unit
 ) {
@@ -2256,28 +2264,33 @@ private fun AddTechniqueDialog(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // ── ছবি যুক্ত করার বাটন — গ্যালারি খুলে, imgbb-তে আপলোড হয়ে
-                        // লিংক টেক্সটে বসে যায়। আপলোড চলাকালীন ছোট লোডার দেখায় ──
-                        Surface(
-                            onClick  = { if (!isUploadingImage) imageLauncher.launch("image/*") },
-                            shape    = RoundedCornerShape(9.dp),
-                            color    = Indigo600.copy(alpha = 0.12f),
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (isUploadingImage) {
-                                    CircularProgressIndicator(
-                                        modifier    = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color       = Indigo600
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.Image,
-                                        contentDescription = "ছবি যুক্ত করুন",
-                                        tint = Indigo600,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                        // ── ছবি যুক্ত করার বাটন — শুধু Admin দেখবে/ব্যবহার করবে (দেখো
+                        // UserTechniqueSection-এর isAdminUser কমেন্ট) — সাধারণ ইউজার এই
+                        // বাটনটাই দেখবে না, শুধু টেক্সট (টেকনিক/ব্যাখ্যা) যোগ করতে পারবে।
+                        // গ্যালারি খুলে CDN-এ আপলোড হয়ে লিংক টেক্সটে বসে যায়। আপলোড
+                        // চলাকালীন ছোট লোডার দেখায় ──
+                        if (isAdmin) {
+                            Surface(
+                                onClick  = { if (!isUploadingImage) imageLauncher.launch("image/*") },
+                                shape    = RoundedCornerShape(9.dp),
+                                color    = Indigo600.copy(alpha = 0.12f),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (isUploadingImage) {
+                                        CircularProgressIndicator(
+                                            modifier    = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color       = Indigo600
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Image,
+                                            contentDescription = "ছবি যুক্ত করুন",
+                                            tint = Indigo600,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
