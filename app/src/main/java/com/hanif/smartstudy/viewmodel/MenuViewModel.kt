@@ -170,6 +170,13 @@ data class MenuUiState(
     val mistralApiKey     : String           = "",
     val cerebrasApiKey    : String           = "",
     val geminiApiKey      : String           = "",
+    // ── প্রতিটা প্রোভাইডারের নির্বাচিত মডেল (SettingsScreen-এর AiModelDropdown) —
+    // AiApiKeys.kt-এর DEFAULT_*_MODEL কনস্ট্যান্ট দিয়ে ডিফল্ট বসানো, যাতে পুরনো
+    // ইউজার (যারা কখনো মডেল বাছেননি) স্বয়ংক্রিয়ভাবে বর্তমান কার্যকর ডিফল্ট মডেলই পান ──
+    val groqModel         : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GROQ_MODEL,
+    val mistralModel      : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_MISTRAL_MODEL,
+    val cerebrasModel     : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_CEREBRAS_MODEL,
+    val geminiModel       : String           = com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GEMINI_MODEL,
     val aiKeysSavedMsg    : String?          = null,
 
     // ── Typing Settings (SettingsScreen "⌨️ টাইপিং সেটিংস" কার্ড) ──
@@ -419,6 +426,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = aiKeys.mistral,
                     cerebrasApiKey = aiKeys.cerebras,
                     geminiApiKey   = aiKeys.gemini,
+                    groqModel      = aiKeys.groqModel,
+                    mistralModel   = aiKeys.mistralModel,
+                    cerebrasModel  = aiKeys.cerebrasModel,
+                    geminiModel    = aiKeys.geminiModel,
                     smartTypingEnabled = smartTypingOn,
                     typingTargetWpm    = typingTargetWpm,
                     typingSoundPreset  = typingSoundPr,
@@ -688,16 +699,23 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearDataSourceTestResult() { _state.update { it.copy(dataSourceTestResultMsg = null) } }
 
-    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key সেভ ──
+    // ── Written উত্তর AI-অটো-চেক: ৪টা প্রোভাইডারের API key + মডেল সেভ ──
     // একবার সেভ করলে DataStore-এ থেকে যায়, পরের বার আবার বসাতে হয় না।
     // চেষ্টার ক্রম Study/QBank উভয় জায়গাতেই: Groq → Mistral → Cerebras → Gemini।
-    fun saveAiApiKeys(groq: String, mistral: String, cerebras: String, gemini: String) {
+    fun saveAiApiKeys(
+        groq: String, mistral: String, cerebras: String, gemini: String,
+        groqModel: String, mistralModel: String, cerebrasModel: String, geminiModel: String
+    ) {
         viewModelScope.launch {
             val keys = com.hanif.smartstudy.data.model.AiApiKeys(
                 groq     = groq.trim(),
                 mistral  = mistral.trim(),
                 cerebras = cerebras.trim(),
-                gemini   = gemini.trim()
+                gemini   = gemini.trim(),
+                groqModel     = groqModel.trim().ifBlank { com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GROQ_MODEL },
+                mistralModel  = mistralModel.trim().ifBlank { com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_MISTRAL_MODEL },
+                cerebrasModel = cerebrasModel.trim().ifBlank { com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_CEREBRAS_MODEL },
+                geminiModel   = geminiModel.trim().ifBlank { com.hanif.smartstudy.data.model.AiApiKeys.DEFAULT_GEMINI_MODEL }
             )
             session.setAiApiKeys(keys)
             _state.update {
@@ -706,11 +724,20 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     mistralApiKey  = keys.mistral,
                     cerebrasApiKey = keys.cerebras,
                     geminiApiKey   = keys.gemini,
+                    groqModel      = keys.groqModel,
+                    mistralModel   = keys.mistralModel,
+                    cerebrasModel  = keys.cerebrasModel,
+                    geminiModel    = keys.geminiModel,
                     aiKeysSavedMsg = "✅ API key সংরক্ষণ করা হয়েছে"
                 )
             }
         }
     }
+
+    /** SettingsScreen-এর "🔍 টেস্ট করুন" বাটন — key+model দিয়ে সরাসরি একটা ছোট রিকোয়েস্ট পাঠিয়ে যাচাই করে। */
+    suspend fun testAiModel(provider: String, apiKey: String, model: String):
+        com.hanif.smartstudy.data.remote.WrittenAnswerAiService.ModelTestResult =
+        com.hanif.smartstudy.data.remote.WrittenAnswerAiService.testProviderModel(provider, apiKey, model)
 
     fun clearAiKeysSavedMsg() {
         _state.update { it.copy(aiKeysSavedMsg = null) }
