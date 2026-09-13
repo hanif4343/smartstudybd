@@ -42,13 +42,8 @@ data class ActiveUser(
     val fcmToken : String = ""
 )
 
-data class DebugLogEntry(
-    val ts    : Long   = 0L,
-    val level : String = "D",
-    val tag   : String = "",
-    val msg   : String = "",
-    val phone : String = ""
-)
+// ── DebugLogEntry ডাটা ক্লাস সরানো হলো — শুধু এখন-মোছা fetchDebugLogs()-এই
+// ব্যবহার হতো, dead code chain-এর অংশ। ──
 
 data class MenuUiState(
     val user            : User?              = null,
@@ -114,10 +109,10 @@ data class MenuUiState(
     val activeUsers     : List<ActiveUser>   = emptyList(),
     val allUsers        : List<Map<String,String>> = emptyList(),
     val viewingAsUser   : User?              = null,
-    // Remote debug logs (Admin)
-    val debugLogPhones  : List<String>       = emptyList(),
-    val debugLogs       : List<DebugLogEntry> = emptyList(),
-    val isLoadingLogs   : Boolean            = false,
+    // ── debugLogPhones/debugLogs/isLoadingLogs, reportedQuestions/isLoadingReports,
+    // isBulkUpdating/bulkUpdateMsg — সরানো হলো (Phase 6 item 13-এ AdminPage.kt-এর
+    // Logs/Reports/Bulk Tag ট্যাব সরানোর পর এই ফিল্ডগুলোর আর কোনো ব্যবহার ছিল না,
+    // dead weight ছিল)। ──
 
     // ── Admin Power features ──────────────────────────────────
     val adminViewingTag   : String           = "",   // audience switch
@@ -126,9 +121,6 @@ data class MenuUiState(
     // Delete Question (পুরো কার্ড — প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা)
     val isDeletingQuestion: Boolean          = false,
     val deleteSuccessMsg  : String?          = null,
-    // Report Queue
-    val reportedQuestions : List<com.hanif.smartstudy.data.remote.ReportedQuestion> = emptyList(),
-    val isLoadingReports  : Boolean          = false,
     // Add Question
     val isAddingQuestion  : Boolean          = false,
     val addQuestionMsg    : String?          = null,
@@ -140,9 +132,6 @@ data class MenuUiState(
     val bulkUploadFailed  : Int              = 0,
     val bulkUploadLog     : List<String>     = emptyList(),
     val bulkUploadResultMsg: String?         = null,
-    // Bulk Audience
-    val isBulkUpdating    : Boolean          = false,
-    val bulkUpdateMsg     : String?          = null,
     // Subject/SubTopic Rename
     val isRenaming        : Boolean          = false,
     val renameMsg         : String?          = null,
@@ -863,40 +852,12 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Admin: load list of phones that have debug logs ──
-    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 📋 Logs ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin Web
-    // App-এ ডুপ্লিকেট ছিল), তাই এই ফাংশনের এখন কোনো caller নেই। ডিলিট না করে শুধু
-    // @Deprecated রাখা হলো (safe cleanup পরে, MenuUiState.debugLogPhones/debugLogs field
-    // দুটোও একইসাথে সরানো যাবে যখন নিশ্চিত হওয়া যাবে অন্য কোথাও লাগছে না)।
-    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
-    fun loadDebugLogPhones() {
-        if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            try {
-                val phones = com.hanif.smartstudy.data.remote.UserSyncService.fetchDebugLogPhones()
-                _state.update { it.copy(debugLogPhones = phones) }
-            } catch (e: Exception) {
-                Log.e("Admin", "loadDebugLogPhones: ${e.message}")
-            }
-        }
-    }
-
-    // ── Admin: load logs for a phone (or "" = own phone) ──
-    @Deprecated("AdminPage.kt-এর 📋 Logs ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
-    fun loadDebugLogs(phone: String) {
-        if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoadingLogs = true) }
-            try {
-                val targetPhone = phone.ifBlank { _state.value.user?.phone ?: "" }
-                val logs = com.hanif.smartstudy.data.remote.UserSyncService.fetchDebugLogs(targetPhone)
-                _state.update { it.copy(debugLogs = logs, isLoadingLogs = false) }
-            } catch (e: Exception) {
-                Log.e("Admin", "loadDebugLogs: ${e.message}")
-                _state.update { it.copy(isLoadingLogs = false, error = "loadDebugLogs error: ${e.message}") }
-            }
-        }
-    }
+    // ── Admin: Logs/Reports/BulkTag ফাংশনগুলো (loadDebugLogPhones, loadDebugLogs,
+    // loadPendingReports, resolveReport, adminBulkAudienceUpdate) সম্পূর্ণ সরানো
+    // হলো — AdminPage.kt-এর এই ট্যাবগুলো Phase 6 item 13-এ আগেই সরানো হয়েছিল
+    // (Admin Web App-এ ডুপ্লিকেট ছিল), শুধু @Deprecated মার্ক করে ফাংশনগুলো রেখে
+    // দেওয়া হয়েছিল "পরে নিশ্চিত হয়ে ডিলিট করার জন্য" — এখন কোথাও কোনো caller
+    // নেই কনফার্ম করে মুছে ফেলা হলো (dead code, APK-তে অপ্রয়োজনে জায়গা নিচ্ছিল)। ──
 
     // ── Clear success/error messages ─────────────────────────
     fun clearMsg() {
@@ -1349,53 +1310,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearEditMsg() { _state.update { it.copy(editSuccessMsg = null) } }
 
-    // ── Admin: Report Queue ───────────────────────────────────
-    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🚩 Reports ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
-    // Web App-এ ডুপ্লিকেট ছিল), তাই এই দুটো ফাংশনের এখন কোনো caller নেই। ডিলিট না করে
-    // শুধু @Deprecated রাখা হলো।
-    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
-    fun loadPendingReports() {
-        if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoadingReports = true) }
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.fetchPendingReports()) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success ->
-                    _state.update { it.copy(reportedQuestions = r.data, isLoadingReports = false) }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(isLoadingReports = false, error = "❌ ${r.message}") }
-            }
-        }
-    }
-
-    /** Report resolve + reporter কে notification পাঠাও */
-    @Deprecated("AdminPage.kt-এর 🚩 Reports ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
-    fun resolveReport(
-        reportKey      : String,
-        status         : String,
-        userPhone      : String,
-        questionSnippet: String = "",
-        userName       : String = "",
-        questionId     : String = "",
-        tab            : String = ""
-    ) {
-        if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            when (com.hanif.smartstudy.data.remote.FirebaseDataService
-                    .resolveReportAndNotify(reportKey, status, userPhone, questionSnippet, userName, questionId, tab)) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    _state.update {
-                        it.copy(
-                            reportedQuestions = it.reportedQuestions.filter { r -> r.reportKey != reportKey },
-                            toast = if (status == "resolved") "✅ Resolved — ইউজারকে নোটিফিকেশন গেছে" else "🗑 Dismissed"
-                        )
-                    }
-                }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(toast = "❌ Update ব্যর্থ") }
-            }
-        }
-    }
-
+    // ── Admin: Report Queue ফাংশন দুটো (loadPendingReports, resolveReport)
+    // সম্পূর্ণ সরানো হলো — উপরের কমেন্ট দেখুন (Phase 6 item 13, dead code)। ──
     // ── Admin: Add New Question (offline-aware) ───────────────
     fun adminAddQuestion(sheet: String, fields: Map<String, String>) {
         if (!_state.value.isAdmin) return
@@ -1611,33 +1527,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── Admin: Bulk Audience Update ───────────────────────────
-    // ⚠️ Phase 6 item 13 — AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সম্পূর্ণ সরানো হয়েছে (Admin
-    // Web App-এ ডুপ্লিকেট + পুরনো raw-text subject/sub_topic matching-এর ওপর নির্ভরশীল
-    // ছিল, দেখো FirebaseDataService.adminBulkAudienceUpdate-এর @Deprecated নোট) — তাই এই
-    // wrapper-এর এখন কোনো caller নেই।
-    @Deprecated("AdminPage.kt-এর 🌐 Bulk Tag ট্যাব সরানো হয়েছে (Phase 6 item 13) — এখন unused")
-    fun adminBulkAudienceUpdate(sheet: String, subject: String, subTopic: String, newTag: String) {
-        if (!_state.value.isAdmin) return
-        viewModelScope.launch {
-            _state.update { it.copy(isBulkUpdating = true, bulkUpdateMsg = null) }
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService
-                    .adminBulkAudienceUpdate(sheet, subject, subTopic, newTag)) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    cache.clearCache()
-                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
-                    _state.update { it.copy(isBulkUpdating = false,
-                        bulkUpdateMsg = "✅ ${r.data}টি প্রশ্ন → \"$newTag\"",
-                        contentEditVersion = it.contentEditVersion + 1) }
-                }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(isBulkUpdating = false,
-                        bulkUpdateMsg = "❌ ${r.message}") }
-            }
-        }
-    }
+    // ── Admin: Bulk Audience Update ফাংশন সরানো হলো — উপরের কমেন্ট দেখুন
+    // (Phase 6 item 13, dead code)। clearBulkMsg() নিচেই আছে, এখনো অন্য কোথাও
+    // ব্যবহার হতে পারে বলে স্পর্শ করা হয়নি। ──
 
-    fun clearBulkMsg() { _state.update { it.copy(bulkUpdateMsg = null) } }
 
     // ── Rename-ও এখন adminUpdateField/adminDeleteRow/adminAddRow-এর মতোই dual-write:
     // Sheet কনফিগার থাকলে সেটাই প্রাইমারি ফলাফল, Firebase শুধু best-effort মিরর ──
