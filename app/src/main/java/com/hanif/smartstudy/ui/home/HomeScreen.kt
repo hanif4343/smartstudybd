@@ -145,7 +145,6 @@ fun HomeScreen(
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
     onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
-    onOpenArchive  : () -> Unit = {},           // Admin-only "Archive" কার্ড → নতুন Archive সেকশন (Quiz/QBank duplicate-cleanup)
     onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -228,29 +227,11 @@ fun HomeScreen(
             // ব্যবহারকারীর সিদ্ধান্তে সম্পূর্ণ সরিয়ে দেওয়া হলো, কোনো নেটওয়ার্ক কল/
             // স্টেট আর অবশিষ্ট নেই (দেখো HomeViewModel.kt-এর সংশ্লিষ্ট মুছে ফেলা অংশ)। ──
 
-            // ── Archive সেকশন (Admin-only) — Quiz-Archive/QBank-Archive duplicate-cleanup
-            // টুল, নতুন স্বতন্ত্র স্ক্রিন-ফ্লো (ui/archive/ArchiveHomeScreen.kt) ──
-            if (isAdmin) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onOpenArchive),
-                    color = Color(0xFFFFFBEB),
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🗄️", fontSize = 22.sp)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Archive", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFB45309))
-                            Text("Quiz/QBank duplicate রিভিউ ও ক্লিনআপ (Admin)", fontFamily = NotoSansBengali, fontSize = 11.sp, color = Color(0xFF92400E))
-                        }
-                    }
-                }
-            }
+            // ── Archive সেকশন সম্পূর্ণ সরানো হলো (ব্যবহারকারীর সিদ্ধান্তে) — আগে এখানে
+            // Admin-only "🗄️ Archive" কার্ড ছিল (Quiz/QBank duplicate-cleanup টুলের
+            // এন্ট্রি পয়েন্ট)। পুরো ফিচার (ui/archive/*, ArchiveViewModel.kt,
+            // ArchiveGasService.kt, ArchiveModels.kt, MainScreen.kt-এর নেভিগেশন) মুছে
+            // ফেলা হয়েছে — আর কোনো নেটওয়ার্ক কল/স্টেট অবশিষ্ট নেই। ──
 
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
