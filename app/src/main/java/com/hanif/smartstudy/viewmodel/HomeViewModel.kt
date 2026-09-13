@@ -5,9 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
-import com.hanif.smartstudy.data.repository.DataState
 import com.hanif.smartstudy.util.SessionManager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +56,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Home data সব একসাথে load ──
+    // ── Home data লোড। `forceRefresh` প্যারামিটারটা এখন এই ফাংশনের ভেতরে সরাসরি
+    // ব্যবহৃত হয় না (আগে repo.getContent(forceRefresh=...)-এ পাঠানো হতো, যেটা
+    // এখন সরানো হয়েছে — দেখো নিচের কমেন্ট) — কিন্তু signature-compatibility
+    // বজায় রাখতে param-টা রাখা হলো (forceFullResync()/refresh()-এর call site
+    // বদলাতে হয়নি)। আসল force-refresh কাজটা repo.forceFullResync()-ই করে,
+    // এই ফাংশনে আসার আগেই। ──
     fun loadHomeData(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -63,30 +69,35 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             // User session
             val user = session.getCurrentUser()
 
-            // Parallel data load
-            val xpInfo       = repo.getXpInfo()
-            val streakInfo   = repo.getStreakInfo()
-            val goalProgress = repo.getGoalProgress()
-            val studyStats   = repo.getStudyStats()
-            val examCd       = repo.getExamCountdown()
-            val quote        = MotivationalQuote.ofDay()
+            // ── ফিক্স ("Home স্ক্রিন লোডিং স্লো" — root cause): আগে এখানে
+            // repo.getContent() কল হতো, যেটা Room-এ quiz/qbank/study তিনটা
+            // টেবিলের **পুরো ডেটা** পড়ে মেমরিতে আনত (সম্ভাব্য হাজার হাজার row) —
+            // কিন্তু HomeScreen.kt-এর UI-তে state.content কোথাও ব্যবহারই হয় না
+            // (পুরো কোডবেসে grep করে কনফার্ম করা হয়েছে, zero consumer)। মানে
+            // প্রতিবার Home খোলার সাথে সাথে একটা সম্পূর্ণ-অপ্রয়োজনীয় ভারী DB-scan
+            // হতো, যার ফলাফল কেউ দেখতই না। Quiz/QBank/Study-এর আসল প্রশ্নের ডেটা
+            // ইতিমধ্যেই lazy-load হয় (দেখো ContentRepository.cacheNextTopicBatch)
+            // — ইউজার আসলে কোনো subject/topic-এ ঢুকলে তখনই, Home-এ আগেভাগে না।
+            // তাই getContent() কলটাই এখান থেকে সরিয়ে ফেলা হলো। শুধু isOffline
+            // ব্যাজের জন্য getContent()-এর ফলাফল লাগত, সেটা এখন হালকা
+            // repo.isOnline() (নেট-স্ট্যাটাস চেক, কোনো DB কল না) দিয়ে সেট হচ্ছে। ──
+            val xpInfoDeferred       = async { repo.getXpInfo() }
+            val streakInfoDeferred   = async { repo.getStreakInfo() }
+            val goalProgressDeferred = async { repo.getGoalProgress() }
+            val studyStatsDeferred   = async { repo.getStudyStats() }
+            val examCdDeferred       = async { repo.getExamCountdown() }
 
-            // Content fetch
-            val contentState = repo.getContent(
-                forceRefresh = forceRefresh,
-                onBackgroundUpdate = { freshData ->
-                    // Background এ নতুন data এলে home screen silently update
-                    viewModelScope.launch { loadHomeData(forceRefresh = false) }
-                }
-            )
-            val content      = (contentState as? DataState.Success)?.data ?: AppContent()
-            val isOffline    = (contentState as? DataState.Success)?.isOffline ?: false
-            val fromCache    = (contentState as? DataState.Success)?.fromCache ?: false
-            val error        = (contentState as? DataState.Error)?.message
+            val xpInfo       = xpInfoDeferred.await()
+            val streakInfo   = streakInfoDeferred.await()
+            val goalProgress = goalProgressDeferred.await()
+            val studyStats   = studyStatsDeferred.await()
+            val examCd       = examCdDeferred.await()
+            val quote        = MotivationalQuote.ofDay()
+            val isOffline    = !repo.isOnline()
 
             _uiState.value = HomeUiState(
                 isLoading     = false,
-                error         = error,
+                error         = null,
                 user          = user,
                 xpInfo        = xpInfo,
                 streakInfo    = streakInfo,
@@ -94,9 +105,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 studyStats    = studyStats,
                 examCountdown = examCd,
                 dailyQuote    = quote,
-                content       = content,
                 isOffline     = isOffline,
-                isFromCache   = fromCache,
                 // notifications পুরনো state থেকেই রাখা হলো — নইলে প্রতিবার
                 // refresh এ badge count ও লিস্ট মুহূর্তের জন্য উবে যায়
                 notifications    = _uiState.value.notifications,
