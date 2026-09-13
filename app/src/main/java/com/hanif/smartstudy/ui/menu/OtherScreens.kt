@@ -22,36 +22,9 @@ import com.hanif.smartstudy.viewmodel.MenuViewModel
 //  BookmarksMenuScreen, LeaderboardScreen, AdminScreen
 // ─────────────────────────────────────────────────────────────
 
-// ── Bookmarks screen — DEPRECATED placeholder, no longer used.
-//    MenuScreen.kt now routes MenuNav.BOOKMARKS to sections.BookmarksPage,
-//    which shows the actual bookmarked questions. Kept here unused to avoid
-//    breaking any other reference; safe to delete in a future cleanup. ──
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun BookmarksMenuScreen(onBack: () -> Unit) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("⭐ সংরক্ষিত প্রশ্ন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }
-            )
-        }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("⭐", fontSize = 48.sp)
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Quiz/QBank/Study ট্যাব থেকে\nপ্রশ্নে ⭐ দিয়ে সংরক্ষণ করুন",
-                    fontFamily = NotoSansBengali, fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(0.5f),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-    }
-}
+// ── Bookmarks screen সরানো হলো — DEPRECATED placeholder ছিল, কোনো caller ছিল
+// না (MenuScreen.kt এখন MenuNav.BOOKMARKS-কে sections.BookmarksPage-এ রুট করে,
+// যেটা আসল সংরক্ষিত প্রশ্নের লিস্ট দেখায়)। ──
 
 // ── Leaderboard ───────────────────────────────────────────────
 
