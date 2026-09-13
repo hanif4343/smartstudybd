@@ -553,177 +553,15 @@ object FirebaseDataService {
             } catch (e: Exception) { ApiResult.Error(e.message ?: "Add failed") }
         }
 
-    /** Admin: Firebase /Reports থেকে pending reports fetch করো */
-    suspend fun fetchPendingReports(): ApiResult<List<ReportedQuestion>> =
-        withContext(Dispatchers.IO) {
-            try {
-                val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/Reports.json$auth"
-                val json = client.newCall(Request.Builder().url(url).get().build())
-                    .execute().body?.string() ?: "null"
-                if (json == "null") return@withContext ApiResult.Success(emptyList())
-                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
-                val list = raw.map { (key, v) ->
-                    ReportedQuestion(
-                        reportKey  = key,
-                        questionId = v["questionId"]?.toString() ?: "",
-                        question   = v["question"]?.toString() ?: "",
-                        issue      = v["issue"]?.toString() ?: "",
-                        userName   = v["userName"]?.toString() ?: "",
-                        userPhone  = v["userPhone"]?.toString() ?: "",
-                        tab        = v["tab"]?.toString() ?: "",
-                        status     = v["status"]?.toString() ?: "pending",
-                        timestamp  = (v["timestamp"] as? Double)?.toLong() ?: 0L
-                    )
-                }.filter { it.status == "pending" }.sortedByDescending { it.timestamp }
-                ApiResult.Success(list)
-            } catch (e: Exception) { ApiResult.Error(e.message ?: "Fetch failed") }
-        }
+    // ── fetchPendingReports()/resolveReportAndNotify() সরানো হলো — MenuViewModel-এর
+    // loadPendingReports/resolveReport wrapper (এখন-মোছা) ছাড়া আর কোনো caller ছিল না,
+    // Phase 6 item 13-এ AdminPage.kt-এর Reports ট্যাব সরানোর পর dead code chain। ──
 
-    /**
-     * Admin: Report status update করো + Reporter user কে FCM notification পাঠাও।
-     * Firebase এ user এর FCM token lookup করে notification পাঠানো হয়।
-     */
-    suspend fun resolveReportAndNotify(
-        reportKey  : String,
-        status     : String,      // "resolved" | "dismissed"
-        userPhone  : String,      // reporter এর phone
-        questionSnippet: String = "",
-        userName   : String = "",
-        questionId : String = "",
-        tab        : String = ""
-    ): ApiResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val auth     = authQuery()
-            val base     = BuildConfig.FIREBASE_URL.trimEnd('/')
 
-            // ── ১. Report status update ──
-            val patchUrl = "$base/Reports/$reportKey.json$auth"
-            val patchObj = JsonObject().apply {
-                addProperty("status", status)
-                addProperty("resolvedAt", System.currentTimeMillis())
-            }
-            client.newCall(
-                Request.Builder().url(patchUrl)
-                    .patch(patchObj.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-            ).execute().close()
+    // ── adminBulkAudienceUpdate() সরানো হলো — নিজের @Deprecated নোটেই লেখা ছিল
+    // "Phase 6 item 13-এ AdminPage.kt থেকে এই ফিচার সরে যাবে"; MenuViewModel-এর
+    // wrapper (এখন-মোছা) ছাড়া আর কোনো caller ছিল না, নিশ্চিত করে মুছে ফেলা হলো। ──
 
-            // ── ২. Reporter এর FCM token সরাসরি Firebase থেকে lookup ──
-            // (Reports নোডে যে কেউ লিখতে পারে, তাই userPhone কে অবশ্যই sanitize করে
-            //  নিতে হবে — না হলে ক্ষতিকর phone value দিয়ে path-injection সম্ভব)
-            val phoneEncoded = com.hanif.smartstudy.util.PhoneValidator.sanitize(userPhone)
-            if (phoneEncoded != null) {
-                val fcmToken = FcmAdminService.fetchTokenForPhone(phoneEncoded)
-
-                // ── ৩. FCM notification পাঠাও ──
-                val displayName = userName.ifBlank { "ব্যবহারকারী" }
-                val notifMsg = if (status == "resolved")
-                    "প্রিয় $displayName, আপনার রিপোর্ট করা প্রশ্নটি সমাধান করা হয়েছে। ধন্যবাদ আপনার সহযোগিতার জন্য! 🎉"
-                else
-                    "প্রিয় $displayName, আপনার রিপোর্টটি পর্যালোচনা করা হয়েছে।"
-
-                val snippet = if (questionSnippet.isNotBlank())
-                    questionSnippet.take(60) + "..." else ""
-
-                if (!fcmToken.isNullOrBlank()) {
-                    try {
-                        val ok = FcmAdminService.sendToToken(
-                            token = fcmToken,
-                            title = "✅ রিপোর্ট সমাধান হয়েছে!",
-                            body  = notifMsg,
-                            data  = mapOf(
-                                "type"       to "report_resolved",
-                                "url"        to "reports",
-                                "questionId" to questionId,
-                                "tab"        to tab
-                            ).filterValues { it.isNotBlank() }
-                        )
-                        Log.d("FirebaseData", "Report notification sent to $userPhone: $ok")
-                    } catch (e: Exception) {
-                        Log.e("FirebaseData", "FCM send failed: ${e.message}")
-                    }
-                }
-
-                // ── ৪. Notifications/{phone} এ fallback entry লিখো (poll worker এর জন্য) ──
-                try {
-                    val notifKey = "notif_${System.currentTimeMillis()}"
-                    val notifObj = JsonObject().apply {
-                        addProperty("title", "SmartStudyBD")
-                        addProperty("body", notifMsg)
-                        addProperty("type", "admin_report")
-                        addProperty("url", "reports")
-                        addProperty("questionId", questionId)
-                        addProperty("tab", tab)
-                        addProperty("read", false)
-                        addProperty("time", System.currentTimeMillis())
-                    }
-                    val notifUrl = "$base/Notifications/$phoneEncoded/$notifKey.json$auth"
-                    client.newCall(
-                        Request.Builder().url(notifUrl)
-                            .put(notifObj.toString().toRequestBody("application/json".toMediaType()))
-                            .build()
-                    ).execute().close()
-                } catch (e: Exception) {
-                    Log.e("FirebaseData", "Notifications fallback write failed: ${e.message}")
-                }
-            }
-
-            ApiResult.Success(Unit)
-        } catch (e: Exception) { ApiResult.Error(e.message ?: "Update failed") }
-    }
-
-    /**
-     * Admin: Bulk audience tag update
-     */
-    @Deprecated(
-        "পুরনো 'content-পড়ার' পথ — পুরো Quiz/QBank/Study node Firebase থেকে ডাউনলোড করে " +
-        "subject/sub_topic টেক্সট মিলিয়ে (normalizeFieldValue দিয়ে, উপরের ফাইল-কমেন্টে বর্ণিত " +
-        "invisible-character bug-এর মূল কারণ) সব matching row বের করে — বড় sheet-এ ধীর ও ভঙ্গুর। " +
-        "Admin Web App-এর নতুন পথ: reference-টেবিলের tag_id দিয়ে GAS bulk-tag action (এখনো " +
-        "Admin App-এও deferred, দেখো FINAL_MASTER_PLAN.md Phase 7 future task)। Phase 6 item 13-এ " +
-        "AdminPage.kt থেকে এই ফিচার সরে যাবে।"
-    )
-    suspend fun adminBulkAudienceUpdate(
-        sheet    : String,
-        subject  : String,
-        subTopic : String,
-        newTag   : String
-    ): ApiResult<Int> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            val json = client.newCall(
-                Request.Builder().url("$base/$sheet.json$auth").get().build()
-            ).execute().body?.string() ?: "null"
-            if (json == "null") return@withContext ApiResult.Error("Sheet empty")
-
-            val raw: Map<String, Map<String, Any>> = parseRowMap(json)
-            val matching = raw.filter { (_, v) ->
-                val s  = normalizeFieldValue(v["subject"]?.toString())
-                val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
-                s.equals(normalizeFieldValue(subject), ignoreCase = true) &&
-                (subTopic.isBlank() || st.equals(normalizeFieldValue(subTopic), ignoreCase = true))
-            }
-            if (matching.isEmpty()) return@withContext ApiResult.Error("কোনো matching প্রশ্ন নেই")
-
-            var updated = 0
-            matching.forEach { (key, _) ->
-                val obj  = JsonObject().apply {
-                    addProperty("AudienceTags", newTag)
-                    addProperty("updatedAt", System.currentTimeMillis())
-                }
-                val body = obj.toString().toRequestBody("application/json".toMediaType())
-                val resp = client.newCall(
-                    Request.Builder().url("$base/$sheet/$key.json$auth").patch(body).build()
-                ).execute()
-                if (resp.isSuccessful) updated++
-                resp.close()
-            }
-            if (updated > 0) touchMetaUpdatedAt()
-            ApiResult.Success(updated)
-        } catch (e: Exception) { ApiResult.Error(e.message ?: "Bulk update failed") }
-    }
 
     /**
      * Admin: একটি Subject অথবা SubTopic এর নাম rename করো।
@@ -938,21 +776,8 @@ object FirebaseDataService {
 }
 
 // ── Data model ───────────────────────────────────────────────
-data class ReportedQuestion(
-    val reportKey  : String = "",
-    val questionId : String = "",
-    val question   : String = "",
-    val issue      : String = "",
-    val userName   : String = "",
-    val userPhone  : String = "",
-    val tab        : String = "",
-    val status     : String = "pending",
-    val timestamp  : Long   = 0L
-) {
-    fun sheetName() = when (tab.lowercase()) {
-        "qbank" -> "QBank"; "study" -> "Study"; else -> "Quiz"
-    }
-}
+// ── ReportedQuestion ডাটা ক্লাস সরানো হলো — শুধু এখন-মোছা fetchPendingReports()-এই
+// ব্যবহার হতো (রিপোর্ট submit করার পথ raw JsonObject ব্যবহার করে, এই ক্লাস লাগে না)। ──
 
 sealed class ApiResult<out T> {
     data class Success<T>(val data: T) : ApiResult<T>()
