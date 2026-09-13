@@ -6,7 +6,6 @@ import com.google.gson.Gson
 import com.hanif.smartstudy.BuildConfig
 import com.hanif.smartstudy.data.remote.FirebaseTokenProvider
 import com.hanif.smartstudy.viewmodel.ActiveUser
-import com.hanif.smartstudy.viewmodel.DebugLogEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -241,54 +240,11 @@ object UserSyncService {
         }
     }
 
-    // ── Fetch debug logs (Admin) ──
-    // path: DebugLogs/{phone}/{date}/{key} -> {ts, level, tag, msg, phone}
-    suspend fun fetchDebugLogPhones(): List<String> = withContext(Dispatchers.IO) {
-        try {
-            val fbAuth = authQuery() // "" or "?auth=..."
-            val sep = if (fbAuth.isEmpty()) "?" else "&"
-            val url  = "$FB_URL/DebugLogs.json$fbAuth${sep}shallow=true"
-            val req  = Request.Builder().url(url).get().build()
-            val body = client.newCall(req).execute().body?.string()
-            if (body.isNullOrBlank() || body == "null") return@withContext emptyList()
-            val obj = JSONObject(body)
-            obj.keys().asSequence().toList().sorted()
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchDebugLogPhones: ${e.message}")
-            emptyList()
-        }
-    }
-
-    suspend fun fetchDebugLogs(phone: String, limit: Int = 200): List<DebugLogEntry> = withContext(Dispatchers.IO) {
-        try {
-            val fbAuth = authQuery()
-            val safePhone = phone.replace(Regex("[.#$\\[\\]/]"), "_")
-            val url  = "$FB_URL/DebugLogs/$safePhone.json$fbAuth"
-            val req  = Request.Builder().url(url).get().build()
-            val body = client.newCall(req).execute().body?.string()
-            if (body.isNullOrBlank() || body == "null") return@withContext emptyList()
-
-            val rootObj = JSONObject(body) // { "dd-MM-yyyy": { key: {entry}, ... }, ... }
-            val list = mutableListOf<DebugLogEntry>()
-            rootObj.keys().forEach { dateKey ->
-                val dayObj = rootObj.optJSONObject(dateKey) ?: return@forEach
-                dayObj.keys().forEach { logKey ->
-                    val e = dayObj.optJSONObject(logKey) ?: return@forEach
-                    list.add(DebugLogEntry(
-                        ts    = e.optLong("ts", 0L),
-                        level = e.optString("level", "D"),
-                        tag   = e.optString("tag", ""),
-                        msg   = e.optString("msg", ""),
-                        phone = e.optString("phone", phone)
-                    ))
-                }
-            }
-            list.sortedByDescending { it.ts }.take(limit)
-        } catch (e: Exception) {
-            Log.e(TAG, "fetchDebugLogs: ${e.message}")
-            emptyList()
-        }
-    }
+    // ── fetchDebugLogPhones()/fetchDebugLogs() সরানো হলো — এই দুটোর একমাত্র caller
+    // ছিল MenuViewModel-এর loadDebugLogPhones/loadDebugLogs, যেগুলো Phase 6 item 13-এ
+    // AdminPage.kt-এর Logs ট্যাব সরানোর পর dead code হয়ে গিয়েছিল এবং এখন মুছে ফেলা
+    // হয়েছে। কোনো writer function-ও পাওয়া যায়নি (DebugLogs/ নোডে কেউ লেখে না) —
+    // পুরো ফিচারটাই end-to-end dead ছিল। ──
 
 }
 
