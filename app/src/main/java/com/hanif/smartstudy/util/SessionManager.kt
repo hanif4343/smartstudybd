@@ -118,10 +118,11 @@ class SessionManager(private val context: Context) {
         // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — Firebase-এ কোনো read/write
         // হবে না, শুধু লোকাল ক্যাশ (Room + DataStore) থেকেই সব চলবে।
         val KEY_OFFLINE_MODE     = booleanPreferencesKey("offline_mode_on")
-        // ⚠️ DEPRECATED — আগে "Data Source" টগলের জন্য ব্যবহৃত হতো, ফিচারটাই সরানো
-        // হয়েছে, এখন আর কোথাও পড়া/লেখা হয় না। পুরনো ডিভাইসে stale ভ্যালু থাকতে
-        // পারে (নিরীহ, অব্যবহৃত)। key-টা রাখা হলো যাতে DataStore-এ পুরনো এন্ট্রি
-        // থাকলেও কোনো crash/conflict না হয়।
+        // ── Data Source Mode (Firebase/Google Sheet) — DataSourceMode.kt-এর storageKey
+        // ("firebase"/"google_sheet") স্ট্রিং হিসেবে সেভ হয়। এটা আগে একবার "ফিচার
+        // সরানো হয়েছে" হিসেবে DEPRECATED মার্ক করা হয়েছিল, কিন্তু SettingsScreen.kt-এ
+        // ফিচারটা আবার সক্রিয় থাকায় (getDataSourceMode/setDataSourceMode ব্যবহার হয়)
+        // key-টা এখন আবার active — শুধু কমেন্ট আপডেট করা হলো, স্টোরেজ key অপরিবর্তিত। ──
         val KEY_DATA_SOURCE_MODE = stringPreferencesKey("data_source_mode")
         val KEY_EXAM_DATE        = stringPreferencesKey("exam_date")
         val KEY_DAILY_GOAL       = intPreferencesKey("daily_goal")
@@ -314,6 +315,15 @@ class SessionManager(private val context: Context) {
 
     suspend fun setThemeColor(color: String) {
         context.dataStore.edit { it[KEY_THEME_COLOR] = color }
+    }
+
+    // ── Data Source Mode (Firebase/Google Sheet) — DataSourceMode.kt দেখুন ──
+    fun getDataSourceMode(): com.hanif.smartstudy.data.model.DataSourceMode = runBlocking {
+        com.hanif.smartstudy.data.model.DataSourceMode.fromStorageOrDefault(cachedPrefs()[KEY_DATA_SOURCE_MODE])
+    }
+
+    suspend fun setDataSourceMode(mode: com.hanif.smartstudy.data.model.DataSourceMode) {
+        context.dataStore.edit { it[KEY_DATA_SOURCE_MODE] = mode.storageKey }
     }
 
     // ── Sound ─────────────────────────────────────────────────
