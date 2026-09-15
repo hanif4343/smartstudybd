@@ -1,6 +1,11 @@
 package com.hanif.smartstudy.ui.quiz
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.annotation.DrawableRes
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import com.hanif.smartstudy.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
@@ -56,6 +61,93 @@ private val subjectIcons = mapOf(
 
 private fun subjectIcon(name: String): String =
     subjectIcons.entries.firstOrNull { name.contains(it.key) }?.value ?: "📚"
+
+// ── Subject illustration ছবি ম্যাপ (Image/CDN Hosting Phase-এর মতোই "app-এর সাথে
+// hardcoded থাকা লাগবে" রিকোয়ারমেন্ট — এই ছবিগুলো res/drawable-এ বান্ডল করা,
+// CDN/নেটওয়ার্ক থেকে আসে না, তাই অফলাইনে/স্লো নেটেও instant লোড হয়) — শুধু
+// কারিকুলামের মূল সাবজেক্টগুলোর জন্যই কাস্টম ইলাস্ট্রেশন আছে; admin নতুন/কাস্টম
+// সাবজেক্ট বানালে (এই ম্যাচ কোনোটাতেই না পড়লে) null রিটার্ন হবে, তখন কলার emoji
+// ফলব্যাকে (subjectIcon() ফাংশন) চলে যাবে। ──
+@DrawableRes
+private fun subjectImageRes(name: String): Int? {
+    val n = name.lowercase()
+    return when {
+        name.contains("বাংলা") && name.contains("সাহিত্য") -> R.drawable.subject_bangla_shahittya
+        name.contains("বাংলা") && (name.contains("ব্যাকরণ") || name.contains("গ্রামার")) -> R.drawable.subject_bangla_byakoron
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("সাহিত্য") || n.contains("literature")) -> R.drawable.subject_english_literature
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("ব্যাকরণ") || name.contains("গ্রামার") || n.contains("grammar")) -> R.drawable.subject_english_grammar
+        name.contains("পাটিগণিত") || n.contains("arithmetic") -> R.drawable.subject_patiganit
+        name.contains("বীজগণিত") || n.contains("algebra") -> R.drawable.subject_bijgonit
+        name.contains("জ্যামিতি") || n.contains("geometry") -> R.drawable.subject_geometry
+        name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> R.drawable.subject_computer
+        name.contains("বাংলাদেশ") && name.contains("বিষয়") -> R.drawable.subject_bangladesh_bishoyabali
+        name.contains("আন্তর্জাতিক") -> R.drawable.subject_international_affairs
+        name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> R.drawable.subject_general_knowledge
+        else -> null
+    }
+}
+
+/**
+ * Portrait ইলাস্ট্রেশন-কার্ড — ৫-কলাম গ্রিডে দেখানোর জন্য। কাস্টম ছবি থাকলে সেটাই
+ * (উপরে ছবি, নিচে রঙিন পিল-এ নাম), না থাকলে emoji-ভিত্তিক ফলব্যাক (একই শেপ/সাইজ,
+ * যাতে গ্রিডে দৃশ্যত অসামঞ্জস্য না হয়)।
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SubjectGridImageCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {}
+) {
+    val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
+    Column(
+        modifier = Modifier
+            .aspectRatio(0.88f)
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = onClick,
+                // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin লং-প্রেস
+                // করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা ক্লিক-জোন রাখার
+                // বদলে long-press ব্যবহার করা হলো, tap এখনো normal navigate করে ──
+                onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
+            )
+    ) {
+        if (imageRes != null) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Image(
+                    painter = painterResource(imageRes),
+                    contentDescription = subject.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        } else {
+            Box(
+                Modifier.weight(1f).fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 30.sp)
+            }
+        }
+        Box(
+            Modifier.fillMaxWidth()
+                .background(Indigo600)
+                .padding(vertical = 5.dp, horizontal = 3.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                subject.name, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                color = Color.White, fontFamily = NotoSansBengali,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                lineHeight = 11.sp
+            )
+        }
+    }
+}
 
 // ── একটা অধ্যায়ে (topic) আসলেই কোনো প্রশ্ন আছে কিনা — টপিক লিস্টে দেখানো এবং
 // সাবজেক্ট কার্ডে "X টি অধ্যায়" গোনা, দুই জায়গাতেই এই একই শর্ত ব্যবহার করতে হবে,
@@ -311,7 +403,9 @@ fun SubjectListScreen(
                     }
                 }
             }
-        } else {
+        } else if (isAdmin && isReorderMode) {
+            // ── Reorder মোডে পুরনো ফুল-রো লিস্ট (up/down এরো বাটনের জন্য জায়গা লাগে,
+            // ৫-কলাম গ্রিডে সেটা কুঁচকে যেত) — শুধু reorder করার সময়ই এটা দেখা যায় ──
             itemsIndexed(displaySubjects) { idx, subject ->
                 SubjectCard(
                     subject = subject,
@@ -323,12 +417,34 @@ fun SubjectListScreen(
                     onMoveDown = { onMoveSubject(idx, idx + 1) },
                     reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
                     emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
-                    isAdmin = isAdmin && !isReorderMode,
-                    onEmojiClick = {
-                        emojiEditTargetId = subject.subjectId
-                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
-                    }
+                    isAdmin = false,
+                    onEmojiClick = {}
                 )
+            }
+        } else {
+            // ── UX ফিচার: portrait ইলাস্ট্রেশন — ৫-কলাম গ্রিড (দেখো subjectImageRes()/
+            // SubjectGridImageCard-এর কমেন্ট) — কাস্টম ছবি না থাকলে emoji ফলব্যাক,
+            // একই কার্ড-শেপে, যাতে গ্রিডে বিসদৃশ না লাগে। ──
+            item {
+                LazyVerticalGrid(
+                    columns                = GridCells.Fixed(5),
+                    modifier               = Modifier.heightIn(max = 4000.dp).padding(horizontal = 10.dp),
+                    horizontalArrangement  = Arrangement.spacedBy(6.dp),
+                    verticalArrangement    = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(displaySubjects) { _, subject ->
+                        SubjectGridImageCard(
+                            subject = subject,
+                            onClick = { onSubject(subject.name) },
+                            emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                            isAdmin = isAdmin,
+                            onEmojiClick = {
+                                emojiEditTargetId = subject.subjectId
+                                emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                            }
+                        )
+                    }
+                }
             }
         }
 
