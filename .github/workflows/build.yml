@@ -29,15 +29,9 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # ── FIX ("Failed to find package 'tools'" — CI বিল্ড ফেল): android-actions/
-      # setup-android@v3 অ্যাকশনের ভেতরে নিজে থেকেই `sdkmanager tools` কল করে,
-      # কিন্তু Google অনেক আগেই SDK রিপোজিটরি থেকে এই legacy "tools" প্যাকেজটা
-      # সরিয়ে ফেলেছে (এখন cmdline-tools ব্যবহার হয়) — তাই এই স্টেপ সবসময় ব্যর্থ
-      # হচ্ছিল, এটা কোনো app কোডের সাথে সম্পর্কিত না। GitHub-এর ubuntu-latest
-      # রানারে এমনিতেই একটা কাজ করা Android SDK (ANDROID_HOME) প্রি-ইনস্টল করা
-      # থাকে, তাই এই আলাদা setup-android স্টেপ আসলে দরকারই ছিল না — সরিয়ে ফেলা
-      # হলো, নিচের "Accept licenses & install SDK" স্টেপ রানারের প্রি-ইনস্টল করা
-      # sdkmanager দিয়েই সরাসরি কাজ করবে। ──
+      # ── FIX: Setup Android SDK (যাতে sdkmanager সঠিকভাবে কাজ করে) ──
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Accept licenses & install SDK
         run: |
@@ -135,7 +129,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
 
-      # ── Rename Debug APK (unique filename so it always downloads fresh, never a stale cached copy) ──
+      # ── Rename Debug APK ──
       - name: Rename Debug APK
         run: |
           APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
@@ -154,12 +148,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # ── Debug build কেও সরাসরি (zip ছাড়া) install-যোগ্য apk হিসেবে Release এ দাও ──
-      # কারণ: GitHub Actions Artifacts সবসময় .zip এ wrap হয়ে ডাউনলোড হয় (GitHub এর নিজস্ব
-      # আচরণ, workflow দিয়ে বদলানো যায় না)। .zip ফাইলকে সরাসরি "install" করলে
-      # ফোন "App not installed" দেখায় কারণ ওটা আসলে .apk না, একটা .zip। Extract না করে
-      # install করাটাই মূল কারণ ছিল। তাই যেকোনো branch এ push করলেই এখানে একটা সরাসরি
-      # .apk লিংক (prerelease) পাওয়া যাবে যেটা extract করা লাগবে না।
+      # ── Debug build release ──
       - name: Get debug version info
         id: dver
         run: |
@@ -178,15 +167,12 @@ jobs:
           body: |
             ## 🧪 Debug Build (auto)
 
-            এটা প্রতি push এ auto-generate হওয়া debug build। সরাসরি নিচের .apk
-            ডাউনলোড করে install করো (Actions ট্যাবের zip artifact দরকার নেই)।
-
             🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
           files: app/build/outputs/apk/debug/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Release APK (শুধু main/master branch এ) ──
+      # ── Release APK ──
       - name: Build Signed Release APK
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         env:
@@ -196,11 +182,6 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
-      # ── ফাইলের নাম প্রতিটি build এ unique রাখা হচ্ছে (SmartStudy.apk নয়) ──
-      # আগে সবসময় একই নাম "SmartStudy.apk" থাকায় ফোনের browser/download manager
-      # পুরনো downloaded ফাইলটাকেই cache থেকে দেখাচ্ছিল/install করছিল, নতুন করে
-      # download না করেই — এই কারণে কোড পাল্টানোর পরও পুরনো ভার্সন install হচ্ছিল।
-      # Unique filename দিলে প্রতিবার নতুন URL/ফাইল হয়, তাই কখনো stale copy install হবে না।
       - name: Rename Release APK
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: |
@@ -222,7 +203,7 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
-      # ── GitHub Release (শুধু main/master) ──
+      # ── GitHub Release ──
       - name: Get version
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         id: ver
@@ -239,10 +220,6 @@ jobs:
           name:     ${{ steps.ver.outputs.title }}
           body: |
             ## 📚 Smart Study
-
-            নিচের .apk ফাইলটা ডাউনলোড করো (ফাইলের নামের শেষে build নম্বর দেখে
-            নিশ্চিত হও এটাই লেটেস্ট build)।
-            > Settings → Unknown sources চালু করে install করো।
 
             🔨 Build \#${{ github.run_number }} | Branch: ${{ github.ref_name }} | 💬 ${{ github.event.head_commit.message }}
           files: app/build/outputs/apk/release/*.apk
