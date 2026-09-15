@@ -29,8 +29,15 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # ── FIX ("Failed to find package 'tools'" — CI বিল্ড ফেল): android-actions/
+      # setup-android@v3 অ্যাকশনের ভেতরে নিজে থেকেই `sdkmanager tools` কল করে,
+      # কিন্তু Google অনেক আগেই SDK রিপোজিটরি থেকে এই legacy "tools" প্যাকেজটা
+      # সরিয়ে ফেলেছে (এখন cmdline-tools ব্যবহার হয়) — তাই এই স্টেপ সবসময় ব্যর্থ
+      # হচ্ছিল, এটা কোনো app কোডের সাথে সম্পর্কিত না। GitHub-এর ubuntu-latest
+      # রানারে এমনিতেই একটা কাজ করা Android SDK (ANDROID_HOME) প্রি-ইনস্টল করা
+      # থাকে, তাই এই আলাদা setup-android স্টেপ আসলে দরকারই ছিল না — সরিয়ে ফেলা
+      # হলো, নিচের "Accept licenses & install SDK" স্টেপ রানারের প্রি-ইনস্টল করা
+      # sdkmanager দিয়েই সরাসরি কাজ করবে। ──
 
       - name: Accept licenses & install SDK
         run: |
