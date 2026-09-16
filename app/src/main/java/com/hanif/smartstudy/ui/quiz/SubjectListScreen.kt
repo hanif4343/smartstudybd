@@ -129,27 +129,65 @@ private fun SubjectGridImageCard(
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 30.sp)
+                Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 52.sp)
             }
         }
         Box(
             Modifier.fillMaxWidth()
                 .background(Indigo600)
-                .padding(vertical = 5.dp, horizontal = 3.dp),
+                .padding(vertical = 8.dp, horizontal = 8.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                subject.name, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                subject.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 color = Color.White, fontFamily = NotoSansBengali,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                lineHeight = 11.sp
+                lineHeight = 16.sp
             )
         }
+        // ── প্রগ্রেস বার — subject.doneQ/totalQ অনুযায়ী কার্ডের একদম নিচে সংযুক্ত ──
+        val progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f
+        LinearProgressIndicator(
+            progress = { progressFrac },
+            modifier = Modifier.fillMaxWidth().height(4.dp),
+            color = GreenOk,
+            trackColor = Color.White.copy(alpha = 0.25f)
+        )
     }
 }
 
-// ── একটা অধ্যায়ে (topic) আসলেই কোনো প্রশ্ন আছে কিনা — টপিক লিস্টে দেখানো এবং
+// ── এই ১১টা "কোর কারিকুলাম" সাবজেক্টের জন্য ক্রম **হার্ডকোড করা** — Firebase-এর
+// admin-configurable serial/order সিস্টেম এদের জন্য আর লাগবে না, তাই আর কখনো
+// এই সাবজেক্টগুলোর ক্রম ঠিক করতে হবে না। যে সাবজেক্ট এই তালিকার কোনোটার সাথেই
+// মেলে না (admin-এর নতুন/কাস্টম সাবজেক্ট), সেটা null পাবে — কলার তখন বিদ্যমান
+// (Firebase serial-ভিত্তিক) ক্রম অনুযায়ী এই ১১টার *পরে* বসাবে। ──
+private fun subjectHardcodedPriority(name: String): Int? {
+    val n = name.lowercase()
+    return when {
+        name.contains("বাংলা") && name.contains("সাহিত্য") -> 0
+        name.contains("বাংলা") && (name.contains("ব্যাকরণ") || name.contains("গ্রামার")) -> 1
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("সাহিত্য") || n.contains("literature")) -> 2
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("ব্যাকরণ") || name.contains("গ্রামার") || n.contains("grammar")) -> 3
+        name.contains("পাটিগণিত") || n.contains("arithmetic") -> 4
+        name.contains("বীজগণিত") || n.contains("algebra") -> 5
+        name.contains("জ্যামিতি") || n.contains("geometry") -> 6
+        name.contains("বাংলাদেশ") && name.contains("বিষয়") -> 7
+        name.contains("আন্তর্জাতিক") -> 8
+        name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> 9
+        name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> 10
+        else -> null
+    }
+}
+
+/**
+ * উপরের displaySubjects-কে হার্ডকোড করা ক্রম অনুযায়ী সাজায় — ১১টা কোর সাবজেক্ট
+ * সবার আগে (নির্দিষ্ট ক্রমে), বাকি (কাস্টম) সাবজেক্ট তাদের বিদ্যমান (Firebase
+ * serial) ক্রম অনুযায়ী তারপরে। এই sort **স্থিতিশীল (stable)** — একই priority
+ * বা both-null হলে আপেক্ষিক ক্রম অক্ষুণ্ণ থাকে। ──
+ */
+private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<SubjectEntry> =
+    subjects.sortedBy { subjectHardcodedPriority(it.name) ?: Int.MAX_VALUE }
 // সাবজেক্ট কার্ডে "X টি অধ্যায়" গোনা, দুই জায়গাতেই এই একই শর্ত ব্যবহার করতে হবে,
 // নাহলে সাবজেক্টে বলা টপিক-সংখ্যা আর আসল টপিক-লিস্টে দেখানো সংখ্যা বেমিল হয়ে যায়।
 // Model Test এন্ট্রি totalQ দিয়ে গোনা হয় না (ওটার প্রশ্ন modelTestCount দিয়ে গোনা হয়),
@@ -422,17 +460,21 @@ fun SubjectListScreen(
                 )
             }
         } else {
-            // ── UX ফিচার: portrait ইলাস্ট্রেশন — ৫-কলাম গ্রিড (দেখো subjectImageRes()/
-            // SubjectGridImageCard-এর কমেন্ট) — কাস্টম ছবি না থাকলে emoji ফলব্যাক,
-            // একই কার্ড-শেপে, যাতে গ্রিডে বিসদৃশ না লাগে। ──
+            // ── UX ফিচার: portrait ইলাস্ট্রেশন — ২-কলাম গ্রিড (বাম/ডান), কোর
+            // কারিকুলামের ১১টা সাবজেক্ট হার্ডকোড করা নির্দিষ্ট ক্রমে (দেখো
+            // subjectHardcodedPriority()/applyHardcodedSubjectOrder() — এই
+            // সাবজেক্টগুলোর জন্য আর কখনো serial/reorder লাগবে না), বাকি
+            // (কাস্টম) সাবজেক্ট তাদের বিদ্যমান ক্রম অনুযায়ী পরে। প্রতিটা কার্ডে
+            // প্রগ্রেস বার সংযুক্ত (SubjectGridImageCard-এর ভেতরেই)। ──
             item {
+                val orderedSubjects = remember(displaySubjects) { applyHardcodedSubjectOrder(displaySubjects) }
                 LazyVerticalGrid(
-                    columns                = GridCells.Fixed(5),
-                    modifier               = Modifier.heightIn(max = 4000.dp).padding(horizontal = 10.dp),
-                    horizontalArrangement  = Arrangement.spacedBy(6.dp),
-                    verticalArrangement    = Arrangement.spacedBy(6.dp)
+                    columns                = GridCells.Fixed(2),
+                    modifier               = Modifier.heightIn(max = 8000.dp).padding(horizontal = 10.dp),
+                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
+                    verticalArrangement    = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(displaySubjects) { _, subject ->
+                    itemsIndexed(orderedSubjects) { _, subject ->
                         SubjectGridImageCard(
                             subject = subject,
                             onClick = { onSubject(subject.name) },
