@@ -88,9 +88,12 @@ private fun subjectImageRes(name: String): Int? {
 }
 
 /**
- * Portrait ইলাস্ট্রেশন-কার্ড — ৫-কলাম গ্রিডে দেখানোর জন্য। কাস্টম ছবি থাকলে সেটাই
- * (উপরে ছবি, নিচে রঙিন পিল-এ নাম), না থাকলে emoji-ভিত্তিক ফলব্যাক (একই শেপ/সাইজ,
- * যাতে গ্রিডে দৃশ্যত অসামঞ্জস্য না হয়)।
+ * Portrait ইলাস্ট্রেশন-কার্ড — ২-কলাম গ্রিডে দেখানোর জন্য। কাস্টম ছবি থাকলে সেটাই
+ * পুরো কার্ড জুড়ে দেখায় (ছবির ভেতরেই নাম আঁকা থাকে, তাই নিচে আলাদা করে আর নাম
+ * pill বসানো হয় না — আগে double দেখাচ্ছিল বলে সরানো হলো)। কাস্টম ছবি না থাকলে
+ * (emoji ফলব্যাক, যেখানে নাম ছবির ভেতরে নেই) নিচে নাম pill থেকে যায়, নাহলে সেই
+ * সাবজেক্টের নামই কোথাও দেখা যেত না। গ্রিড-সেলের ভেতর কার্ডটা ৮৫%-এ রাখা হয়েছে
+ * (~১৫% ছোট, কেন্দ্রে) — সাইজ কমানোর রিকোয়েস্ট অনুযায়ী।
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -102,58 +105,63 @@ private fun SubjectGridImageCard(
     onEmojiClick  : () -> Unit = {}
 ) {
     val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
-    Column(
-        modifier = Modifier
-            .aspectRatio(0.88f)
-            .clip(RoundedCornerShape(14.dp))
-            .combinedClickable(
-                onClick = onClick,
-                // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin লং-প্রেস
-                // করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা ক্লিক-জোন রাখার
-                // বদলে long-press ব্যবহার করা হলো, tap এখনো normal navigate করে ──
-                onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
-            )
-    ) {
-        if (imageRes != null) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                Image(
-                    painter = painterResource(imageRes),
-                    contentDescription = subject.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)   // ── ~১৫% ছোট, গ্রিড-সেলের কেন্দ্রে ──
+                .aspectRatio(0.88f)    // ── সোর্স ছবির (নাম-সহ আঁকা) স্বাভাবিক অনুপাত — বিকৃত না হয় ──
+                .clip(RoundedCornerShape(14.dp))
+                .combinedClickable(
+                    onClick = onClick,
+                    // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin
+                    // লং-প্রেস করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা
+                    // ক্লিক-জোন রাখার বদলে long-press, tap এখনো normal navigate করে ──
+                    onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
                 )
-            }
-        } else {
-            Box(
-                Modifier.weight(1f).fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 52.sp)
-            }
-        }
-        Box(
-            Modifier.fillMaxWidth()
-                .background(Indigo600)
-                .padding(vertical = 8.dp, horizontal = 8.dp),
-            contentAlignment = Alignment.Center
         ) {
-            Text(
-                subject.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                color = Color.White, fontFamily = NotoSansBengali,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                lineHeight = 16.sp
+            if (imageRes != null) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Image(
+                        painter = painterResource(imageRes),
+                        contentDescription = subject.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                // ছবির ভেতরেই নাম আঁকা আছে — নিচে আলাদা নাম pill নেই, শুধু প্রগ্রেস বার
+            } else {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 44.sp)
+                }
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(Indigo600)
+                        .padding(vertical = 7.dp, horizontal = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        subject.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, fontFamily = NotoSansBengali,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+            // ── প্রগ্রেস বার — subject.doneQ/totalQ অনুযায়ী কার্ডের একদম নিচে সংযুক্ত,
+            // দুই ধরনের কার্ডেই (ছবি/emoji) থাকে ──
+            val progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f
+            LinearProgressIndicator(
+                progress = { progressFrac },
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = GreenOk,
+                trackColor = Color.White.copy(alpha = 0.25f)
             )
         }
-        // ── প্রগ্রেস বার — subject.doneQ/totalQ অনুযায়ী কার্ডের একদম নিচে সংযুক্ত ──
-        val progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f
-        LinearProgressIndicator(
-            progress = { progressFrac },
-            modifier = Modifier.fillMaxWidth().height(4.dp),
-            color = GreenOk,
-            trackColor = Color.White.copy(alpha = 0.25f)
-        )
     }
 }
 
