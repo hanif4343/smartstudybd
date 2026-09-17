@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -41,6 +42,7 @@ import com.hanif.smartstudy.ui.theme.NordicBlueTint
 import com.hanif.smartstudy.ui.theme.NordicClayTint
 import com.hanif.smartstudy.ui.theme.NordicInk
 import com.hanif.smartstudy.ui.theme.NordicMuted
+import kotlin.math.ceil
 
 // subject icon map
 private val subjectIcons = mapOf(
@@ -100,25 +102,23 @@ private fun subjectImageRes(name: String): Int? {
 private fun SubjectGridImageCard(
     subject : SubjectEntry,
     onClick : () -> Unit,
+    modifier : Modifier = Modifier,
     emojiOverride : String? = null,
     isAdmin       : Boolean = false,
     onEmojiClick  : () -> Unit = {}
 ) {
     val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)   // ── ~১৫% ছোট, গ্রিড-সেলের কেন্দ্রে ──
-                .aspectRatio(0.88f)    // ── সোর্স ছবির (নাম-সহ আঁকা) স্বাভাবিক অনুপাত — বিকৃত না হয় ──
-                .clip(RoundedCornerShape(14.dp))
-                .combinedClickable(
-                    onClick = onClick,
-                    // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin
-                    // লং-প্রেস করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা
-                    // ক্লিক-জোন রাখার বদলে long-press, tap এখনো normal navigate করে ──
-                    onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
-                )
-        ) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .combinedClickable(
+                onClick = onClick,
+                // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin
+                // লং-প্রেস করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা
+                // ক্লিক-জোন রাখার বদলে long-press, tap এখনো normal navigate করে ──
+                onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
+            )
+    ) {
             if (imageRes != null) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Image(
@@ -161,7 +161,6 @@ private fun SubjectGridImageCard(
                 color = GreenOk,
                 trackColor = Color.White.copy(alpha = 0.25f)
             )
-        }
     }
 }
 
@@ -468,31 +467,70 @@ fun SubjectListScreen(
                 )
             }
         } else {
-            // ── UX ফিচার: portrait ইলাস্ট্রেশন — ২-কলাম গ্রিড (বাম/ডান), কোর
-            // কারিকুলামের ১১টা সাবজেক্ট হার্ডকোড করা নির্দিষ্ট ক্রমে (দেখো
-            // subjectHardcodedPriority()/applyHardcodedSubjectOrder() — এই
-            // সাবজেক্টগুলোর জন্য আর কখনো serial/reorder লাগবে না), বাকি
-            // (কাস্টম) সাবজেক্ট তাদের বিদ্যমান ক্রম অনুযায়ী পরে। প্রতিটা কার্ডে
-            // প্রগ্রেস বার সংযুক্ত (SubjectGridImageCard-এর ভেতরেই)। ──
+            // ── UX ফিচার: portrait ইলাস্ট্রেশন — "সব সাবজেক্ট এক স্ক্রিনে" (কোনো
+            // স্ক্রল ছাড়া), নতুন সাবজেক্ট যোগ হলে অটো রিসাইজ হয়ে সব সবসময় একই
+            // স্ক্রিনে ফিট করবে। এর জন্য LazyVerticalGrid-এর বদলে screen-height
+            // থেকে হিসাব করে সরাসরি কার্ডের width/height বসানো হচ্ছে — যতগুলো
+            // সাবজেক্ট থাকুক (row×column অটো-নির্ধারিত), সবগুলো height-এ ভাগ হয়ে
+            // ফিট করে যায়। কোর ১১টা সাবজেক্ট হার্ডকোড করা নির্দিষ্ট ক্রমে থাকে
+            // (subjectHardcodedPriority()), বাকিরা পরে। ──
             item {
                 val orderedSubjects = remember(displaySubjects) { applyHardcodedSubjectOrder(displaySubjects) }
-                LazyVerticalGrid(
-                    columns                = GridCells.Fixed(2),
-                    modifier               = Modifier.heightIn(max = 8000.dp).padding(horizontal = 10.dp),
-                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
-                    verticalArrangement    = Arrangement.spacedBy(8.dp)
+                val config = LocalConfiguration.current
+                val count = orderedSubjects.size.coerceAtLeast(1)
+
+                // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
+                // বেশি কলাম (নাহলে row বেড়ে কার্ড অতিরিক্ত চ্যাপ্টা/সরু হয়ে যেত) ──
+                val columns = when {
+                    count <= 6  -> 2
+                    count <= 12 -> 3
+                    count <= 20 -> 4
+                    else        -> 5
+                }
+                val rows = ceil(count / columns.toFloat()).toInt().coerceAtLeast(1)
+
+                // ── এই স্ক্রিনে গ্রিডের ওপরে যা যা আছে (header, audience-tag রো,
+                // admin বাটন, filter/search যা থাকতে পারে) তার আনুমানিক উচ্চতা বাদ
+                // দিয়ে বাকি স্ক্রিন-হাইট গ্রিডের জন্য বরাদ্দ ধরা হচ্ছে — LazyColumn-এর
+                // ভেতরে item{} হওয়ায় এখানে সরাসরি প্যারেন্টের প্রকৃত remaining height
+                // মাপা যায় না (LazyColumn ইনফিনিট height দিয়ে measure করে), তাই
+                // ডিভাইসের প্রকৃত স্ক্রিন-হাইট (LocalConfiguration) থেকে একটা
+                // reasonable estimate বিয়োগ করে কাজ চালানো হচ্ছে। ──
+                val estimatedChromeDp = 250.dp
+                val availableHeightDp = (config.screenHeightDp.dp - estimatedChromeDp).coerceAtLeast(240.dp)
+                val spacingDp = 6.dp
+                val horizontalPaddingDp = 10.dp
+
+                val cardWidthDp  = (config.screenWidthDp.dp - horizontalPaddingDp * 2 - spacingDp * (columns - 1)) / columns
+                val cardHeightDp = (availableHeightDp - spacingDp * (rows - 1)) / rows
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp),
+                    verticalArrangement = Arrangement.spacedBy(spacingDp)
                 ) {
-                    itemsIndexed(orderedSubjects) { _, subject ->
-                        SubjectGridImageCard(
-                            subject = subject,
-                            onClick = { onSubject(subject.name) },
-                            emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
-                            isAdmin = isAdmin,
-                            onEmojiClick = {
-                                emojiEditTargetId = subject.subjectId
-                                emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                    orderedSubjects.chunked(columns).forEach { rowSubjects ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(spacingDp)
+                        ) {
+                            rowSubjects.forEach { subject ->
+                                SubjectGridImageCard(
+                                    subject = subject,
+                                    onClick = { onSubject(subject.name) },
+                                    modifier = Modifier.width(cardWidthDp).height(cardHeightDp),
+                                    emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                                    isAdmin = isAdmin,
+                                    onEmojiClick = {
+                                        emojiEditTargetId = subject.subjectId
+                                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                                    }
+                                )
                             }
-                        )
+                            // ── শেষ row-এ কলাম কম থাকলে ফাঁকা স্পেসার দিয়ে alignment ঠিক রাখা ──
+                            repeat(columns - rowSubjects.size) {
+                                Spacer(Modifier.width(cardWidthDp))
+                            }
+                        }
                     }
                 }
             }
