@@ -395,8 +395,25 @@ fun QuestionCard(
                     modifier   = Modifier.padding(end = 5.dp)
                 )
                 Box(Modifier.weight(1f)) {
-                    if (studyNoQ) {
-                        // Explanation as question — RichContentText (PDF/image/video লিংক render করবে)
+                    // ── ফিক্স ("প্রশ্নে ছবির লিংক থাকলে ছবি না দেখিয়ে raw URL টেক্সট
+                    // হিসেবে দেখাচ্ছে"): এই সমস্যাটা আসলে আগে থেকেই ছিল — explanation/
+                    // answer/technique ফিল্ডে RichContentText (MediaLinkParser দিয়ে
+                    // ছবি/PDF/ভিডিও লিংক অটো-ডিটেক্ট করে zoomable ছবি দেখায়) ব্যবহার
+                    // হতো, কিন্তু "question" ফিল্ডের জন্য QuestionText-এর কোনো এই
+                    // ধরনের লিংক-ডিটেকশনই ছিল না (LaTeX/formatStyle/TTS হ্যান্ডল
+                    // করত, কিন্তু embedded image URL ধরত না)। এখন প্রশ্নের টেক্সটে
+                    // ছবি/ভিডিও/PDF লিংক থাকলে (MediaLinkParser দিয়ে চেক) সেটা
+                    // RichContentText দিয়েই রেন্ডার হবে (studyNoQ কিনা তার ওপর
+                    // নির্ভর না করেই) — এই একই detection নতুন CDN-হোস্টেড ছবির লিংকেও
+                    // (jsdelivr.net) কাজ করে, কারণ ডিটেকশন extension-based
+                    // (.jpg/.png/.webp ইত্যাদি), ডোমেইন-নির্দিষ্ট না। ──
+                    val hasMediaLink = remember(displayQuestion) {
+                        com.hanif.smartstudy.ui.components.MediaLinkParser.parse(displayQuestion)
+                            .any { it !is com.hanif.smartstudy.ui.components.MediaSegment.PlainText }
+                    }
+                    if (studyNoQ || hasMediaLink) {
+                        // Explanation-as-question অথবা প্রশ্নে মিডিয়া-লিংক থাকলে —
+                        // RichContentText (PDF/image/video লিংক render করবে)
                         RichContentText(
                             text      = displayQuestion,
                             textColor = MaterialTheme.colorScheme.onSurface,
@@ -1061,6 +1078,14 @@ private val SharedHighlightRegex = Regex("\\*(.+?)\\*")
 private val SharedFillBlankRegex = Regex("_(.+?)_")
 private val SharedLegacyBlankRegex = Regex("_{2,}|\\.{4,}|…{2,}")
 
+// ── জেনেরিক বোল্ড/ইটালিক/আন্ডারলাইন মার্কডাউন (**, __, ++, <b>/<i>/<u>/<mark>)
+// টেক্সটে আছে কিনা — দ্রুত চেক, parseRichAnnotated() অযথা প্রতিটা সাধারণ প্রশ্নে
+// না চালিয়ে শুধু যেখানে সত্যিই মার্কআপ আছে সেখানেই চালানোর জন্য ──
+private fun hasGenericMarkup(text: String): Boolean =
+    text.contains("**") || text.contains("__") || text.contains("++") ||
+    text.contains("<b>") || text.contains("<i>") || text.contains("<u>") ||
+    text.contains("<mark>") || text.contains("<li>")
+
 private fun buildQuestionHighlight(raw: String): AnnotatedString = buildAnnotatedString {
     var lastEnd = 0
     for (m in SharedHighlightRegex.findAll(raw)) {
@@ -1099,13 +1124,24 @@ fun QuestionText(
         when {
             formatStyle == "fillblank" && answerForBlank.isNotBlank() -> buildQuestionFillBlank(text, answerForBlank)
             formatStyle == "highlight" -> buildQuestionHighlight(text)
+            // ── ফিচার সম্পূর্ণ: জেনেরিক **বোল্ড**/*ইটালিক*/__আন্ডারলাইন__ মার্কডাউন —
+            // parseRichAnnotated() (আগে শুধু MediaViewer.kt-এ ব্যবহার হতো) এখন
+            // প্রশ্নের কার্ডেও কাজ করবে। এটা শুধু তখনই চালানো হয় যখন টেক্সটে আসলেই
+            // এই মার্কআপ চিহ্ন থাকে (hasGenericMarkup চেক) — নাহলে সাধারণ প্রশ্নে
+            // (মার্কআপ নেই) SelectableSmartText-এর ইংরেজি-শব্দ-ট্যাপ-TTS ফিচার
+            // আগের মতোই কাজ করে, কিছু হারায় না। formatStyle == "highlight"-এর
+            // single "*word*" সিনট্যাক্সের সাথে conflict এড়াতে এই ব্রাঞ্চ শুধু
+            // fillblank/highlight *না* হলেই চেক হয় (উপরের ২টা branch already
+            // single-asterisk হাইলাইট সামলে নিয়েছে)। ──
+            hasGenericMarkup(text) -> parseRichAnnotated(text, 14f)
             else -> null
         }
     }
     val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
     if (richFormatted != null) {
-        // highlight/fillblank মার্কআপ পার্স হয়ে গেছে — সরাসরি সেটাই দেখাও (LaTeX/TTS
-        // এখানে প্রযোজ্য না, কারণ এই দুই formatStyle সবসময় সাধারণ টেক্সট নিয়েই কাজ করে)
+        // highlight/fillblank/জেনেরিক-মার্কডাউন পার্স হয়ে গেছে — সরাসরি সেটাই
+        // দেখাও (LaTeX/TTS এখানে প্রযোজ্য না, এই কেসগুলো সবসময় সাধারণ টেক্সট
+        // নিয়েই কাজ করে)
         Text(text = richFormatted, fontSize = 14.sp, modifier = modifier)
     } else if (hasLatex) {
         // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
