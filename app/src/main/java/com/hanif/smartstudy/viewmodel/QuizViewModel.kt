@@ -441,7 +441,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         val mode = _state.value.mode
         viewModelScope.launch {
-            val topicRows = repo.getRoomTopicsForSubject(subjectId)
+            var topicRows = repo.getRoomTopicsForSubject(subjectId)
+            // ── ফিক্স ("অ্যাপ খুলে প্রথমবার কোনো সাবজেক্টে ঢুকলে টপিক ফাঁকা দেখায়,
+            // Back করে আবার ঢুকলে ঠিক আসে"): Subject list দ্রুত দেখানোর জন্য Room
+            // cache থেকে instant দেখানো হয়, আর সাথে সাথেই ব্যাকগ্রাউন্ডে
+            // syncReferenceData() চলে সাবজেক্ট+টপিক দুটোই রিফ্রেশ করতে। এই
+            // ব্যাকগ্রাউন্ড sync তখনো শেষ না হয়ে থাকলে এবং Room-এ এই subjectId-এর
+            // জন্য টপিক row এখনো না থাকলে (স্টেল/আংশিক পুরনো cache),
+            // getRoomTopicsForSubject() খালি লিস্ট ফেরত দিত এবং সেটাই সরাসরি
+            // দেখানো হতো — পরে ফিরে গিয়ে আবার ঢুকলে ততক্ষণে ব্যাকগ্রাউন্ড sync
+            // শেষ হয়ে ঠিক দেখাত। এখন প্রথমবার খালি পেলে হাল না ছেড়ে একবার
+            // syncReferenceData() (নিজের cache-gate সহ, বারবার কল করলেও অপ্রয়োজনীয়
+            // নেটওয়ার্ক হিট হয় না) চালিয়ে আবার চেষ্টা করা হয় — সত্যিই টপিক-শূন্য
+            // সাবজেক্ট হলে (আসল ০) এটাও খালিই থাকবে, কোনো ক্ষতি নেই। ──
+            if (topicRows.isEmpty()) {
+                Log.d("QuizVM", "navigateToSubjectLazy: $subjectId — প্রথম কোয়েরিতে টপিক খালি, syncReferenceData() দিয়ে retry")
+                repo.syncReferenceData()
+                topicRows = repo.getRoomTopicsForSubject(subjectId)
+            }
             val subTopics = topicRows.map { t ->
                 // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
                 // (generic legacy কলাম) সবসময় Study sheet-এর কাউন্ট বহন করতো, মোড যাই হোক
