@@ -263,11 +263,23 @@ fun QuestionCard(
     // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট বাটন — Quiz/QBank/Study তিনটাতেই দেখা যায়।
     // null থাকলে বাটনটাই রেন্ডার হয় না (যেমন ChallengeExamScreen-এ এখনো ব্যবহার হয়নি)। ──
     onAskAi        : (() -> Unit)? = null,
+    // ── UX ফিচার: অপশন সিলেক্ট করার সাথে সাথেই (কোনো বাটন চাপা ছাড়াই) AI ব্যাখ্যা
+    // অটো-লোড হয় — গণিত হলে ধাপে ধাপে, ইংরেজি গ্রামার হলে গঠনতন্ত্র/লজিকসহ (দেখো
+    // QuizViewModel.explainQuestionWithAi()/WrittenAnswerAiService.explainQuestion())।
+    // null থাকলে (API key সেট নেই, বা এই স্ক্রিনে এখনো wire করা হয়নি) কিছুই দেখাবে না। ──
+    onRequestAiExplanation: (suspend (question: String, answer: String, subjectTopic: String) -> String?)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
     var activeEditField by remember { mutableStateOf<String?>(null) }
+    // ── UX ফিচার: AI ব্যাখ্যা — অপশন সিলেক্ট করার সাথে সাথেই অটো-লোড হয় (নিচে
+    // LaunchedEffect দেখো), item.id বদলালে (পরের প্রশ্নে গেলে) রিসেট হয়ে যায়।
+    // scope = coroutineScope, যেহেতু suspend ফাংশন কল করতে হবে LaunchedEffect-এর
+    // ভেতরে ──
+    var aiExplanation by remember(item.id) { mutableStateOf<String?>(null) }
+    var isLoadingAiExplanation by remember(item.id) { mutableStateOf(false) }
+    var aiExplanationFailed by remember(item.id) { mutableStateOf(false) }
 
     Card(
         modifier  = modifier.fillMaxWidth(),
@@ -350,20 +362,11 @@ fun QuestionCard(
                             )
                         }
                     }
-                    if (onAskAi != null) {
-                        // ── আগে এখানে শুধু 🤖 ইমোজি ছিল — অনেকেই বুঝতে পারতো না এটা কিসের
-                        // বাটন, তাই এখন স্পষ্ট "AI" লেখা একটা ছোট্ট ব্যাজ ──
-                        IconButton(onClick = onAskAi, modifier = Modifier.size(28.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Indigo600.copy(alpha = 0.12f))
-                                    .padding(horizontal = 5.dp, vertical = 2.dp)
-                            ) {
-                                Text("AI", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Indigo600)
-                            }
-                        }
-                    }
+                    // ── "AI" ব্যাজ বাটন সরানো হলো — user রিকোয়েস্ট অনুযায়ী, এখন এটার
+                    // বদলে অপশন সিলেক্ট করার সাথে সাথেই AI ব্যাখ্যা অটো-লোড হবে (নিচে,
+                    // aiExplanation state + LaunchedEffect দেখো) — কোনো ম্যানুয়াল বাটন
+                    // চাপা লাগবে না। onAskAi প্যারামিটার/voice-AI চ্যাট ফিচার অক্ষত
+                    // রইল (অন্য কোথাও লাগলে), শুধু এই per-card badge-টাই সরানো হলো। ──
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
                         Icon(
                             if (item.isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -707,6 +710,28 @@ fun QuestionCard(
                 StudyMode.STUDY -> true
                 else -> item.answerState !is AnswerState.Unanswered
             }
+            // ── UX ফিচার: MCQ-তে অপশন সিলেক্ট করলেই (আগে ম্যানুয়াল "AI" বাটন লাগত)
+            // AI ব্যাখ্যা অটো-লোড হয় — শুধু MCQ-এর জন্যই (Study mode-এ showAnswerBox
+            // সবসময় true, প্রতিটা কার্ডে না চেয়েই AI কল হয়ে যেত, তাই এখানে item.isMcq()
+            // চেক করে সেটা এড়ানো হলো — user স্পষ্ট বলেছেন "press any options" মানে) ──
+            LaunchedEffect(item.id, item.answerState) {
+                val requestFn = onRequestAiExplanation
+                if (item.isMcq() && item.answerState !is AnswerState.Unanswered &&
+                    requestFn != null && aiExplanation == null && !isLoadingAiExplanation) {
+                    isLoadingAiExplanation = true
+                    aiExplanationFailed = false
+                    val subjectTopic = "${item.subject} - ${item.subTopic}".trim(' ', '-')
+                    val result = runCatching {
+                        requestFn(item.question, item.answer, subjectTopic)
+                    }.getOrNull()
+                    if (result.isNullOrBlank()) {
+                        aiExplanationFailed = true
+                    } else {
+                        aiExplanation = result
+                    }
+                    isLoadingAiExplanation = false
+                }
+            }
             // MCQ তে সবুজ/লাল রঙে অপশনেই উত্তর বোঝা যায় — আলাদা AnswerBox দরকার নেই
             val showAnswerText = showAnswerBox && (!item.isMcq() || item.isStudy())
             // studyNoQ হলে answer already question হিসেবে দেখানো হয়েছে — আবার দেখানো দরকার নেই
@@ -849,6 +874,64 @@ fun QuestionCard(
                             "Private — শুধু আপনি (Admin) দেখছেন",
                             fontSize = 9.sp, fontFamily = NotoSansBengali,
                             fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B)
+                        )
+                    }
+                }
+            }
+
+            // ── UX ফিচার: AI ব্যাখ্যা — MCQ-তে অপশন সিলেক্ট করার সাথে সাথে অটো-লোড
+            // হয় (উপরের LaunchedEffect), admin-এর static ব্যাখ্যার নিচে আলাদা বক্সে
+            // দেখা যায় (দুটো গুলিয়ে না যায়, তাই "🤖 AI ব্যাখ্যা" লেবেল দেওয়া) ──
+            if (item.isMcq() && item.answerState !is AnswerState.Unanswered && onRequestAiExplanation != null) {
+                Spacer(Modifier.height(6.dp))
+                when {
+                    isLoadingAiExplanation -> {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Indigo600.copy(alpha = 0.06f))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Indigo600)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "🤖 AI ব্যাখ্যা লোড হচ্ছে...",
+                                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                color = Indigo600, fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    aiExplanation != null -> {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Indigo600.copy(alpha = 0.06f))
+                                .padding(10.dp)
+                        ) {
+                            Text(
+                                "🤖 AI ব্যাখ্যা",
+                                fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                                color = Indigo600, fontFamily = NotoSansBengali
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                aiExplanation ?: "",
+                                fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurface, lineHeight = 17.sp
+                            )
+                        }
+                    }
+                    aiExplanationFailed -> {
+                        // ── নীরব ব্যর্থতা — API key সেট না থাকলে/সব প্রোভাইডার fail
+                        // করলে এটা প্রায়ই ঘটবে, তাই বড় এরর না দেখিয়ে ছোট্ট, অপ্রতুল
+                        // (non-intrusive) নোট দেখানো হয় ──
+                        Text(
+                            "🤖 AI ব্যাখ্যা এই মুহূর্তে আনা যায়নি",
+                            fontSize = 10.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
                 }
