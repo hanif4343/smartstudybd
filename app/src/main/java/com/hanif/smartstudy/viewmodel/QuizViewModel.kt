@@ -1499,6 +1499,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * ── UX ফিচার: MCQ-তে অপশন সিলেক্ট করার সাথে সাথে (আগে ম্যানুয়াল "AI" বাটন
+     * চাপতে হতো, এখন অটো) প্রশ্নের সম্পূর্ণ AI ব্যাখ্যা আনে — গণিত হলে ধাপে ধাপে,
+     * ইংরেজি গ্রামার হলে গঠনতন্ত্র/লজিক বুঝিয়ে (দেখো
+     * WrittenAnswerAiService.explainQuestion()-এর প্রম্পট, ঠিক এই নিয়মেই লেখা)।
+     */
+    suspend fun explainQuestionWithAi(question: String, correctAnswer: String, subjectTopic: String): String? {
+        val keys = session.getAiApiKeys()
+        if (!keys.hasAnyKey() || question.isBlank()) return null
+        return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.explainQuestion(
+            question      = question,
+            correctAnswer = correctAnswer,
+            subjectTopic  = subjectTopic,
+            keys          = keys
+        )
+    }
+
+    /**
      * ── Study রিকল-টাইপিং মোডের নিচের ফ্লোটিং "সাবমিট" বাটনে ফলাফলের
      * "বিস্তারিত" চাপলে — ভুলটা ঠিক কোথায় হয়েছে তার সংক্ষিপ্ত ব্যাখ্যা আনে। ──
      */
