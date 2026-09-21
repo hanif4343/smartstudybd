@@ -686,7 +686,10 @@ fun QuestionListScreen(
                                     onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     },
-                                    onAskAi = { voiceAiIdx = localIdx }
+                                    onAskAi = { voiceAiIdx = localIdx },
+                                    onRequestAiExplanation = { question, answer, subjectTopic ->
+                                        viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                                    }
                                 )
                             }
                         } else {
@@ -726,7 +729,10 @@ fun QuestionListScreen(
                             onAiGradeWritten = { question, correctAnswer, userAnswer ->
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             },
-                            onAskAi = { voiceAiIdx = localIdx }
+                            onAskAi = { voiceAiIdx = localIdx },
+                            onRequestAiExplanation = { question, answer, subjectTopic ->
+                                viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                            }
                         )
                         }
                         }
