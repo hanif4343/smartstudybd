@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class, QuestionProgressEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -52,7 +52,16 @@ import androidx.room.RoomDatabase
     // মূল-ব্রাঞ্চে merge করার সময়) — Google Sheet-এর "CurriculumStages" ট্যাব থেকে
     // admin-curated কারিকুলাম-স্টেজ প্র্যাকটিস-কনটেন্টের অফলাইন cache (দেখো
     // CurriculumStageContentProvider.kt)।
-    version = 17,
+    // v17 → v18: QuestionProgressEntity যোগ হলো — FIX ("progress bar একবার দেখায়,
+    // পরে দেখায় না" / "% আসলে attempted, correct না"): আগে per-question
+    // correct/wrong শুধু SharedPreferences স্ট্রিং-সেটে থাকত (userId-নিরপেক্ষ,
+    // Firebase-এ sync হতো না, আর lazy subject/topic list-এ doneQ হার্ডকোড ০
+    // থাকত বলে % কখনোই সঠিকভাবে দেখাতোই না)। এখন প্রতিটা উত্তর subjectId/topicId
+    // সহ এই টেবিলে সেভ হয় — topic/subject-ভিত্তিক accuracy % (correct/total,
+    // attempted % না) এক Room aggregate query দিয়েই তাৎক্ষণিক বের করা যায়, কোনো
+    // প্রশ্ন ডাউনলোড না করেই। fallbackToDestructiveMigration() থাকায় migration
+    // SQL লাগে না। দেখো ContentRepository.recordQuestionAnswer()/topicAccuracy().
+    version = 18,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -70,6 +79,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun referenceDao(): ReferenceDao
     abstract fun topicSyncDao(): TopicSyncDao
     abstract fun typingCurriculumStageContentDao(): TypingCurriculumStageContentDao
+    abstract fun questionProgressDao(): QuestionProgressDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
