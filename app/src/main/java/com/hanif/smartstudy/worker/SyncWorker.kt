@@ -96,6 +96,16 @@ class SyncWorker(
         // 5+ বার fail হলে drop করো
         queue.dropFailed()
 
+        // ── ২. Question-progress ব্যাকআপ (batched) — শুধু multi-device backup এর
+        // জন্য, UI-তে accuracy % এই backup এর ওপর নির্ভর করে না (Room থেকেই
+        // instant আসে), তাই fail হলেও app-flow অক্ষুণ্ণ থাকে ──
+        try {
+            com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                .flushProgressToFirebase()
+        } catch (e: Exception) {
+            Log.w(TAG, "flushProgressToFirebase skipped: ${e.message}")
+        }
+
         // ── Content (Study/Quiz/QBank/Subjects/Topics/...) এখন এখানে refresh
         // হয় না — সেসব CDN + Room দিয়ে on-demand/lazy সরাসরি ভিজিট করার সময়ই
         // আপ-টু-ডেট থাকে (দেখো ContentRepository.syncReferenceData()/
