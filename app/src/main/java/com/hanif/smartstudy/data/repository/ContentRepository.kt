@@ -43,6 +43,7 @@ class ContentRepository(private val context: Context) {
     private val dao     = db.questionDao()
     private val refDao  = db.referenceDao()   // Phase 6 — Subjects/Topics/SubTopics/Tags/Posts/Institutions
     private val topicSyncDao = db.topicSyncDao()  // প্রতিটা Topic-এ কতদূর আনা হয়েছে (progressive fill)
+    private val progressDao = db.questionProgressDao()  // প্রশ্ন-ভিত্তিক সঠিক/ভুল — accuracy % এর source of truth
 
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
@@ -914,11 +915,119 @@ class ContentRepository(private val context: Context) {
             .apply()
     }
 
+    // ── FIX ("progress bar একবার দেখায়, পরে দেখায় না" / "% আসলে attempted, correct
+    // না"): আগে এখানে শুধু global correct/wrong counter (ContentCache, aggregate,
+    // topic-নিরপেক্ষ) বাড়ত, আর online থাকলে কোথাও কিছুই persist হতো না (queue-তে
+    // শুধু offline এ যোগ হতো, online branch শুধু SyncWorker.scheduleOneTime() কল
+    // করত যেটার queue-তে তখন কিছুই থাকত না — কার্যত no-op)। এখন প্রতিটা উত্তর
+    // subjectId/topicId সহ Room-এ সরাসরি, সাথে সাথে, ১০০% offline-safe সেভ হয়
+    // (Firebase-এর ওপর নির্ভর করে না) — accuracy % এখান থেকেই তাৎক্ষণিক বের হয়।
+    // Firebase-এ backup যায় আলাদাভাবে ব্যাচ করে (দেখো flushProgressToFirebase),
+    // UI progress এর জন্য Firebase কল লাগেই না, quota-safe। ──
+    suspend fun recordQuestionAnswer(
+        questionId: String,
+        subjectId : String,
+        topicId   : String,
+        mode      : String,   // StudyMode.name
+        isCorrect : Boolean
+    ) {
+        val userId = session.getCurrentUser()?.phone ?: return
+        if (questionId.isBlank()) return
+        val existing = progressDao.get(userId, mode, questionId)
+        progressDao.upsert(
+            com.hanif.smartstudy.data.local.QuestionProgressEntity(
+                userId     = userId,
+                mode       = mode,
+                questionId = questionId,
+                subjectId  = subjectId,
+                topicId    = topicId,
+                isCorrect  = isCorrect,
+                attempts   = (existing?.attempts ?: 0) + 1,
+                updatedAt  = System.currentTimeMillis(),
+                synced     = false
+            )
+        )
+        if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
+        // ব্যাকআপ — best-effort, ব্যাচ করা, প্রতি উত্তরে network কল না
+        if (!isOnline()) queue.enqueueQuizAnswer(questionId, isCorrect, userId)
+        else SyncWorker.scheduleOneTime(context)
+    }
+
+    /** @deprecated topicId/subjectId ছাড়া পুরনো কল-সাইট — নতুন কোড recordQuestionAnswer() ব্যবহার করবে */
     suspend fun submitQuizAnswer(questionId: String, isCorrect: Boolean) {
         val phone = session.getCurrentUser()?.phone ?: return
         if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
         if (isOnline()) SyncWorker.scheduleOneTime(context)
         else queue.enqueueQuizAnswer(questionId, isCorrect, phone)
+    }
+
+    /** টপিক-ভিত্তিক accuracy % (correct/total, attempted % না) — এক Room aggregate query, instant */
+    suspend fun getTopicAccuracy(mode: String, topicIds: List<String>): Map<String, Pair<Int, Int>> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyMap()
+        if (topicIds.isEmpty()) return emptyMap()
+        return progressDao.statsForTopics(userId, mode, topicIds)
+            .associate { it.topicId to (it.correct to it.attempted) }  // (correct, attempted)
+    }
+
+    suspend fun getSubjectAccuracy(mode: String, subjectIds: List<String>): Map<String, Pair<Int, Int>> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyMap()
+        if (subjectIds.isEmpty()) return emptyMap()
+        return progressDao.statsForSubjects(userId, mode, subjectIds)
+            .associate { it.subjectId to (it.correct to it.attempted) }
+    }
+
+    suspend fun getWrongQuestionIds(mode: String): Set<String> {
+        val userId = session.getCurrentUser()?.phone ?: return emptySet()
+        return progressDao.wrongQuestionIds(userId, mode).toSet()
+    }
+
+    suspend fun getAttemptedQuestionIds(mode: String): Set<String> {
+        val userId = session.getCurrentUser()?.phone ?: return emptySet()
+        return progressDao.attemptedQuestionIds(userId, mode).toSet()
+    }
+
+    /**
+     * অনলাইনে থাকলে মাঝেমধ্যে (SyncWorker periodic run থেকে) sync-না-হওয়া রো
+     * ব্যাচে Firebase-এ backup পাঠায় — এটা শুধু multi-device backup-এর জন্য, UI
+     * progress % এটার ওপর নির্ভর করে না, তাই fail হলেও app-flow ব্লক হয় না।
+     */
+    suspend fun flushProgressToFirebase(batchSize: Int = 30): Boolean {
+        val userId = session.getCurrentUser()?.phone ?: return true
+        if (!isOnline()) return true
+        val pending = progressDao.getUnsynced(userId, batchSize)
+        if (pending.isEmpty()) return true
+        return try {
+            val safePhone = userId.replace("+", "").trim()
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            var allOk = true
+            for (p in pending) {
+                val url = "$base/QuestionProgress/$safePhone/${p.mode}/${p.questionId}.json?auth=$secret"
+                val obj = com.google.gson.JsonObject().apply {
+                    addProperty("subjectId", p.subjectId)
+                    addProperty("topicId", p.topicId)
+                    addProperty("isCorrect", p.isCorrect)
+                    addProperty("attempts", p.attempts)
+                    addProperty("updatedAt", p.updatedAt)
+                }
+                val resp = client.newCall(
+                    okhttp3.Request.Builder().url(url)
+                        .put(obj.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute()
+                val ok = resp.isSuccessful
+                resp.close()
+                if (ok) progressDao.markSynced(userId, p.mode, p.questionId) else allOk = false
+            }
+            allOk
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "flushProgressToFirebase error: ${e.message}")
+            false
+        }
     }
 
     suspend fun submitStudyProgress(minutes: Int, topic: String) {
