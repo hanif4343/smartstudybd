@@ -697,6 +697,46 @@ function ghPutFile_(owner, repo, branch, path, contentStr, token, message, known
   return { success: false, error: "HTTP " + code + ": " + resp.getContentText() };
 }
 
+// ── Image/CDN Hosting Phase — বাইনারি (ছবি) ফাইল GitHub-এ commit করার জন্য
+// ghPutFile_-এর আলাদা ভার্সন। ghPutFile_ টেক্সট/JSON কন্টেন্টের জন্য বানানো —
+// `Utilities.base64Encode(contentStr, UTF_8)` একটা STRING-কে UTF-8 হিসেবে ধরে
+// এনকোড করে, যেটা বাইনারি ছবির bytes-এর জন্য ব্যবহার করলে ডেটা corrupt হয়ে
+// যাবে (UTF-8 charset conversion বাইনারি bytes-কে বদলে দেয়)। তাই এখানে সরাসরি
+// base64-encoded string (client থেকেই base64 হিসেবে আসে) নিয়ে charset ছাড়াই
+// raw bytes-এ ডিকোড করে GitHub-এ পাঠানো হয় — কোনো টেক্সট-এনকোডিং-এর মধ্যস্থতা নেই। ──
+function ghPutBinaryFile_(owner, repo, branch, path, base64Content, token, message, knownSha) {
+  var sha = knownSha;
+  if (sha === undefined) {
+    var existing = ghGetFile_(owner, repo, branch, path, token);
+    sha = existing.exists ? existing.sha : null;
+  }
+  var url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + path;
+  var payload = {
+    message: message || ("Upload " + path),
+    content: base64Content, // ── ইতিমধ্যে base64 — কোনো re-encode লাগবে না ──
+    branch: branch
+  };
+  if (sha) payload.sha = sha;
+
+  var resp = fetchWithRetry_(url, {
+    method: "put",
+    contentType: "application/json",
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code === 200 || code === 201) {
+    var body = JSON.parse(resp.getContentText());
+    return { success: true, sha: body.content ? body.content.sha : null };
+  }
+  return { success: false, error: "HTTP " + code + ": " + resp.getContentText() };
+}
+
 function ghDeleteFile_(owner, repo, branch, path, token, knownSha) {
   var sha = knownSha;
   if (sha === undefined) {
@@ -857,6 +897,94 @@ function sendFCMToAll(title, body, extraData) {
     }
     return {sent:sent,failed:failed};
   } catch(e) { return {error:e.toString()}; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   🎯 TOPIC COVERAGE — ডেইলি রিমাইন্ডার
+   TopicPlan (Firebase, Admin App-এ in-app এডিটেবল) vs Subjects/Topics
+   রেফারেন্স-টেবিলের row_count মিলিয়ে যেসব টপিক এখনো ফাঁকা (0 প্রশ্ন) তার জন্য
+   অ্যাডমিনকে রোজ একবার push notification পাঠায়। অ্যাডমিন ফোন হার্ডকোড না করে
+   Users থেকে Role==="Admin" খুঁজে বের করা হয় (একাধিক admin থাকলেও কাজ করবে)।
+   🔄 ফিক্স (v3): আগে TopicPlan (Firebase, ম্যানুয়ালি টাইপ করা লিস্ট) vs Subjects/
+   Topics রেফারেন্স-টেবিল মিলিয়ে ফাঁকা টপিক বের করা হতো। এখন TopicPlan বাদ —
+   ডেটাবেজে যা Subject/Topic আছে (Subjects/Topics শিট) সেটাই সরাসরি "প্ল্যান"।
+   TopicTodayPick-ও এখন planId না, সরাসরি subject+topic নাম দিয়ে ম্যাচ করে। ══ */
+function dailyTopicReminderTrigger() {
+  try {
+    var cfg = getProps();
+    var dbSecret = PropertiesService.getScriptProperties().getProperty("FIREBASE_DB_SECRET") || cfg.SECRET_KEY;
+
+    var pickResp = UrlFetchApp.fetch(cfg.FIREBASE_URL+"TopicTodayPick.json?auth="+dbSecret,{muteHttpExceptions:true});
+    var picks = JSON.parse(pickResp.getContentText())||{};
+    var pickedKeys = {};
+    Object.keys(picks).forEach(function(k){
+      var v=picks[k];
+      if(v&&v.subject&&v.topic) pickedKeys[String(v.subject).trim()+"||"+String(v.topic).trim()]=true;
+    });
+
+    // Subjects+Topics রেফারেন্স-টেবিল থেকে subject_id→নাম রেজলভ করে row_count যোগ করা —
+    // এটাই এখন পুরো "প্ল্যান" (ডেটাবেজে যা Subject/Topic হিসেবে তৈরি হয়ে আছে)
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var subjName = {};
+    var subjSh = ss.getSheetByName("Subjects");
+    if (subjSh && subjSh.getLastRow()>=2) {
+      var subjData = subjSh.getDataRange().getValues(), subjHdr = subjData[0];
+      var sidCol = subjHdr.indexOf("subject_id"), snameCol = subjHdr.indexOf("subject_name");
+      if (sidCol>=0 && snameCol>=0) {
+        for (var si=1; si<subjData.length; si++) subjName[subjData[si][sidCol]] = String(subjData[si][snameCol]||"").trim();
+      }
+    }
+    var countMap = {}; // "subject||topic" -> count
+    var seenPairs = []; // [{subject,topic}]
+    var seenSet = {};
+    var topicSh = ss.getSheetByName("Topics");
+    if (topicSh && topicSh.getLastRow()>=2) {
+      var topicData = topicSh.getDataRange().getValues(), topicHdr = topicData[0];
+      var tnameCol = topicHdr.indexOf("topic_name"), tsidCol = topicHdr.indexOf("subject_id"), trcCol = topicHdr.indexOf("row_count");
+      if (tnameCol>=0 && tsidCol>=0 && trcCol>=0) {
+        for (var ti=1; ti<topicData.length; ti++) {
+          var sName = subjName[topicData[ti][tsidCol]] || "অজানা";
+          var tName = String(topicData[ti][tnameCol]||"").trim();
+          if(!tName) continue;
+          var cnt = parseInt(topicData[ti][trcCol],10)||0;
+          var key = sName+"||"+tName;
+          countMap[key] = (countMap[key]||0)+cnt;
+          if(!seenSet[key]){ seenSet[key]=true; seenPairs.push({subject:sName,topic:tName}); }
+        }
+      }
+    }
+
+    var emptyEntries = seenPairs.filter(function(p){ return !(countMap[p.subject+"||"+p.topic]>0); });
+    if(!emptyEntries.length) return; // সব টপিক পূর্ণ — নোটিফাই করার দরকার নেই
+
+    var pickedEmpty = emptyEntries.filter(function(p){ return pickedKeys[p.subject+"||"+p.topic]; });
+
+    var usersResp = UrlFetchApp.fetch(cfg.FIREBASE_URL+"Users.json?auth="+dbSecret,{muteHttpExceptions:true});
+    var users = JSON.parse(usersResp.getContentText())||{};
+    var adminPhones = [];
+    Object.keys(users).forEach(function(k){
+      var u=users[k];
+      if(u && String(u.Role||u.role||"").toLowerCase()==="admin") adminPhones.push(u.Phone||u.phone||k);
+    });
+    if(!adminPhones.length) return;
+
+    var title = "🎯 "+emptyEntries.length+"টা টপিক এখনো ফাঁকা";
+    var body = pickedEmpty.length
+      ? "আজকের টার্গেট থেকে বাকি: "+pickedEmpty.slice(0,3).map(function(p){return p.topic;}).join(", ")+(pickedEmpty.length>3?" +আরও "+(pickedEmpty.length-3)+"টা":"")
+      : "মোট "+emptyEntries.length+"টা টপিকে এখনো কোনো প্রশ্ন যোগ করা হয়নি।";
+
+    adminPhones.forEach(function(ph){ sendFCMToPhone(ph, title, body, {type:"topic_reminder"}); });
+  } catch(e) { logError_("dailyTopicReminderTrigger", String(e)); }
+}
+
+var TOPIC_REMINDER_TRIGGER_INSTALLED_KEY_ = "TOPIC_REMINDER_TRIGGER_INSTALLED_V1";
+function installTopicReminderTrigger_(hour) {
+  var triggers=ScriptApp.getProjectTriggers();
+  for (var i=0;i<triggers.length;i++){
+    if (triggers[i].getHandlerFunction()==="dailyTopicReminderTrigger") ScriptApp.deleteTrigger(triggers[i]);
+  }
+  ScriptApp.newTrigger("dailyTopicReminderTrigger").timeBased().atHour(hour==null?9:hour).everyDays(1).create();
+  Logger.log("✅ Topic reminder trigger installed — প্রতিদিন সকাল "+(hour==null?9:hour)+"টায় চেক করবে।");
 }
 
 /* ══ ATOMIC ID ══
@@ -3870,6 +3998,46 @@ function doPost(e) {
       return json({result:"success",fcm:sendFCMToAll(params.title||'Smart Study',params.body||'',{type:"broadcast"})});
     }
 
+    // 🔒 সিকিউরিটি ফিক্স: Admin App-এর src/core/fcm.js আগে ব্রাউজারেই Service Account
+    // প্রাইভেট কী দিয়ে JWT সাইন করে সরাসরি FCM-এ হিট করতো — সেই কী VITE_ প্রিফিক্সের
+    // কারণে পাবলিক JS বান্ডেলে ফাঁস হয়ে যেত (যে কেউ দেখে নিতে পারতো)। sendFCMToPhone/
+    // sendFCMToAll ফাংশন GAS-এ (সার্ভার-সাইড, কখনো ফাঁস হয় না) আগে থেকেই ছিল —
+    // শুধু এই দুটো doPost action আগে ছিল না যেটা দিয়ে client থেকে সেটা নিরাপদে কল
+    // করা যেত। এখন fcm.js পুরোপুরি এই দুটো action ব্যবহার করে, নিজে কোনো কী রাখে না।
+    if(params.type==="notify_phone"){
+      var npPhone=(params.phone||'').toString().trim();
+      if(!npPhone) return json({result:"error",error:"phone missing"});
+      return json({result:"success",fcm:sendFCMToPhone(npPhone,params.title||'Smart Study',params.body||'',params.data||{})});
+    }
+
+    if(params.type==="notify_bulk"){
+      var nbPhones=Array.isArray(params.phones)?params.phones:[];
+      var nbSent=0, nbFailed=0;
+      nbPhones.forEach(function(ph){
+        if(!ph) return;
+        var r=sendFCMToPhone(ph.toString().trim(),params.title||'Smart Study',params.body||'',params.data||{});
+        if(r&&!r.error) nbSent++; else nbFailed++;
+      });
+      return json({result:"success",sent:nbSent,failed:nbFailed});
+    }
+
+    // 🎯 Topic Tracker — ডেইলি রিমাইন্ডার ট্রিগার (idempotent — বারবার কল হলেও
+    // সমস্যা নেই, Script Property ফ্ল্যাগ চেক করে দ্বিতীয়বার ইনস্টল করে না)
+    if(params.type==="ensure_topic_reminder"){
+      try{
+        var trProps=PropertiesService.getScriptProperties();
+        if(trProps.getProperty(TOPIC_REMINDER_TRIGGER_INSTALLED_KEY_)!=="1"){
+          installTopicReminderTrigger_(9);
+          trProps.setProperty(TOPIC_REMINDER_TRIGGER_INSTALLED_KEY_,"1");
+          return json({result:"success",message:"✅ প্রতিদিন সকাল ৯টায় নোটিফিকেশন চালু হলো"});
+        }
+        return json({result:"success",message:"আগে থেকেই চালু আছে — প্রতিদিন সকাল ৯টায় চেক হয়"});
+      }catch(trErr){
+        logError_("ensure_topic_reminder",String(trErr));
+        return json({result:"error",error:String(trErr)});
+      }
+    }
+
     if(params.type==="update_explanation"){
       var sName=params.sheet, shMap2={qbank:"QBank",quiz:"Quiz",study:"Study",typing:"Typing"};
       sName=shMap2[sName.toLowerCase()]||sName;
@@ -3923,6 +4091,55 @@ function doPost(e) {
       var searchPhone=params.phone.toString().trim().replace(/^'+/,'');
       for(var pr=1;pr<pRows.length;pr++){var rowPhone=pRows[pr][pPhCol].toString().trim().replace(/^'+/,'');if(rowPhone.replace(/^0+/,'')===searchPhone.replace(/^0+/,'')){pSh.getRange(pr+1,pPicCol+1).setValue(params.picture_url);syncToFirebase("Users","Users");return txt("Picture Updated");}}
       return txt("User not found");
+    }
+
+    // ── Image/CDN Hosting Phase — ImgBB-এর বদলে ছবি এখন এই একটা GAS action দিয়েই
+    // GitHub-এ commit হয়ে jsDelivr CDN URL হিসেবে ফেরত আসে। Admin App ও Student
+    // App দুটোই এই একই action ব্যবহার করে — GitHub টোকেন কখনো client-এ যায় না,
+    // শুধু GAS-এর Script Properties-এ (GITHUB_WRITE_TOKEN) নিরাপদে থাকে।
+    // params: { type:"upload_image", imageBase64 (data-URI প্রিফিক্স ছাড়া/সহ
+    // দুটোই চলবে), folder ("questions"/"users"/ইত্যাদি — path-এ subfolder হিসেবে
+    // বসে), fileName (এক্সটেনশনসহ, না দিলে .jpg ধরে নেওয়া হয়) }
+    // রিটার্ন: { status:"success", url: "<jsDelivr CDN URL>" } অথবা error ──
+    if (params.type === "upload_image") {
+      var imgProps = PropertiesService.getScriptProperties();
+      var imgOwner = imgProps.getProperty("GH_OWNER");
+      var imgRepo  = imgProps.getProperty("GH_MEDIA_REPO") || imgProps.getProperty("GH_REPO");
+      var imgBranch = imgProps.getProperty("GH_BRANCH") || "main";
+      // 🐛 ফিক্স: আগে শুধু GITHUB_WRITE_TOKEN (content-repo-র জন্য) খোঁজা হতো —
+      // কিন্তু media রিপোর জন্য আলাদা, কম-পারমিশনের একটা টোকেন বানিয়ে
+      // GITHUB_MEDIA_WRITE_TOKEN নামে সেভ করাই বেশি নিরাপদ (least-privilege —
+      // content আর media টোকেন আলাদা থাকলে একটা leak হলেও অন্যটা সেফ থাকে)।
+      // তাই আগে GITHUB_MEDIA_WRITE_TOKEN খোঁজা হচ্ছে, না পেলে পুরনো
+      // GITHUB_WRITE_TOKEN-এ fallback করে (যারা আলাদা টোকেন বানাননি তাদের জন্য)।
+      var imgToken = imgProps.getProperty("GITHUB_MEDIA_WRITE_TOKEN") || imgProps.getProperty("GITHUB_WRITE_TOKEN");
+      if (!imgOwner || !imgRepo || !imgToken) {
+        return json({ status: "error", message: "GitHub config (GH_OWNER/GH_MEDIA_REPO/GITHUB_MEDIA_WRITE_TOKEN) সেট করা নেই" });
+      }
+      if (!params.imageBase64) {
+        return json({ status: "error", message: "imageBase64 পাঠানো হয়নি" });
+      }
+      // ── data-URI প্রিফিক্স (যেমন "data:image/jpeg;base64,") থাকলে ছেঁটে ফেলা —
+      // ক্লায়েন্ট Canvas.toDataURL()/Base64 এনকোডার যেভাবেই পাঠাক, দুটোই কাজ করবে ──
+      var b64 = params.imageBase64.toString();
+      var commaIdx = b64.indexOf(",");
+      if (b64.substring(0, 5) === "data:" && commaIdx !== -1) b64 = b64.substring(commaIdx + 1);
+      // ── আনুমানিক সাইজ চেক (base64 আসল বাইটের ~1.33 গুণ) — GitHub Contents API-র
+      // ~1MB ফাইল-সাইজ সীমার আগেই স্পষ্ট এরর দেখানো, নাহলে GitHub থেকে অস্পষ্ট
+      // এরর আসত এবং client বুঝতে পারত না কেন ব্যর্থ হলো ──
+      var approxBytes = Math.floor(b64.length * 0.75);
+      if (approxBytes > 1500000) {
+        return json({ status: "error", message: "ছবি অনেক বড় (~" + Math.round(approxBytes/1024) + "KB) — আপলোডের আগে কমপ্রেস/রিসাইজ করে ছোট করুন (সর্বোচ্চ ~1.4MB)" });
+      }
+      var folder = (params.folder || "misc").toString().replace(/[^a-zA-Z0-9_-]/g, "");
+      var fileName = (params.fileName || (Utilities.getUuid() + ".jpg")).toString().replace(/[^a-zA-Z0-9_.-]/g, "");
+      var filePath = "media/" + folder + "/" + fileName;
+      var putResult = ghPutBinaryFile_(imgOwner, imgRepo, imgBranch, filePath, b64, imgToken, "Upload image: " + filePath);
+      if (!putResult.success) {
+        return json({ status: "error", message: "GitHub আপলোড ব্যর্থ: " + putResult.error });
+      }
+      var cdnUrl = "https://cdn.jsdelivr.net/gh/" + imgOwner + "/" + imgRepo + "@" + imgBranch + "/" + filePath;
+      return json({ status: "success", url: cdnUrl });
     }
 
     // ── update_fields — একসাথে একাধিক কলাম (Question/Opt1-4/Correct/Explanation/
@@ -4127,19 +4344,20 @@ function doPost(e) {
 
         var bNewRows=[];
         var bNowMs=Date.now();
+        // 🆕 প্রতিটা ইনপুট row-এর জন্য (নতুন তৈরি হোক বা duplicate-matched বিদ্যমান হোক)
+        // ফলাফল id — client-কে ফেরত পাঠানো হয় (bRows.length-এর সাথে ইনডেক্স মিলিয়ে),
+        // যাতে সাবমিটের পরপরই client জানতে পারে কোন প্রশ্ন কোন id পেলো (single-entry
+        // MCQ সাবমিটের পর option/explanation-generator ওয়ার্কফ্লো নির্দিষ্ট id
+        // টার্গেট করে ট্রিগার করার জন্য এটা দরকার — দেখো SingleQuestionEntryPage)।
+        var bResultIds=new Array(bRows.length).fill("");
         for(var bi=0;bi<bRows.length;bi++){
           var row=bRows[bi]||{};
           try{
             var bKey=bNorm(row.question)+"|"+bNorm(row.sub_topic)+"|"+bNorm(row.subject);
-            // ── FIX (আসল সমস্যা): আগে ডুপ্লিকেট পেলে সাথে সাথে skip করে continue হতো —
-            // examAppearance দেওয়া থাকলেও সেটা হারিয়ে যেত, কারণ appearance-attach লজিক
-            // নিচে (নতুন রো তৈরির পরে) ছিল, যেটা duplicate-এর জন্য কখনো চলতোই না। এখন
-            // duplicate পেলে, যদি examAppearance দেওয়া থাকে (QBank-এই শুধু), তাহলে নতুন রো
-            // না বানিয়ে সেই বিদ্যমান প্রশ্নের id-তেই একটা নতুন Exam_Appearance জোড়া হয় —
-            // এটাই Admin App-এর "একই প্রশ্ন আবার এলে duplicate না বানিয়ে appearance যোগ
-            // করো" ফিচারের মূল সার্ভার-সাইড অংশ। ──
             if(row.question && bExisting[bKey]){
               bSkipped++;
+              var bExistingId0=bExisting[bKey];
+              if(bExistingId0 && bExistingId0!==true) bResultIds[bi]=bExistingId0.toString();
               if(params.examAppearance && bTab==="QBank"){
                 var bExistingId=bExisting[bKey];
                 if(bExistingId && bExistingId!==true){
@@ -4201,6 +4419,7 @@ function doPost(e) {
 
             if(!row.editId){ /* id বসানো হয়ে গেছে উপরেই */ }
             bNewRows.push(bLine);
+            bResultIds[bi]=bId.toString();
             bExisting[bKey]=bId; // একই ব্যাচে দুইবার একই প্রশ্ন থাকলে দ্বিতীয়টাও এখন bId পাবে (আগে শুধু true থাকতো, appearance জোড়া যেত না)
             bAdded++;
             if(params.examAppearance && bTab==="QBank"){
@@ -4242,7 +4461,7 @@ function doPost(e) {
       var bShouldSync = (params.sync!==undefined) ? !!params.sync : true; // পুরনো কলার (sync ফ্ল্যাগ ছাড়া) থাকলে আগের মতোই প্রতিবার সিঙ্ক হবে, নতুন ফ্রন্টএন্ড শুধু শেষ চাংকেই sync:true পাঠায়
       var bSyncOk = true;
       if(bShouldSync) bSyncOk = syncToFirebase(bTab,bTab);
-      return json({result:"success",added:bAdded,skipped:bSkipped,firebaseSynced:bSyncOk,examAppearancesAdded:bAppearanceRows.length,examAppearancesLinkedToExisting:bLinkedExistingCount});
+      return json({result:"success",added:bAdded,skipped:bSkipped,firebaseSynced:bSyncOk,examAppearancesAdded:bAppearanceRows.length,examAppearancesLinkedToExisting:bLinkedExistingCount,ids:bResultIds});
     }
 
     // ── নতুন User signup ──
