@@ -404,7 +404,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     val freshRows = repo.getRoomSubjectsRefBySheet(sheet)
                     if (freshRows.isNotEmpty()) {
                         val freshSubjects = toSubjects(freshRows)
-                        _state.update { it.copy(subjects = freshSubjects) }
+                        // ── FIX ("cache theke dekhay, tarpor abar online theke dekhay" —
+                        // flicker): আগে ব্যাকগ্রাউন্ড sync শেষ হলে ডেটা একই হলেও সবসময়
+                        // state.update কল হতো, ফলে UI recompose করত আর মনে হতো "আবার
+                        // দেখাচ্ছে/লাফাচ্ছে" — যদিও আসলে কিছুই বদলায়নি। এখন cache আর
+                        // fresh ডেটা হুবহু এক হলে (বেশিরভাগ সময়েই তাই, cache-gate এর
+                        // কারণে) কোনো update-ই হয় না — শুধু সত্যিকার পরিবর্তন থাকলেই
+                        // (নতুন প্রশ্ন/সাবজেক্ট যোগ/মুছে যাওয়া) UI নতুন করে আঁকে। ──
+                        if (freshSubjects != cachedSubjects) {
+                            _state.update { it.copy(subjects = freshSubjects) }
+                        }
                     }
                 }
             }
@@ -459,6 +468,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 repo.syncReferenceData()
                 topicRows = repo.getRoomTopicsForSubject(subjectId)
             }
+            // ── FIX ("progress bar একবার দেখায়, পরে দেখায় না"): আগে এখানে doneQ
+            // হার্ডকোড ০ ছিল (কমেন্টে লেখা ছিল "গণনা করতে হলে প্রশ্ন ডাউনলোড করা
+            // লাগতো" — কিন্তু এখন লাগে না, কারণ correct/attempted count আলাদা
+            // Room টেবিলে (QuestionProgressEntity) topicId সহ আগে থেকেই সেভ করা
+            // থাকে, দেখো ContentRepository.recordQuestionAnswer())। এক Room
+            // aggregate query দিয়েই সব টপিকের accuracy % (সঠিক/মোট, attempted %
+            // না) এক লাফে বের হয়ে যায় — প্রশ্ন ডাউনলোডের দরকারই নেই। ──
+            val topicAccuracy = repo.getTopicAccuracy(mode.name, topicRows.map { it.topicId })
             val subTopics = topicRows.map { t ->
                 // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
                 // (generic legacy কলাম) সবসময় Study sheet-এর কাউন্ট বহন করতো, মোড যাই হোক
@@ -485,11 +502,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 // topic row-টায় চলেনি, তাই per-sheet ডেটা সত্যিই অনুপস্থিত) — একটা sheet-এ
                 // সত্যিকারের ০ (অন্য sheet-এ ডেটা থাকা সত্ত্বেও) কখনোই override হবে না। ──
                 val allPerSheetZero = t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0
+                // doneQ = কত% সঠিক করেছে (accuracy) — কত% attempt করেছে, তা না
+                val correctCount = topicAccuracy[t.topicId]?.first ?: 0
                 SubTopicEntry(
                     name      = t.name,
                     subject   = subjectName,
                     totalQ    = if (allPerSheetZero) t.rowCount else perSheetCount,
-                    doneQ     = 0,
+                    doneQ     = correctCount,
                     subjectId = t.subjectId,
                     topicId   = t.topicId
                 )
@@ -1379,10 +1398,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         questions[localIdx] = q.copy(answerState = AnswerState.McqSelected(selectedOption, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
-        markProgress(q.id, _state.value.mode)
+        recordAnswerProgress(q, isCorrect, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
-                cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)   // সঠিক হলে remove
                 // STUDY mode এ per-answer XP award — QUIZ mode এ submitQuiz() এ bulk award হয় (double নয়)
                 if (_state.value.mode == StudyMode.STUDY) {
@@ -1391,11 +1409,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } else {
-                cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
                 saveWrongQId(q.id, _state.value.mode)     // ভুল হলে save
             }
-            repo.submitQuizAnswer(q.id, isCorrect)
         }
     }
 
@@ -1416,13 +1432,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         )
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
-        markProgress(q.id, _state.value.mode)
+        recordAnswerProgress(q, isCorrect, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
-                cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)
             } else {
-                cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
                 saveWrongQId(q.id, _state.value.mode)
             }
@@ -1457,10 +1471,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         questions[localIdx] = q.copy(answerState = AnswerState.WrittenSubmitted(userText, matchPct, isCorrect))
         _state.update { it.copy(questions = questions, answeredCount = it.answeredCount + 1) }
         _feedbackEvent.value = isCorrect
-        markProgress(q.id, _state.value.mode)
+        recordAnswerProgress(q, isCorrect, _state.value.mode)
         viewModelScope.launch {
             if (isCorrect) {
-                cache.incrementCorrect()
                 removeWrongQIdByMode(q.id, _state.value.mode)
                 // STUDY mode এ per-answer XP award — QUIZ mode এ submitQuiz() এ bulk award হয়
                 if (_state.value.mode == StudyMode.STUDY) {
@@ -1469,7 +1482,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } else {
-                cache.incrementWrong()
                 saveWeakTopic(q.subject, q.subTopic)
                 saveWrongQId(q.id, _state.value.mode)
             }
@@ -2869,6 +2881,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val key   = "${mode.name}:$qId"
         val saved = prefs.getStringSet("progress", mutableSetOf())!!.toMutableSet()
         if (saved.add(key)) prefs.edit().putStringSet("progress", saved).apply()
+    }
+
+    // ── FIX ("% আসলে attempted, correct না" / "progress bar একবার দেখায় পরে
+    // দেখায় না"): উপরের markProgress() শুধু "attempted" (উত্তর দেওয়া হয়েছে কিনা)
+    // মনে রাখে — সেটা এখনো প্রশ্ন-লিস্ট সর্ট (isMastered) এর জন্য দরকার, তাই
+    // অক্ষত রাখা হলো। কিন্তু Subject/Topic কার্ডের progress % এখন থেকে এই
+    // ফাংশনের মাধ্যমে Room-এ (QuestionProgressEntity) subjectId/topicId সহ
+    // persist হওয়া সঠিক/ভুল থেকে হিসাব হবে — accuracy-based, attempted-based না।
+    // এটাই প্রতিটা MCQ/Written উত্তরের একমাত্র জায়গা যেখান থেকে correctness
+    // persist হওয়া উচিত, তাই 4 জায়গার answerXxx() ফাংশন থেকে এটাই কল করা হয়। ──
+    private fun recordAnswerProgress(q: QuestionItem, isCorrect: Boolean, mode: StudyMode) {
+        markProgress(q.id, mode)
+        viewModelScope.launch {
+            repo.recordQuestionAnswer(
+                questionId = q.id,
+                subjectId  = q.subjectId,
+                topicId    = q.topicId,
+                mode       = mode.name,
+                isCorrect  = isCorrect
+            )
+        }
     }
 
     private fun saveWeakTopic(subject: String, subTopic: String) {
