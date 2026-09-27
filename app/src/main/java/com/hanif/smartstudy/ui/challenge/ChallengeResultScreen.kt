@@ -47,6 +47,10 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
 
     var showComparison by remember { mutableStateOf(false) }
 
+    // Admin হলে কোনো ad লোড/দেখানো হবে না — Double XP কার্ডও লুকানো থাকবে
+    // (নাহলে rewardedAd চিরকাল null থেকে যেত আর বাটনে "লোড হচ্ছে..." আটকে থাকত)
+    val isAdFree = remember { AdManager.isAdFreeUser(context) }
+
     // ── Rewarded Ad: background load ──
     var rewardedAd    by remember { mutableStateOf<RewardedAd?>(null) }
     var xpDoubled     by remember { mutableStateOf(false) }
@@ -212,7 +216,7 @@ fun ChallengeResultScreen(state: ChallengeUiState, vm: ChallengeViewModel) {
             }
 
             // ── Rewarded Ad — XP Double বাটন ──
-            if (!xpDoubled && waitingCount == 0) {
+            if (!xpDoubled && waitingCount == 0 && !isAdFree) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape    = RoundedCornerShape(16.dp),
