@@ -53,6 +53,16 @@ object AdManager {
     // ── Standard AdRequest ───────────────────────────────────
     fun request(): AdRequest = AdRequest.Builder().build()
 
+    // ── Admin হলে কোনো ad-ই দেখানো/লোড করা হবে না ──────────
+    // (banner, interstitial, rewarded — সব জায়গায় এই একটা ফাংশন দিয়েই চেক হয়,
+    // তাই নতুন কোনো ad যোগ হলেও এটা কল করলেই admin-এর জন্য বন্ধ থাকবে)
+    fun isAdFreeUser(context: Context): Boolean =
+        try {
+            SessionManager(context.applicationContext).getCurrentUser()?.isAdmin() == true
+        } catch (e: Exception) {
+            false
+        }
+
     // ── Interstitial load helper ─────────────────────────────
     fun loadInterstitial(
         context  : Context,
@@ -60,6 +70,11 @@ object AdManager {
         onLoaded : (InterstitialAd) -> Unit,
         onFailed : () -> Unit = {}
     ) {
+        if (isAdFreeUser(context)) {
+            Log.d(TAG, "Admin user — interstitial skipped")
+            onFailed()
+            return
+        }
         InterstitialAd.load(
             context,
             adUnitId,
@@ -83,6 +98,11 @@ object AdManager {
         onLoaded : (RewardedAd) -> Unit,
         onFailed : () -> Unit = {}
     ) {
+        if (isAdFreeUser(context)) {
+            Log.d(TAG, "Admin user — rewarded skipped")
+            onFailed()
+            return
+        }
         RewardedAd.load(
             context,
             REWARDED_XP_BONUS,
