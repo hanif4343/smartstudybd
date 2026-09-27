@@ -330,6 +330,10 @@ class SyncWorker(
                 .deleteQuestion(sheet, questionId)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     Log.d(TAG, "syncAdminDelete (GAS) $sheet/$questionId → success")
+                    try {
+                        com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+                            .clearDeleteTombstone(sheet, questionId)  // কনফার্ম — tombstone housekeeping
+                    } catch (_: Exception) {}
                     true
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
