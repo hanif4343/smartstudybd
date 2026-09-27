@@ -94,33 +94,13 @@ jobs:
           ls -lh app/src/main/res/font/
 
       # ── App icons ──
-      - name: Generate app icons
-        run: |
-          sudo apt-get install -y imagemagick 2>/dev/null || true
-          for entry in "mdpi:48" "hdpi:72" "xhdpi:96" "xxhdpi:144" "xxxhdpi:192"; do
-            density="${entry%%:*}"
-            px="${entry##*:}"
-            dir="app/src/main/res/mipmap-${density}"
-            mkdir -p "$dir"
-            convert -size "${px}x${px}" xc:"#4F46E5" \
-              -fill white -font DejaVu-Sans-Bold \
-              -pointsize $((px * 35 / 100)) \
-              -gravity Center -annotate 0 "SS" \
-              "${dir}/ic_launcher.png" 2>/dev/null || \
-            python3 -c "
-          import struct,zlib
-          w,h=$px,$px
-          raw=b''.join(b'\x00'+bytes([79,70,229]*w) for _ in range(h))
-          c=zlib.compress(raw)
-          def ch(t,d):
-              return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
-          png=b'\x89PNG\r\n\x1a\n'+ch(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+ch(b'IDAT',c)+ch(b'IEND',b'')
-          open('${dir}/ic_launcher.png','wb').write(png)
-          "
-            cp "${dir}/ic_launcher.png" "${dir}/ic_launcher_round.png"
-            cp "${dir}/ic_launcher.png" "${dir}/ic_launcher_foreground.png"
-          done
-          echo "Icons done"
+      # ⚠️ আগে এখানে একটা "Generate app icons" স্টেপ ছিল যেটা প্রতি build-এ
+      # ic_launcher.png / ic_launcher_round.png / ic_launcher_foreground.png
+      # কে একরঙা (#4F46E5) প্লেসহোল্ডার দিয়ে ওভাররাইট করে দিত — repo-তে যতই
+      # real আইকন থাকুক না কেন। এই কারণেই home screen-এ শুধু একটা পার্পল
+      # স্কয়ার দেখাচ্ছিল, real লোগো না। যেহেতু repo-তে এখন real আইকন ফাইল
+      # আগে থেকেই আছে (app/src/main/res/mipmap-*/), এই স্টেপের আর দরকার নেই —
+      # তাই পুরোপুরি সরিয়ে দেওয়া হয়েছে, যাতে real আইকন ফাইলগুলো অক্ষত থাকে।
 
       # ── Remove duplicate files ──
       - name: Remove duplicate files
