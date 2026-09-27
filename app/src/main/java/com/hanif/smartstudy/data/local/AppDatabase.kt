@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class, QuestionProgressEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class, QuestionProgressEntity::class, DeletedQuestionEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -61,7 +61,15 @@ import androidx.room.RoomDatabase
     // attempted % না) এক Room aggregate query দিয়েই তাৎক্ষণিক বের করা যায়, কোনো
     // প্রশ্ন ডাউনলোড না করেই। fallbackToDestructiveMigration() থাকায় migration
     // SQL লাগে না। দেখো ContentRepository.recordQuestionAnswer()/topicAccuracy().
-    version = 18,
+    // v18 → v19: DeletedQuestionEntity (tombstone) যোগ হলো — FIX ("delete korle
+    // ... database theke remove hote time lagleo seta never show by anychance"):
+    // আগে delete করার পর background content-sync (syncToRoom) সার্ভারের stale
+    // (তখনো-delete-না-হওয়া) ডেটা দিয়ে সেই প্রশ্নটাই আবার upsert করে ফেলত। এখন
+    // delete-এর মুহূর্তেই একটা tombstone রো সেভ হয়, syncToRoom() সবসময় এই
+    // তালিকা চেক করে বাদ দেয় — server delete যত দেরিতেই কনফার্ম হোক না কেন,
+    // প্রশ্নটা আর কখনো ফিরে আসে না। দেখো ContentRepository.markQuestionDeleted()/
+    // syncToRoom()। fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
+    version = 19,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,6 +88,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun topicSyncDao(): TopicSyncDao
     abstract fun typingCurriculumStageContentDao(): TypingCurriculumStageContentDao
     abstract fun questionProgressDao(): QuestionProgressDao
+    abstract fun deletedQuestionDao(): DeletedQuestionDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
