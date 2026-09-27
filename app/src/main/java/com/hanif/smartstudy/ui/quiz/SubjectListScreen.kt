@@ -201,6 +201,57 @@ private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<Subje
 // তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
 private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 
+// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — বিসিএস/প্রাথমিক/নিবন্ধন। নতুন ক্যাটাগরি লাগলে
+// এখানে শুধু একটা নাম যোগ করলেই চিপ-রো তে দেখা যাবে। ──
+private val EXAM_CATEGORIES = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন")
+
+private fun examCategoryMatches(subjectName: String, category: String): Boolean {
+    val n = subjectName.trim().lowercase()
+    return when (category) {
+        "বিসিএস"   -> n.contains("bcs") || subjectName.contains("বিসিএস")
+        "প্রাথমিক" -> n.contains("primary") || subjectName.contains("প্রাথমিক")
+        "নিবন্ধন"  -> n.contains("ntrca") || n.contains("registration") || subjectName.contains("নিবন্ধন")
+        else       -> true
+    }
+}
+
+@Composable
+private fun ExamCategoryChipsRow(
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        EXAM_CATEGORIES.forEach { cat ->
+            val isActive = cat == selected
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(if (isActive) Color(0xFF3157D5) else Color.White)
+                    .border(
+                        width = 1.dp,
+                        color = if (isActive) Color(0xFF3157D5) else Color(0xFFE0E4ED),
+                        shape = RoundedCornerShape(22.dp)
+                    )
+                    .clickable { onSelect(cat) }
+                    .padding(horizontal = 19.dp, vertical = 11.dp)
+            ) {
+                Text(
+                    text = cat,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isActive) Color.White else Color(0xFF172033)
+                )
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 // Subject List Screen
 // ─────────────────────────────────────────────────────────
@@ -288,9 +339,22 @@ fun SubjectListScreen(
     // ── QBank-only সার্চ: শুধু নাম-লিস্ট (Designation/Institution/Year) ক্লায়েন্ট-সাইড
     // ফিল্টার করে — Rename/Delete ডায়ালগ পুরো (আন-ফিল্টার্ড) subjects লিস্টই ব্যবহার করে,
     // যাতে সার্চ করা অবস্থায়ও Admin অন্য আইটেম rename/delete করতে পারে ──
-    val displaySubjects = if (showQBankFilterBar && qbankSearchQuery.isNotBlank()) {
-        subjects.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
-    } else subjects
+    // ── QBank পরীক্ষা-ক্যাটাগরি চিপ (বিসিএস/প্রাথমিক/নিবন্ধন) — subject grid এর ওপরে বসে,
+    // নাম দিয়ে best-effort match করে ফিল্টার করে (subjectName-এ "bcs"/"primary"/"ntrca"
+    // বা বাংলা নাম থাকলে মিলবে)। নতুন কোনো Subject যোগ হলে (যেমন ভবিষ্যতে "প্রাথমিক
+    // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
+    // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
+    var selectedExamCategory by remember { mutableStateOf(EXAM_CATEGORIES.first()) }
+    val displaySubjects = run {
+        var list = subjects
+        if (showQBankFilterBar) {
+            list = list.filter { examCategoryMatches(it.name, selectedExamCategory) }
+            if (qbankSearchQuery.isNotBlank()) {
+                list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
+            }
+        }
+        list
+    }
 
     // ── Admin মেনু (ক্রম ঠিক করুন / Rename / Delete) — সবগুলোই বর্তমান sheet
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
@@ -350,6 +414,18 @@ fun SubjectListScreen(
             item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
         }
 
+        // ── QBank পরীক্ষা-ক্যাটাগরি চিপ (বিসিএস/প্রাথমিক/নিবন্ধন) — filter bar-এর ঠিক ওপরে,
+        // subject grid এর আগে। শুধু QBank মোডে (showQBankFilterBar=true), Quiz/Study
+        // মোডে কিছুই render হয় না, আগের আচরণ অপরিবর্তিত। ──
+        if (showQBankFilterBar) {
+            item {
+                ExamCategoryChipsRow(
+                    selected = selectedExamCategory,
+                    onSelect = { selectedExamCategory = it }
+                )
+            }
+        }
+
         // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + সার্চ ──
         if (showQBankFilterBar) {
             item {
@@ -392,8 +468,11 @@ fun SubjectListScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (showQBankFilterBar && qbankSearchQuery.isNotBlank())
-                                   "🔍 কিছু পাওয়া যায়নি" else "⚠️ ডেটা আসেনি",
+                        text = when {
+                            showQBankFilterBar && qbankSearchQuery.isNotBlank() -> "🔍 কিছু পাওয়া যায়নি"
+                            showQBankFilterBar -> "📭 \"$selectedExamCategory\" ক্যাটাগরিতে এখনো কোনো বিষয় যোগ করা হয়নি"
+                            else -> "⚠️ ডেটা আসেনি"
+                        },
                         fontSize = 15.sp,
                         fontFamily = NotoSansBengali,
                         fontWeight = FontWeight.Bold,
