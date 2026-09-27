@@ -44,6 +44,7 @@ class ContentRepository(private val context: Context) {
     private val refDao  = db.referenceDao()   // Phase 6 — Subjects/Topics/SubTopics/Tags/Posts/Institutions
     private val topicSyncDao = db.topicSyncDao()  // প্রতিটা Topic-এ কতদূর আনা হয়েছে (progressive fill)
     private val progressDao = db.questionProgressDao()  // প্রশ্ন-ভিত্তিক সঠিক/ভুল — accuracy % এর source of truth
+    private val deletedDao  = db.deletedQuestionDao()    // "delete মানে delete" — tombstone, কখনো ফিরে আসবে না
 
     // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
     companion object {
@@ -242,9 +243,21 @@ class ContentRepository(private val context: Context) {
     suspend fun syncToRoom(content: AppContent) {
         val now = System.currentTimeMillis()
         Log.d("Repo", "syncToRoom: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
-        if (content.quiz.isNotEmpty())  dao.upsertAll(content.quiz.map  { it.toEntity(now) })
-        if (content.qbank.isNotEmpty()) dao.upsertAll(content.qbank.map { it.toEntity(now) })
-        if (content.study.isNotEmpty()) dao.upsertAll(content.study.map { it.toEntity(now) })
+        // ── FIX ("delete মানে delete — কখনো ফিরে আসবে না"): সার্ভার থেকে fresh
+        // fetch করা এই কন্টেন্টে যদি এমন কোনো প্রশ্ন থাকে যেটা এই ডিভাইস থেকে
+        // ইতিমধ্যে delete করা হয়েছে (কিন্তু Firebase-এ delete তখনো propagate
+        // হয়নি — network delay/queue এর কারণে দেরি হতেই পারে), সেটা যেন কোনোভাবেই
+        // আবার Room-এ upsert না হয়ে যায়, তাই তিনটা sheet-এর tombstone id গুলো
+        // আগেই বাদ দেওয়া হচ্ছে। ──
+        val deletedQuiz  = deletedDao.idsForSheet("QUIZ").toSet()
+        val deletedQbank = deletedDao.idsForSheet("QBANK").toSet()
+        val deletedStudy = deletedDao.idsForSheet("STUDY").toSet()
+        val quizToSave  = if (deletedQuiz.isEmpty())  content.quiz  else content.quiz.filterNot  { it.id in deletedQuiz }
+        val qbankToSave = if (deletedQbank.isEmpty()) content.qbank else content.qbank.filterNot { it.id in deletedQbank }
+        val studyToSave = if (deletedStudy.isEmpty()) content.study else content.study.filterNot { it.id in deletedStudy }
+        if (quizToSave.isNotEmpty())  dao.upsertAll(quizToSave.map  { it.toEntity(now) })
+        if (qbankToSave.isNotEmpty()) dao.upsertAll(qbankToSave.map { it.toEntity(now) })
+        if (studyToSave.isNotEmpty()) dao.upsertAll(studyToSave.map { it.toEntity(now) })
         Log.d("Repo", "syncToRoom: done")
     }
 
@@ -1177,9 +1190,27 @@ class ContentRepository(private val context: Context) {
 
     // ── FIX ("ডিলিট করলে অ্যাপে সাথে সাথে হারিয়ে যায় না" বাগ): Room-এর topicId-ভিত্তিক
     // ক্যাশ থেকেও (আসল টপিক-স্ক্রিন যেটা পড়ে) সরাসরি মুছে দেয় — removeContentAndPersist()
-    // শুধু পুরনো bulk cache প্যাচ করে, এটা আলাদা এবং দুটোই দরকার। ──
+    // শুধু পুরনো bulk cache প্যাচ করে, এটা আলাদা এবং দুটোই দরকার।
+    // ── FIX ("delete মানে delete, database sync দেরি হলেও কখনো ফিরে আসবে না"):
+    // এখানেই সাথে সাথে tombstone মার্ক করা হয় (network কলের আগেই) — এরপর
+    // syncToRoom() কখনোই এই id আবার upsert করবে না, সার্ভার-সাইড delete যতই
+    // দেরিতে কনফার্ম হোক না কেন। ──
     suspend fun removeRoomQuestion(sheet: String, rowKey: String) = withContext(Dispatchers.IO) {
-        dao.deleteByFbKey(sheet.uppercase(), rowKey)
+        val roomSheet = sheet.uppercase()
+        dao.deleteByFbKey(roomSheet, rowKey)
+        deletedDao.markDeleted(
+            com.hanif.smartstudy.data.local.DeletedQuestionEntity(
+                sheet      = roomSheet,
+                questionId = rowKey,
+                deletedAt  = System.currentTimeMillis()
+            )
+        )
+    }
+
+    /** Firebase-এ delete কনফার্ম (success) হলে tombstone আর দরকার নেই — housekeeping-only,
+     *  না ডাকলেও ভুল কিছু হয় না (শুধু tombstone টেবিলে অল্প কিছু পুরনো রো থেকে যাবে)। */
+    suspend fun clearDeleteTombstone(sheet: String, rowKey: String) = withContext(Dispatchers.IO) {
+        try { deletedDao.clear(sheet.uppercase(), rowKey) } catch (_: Exception) {}
     }
 
     // ═════════════════════════════════════════════════════════════════════════
