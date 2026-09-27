@@ -21,6 +21,10 @@ fun AdBannerView(
 ) {
     val context = LocalContext.current
 
+    // Admin user হলে ব্যানার সহ কোনো ad-ই দেখানো হবে না
+    val isAdFree = remember { AdManager.isAdFreeUser(context) }
+    if (isAdFree) return
+
     // MobileAds initialized কিনা — state হিসেবে track করো
     var initialized by remember { mutableStateOf(AdInitTracker.isReady) }
 
