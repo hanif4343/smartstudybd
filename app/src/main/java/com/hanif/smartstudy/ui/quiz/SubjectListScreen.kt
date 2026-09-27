@@ -201,17 +201,24 @@ private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<Subje
 // তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
 private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 
-// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — বিসিএস/প্রাথমিক/নিবন্ধন। নতুন ক্যাটাগরি লাগলে
-// এখানে শুধু একটা নাম যোগ করলেই চিপ-রো তে দেখা যাবে। ──
-private val EXAM_CATEGORIES = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন")
+// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — বিসিএস/প্রাথমিক/নিবন্ধন/১৬-২০ গ্রেড। নতুন ক্যাটাগরি
+// লাগলে এখানে শুধু একটা নাম যোগ করলেই চিপ-রো তে দেখা যাবে। ──
+private val EXAM_CATEGORIES = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "১৬-২০ গ্রেড")
 
+// "১৬-২০ গ্রেড" আলাদা কোনো নাম-প্যাটার্ন খোঁজে না — এটা catch-all: বিসিএস/প্রাথমিক/
+// নিবন্ধন এই তিনটার কোনোটাতেই যেসব subject মিলে না (যেমন ১৬-২০ গ্রেডের সরকারি চাকরির
+// প্রশ্ন, বা ভবিষ্যতে নতুন যেকোনো কাস্টম subject), সেগুলো এমনিতেই এখানে চলে আসবে —
+// আলাদা করে প্রতিটা subject নাম match করার দরকার নেই।
 private fun examCategoryMatches(subjectName: String, category: String): Boolean {
     val n = subjectName.trim().lowercase()
     return when (category) {
-        "বিসিএস"   -> n.contains("bcs") || subjectName.contains("বিসিএস")
-        "প্রাথমিক" -> n.contains("primary") || subjectName.contains("প্রাথমিক")
-        "নিবন্ধন"  -> n.contains("ntrca") || n.contains("registration") || subjectName.contains("নিবন্ধন")
-        else       -> true
+        "বিসিএস"      -> n.contains("bcs") || subjectName.contains("বিসিএস")
+        "প্রাথমিক"    -> n.contains("primary") || subjectName.contains("প্রাথমিক")
+        "নিবন্ধন"     -> n.contains("ntrca") || n.contains("registration") || subjectName.contains("নিবন্ধন")
+        "১৬-২০ গ্রেড" -> !examCategoryMatches(subjectName, "বিসিএস") &&
+                          !examCategoryMatches(subjectName, "প্রাথমিক") &&
+                          !examCategoryMatches(subjectName, "নিবন্ধন")
+        else          -> true
     }
 }
 
