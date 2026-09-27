@@ -1097,6 +1097,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 if (isOnline) {
                     when (val r = adminDeleteRow(sheet, rowKey)) {
                         is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                            repo.clearDeleteTombstone(sheet, rowKey)  // Firebase কনফার্ম — tombstone housekeeping
                             _state.update { it.copy(isDeletingQuestion = false,
                                 deleteSuccessMsg = "✅ প্রশ্ন কার্ডটি ডিলিট হয়েছে!", toast = "🗑️ প্রশ্ন ডিলিট হয়েছে",
                                 contentEditVersion = it.contentEditVersion + 1) }
@@ -1207,6 +1208,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     // লোকাল cache থেকে তো ডিলিটের সময়ই সরানো হয়ে গেছে,
                                     // এখানে শুধু Firebase-এ পাঠানো সফল হলো এটাই নিশ্চিত করা
+                                    repo.clearDeleteTombstone(sheet, questionId)  // housekeeping
                                     q.remove(action.id); successCount++
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
