@@ -117,6 +117,7 @@ fun TopicRef.toEntity() = TopicEntity(
     // rowStart/rowCount এখন String? (দেখো ReferenceModels.kt-এর কমেন্ট) — "" বা অন্য
     // অ-সংখ্যা মান এলে toIntOrNull() null দেয়, তখন ডিফল্ট 0 (মানে "এই topic-এ এখনো
     // index/প্রশ্ন নেই", crash না করে)
+    sortOrder     = sortOrder?.trim()?.toDoubleOrNull()?.toInt() ?: 0,
     rowStart      = rowStart?.toIntOrNull() ?: 0,
     rowCount      = rowCount?.toIntOrNull() ?: 0,      // legacy — fallback-only
     rowCountQuiz  = rowCountQuiz?.toIntOrNull()  ?: 0,
