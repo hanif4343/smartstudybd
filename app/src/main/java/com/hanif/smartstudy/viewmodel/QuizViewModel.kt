@@ -514,22 +514,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // topic row-টায় চলেনি, তাই per-sheet ডেটা সত্যিই অনুপস্থিত) — একটা sheet-এ
             // সত্যিকারের ০ (অন্য sheet-এ ডেটা থাকা সত্ত্বেও) কখনোই override হবে না। ──
             val allPerSheetZero = t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0
-            // doneQ = কত% সঠিক করেছে (accuracy) — কত% attempt করেছে, তা না
-            val correctCount = topicAccuracy[t.topicId]?.first ?: 0
+            // ── doneQ = কতগুলো প্রশ্নে উত্তর দেওয়া হয়েছে (attempted) — সঠিক-উত্তর নয়।
+            // আগে এখানে accuracy (correct) ধরা হতো; কিন্তু "টপিক ১০০% শেষ" মানে সব প্রশ্ন করা
+            // শেষ (ভুল হলেও) — সেটাই এখন প্রগ্রেস-বার আর "সম্পন্ন টপিক নিচে নামা"-র ভিত্তি।
+            // প্রশ্ন ডিলিট হয়ে গেলে attempted > total হতে পারে, তাই total-এ আটকানো। ──
+            val totalForTopic  = if (allPerSheetZero) t.rowCount else perSheetCount
+            val attemptedCount = (topicAccuracy[t.topicId]?.second ?: 0).coerceIn(0, totalForTopic.coerceAtLeast(0))
             SubTopicEntry(
                 name      = t.name,
                 subject   = subjectName,
-                totalQ    = if (allPerSheetZero) t.rowCount else perSheetCount,
-                doneQ     = correctCount,
+                totalQ    = totalForTopic,
+                doneQ     = attemptedCount,
                 subjectId = t.subjectId,
-                topicId   = t.topicId
+                topicId   = t.topicId,
+                sortOrder = t.sortOrder
             )
         }
         // ── FIX ("যেই টপিক ফাঁকা সেটা দেখানোর দরকার কী?"): totalQ=০ এমন টপিক
         // (বর্তমান sheet-এ সত্যিই কোনো প্রশ্ন নেই) এখন লিস্ট থেকেই বাদ — শুধু
         // সংখ্যাটা ঠিক দেখানো না, পুরো এন্ট্রিটাই আর দেখাবে না। ──
         .filter { it.totalQ > 0 }
-        .sortedBy { it.name }
+        .let { com.hanif.smartstudy.util.TopicOrdering.displayOrder(it) }   // ← একমাত্র সাজানোর জায়গা
     }
 
     /** FIX ("Topic Move/Rename করলে লিস্টে দেখা যায় না"): Admin edit-এর পর MainScreen
@@ -1890,6 +1895,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun rebuildSubTopics(content: AppContent, subject: String, mode: StudyMode) {
+        // ── FIX ("অনলাইনে একরকম, অফলাইনে আরেকরকম ক্রম"): আগে এই পথ (bulk content) নাম-ভিত্তিক
+        // admin-map দিয়ে সাজাত, আর Room-পথ (navigateToSubjectLazy) শুধু নামের A-Z — দুটো আলাদা
+        // ফল দিত। এখন Room-এর Topics পাওয়া গেলে হুবহু একই buildSubTopicEntries()/TopicOrdering
+        // চলে; শুধু Room-এ subject-ই না থাকলে (পুরনো/sync-না-হওয়া ডেটা) নিচের fallback। ──
+        run {
+            val sheetKey = when (mode) { StudyMode.QUIZ -> "Quiz"; StudyMode.QBANK -> "QBank"; StudyMode.STUDY -> "Study" }
+            val sid = repo.resolveSubjectId(sheetKey, subject)
+            if (!sid.isNullOrBlank()) {
+                val rows = repo.getRoomTopicsForSubject(sid)
+                if (rows.isNotEmpty()) {
+                    _state.update { it.copy(subTopics = buildSubTopicEntries(subject, mode, rows)) }
+                    return
+                }
+            }
+        }
         val user     = session.getCurrentUser()
         val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
         val filtered = content.forUser(user, adminTag)
@@ -1916,21 +1936,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 writtenCount = qs.count { it.isWritten() }
             )
         }
-            .sortedWith(compareBy({ order[it.name] ?: Int.MAX_VALUE }, { it.name }))
+            .let { com.hanif.smartstudy.util.TopicOrdering.displayOrder(it) }
 
         // Model Test আগে এখানে subtopic list-এর ভেতর virtual card হিসেবে বসতো — এখন Mock Test-এর
         // মতোই subject list-এর নিচে একটা গ্লোবাল বাটন থেকে (openModelTestPicker) অ্যাক্সেস হয়,
         // তাই এখানে আর ইনজেক্ট করা হয় না।
         _state.update { it.copy(subTopics = subTopics) }
 
-        // ── Phase 1 — Auto-serial (subTopic-level, একই যুক্তি উপরের rebuildSubjects-এর মতো) ──
-        if (user?.isAdmin() == true && subTopics.isNotEmpty() && subTopics.size > order.size) {
-            val guardKey = "${mode.name}|$encodedTag|$subject"
-            if (autoFixedSubTopicOrderKeys.add(guardKey)) {
-                Log.d("QuizVM", "Auto-serial: $guardKey — ${subTopics.size} subTopics, ${order.size} had explicit order")
-                persistSubTopicOrder(subject, subTopics.map { it.name })
-            }
-        }
+        // (নাম-ভিত্তিক Auto-serial সরানো হয়েছে — সিরিয়াল এখন topicId-ভিত্তিক, admin নিজে সেট করেন;
+        //  সিরিয়াল-না-দেওয়া টপিক নিজে থেকেই শেষে প্রাকৃতিক নামের ক্রমে যায়)
     }
 
     // ═════════════════════════════════════════════════════════
@@ -2589,7 +2603,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     /** Admin "ক্রম সাজান" বাটনে চাপলে ▲▼ controls toggle হয় */
     fun toggleReorderMode() {
         if (!_state.value.isAdmin) return
-        _state.update { it.copy(isReorderMode = !it.isReorderMode, orderSavedMsg = null) }
+        _state.update {
+            val turningOn = !it.isReorderMode
+            // টপিক-লিস্টে (depth 1): সাজানোর মোডে admin আসল সিরিয়াল-ক্রম দেখে (সম্পন্ন-নিচে-নামা
+            // বন্ধ), বেরোলে আবার সবার মতো স্বাভাবিক ভিউ — দেখো util/TopicOrdering
+            val list = if (it.navPath.depth() == 1 && it.subTopics.isNotEmpty()) {
+                if (turningOn) com.hanif.smartstudy.util.TopicOrdering.serialOrder(it.subTopics)
+                else           com.hanif.smartstudy.util.TopicOrdering.displayOrder(it.subTopics)
+            } else it.subTopics
+            it.copy(isReorderMode = turningOn, orderSavedMsg = null, subTopics = list)
+        }
     }
 
     /** Subject list এ একটা subject উপরে/নিচে সরানো — শুধু local state, সাথে সাথেই Firebase এ সংরক্ষণ হয় */
@@ -2603,16 +2626,35 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         persistSubjectOrder(list.map { it.name })
     }
 
-    /** SubTopic list এ একটা subTopic উপরে/নিচে সরানো — শুধু local state, সাথে সাথেই Firebase এ সংরক্ষণ হয় */
+    /** SubTopic list এ একটা টপিক উপরে/নিচে সরানো — UI-তে সাজানোর মোডে যে (সিরিয়াল) ক্রম দেখানো
+     *  হয় সেটার ওপরেই কাজ করে; সাথে সাথে Room-এ, তারপর Sheet-এ (topicId-ভিত্তিক) সেভ হয়। */
     fun moveSubTopic(fromIndex: Int, toIndex: Int) {
         if (!_state.value.isAdmin) return
         val subject = _state.value.navPath.subject ?: return
-        val list = _state.value.subTopics.toMutableList()
+        val list = com.hanif.smartstudy.util.TopicOrdering.serialOrder(_state.value.subTopics).toMutableList()
         if (fromIndex !in list.indices || toIndex !in list.indices) return
         val item = list.removeAt(fromIndex)
         list.add(toIndex, item)
-        _state.update { it.copy(subTopics = list) }
-        persistSubTopicOrder(subject, list.map { it.name })
+        applyTopicOrder(subject, list)
+    }
+
+    /**
+     * নতুন ক্রম (সিরিয়াল ১,২,৩…) স্টেটে বসিয়ে সেভ শুরু করে। সিরিয়াল topicId-ভিত্তিক — Rename/Move
+     * করলেও হারায় না। topicId ফাঁকা (Room-এ এখনো resolve হয়নি) এমন টপিক থাকলে সেভ করা যায় না।
+     */
+    private fun applyTopicOrder(subject: String, ordered: List<SubTopicEntry>) {
+        val real = ordered.filterNot { it.isModelTest }
+        if (real.any { it.topicId.isBlank() }) {
+            _state.update { it.copy(orderSavedMsg = "⚠️ কিছু টপিকের id এখনো লোড হয়নি — রিফ্রেশ করে আবার চেষ্টা করুন") }
+            return
+        }
+        var n = 0
+        val withSerial = ordered.map { if (it.isModelTest) it else it.copy(sortOrder = ++n) }
+        _state.update {
+            it.copy(subTopics = if (it.isReorderMode) withSerial
+                                else com.hanif.smartstudy.util.TopicOrdering.displayOrder(withSerial))
+        }
+        persistTopicOrder(real.mapIndexed { idx, e -> e.topicId to (idx + 1) }.toMap())
     }
 
     private var orderSaveJob: Job? = null
@@ -2688,44 +2730,42 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * persistSubjectOrder-এর মতোই প্যাটার্ন — লোকাল cache সবসময় সাথে সাথে patch হয়, আর
      * offline/fail হলে PendingQueue-তে রাখা হয় (SyncWorker ব্যাকগ্রাউন্ডে auto-retry করবে)।
      */
-    private fun persistSubTopicOrder(subject: String, orderedNames: List<String>) {
-        val mode = _state.value.mode
-        val user = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
-        val tagLabel = effectiveTag.ifBlank { "⚠️ কোনো tag সেট নেই (সব audience-এর ডিফল্ট)" }
+    /**
+     * টপিক-সিরিয়াল সেভ (topicId → ১,২,৩…): ১) Room-এ সাথে সাথে (UI ও অফলাইন একই ক্রম দেখায়),
+     * ২) Sheet-এর Topics.sort_order-এ (GAS setTopicOrder) — সেখান থেকেই CDN হয়ে সব ইউজারের
+     * কাছে যায়। অফলাইন বা ব্যর্থ হলে PendingQueue + SyncWorker পরে পাঠায়; লোকাল ক্রম
+     * "override" হিসেবে থেকে যায় (দেখো ContentRepository.saveTopicOrderLocal), তাই admin
+     * নিজের ক্রম কখনো হারায় না।
+     */
+    private fun persistTopicOrder(order: Map<String, Int>) {
         orderSaveJob?.cancel()
         orderSaveJob = viewModelScope.launch {
             _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
-            val order = orderedNames.mapIndexed { idx, name -> name to (idx + 1) }.toMap()
-            val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
-
-            // ── Step 1: লোকাল cache-এ সাথে সাথেই patch — ফলাফল যাই হোক ──
-            repo.patchSubTopicOrderAndPersist(mode.name, encodedTag, subject, order)
+            repo.saveTopicOrderLocal(order)
 
             val pendingQueue = com.hanif.smartstudy.data.local.PendingQueue(getApplication<Application>())
-
             if (!repo.isOnline()) {
-                pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
+                pendingQueue.enqueueAdminSetTopicOrder(order)
                 _state.update { it.copy(isSavingOrder = false,
-                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত (tag: $tagLabel) — net আসলে auto sync হবে") }
+                    orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
                 return@launch
             }
-
-            when (val r = com.hanif.smartstudy.data.remote.FirebaseDataService.adminSetSubTopicOrderBulk(mode.name, effectiveTag, subject, order)) {
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService.setTopicOrder(order)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত হয়েছে (tag: $tagLabel) — এই audience-এর সব ইউজার দেখতে পাবে") }
+                    pendingQueue.dropPendingTopicOrder(order.keys)   // পুরনো pending (থাকলে) আর পাঠানো চলবে না
+                    _state.update { it.copy(isSavingOrder = false,
+                        orderSavedMsg = "✅ ক্রম সংরক্ষিত — সব ইউজার পরের sync-এ এই ক্রম দেখবে") }
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                    pendingQueue.enqueueAdminReorderSubTopic(mode.name, effectiveTag, subject, order)
+                    pendingQueue.enqueueAdminSetTopicOrder(order)
                     com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
                     _state.update { it.copy(isSavingOrder = false,
-                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}, tag: $tagLabel) — queue-তে রাখা হয়েছে, নেট/quota ঠিক হলে auto sync হবে") }
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, পরে auto sync হবে") }
                 }
             }
         }
     }
+
 
     fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
 
@@ -2746,11 +2786,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun applySubTopicSerialOrder(orderedNames: List<String>) {
         if (!_state.value.isAdmin) return
         val subject = _state.value.navPath.subject ?: return
-        val byName = _state.value.subTopics.associateBy { it.name }
+        val current = _state.value.subTopics
+        val byName  = current.filterNot { it.isModelTest }.associateBy { it.name }
         val reordered = orderedNames.mapNotNull { byName[it] }
-        if (reordered.size != _state.value.subTopics.size) return
-        _state.update { it.copy(subTopics = reordered) }
-        persistSubTopicOrder(subject, orderedNames)
+        if (reordered.size != byName.size) return
+        applyTopicOrder(subject, current.filter { it.isModelTest } + reordered)
     }
 
     /** Pagination: নির্দিষ্ট page-এ যাও — Room থেকে instant load */
