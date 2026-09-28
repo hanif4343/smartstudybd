@@ -476,6 +476,8 @@ fun CoreScreen(
                 isLoading  = state.isLoading,
                 error      = state.error,
                 onSubject  = { viewModel.updateSubTopicScrollIndex(0); viewModel.selectQBankPost(it) },
+                // ── বিসিএস/প্রাথমিক/নিবন্ধন চিপে ট্যাপ করলে সরাসরি প্রশ্নপত্র (১৬-২০ গ্রেডে আগের মতো) ──
+                onSubjectDirect = { viewModel.updateSubTopicScrollIndex(0); viewModel.selectQBankPostDirect(it) },
                 onMockZone = { viewModel.openMockZone() },
                 onModelTestZone = { viewModel.openModelTestPicker() },
                 // ── App feature request ৩: পদবী লিস্টে Rename/Delete (Institution লিস্টের
