@@ -2032,6 +2032,57 @@ function doGet(e) {
     });
   }
 
+  // ── setTopicOrder — Admin-এর সেট করা টপিক-সিরিয়াল (Topics ট্যাবের "sort_order" কলামে)।
+  // ⭐ এই কলামটাই সব ইউজারের কাছে টপিকের ক্রমের একমাত্র সোর্স: getReferenceData / CDN-এর
+  // reference/topics.json এই কলামসহই যায়, অ্যাপ Room-এ রেখে অনলাইন-অফলাইন একই ক্রম দেখায়।
+  // order = "topic_id:সংখ্যা,topic_id:সংখ্যা,..." (topic_id-তে ':' বা ',' থাকে না)।
+  // কলাম না থাকলে হেডারের শেষে নিজে থেকে "sort_order" যোগ হয়। ঠিক ১টা batch-write —
+  // রো-বাই-রো setValue না, তাই দ্রুত + quota-বান্ধব। ──
+  if (action==="setTopicOrder") {
+    return withWriteLock(function(){
+    var stoRaw=(e.parameter.order||"").toString().trim();
+    if (!stoRaw) return json({status:"error",result:"error",message:"order প্রয়োজন"});
+    var stoMap={}, stoFirst="";
+    stoRaw.split(",").forEach(function(pair){
+      var ix=pair.lastIndexOf(":");
+      if (ix<=0) return;
+      var id=pair.substring(0,ix).trim(), n=parseInt(pair.substring(ix+1),10);
+      if (id && !isNaN(n)) { stoMap[id]=n; if(!stoFirst) stoFirst=id; }
+    });
+    if (!stoFirst) return json({status:"error",result:"error",message:"order পার্স করা যায়নি"});
+    var stoSs=SpreadsheetApp.getActiveSpreadsheet(), stoSh=stoSs.getSheetByName("Topics");
+    if (!stoSh) return json({status:"error",result:"error",message:"Sheet not found: Topics"});
+    var stoData=stoSh.getDataRange().getValues(), stoHdr=stoData[0];
+    var stoIdCol=-1, stoOrdCol=-1;
+    for (var sc=0;sc<stoHdr.length;sc++){
+      var scName=stoHdr[sc].toString().trim();
+      if (scName==="topic_id") stoIdCol=sc;
+      if (scName==="sort_order") stoOrdCol=sc;
+    }
+    if (stoIdCol<0) return json({status:"error",result:"error",message:"topic_id কলাম পাওয়া যায়নি"});
+    if (stoOrdCol<0) {
+      stoOrdCol=stoHdr.length;
+      stoSh.getRange(1,stoOrdCol+1).setValue("sort_order");
+    }
+    var stoVals=[], stoChanged=0;
+    for (var sr=1;sr<stoData.length;sr++){
+      var stoCur=(stoOrdCol<stoData[sr].length)?stoData[sr][stoOrdCol]:"";
+      var stoTid=(stoData[sr][stoIdCol]||"").toString().trim();
+      if (stoTid && stoMap.hasOwnProperty(stoTid)) {
+        if (String(stoCur)!==String(stoMap[stoTid])) stoChanged++;
+        stoVals.push([stoMap[stoTid]]);
+      } else {
+        stoVals.push([stoCur===undefined?"":stoCur]);
+      }
+    }
+    if (stoVals.length) stoSh.getRange(2,stoOrdCol+1,stoVals.length,1).setValues(stoVals);
+    // ── CDN: publish-স্ক্রিপ্ট dirty টপিক পেলেই reference/*.json নতুন করে commit করে —
+    // তাই যে কোনো ১টা টপিক dirty মার্ক করলেই নতুন সিরিয়াল সব ইউজারের কাছে পৌঁছায় ──
+    if (stoChanged>0) markTopicDirty(stoFirst);
+    return json({status:"success",result:"success",updated:stoChanged,total:Object.keys(stoMap).length});
+    });
+  }
+
   // ── addReferenceItem — Subjects/Topics/Tags/Posts/Institutions-এ
   // নতুন এন্ট্রি যোগ করে, id নিজে থেকে জেনারেট করে (parent-scoped prefix সহ)।
   // Manager UI থেকে "নতুন যোগ করো" বাটনে ব্যবহার হয়। ──
@@ -2793,6 +2844,10 @@ function doGet(e) {
     } else {
       // শুধু reparent — topic_id অপরিবর্তিত, শুধু subject_id বদলায়
       mtTopicsSh.getRange(mtFoundRow+1,mtTSubCol+1).setValue(mtNewSubjectId);
+      // ── সিরিয়াল রিসেট: আগের subject-এর নম্বর নতুন subject-এ অর্থহীন/ভুলভাবে মিশে যেত —
+      // এখন খালি হয়ে destination-এর সিরিয়াল-ছাড়া টপিকদের (নামের ক্রমে) মধ্যে বসে ──
+      var mtOrdCol=mtTopicsSh.getRange(1,1,1,mtTopicsSh.getLastColumn()).getValues()[0].map(function(h){return h.toString().trim();}).indexOf("sort_order");
+      if (mtOrdCol>=0) mtTopicsSh.getRange(mtFoundRow+1,mtOrdCol+1).setValue("");
     }
 
     // ── ডেটা-শিটে (Quiz/QBank/Study) এই টপিকের সব প্রশ্নের subject/sub_topic/
