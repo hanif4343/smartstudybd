@@ -35,6 +35,10 @@ data class TopicRef(
     // হলো (Gson সংখ্যা/স্ট্রিং দুটোই String-এ নিরাপদে পড়তে পারে), আসল Int কনভার্শন
     // EntityExtensions.kt-এর toEntity()-তে toIntOrNull() দিয়ে ডিফেন্সিভলি হয় —
     // এই একই প্যাটার্ন এই ফাইলেরই অন্য জায়গায় (QuestionEntity.subIndex) আগে থেকেই আছে।
+    // ── Admin-এর সেট করা টপিক-সিরিয়াল (Topics ট্যাবের "sort_order" কলাম, GAS setTopicOrder)।
+    // String? — অন্য কলামগুলোর মতোই: খালি সেল "" হিসেবে আসে, Int? হলে Gson crash করত।
+    // খালি/০/অ-সংখ্যা = "সিরিয়াল দেওয়া নেই" (নামের ক্রমে শেষে যায়) ──
+    @SerializedName("sort_order") val sortOrder : String? = null,
     @SerializedName("row_start")  val rowStart  : String? = null,
     @SerializedName("row_count")  val rowCount  : String? = null,
     // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz শুরু করলে ভিতরে ২৩টা — মূল কারণ):
