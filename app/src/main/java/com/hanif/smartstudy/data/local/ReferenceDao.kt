@@ -77,6 +77,15 @@ interface ReferenceDao {
     @Query("SELECT * FROM topics ORDER BY name")
     suspend fun getAllTopics(): List<TopicEntity>
 
+    // ── Admin টপিক-সিরিয়াল (দেখো util/TopicOrdering) ──
+    @Query("UPDATE topics SET sortOrder = :order WHERE topicId = :topicId")
+    suspend fun setTopicSortOrder(topicId: String, order: Int)
+
+    @Transaction
+    suspend fun setTopicSortOrders(order: Map<String, Int>) {
+        order.forEach { (id, n) -> setTopicSortOrder(id, n) }
+    }
+
     @Query("SELECT * FROM topics WHERE topicId = :topicId LIMIT 1")
     suspend fun getTopicById(topicId: String): TopicEntity?
 
@@ -136,7 +145,9 @@ interface ReferenceDao {
     suspend fun renameTopicById(topicId: String, newName: String)
 
     // ── Admin "Move Topic" (ফাইল ম্যানেজারের মতো, অন্য Subject-এ) ──
-    @Query("UPDATE topics SET subjectId = :newSubjectId WHERE topicId = :topicId")
+    // sortOrder = 0: নতুন subject-এ পুরনো subject-এর সিরিয়াল-নম্বর অর্থহীন — সিরিয়াল-ছাড়া
+    // হয়ে নামের ক্রমে বসে (GAS moveTopic-ও "sort_order" সেল খালি করে, তাই sync-এর পরও একই)
+    @Query("UPDATE topics SET subjectId = :newSubjectId, sortOrder = 0 WHERE topicId = :topicId")
     suspend fun reparentTopic(topicId: String, newSubjectId: String)
 
     // ── FIX ("সাবজেক্টে টপিক-সংখ্যা / টপিকে প্রশ্ন-সংখ্যা বেমিল দেখাচ্ছে", "move করার পর
