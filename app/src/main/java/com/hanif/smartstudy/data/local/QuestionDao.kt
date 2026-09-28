@@ -241,6 +241,13 @@ interface QuestionDao {
         newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
     )
 
+    // ── Admin Rename — প্রশ্নের denormalized subject/subTopic নাম (id অপরিবর্তিত) ──
+    @Query("UPDATE questions SET subject = :newName WHERE sheet = :sheet AND subjectId = :subjectId")
+    suspend fun renameSubjectInQuestions(sheet: String, subjectId: String, newName: String)
+
+    @Query("UPDATE questions SET subTopic = :newName WHERE sheet = :sheet AND topicId = :topicId")
+    suspend fun renameSubTopicInQuestions(sheet: String, topicId: String, newName: String)
+
     // ── "নতুন Topic যোগ করে Move" — অস্থায়ী লোকাল topicId (adminAddQuestion-এর
     // "-local..." id প্যাটার্নের মতোই) ব্যাকগ্রাউন্ডে GAS-এর দেওয়া আসল topicId দিয়ে
     // replace করতে হয়, নাহলে Room-এ প্রশ্নগুলো এতিম (orphan) topicId ধরে থেকে যাবে ──
