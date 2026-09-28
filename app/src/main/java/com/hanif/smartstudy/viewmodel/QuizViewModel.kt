@@ -2239,6 +2239,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** পদবী কার্ড ট্যাপ → প্রতিষ্ঠান-লিস্ট এড়িয়ে সরাসরি প্রশ্নপত্র, যদি পদবীর আন্ডারে ঠিক ১টা
+     *  প্রতিষ্ঠান থাকে। qbankSelectedPost ইচ্ছা করেই সেট করা হয় না — তাহলে প্রশ্নপত্র থেকে
+     *  back করলে প্রতিষ্ঠান-লিস্ট না দেখিয়ে সরাসরি পদবী-লিস্টে ফেরে (দেখো qbankFilterBack)।
+     *  ১টার বেশি প্রতিষ্ঠান থাকলে আগের মতো প্রতিষ্ঠান-লিস্ট দেখায়। */
+    fun selectQBankPostDirect(postName: String) {
+        val entry = _state.value.qbankPosts.find { it.name == postName }
+        val only  = entry?.subTopics?.singleOrNull()
+        if (entry == null || only == null) {
+            selectQBankPost(postName)
+            return
+        }
+        _state.update { it.copy(qbankInstitutionsUnderPost = entry.subTopics) }
+        selectQBankInstitutionUnderPost(only.name)
+    }
+
     /** পদ-মোডের depth1 → একটা প্রতিষ্ঠান বাছাই — appearance-linked questionId গুলো দিয়ে
      *  সরাসরি Room থেকে ফ্ল্যাট প্রশ্ন-লিস্ট। navigateToSubTopic() রিইউজ করা যায়নি কারণ
      *  এই ডেটার জন্য কোনো raw subject/sub_topic টেক্সট ম্যাচ নেই, শুধু Exam_Appearances-এর
