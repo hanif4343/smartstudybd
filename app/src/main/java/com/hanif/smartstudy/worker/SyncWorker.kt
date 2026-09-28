@@ -131,6 +131,7 @@ class SyncWorker(
             "admin_delete_question" -> syncAdminDelete(payload)
             "admin_reorder_subject" -> syncAdminReorderSubject(payload)
             "admin_reorder_subtopic" -> syncAdminReorderSubTopic(payload)
+            "admin_set_topic_order" -> syncAdminSetTopicOrder(payload)
             "admin_delete_subject_topic" -> syncAdminDeleteSubjectTopic(payload)
             "admin_move_questions" -> syncAdminMoveQuestions(payload)
             "admin_move_topic" -> syncAdminMoveTopic(payload)
@@ -506,6 +507,30 @@ class SyncWorker(
 
     // ── একই প্যাটার্নে SubTopic reorder — mode+tag+subject ভিত্তিক ──
     @Suppress("UNCHECKED_CAST")
+    // ── অফলাইনে/ব্যর্থ হওয়া টপিক-সিরিয়াল (topicId → n) — GAS "setTopicOrder" ──
+    private suspend fun syncAdminSetTopicOrder(payload: Map<*, *>): Boolean {
+        return try {
+            val orderRaw = payload["order"] as? Map<*, *> ?: return true   // ভাঙা payload — আটকে না রেখে বাদ
+            val order = orderRaw.entries.associate { (k, v) ->
+                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+            }
+            if (order.isEmpty()) return true
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService.setTopicOrder(order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.d(TAG, "syncAdminSetTopicOrder ${order.size} topics → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminSetTopicOrder failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminSetTopicOrder error: ${e.message}")
+            false
+        }
+    }
+
     private suspend fun syncAdminReorderSubTopic(payload: Map<*, *>): Boolean {
         return try {
             val mode     = payload["mode"]?.toString() ?: return false
