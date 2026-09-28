@@ -1552,6 +1552,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Admin: Rename Subject/SubTopic ────────────────────────
+    // ── FIX ("Rename করলে হচ্ছে না"): আগে শুধু Sheet-এর প্রশ্ন-রো বদলাত (পুরনো নাম-ভিত্তিক
+    // renameField, যেটা আবার সব Subject জুড়ে একই নামের Topic-ও বদলে দিতে পারত), কিন্তু
+    // SubjectListScreen/SubTopicListScreen পড়ে Room-এর Subjects/Topics reference-টেবিল
+    // থেকে — সেটা কখনো বদলাত না, তাই স্ক্রিনে পুরনো নামই থেকে যেত। এখন Delete/Move-এর মতোই
+    // প্রথমে Room-এ instant (UI সাথে সাথে বদলায়), তারপর GAS-এর id-ভিত্তিক
+    // renameReferenceItem (ঠিক ১টা রো, cascade নেই)। Sheet ব্যর্থ হলে লোকাল রিভার্ট হয়ে
+    // যায় + এরর দেখায় — নাহলে পরের reference-sync চুপচাপ পুরনো নাম ফিরিয়ে আনত। ──
     fun adminRenameSubjectOrTopic(
         sheets         : List<String>,
         oldSubject     : String,
@@ -1561,19 +1568,64 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         if (!_state.value.isAdmin) return
         if (sheets.isEmpty() || oldSubject.isBlank() || newName.isBlank()) return
+        val cleanNew = newName.trim()
         viewModelScope.launch {
             _state.update { it.copy(isRenaming = true, renameMsg = null) }
-            when (val r = adminRenameBoth(sheets, oldSubject, oldSubTopic, newName, renameSubTopic)) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    cache.clearCache()
-                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
-                    val what = if (renameSubTopic) "অধ্যায়" else "বিষয়"
-                    _state.update { it.copy(isRenaming = false,
-                        renameMsg = "✅ ${r.data}টি প্রশ্নে $what \"$newName\" এ পরিবর্তিত হয়েছে",
-                        contentEditVersion = it.contentEditVersion + 1) }
+            val what = if (renameSubTopic) "অধ্যায়" else "বিষয়"
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+
+            // ── ধাপ ১: লোকাল instant rename (Room reference + Room questions + bulk cache) ──
+            val done = mutableListOf<Pair<String, com.hanif.smartstudy.data.repository.ContentRepository.RenameTarget>>()
+            for (sheet in sheets) {
+                try {
+                    contentRepo.renameLocal(sheet, oldSubject, oldSubTopic, cleanNew, renameSubTopic)
+                        ?.let { done += sheet to it }
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminRename", "local rename failed for $sheet: ${e.message}")
                 }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error ->
-                    _state.update { it.copy(isRenaming = false, renameMsg = "❌ ${r.message}") }
+            }
+
+            if (done.isEmpty()) {
+                // reference-টেবিলে id রিজলভ হয়নি (পুরনো/sync-না-হওয়া ডেটা) — আগের আচরণে fallback
+                when (val r = adminRenameBoth(sheets, oldSubject, oldSubTopic, cleanNew, renameSubTopic)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        cache.clearCache()
+                        com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                        _state.update { it.copy(isRenaming = false,
+                            renameMsg = "✅ ${r.data}টি প্রশ্নে $what \"$cleanNew\" এ পরিবর্তিত হয়েছে",
+                            contentEditVersion = it.contentEditVersion + 1) }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                        _state.update { it.copy(isRenaming = false, renameMsg = "❌ ${r.message}") }
+                }
+                return@launch
+            }
+
+            // UI সাথে সাথে নতুন নাম দেখাক (MainScreen: contentEditVersion → adminRefreshContent)
+            _state.update { it.copy(contentEditVersion = it.contentEditVersion + 1) }
+
+            // ── ধাপ ২: Sheet-এর reference-রো (id দিয়ে, ঠিক ১টা রো) ──
+            var failMsg: String? = null
+            for ((sheet, target) in done) {
+                when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                        .renameReferenceItem(target.refType, target.id, cleanNew)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {}
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        failMsg = r.message
+                        try { contentRepo.applyRenameById(sheet, target.refType, target.id, target.oldName) } catch (_: Exception) {}
+                        try { contentRepo.renameContentAndPersist(sheet, if (renameSubTopic) oldSubject else cleanNew, cleanNew, target.oldName, renameSubTopic) } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            if (failMsg == null) {
+                _state.update { it.copy(isRenaming = false,
+                    renameMsg = "✅ $what \"$cleanNew\" এ পরিবর্তিত হয়েছে",
+                    toast = "✏️ Rename হয়েছে") }
+            } else {
+                _state.update { it.copy(isRenaming = false,
+                    renameMsg = "❌ Sheet-এ rename হয়নি ($failMsg) — আগের নামই থাকল",
+                    contentEditVersion = it.contentEditVersion + 1) }
             }
         }
     }
