@@ -61,6 +61,8 @@ import androidx.room.RoomDatabase
     // attempted % না) এক Room aggregate query দিয়েই তাৎক্ষণিক বের করা যায়, কোনো
     // প্রশ্ন ডাউনলোড না করেই। fallbackToDestructiveMigration() থাকায় migration
     // SQL লাগে না। দেখো ContentRepository.recordQuestionAnswer()/topicAccuracy().
+    // v19 → v20: topics টেবিলে sortOrder কলাম (Admin-সেট টপিক-সিরিয়াল) — এবার সত্যিকারের
+    // Migration আছে (MIGRATION_19_20), তাই ইউজারের প্রগ্রেস/ক্যাশ করা প্রশ্ন মুছে যায় না।
     // v18 → v19: DeletedQuestionEntity (tombstone) যোগ হলো — FIX ("delete korle
     // ... database theke remove hote time lagleo seta never show by anychance"):
     // আগে delete করার পর background content-sync (syncToRoom) সার্ভারের stale
@@ -69,7 +71,7 @@ import androidx.room.RoomDatabase
     // তালিকা চেক করে বাদ দেয় — server delete যত দেরিতেই কনফার্ম হোক না কেন,
     // প্রশ্নটা আর কখনো ফিরে আসে না। দেখো ContentRepository.markQuestionDeleted()/
     // syncToRoom()। fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -93,6 +95,12 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
+        private val MIGRATION_19_20 = object : androidx.room.migration.Migration(19, 20) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE topics ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -100,7 +108,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "smartstudy.db"
                 )
-                .fallbackToDestructiveMigration()   // version bump হলে DB পুনরায় তৈরি হবে
+                .addMigrations(MIGRATION_19_20)
+                .fallbackToDestructiveMigration()   // অন্য যেকোনো অমিল version-এর জন্য safety-net
                 .build()
                 .also { INSTANCE = it }
             }
