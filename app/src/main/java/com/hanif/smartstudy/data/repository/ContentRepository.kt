@@ -334,9 +334,46 @@ class ContentRepository(private val context: Context) {
             posts        = posts?.map { it.toEntity() } ?: refDao.getAllPosts(),
             institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
         )
+        reapplyTopicOrderOverrides()
         _lastRefSyncAt = now
         Log.d("Repo", "syncReferenceData (CDN): subjects=${subjects.size} topics=${topics.size}")
         true
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin টপিক-সিরিয়াল — লোকাল instant + "override" (CDN ধরার আগ পর্যন্ত)।
+    // Admin সেভ করার পর CDN-এর reference/topics.json নতুন হতে কিছু সময় (পরের publish) লাগে;
+    // তার আগে যদি syncReferenceData() চলে, Room-এর replaceAll() পুরনো সিরিয়াল ফিরিয়ে আনত
+    // — admin-এর নিজের ক্রম "লাফিয়ে" পুরনোতে ফিরত। তাই সেভ করা সিরিয়ালগুলো একটা ছোট
+    // SharedPreferences-এ (topicId → ক্রম, সময়) রাখা হয় এবং প্রতিটা reference-sync-এর
+    // পর আবার বসানো হয়; CDN-এর মান মিলে গেলে (বা ৪৮ ঘণ্টা পার হলে) override মুছে যায়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val topicOrderPrefs get() = context.getSharedPreferences("topic_order_overrides", Context.MODE_PRIVATE)
+
+    suspend fun saveTopicOrderLocal(order: Map<String, Int>) = withContext(Dispatchers.IO) {
+        refDao.setTopicSortOrders(order)
+        val now = System.currentTimeMillis()
+        val ed = topicOrderPrefs.edit()
+        order.forEach { (id, n) -> ed.putString(id, "$n|$now") }
+        ed.apply()
+    }
+
+    private suspend fun reapplyTopicOrderOverrides() {
+        val all = topicOrderPrefs.all
+        if (all.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val ed = topicOrderPrefs.edit()
+        val byId = refDao.getAllTopics().associateBy { it.topicId }
+        for ((id, raw) in all) {
+            val parts = (raw as? String)?.split("|")
+            val n  = parts?.getOrNull(0)?.toIntOrNull()
+            val at = parts?.getOrNull(1)?.toLongOrNull() ?: 0L
+            val cur = byId[id]
+            if (n == null || cur == null || now - at > 48L * 3600_000L) { ed.remove(id); continue }
+            if (cur.sortOrder == n) { ed.remove(id); continue }      // CDN ধরে ফেলেছে
+            refDao.setTopicSortOrder(id, n)                          // এখনো পুরনো — admin-এর মান বসাও
+        }
+        ed.apply()
     }
 
     // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
