@@ -1524,7 +1524,9 @@ fun SubTopicListScreen(
     // দেখানো হয় — নাহলে খালি হয়ে যাওয়া টপিক আর সাজানো/দেখা যাবে না। Rename/Delete/
     // Move ডায়ালগও ইচ্ছাকৃতভাবে নিচে পুরো subTopics লিস্ট ব্যবহার করে, যাতে খালি
     // টপিক অ্যাডমিন ঠিক করতে/মুছতে পারে। ──
-    val visibleSubTopics = if (isAdmin && isReorderMode) subTopics
+    // ── সাজানোর মোডে সিরিয়াল-ক্রম (সম্পন্ন-নিচে-নামা বন্ধ) — ViewModel.moveSubTopic() ঠিক এই
+    // একই TopicOrdering.serialOrder() ব্যবহার করে, তাই এখানকার index আর ওখানকার index সবসময় মেলে ──
+    val visibleSubTopics = if (isAdmin && isReorderMode) com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics)
                             else subTopics.filter { it.hasQuestions() }
 
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
@@ -1611,6 +1613,7 @@ fun SubTopicListScreen(
                     itemsIndexed(visibleSubTopics) { idx, st ->
                         QBankTopicCard(
                             st = st,
+                            serialNo = idx + 1,
                             onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
                             reorderEnabled = reorderEnabled && !st.isModelTest,
                             isFirst = idx == 0,
@@ -1626,6 +1629,7 @@ fun SubTopicListScreen(
             itemsIndexed(visibleSubTopics) { idx, st ->
                 SubTopicCard(
                     st = st,
+                    serialNo = idx + 1,
                     onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
                     reorderEnabled = reorderEnabled && !st.isModelTest,
                     isFirst = idx == 0,
@@ -1669,7 +1673,8 @@ fun SubTopicListScreen(
     if (isAdmin && showSerialManager) {
         SerialManagerDialog(
             title     = "$subject — অধ্যায়ের ক্রম",
-            entries   = subTopics.filterNot { it.isModelTest }.mapIndexed { idx, st -> st.name to (idx + 1) },
+            entries   = com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics.filterNot { it.isModelTest })
+                            .mapIndexed { idx, st -> st.name to (idx + 1) },
             onDismiss = { showSerialManager = false },
             onSave    = { orderedNames -> onSaveSerialOrder(orderedNames) }
         )
@@ -1680,6 +1685,7 @@ fun SubTopicListScreen(
 private fun SubTopicCard(
     st : SubTopicEntry,
     onClick : () -> Unit,
+    serialNo : Int = 0,          // সাজানোর মোডে "১. নাম" — admin আসল সিরিয়াল দেখতে পায়
     reorderEnabled : Boolean = false,
     isFirst : Boolean = false,
     isLast  : Boolean = false,
@@ -1705,7 +1711,7 @@ private fun SubTopicCard(
             ) {
                 Text("🏆", fontSize = 20.sp)
                 Column(Modifier.weight(1f)) {
-                    Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                    Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF059669), fontFamily = NotoSansBengali)
                     Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
                         color = mutedColor, fontFamily = NotoSansBengali)
@@ -1731,7 +1737,7 @@ private fun SubTopicCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = textColor, fontFamily = NotoSansBengali)
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
@@ -1767,6 +1773,7 @@ private fun SubTopicCard(
 private fun QBankTopicCard(
     st : SubTopicEntry,
     onClick : () -> Unit,
+    serialNo : Int = 0,          // সাজানোর মোডে "১. নাম" — admin আসল সিরিয়াল দেখতে পায়
     reorderEnabled : Boolean = false,
     isFirst : Boolean = false,
     isLast  : Boolean = false,
@@ -1787,7 +1794,7 @@ private fun QBankTopicCard(
         ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("🏆", fontSize = 20.sp)
-                Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF059669), fontFamily = NotoSansBengali, maxLines = 2)
                 Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
                     color = mutedColor, fontFamily = NotoSansBengali)
@@ -1834,7 +1841,7 @@ private fun QBankTopicCard(
                         modifier = Modifier.size(11.dp))
                 }
             }
-            Text(st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
