@@ -127,6 +127,14 @@ interface ReferenceDao {
         deleteTopicById(topicId)
     }
 
+    // ── Admin Rename (Subject/Topic) — UI (SubjectListScreen/SubTopicListScreen) এই দুই
+    // টেবিল থেকেই পড়ে, তাই rename-এর পর এখানকার name কলামই সাথে সাথে বদলাতে হয় ──
+    @Query("UPDATE subjects SET name = :newName WHERE subjectId = :subjectId")
+    suspend fun renameSubjectById(subjectId: String, newName: String)
+
+    @Query("UPDATE topics SET name = :newName WHERE topicId = :topicId")
+    suspend fun renameTopicById(topicId: String, newName: String)
+
     // ── Admin "Move Topic" (ফাইল ম্যানেজারের মতো, অন্য Subject-এ) ──
     @Query("UPDATE topics SET subjectId = :newSubjectId WHERE topicId = :topicId")
     suspend fun reparentTopic(topicId: String, newSubjectId: String)
