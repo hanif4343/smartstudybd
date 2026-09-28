@@ -205,6 +205,14 @@ private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 // লাগলে এখানে শুধু একটা নাম যোগ করলেই চিপ-রো তে দেখা যাবে। ──
 private val EXAM_CATEGORIES = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "১৬-২০ গ্রেড")
 
+// ── এই ক্যাটাগরিতে কার্ড ট্যাপ করলে প্রতিষ্ঠান-লিস্ট এড়িয়ে সরাসরি প্রশ্নপত্রে ঢোকে না
+// (আগের মতোই প্রতিষ্ঠান-লিস্ট দেখায়) ──
+private const val GRADE_CATEGORY = "১৬-২০ গ্রেড"
+
+// ── সিলেক্টেড চিপ ফাইল-লেভেলে রাখা হয়েছে — প্রশ্নপত্র থেকে back করলে স্ক্রিন নতুন করে
+// compose হয়, তখন remember রিসেট হয়ে সবসময় "বিসিএস" চিপে ফিরে যেত ──
+private var rememberedExamCategory by mutableStateOf(EXAM_CATEGORIES.first())
+
 // "১৬-২০ গ্রেড" আলাদা কোনো নাম-প্যাটার্ন খোঁজে না — এটা catch-all: বিসিএস/প্রাথমিক/
 // নিবন্ধন এই তিনটার কোনোটাতেই যেসব subject মিলে না (যেমন ১৬-২০ গ্রেডের সরকারি চাকরির
 // প্রশ্ন, বা ভবিষ্যতে নতুন যেকোনো কাস্টম subject), সেগুলো এমনিতেই এখানে চলে আসবে —
@@ -231,8 +239,8 @@ private fun ExamCategoryChipsRow(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 18.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(9.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         EXAM_CATEGORIES.forEach { cat ->
             val isActive = cat == selected
@@ -246,7 +254,7 @@ private fun ExamCategoryChipsRow(
                         shape = RoundedCornerShape(22.dp)
                     )
                     .clickable { onSelect(cat) }
-                    .padding(horizontal = 19.dp, vertical = 11.dp)
+                    .padding(horizontal = 13.dp, vertical = 11.dp)
             ) {
                 Text(
                     text = cat,
@@ -271,6 +279,9 @@ fun SubjectListScreen(
     isLoading  : Boolean,
     error      : String?   = null,
     onSubject  : (String) -> Unit,
+    // ── QBank পদবী-লিস্টে: বিসিএস/প্রাথমিক/নিবন্ধন চিপে কার্ড ট্যাপ করলে এটা কল হয়
+    // (সরাসরি প্রশ্নপত্র)। null হলে বা "১৬-২০ গ্রেড" চিপে থাকলে সাধারণ onSubject ──
+    onSubjectDirect : ((String) -> Unit)? = null,
     onMockZone : () -> Unit,
     onModelTestZone : () -> Unit = {},
     // ── Admin: ইনলাইন ক্রম সাজানো ──
@@ -351,7 +362,7 @@ fun SubjectListScreen(
     // বা বাংলা নাম থাকলে মিলবে)। নতুন কোনো Subject যোগ হলে (যেমন ভবিষ্যতে "প্রাথমিক
     // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
     // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
-    var selectedExamCategory by remember { mutableStateOf(EXAM_CATEGORIES.first()) }
+    val selectedExamCategory = rememberedExamCategory
     val displaySubjects = run {
         var list = subjects
         if (showQBankFilterBar) {
@@ -428,7 +439,7 @@ fun SubjectListScreen(
             item {
                 ExamCategoryChipsRow(
                     selected = selectedExamCategory,
-                    onSelect = { selectedExamCategory = it }
+                    onSelect = { rememberedExamCategory = it }
                 )
             }
         }
@@ -511,7 +522,11 @@ fun SubjectListScreen(
                     itemsIndexed(displaySubjects) { idx, subject ->
                         QBankSubjectCard(
                             subject = subject,
-                            onClick = { onSubject(subject.name) },
+                            onClick = {
+                                val direct = onSubjectDirect
+                                if (direct != null && selectedExamCategory != GRADE_CATEGORY) direct(subject.name)
+                                else onSubject(subject.name)
+                            },
                             reorderEnabled = isAdmin && isReorderMode,
                             isFirst = idx == 0,
                             isLast  = idx == displaySubjects.lastIndex,
