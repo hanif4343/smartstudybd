@@ -385,11 +385,93 @@ class ContentRepository(private val context: Context) {
 
     // ── Admin "Move" ডায়ালগে Subject/Topic নাম বেছে/টাইপ করলে, ব্যাকগ্রাউন্ড sync কলের
     // আগে আসল id বের করতে লাগে (GAS action-গুলো id-ভিত্তিক, নাম-ভিত্তিক না) ──
+    // ── FIX ("Move/Rename কাজ করছে না" — "রিজলভ করা যায়নি"): আগে শুধু হুবহু নাম-মিল
+    // (SQL =) ছিল — নামে বাড়তি space/invisible char (zero-width, nbsp) থাকলে কখনো মিলত
+    // না। এখন হুবহু মিল না পেলে normalize (trim + invisible-char বাদ + lowercase) করে খোঁজে ──
+    private fun normName(s: String?): String =
+        (s ?: "").replace(Regex("[\\u200B-\\u200D\\uFEFF\\u00A0]"), " ")
+            .trim().replace(Regex("\\s+"), " ").lowercase()
+
+    private suspend fun findSubjectEntity(sheet: String, subjectName: String) =
+        refDao.getSubjectByName(sheet, subjectName)
+            ?: refDao.getSubjectsBySheet(sheet).firstOrNull { normName(it.name) == normName(subjectName) }
+
+    private suspend fun findTopicEntity(subjectId: String, topicName: String) =
+        refDao.getTopicByName(subjectId, topicName)
+            ?: refDao.getTopicsForSubject(subjectId).firstOrNull { normName(it.name) == normName(topicName) }
+
     suspend fun resolveSubjectId(sheet: String, subjectName: String): String? =
-        refDao.getSubjectByName(sheet, subjectName)?.subjectId
+        findSubjectEntity(sheet, subjectName)?.subjectId
 
     suspend fun resolveTopicId(subjectId: String, topicName: String): String? =
-        refDao.getTopicByName(subjectId, topicName)?.topicId
+        findTopicEntity(subjectId, topicName)?.topicId
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin Rename (Subject/Topic) — instant-local। আগে rename শুধু Sheet-এর প্রশ্ন-রো বদলাত
+    // (পুরনো নাম-ভিত্তিক renameField), কিন্তু UI পড়ে Room-এর Subjects/Topics reference
+    // টেবিল থেকে — সেটা কখনো বদলাত না, তাই rename "হচ্ছে না" মনে হতো।
+    // ═════════════════════════════════════════════════════════════════════════
+    data class RenameTarget(val refType: String, val id: String, val oldName: String)
+
+    /** Room reference-টেবিল + Room questions-এর denormalized নাম + bulk cache — সব একসাথে
+     *  বদলায়। id রিজলভ না হলে (পুরনো/sync-না-হওয়া ডেটা) null রিটার্ন করে। */
+    suspend fun renameLocal(
+        sheet: String, subject: String, subTopic: String, newName: String, renameSubTopic: Boolean
+    ): RenameTarget? = withContext(Dispatchers.IO) {
+        val target: RenameTarget = if (renameSubTopic) {
+            val subj  = findSubjectEntity(sheet, subject) ?: return@withContext null
+            val topic = findTopicEntity(subj.subjectId, subTopic) ?: return@withContext null
+            RenameTarget("topics", topic.topicId, topic.name)
+        } else {
+            val subj = findSubjectEntity(sheet, subject) ?: return@withContext null
+            RenameTarget("subjects", subj.subjectId, subj.name)
+        }
+        applyRenameById(sheet, target.refType, target.id, newName)
+        renameContentAndPersist(sheet, subject, subTopic, newName, renameSubTopic)
+        target
+    }
+
+    /** id দিয়ে সরাসরি Room-এর নাম সেট করে (rename + Sheet ব্যর্থ হলে revert — দুটোতেই ব্যবহৃত) */
+    suspend fun applyRenameById(sheet: String, refType: String, id: String, name: String) =
+        withContext(Dispatchers.IO) {
+            val roomSheet = sheet.uppercase()
+            if (refType == "topics") {
+                refDao.renameTopicById(id, name)
+                dao.renameSubTopicInQuestions(roomSheet, id, name)
+            } else {
+                refDao.renameSubjectById(id, name)
+                dao.renameSubjectInQuestions(roomSheet, id, name)
+            }
+        }
+
+    /** bulk cache-এও (নাম-ভিত্তিক legacy content) নতুন নাম বসায় — moveContentByTopicAndPersist-এর
+     *  একই প্যাটার্ন। Topic rename হলে subject মিলিয়ে scope করা হয় (অন্য subject-এর একই নামের
+     *  Topic ছোঁয়া হয় না)। */
+    suspend fun renameContentAndPersist(
+        sheet: String, oldSubject: String, oldSubTopic: String, newName: String, renameSubTopic: Boolean
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val oSubjN = normName(oldSubject); val oSubTN = normName(oldSubTopic)
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, subjOf: (T) -> String?, subTOf: (T) -> String?): T {
+            if (normName(subjOf(item)) != oSubjN) return item
+            if (renameSubTopic && normName(subTOf(item)) != oSubTN) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty(if (renameSubTopic) "sub_topic" else "subject", newName)
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it, { s -> s.subject }, { s -> s.subTopic }) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            else    -> base
+        }
+        _memCache = patched
+        cache.saveContent(patched)
+    }
 
     /**
      * "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: CDN-এর বাল্ক `exam-appearances.json`
