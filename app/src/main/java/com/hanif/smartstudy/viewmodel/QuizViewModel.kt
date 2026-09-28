@@ -475,52 +475,80 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // থাকে, দেখো ContentRepository.recordQuestionAnswer())। এক Room
             // aggregate query দিয়েই সব টপিকের accuracy % (সঠিক/মোট, attempted %
             // না) এক লাফে বের হয়ে যায় — প্রশ্ন ডাউনলোডের দরকারই নেই। ──
-            val topicAccuracy = repo.getTopicAccuracy(mode.name, topicRows.map { it.topicId })
-            val subTopics = topicRows.map { t ->
-                // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
-                // (generic legacy কলাম) সবসময় Study sheet-এর কাউন্ট বহন করতো, মোড যাই হোক
-                // না কেন। এখন বর্তমান StudyMode অনুযায়ী সঠিক per-sheet কলাম বেছে নেওয়া হচ্ছে
-                // — নতুন কলাম এখনো ০ থাকলে (rebuildIndex পুরনো ভার্সনে চলেছিল/এখনো চলেনি,
-                // per-sheet কলাম ফাঁকা) legacy rowCount-এ fallback করে, যাতে rebuildIndex
-                // নতুন করে না চালানো পর্যন্ত পুরোপুরি ০ না দেখায়। ──
-                val perSheetCount = when (mode) {
-                    StudyMode.QUIZ  -> t.rowCountQuiz
-                    StudyMode.QBANK -> t.rowCountQbank
-                    StudyMode.STUDY -> t.rowCountStudy
-                }
-                // ── FIX ("সাবজেক্ট/টপিক দেখাচ্ছে যেখানে আসলে কোনো প্রশ্নই নেই" — যেমন
-                // "English Grammar > Article" Quiz-মোডে "211 প্রশ্ন" দেখাতো, ভিতরে ঢুকলে
-                // "কোনো প্রশ্ন পাওয়া যায়নি"): এই টপিকের rowCountQuiz আসলে সত্যিই ০ (এই
-                // টপিকে Quiz sheet-এ সত্যিই কোনো প্রশ্ন নেই — শুধু QBank-এ আছে), কিন্তু
-                // ঠিক নিচের ফলব্যাক-শর্তটাই (perSheetCount > 0 হলে সেটা, নাহলে legacy
-                // t.rowCount) একটা GENUINE শূন্যকে "না-জানা" ধরে নিয়ে t.rowCount
-                // (legacy কলাম, যেটা rebuildIndex-এর পুরনো ভার্সনে Quiz→QBank→Study
-                // ক্রমে সবার শেষে যেই sheet প্রসেস হতো তারই কাউন্ট বহন করত) দিয়ে ওভাররাইট
-                // করে দিত — ফলে আসল ০-কে ভুল করে QBank/Study-এর বড় সংখ্যা (211, 198…)
-                // বানিয়ে দেখাতো। legacy fallback শুধু তখনই ব্যবহার করা ঠিক, যখন তিনটা
-                // per-sheet কলামই একসাথে ০ (মানে rebuildIndex-এর নতুন ভার্সনই এখনো এই
-                // topic row-টায় চলেনি, তাই per-sheet ডেটা সত্যিই অনুপস্থিত) — একটা sheet-এ
-                // সত্যিকারের ০ (অন্য sheet-এ ডেটা থাকা সত্ত্বেও) কখনোই override হবে না। ──
-                val allPerSheetZero = t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0
-                // doneQ = কত% সঠিক করেছে (accuracy) — কত% attempt করেছে, তা না
-                val correctCount = topicAccuracy[t.topicId]?.first ?: 0
-                SubTopicEntry(
-                    name      = t.name,
-                    subject   = subjectName,
-                    totalQ    = if (allPerSheetZero) t.rowCount else perSheetCount,
-                    doneQ     = correctCount,
-                    subjectId = t.subjectId,
-                    topicId   = t.topicId
-                )
-            }
-            // ── FIX ("যেই টপিক ফাঁকা সেটা দেখানোর দরকার কী?"): totalQ=০ এমন টপিক
-            // (বর্তমান sheet-এ সত্যিই কোনো প্রশ্ন নেই) এখন লিস্ট থেকেই বাদ — শুধু
-            // সংখ্যাটা ঠিক দেখানো না, পুরো এন্ট্রিটাই আর দেখাবে না। ──
-            .filter { it.totalQ > 0 }
-            .sortedBy { it.name }
+            val subTopics = buildSubTopicEntries(subjectName, mode, topicRows)
             Log.d("QuizVM", "navigateToSubjectLazy: $subjectName ($subjectId) topics=${subTopics.size}")
             _state.update { it.copy(subTopics = subTopics, isLoading = false) }
         }
+    }
+
+    /** Room-এর Topics সারি → SubTopicEntry লিস্ট (per-sheet কাউন্ট, accuracy, খালি টপিক বাদ)।
+     *  navigateToSubjectLazy() আর reloadSubTopicsFromRoom() দুটোই এটা ব্যবহার করে —
+     *  যাতে ফরোয়ার্ড-নেভিগেশন আর Admin rename/move-এর পর রিফ্রেশ হুবহু একই লজিকে চলে। */
+    private suspend fun buildSubTopicEntries(
+        subjectName: String, mode: StudyMode, topicRows: List<com.hanif.smartstudy.data.local.TopicEntity>
+    ): List<SubTopicEntry> {
+        val topicAccuracy = repo.getTopicAccuracy(mode.name, topicRows.map { it.topicId })
+        return topicRows.map { t ->
+            // ── FIX ("Article: 74 প্রশ্ন" দেখাতো, Quiz-এ ঢুকলে ভিতরে ২৩টা): t.rowCount
+            // (generic legacy কলাম) সবসময় Study sheet-এর কাউন্ট বহন করতো, মোড যাই হোক
+            // না কেন। এখন বর্তমান StudyMode অনুযায়ী সঠিক per-sheet কলাম বেছে নেওয়া হচ্ছে
+            // — নতুন কলাম এখনো ০ থাকলে (rebuildIndex পুরনো ভার্সনে চলেছিল/এখনো চলেনি,
+            // per-sheet কলাম ফাঁকা) legacy rowCount-এ fallback করে, যাতে rebuildIndex
+            // নতুন করে না চালানো পর্যন্ত পুরোপুরি ০ না দেখায়। ──
+            val perSheetCount = when (mode) {
+                StudyMode.QUIZ  -> t.rowCountQuiz
+                StudyMode.QBANK -> t.rowCountQbank
+                StudyMode.STUDY -> t.rowCountStudy
+            }
+            // ── FIX ("সাবজেক্ট/টপিক দেখাচ্ছে যেখানে আসলে কোনো প্রশ্নই নেই" — যেমন
+            // "English Grammar > Article" Quiz-মোডে "211 প্রশ্ন" দেখাতো, ভিতরে ঢুকলে
+            // "কোনো প্রশ্ন পাওয়া যায়নি"): এই টপিকের rowCountQuiz আসলে সত্যিই ০ (এই
+            // টপিকে Quiz sheet-এ সত্যিই কোনো প্রশ্ন নেই — শুধু QBank-এ আছে), কিন্তু
+            // ঠিক নিচের ফলব্যাক-শর্তটাই (perSheetCount > 0 হলে সেটা, নাহলে legacy
+            // t.rowCount) একটা GENUINE শূন্যকে "না-জানা" ধরে নিয়ে t.rowCount
+            // (legacy কলাম, যেটা rebuildIndex-এর পুরনো ভার্সনে Quiz→QBank→Study
+            // ক্রমে সবার শেষে যেই sheet প্রসেস হতো তারই কাউন্ট বহন করত) দিয়ে ওভাররাইট
+            // করে দিত — ফলে আসল ০-কে ভুল করে QBank/Study-এর বড় সংখ্যা (211, 198…)
+            // বানিয়ে দেখাতো। legacy fallback শুধু তখনই ব্যবহার করা ঠিক, যখন তিনটা
+            // per-sheet কলামই একসাথে ০ (মানে rebuildIndex-এর নতুন ভার্সনই এখনো এই
+            // topic row-টায় চলেনি, তাই per-sheet ডেটা সত্যিই অনুপস্থিত) — একটা sheet-এ
+            // সত্যিকারের ০ (অন্য sheet-এ ডেটা থাকা সত্ত্বেও) কখনোই override হবে না। ──
+            val allPerSheetZero = t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0
+            // doneQ = কত% সঠিক করেছে (accuracy) — কত% attempt করেছে, তা না
+            val correctCount = topicAccuracy[t.topicId]?.first ?: 0
+            SubTopicEntry(
+                name      = t.name,
+                subject   = subjectName,
+                totalQ    = if (allPerSheetZero) t.rowCount else perSheetCount,
+                doneQ     = correctCount,
+                subjectId = t.subjectId,
+                topicId   = t.topicId
+            )
+        }
+        // ── FIX ("যেই টপিক ফাঁকা সেটা দেখানোর দরকার কী?"): totalQ=০ এমন টপিক
+        // (বর্তমান sheet-এ সত্যিই কোনো প্রশ্ন নেই) এখন লিস্ট থেকেই বাদ — শুধু
+        // সংখ্যাটা ঠিক দেখানো না, পুরো এন্ট্রিটাই আর দেখাবে না। ──
+        .filter { it.totalQ > 0 }
+        .sortedBy { it.name }
+    }
+
+    /** FIX ("Topic Move/Rename করলে লিস্টে দেখা যায় না"): Admin edit-এর পর MainScreen
+     *  adminRefreshContent() ডাকে — সেটা আগে টপিক-লিস্টে পুরনো bulk-content (rebuildSubTopics)
+     *  দিয়ে লিস্ট আবার বানাত, অথচ স্ক্রিনের আসল সোর্স Room-এর Topics টেবিল (দেখো
+     *  navigateToSubjectLazy)। এখন একই Room সোর্স থেকে নিঃশব্দে (spinner ছাড়া) রিলোড হয়। */
+    private suspend fun reloadSubTopicsFromRoom(subjectName: String) {
+        val mode  = _state.value.mode
+        val sheet = when (mode) {
+            StudyMode.QUIZ  -> "Quiz"
+            StudyMode.QBANK -> "QBank"
+            StudyMode.STUDY -> "Study"
+        }
+        val subjectId = _state.value.subjects.find { it.name == subjectName }?.subjectId
+            ?.takeIf { it.isNotBlank() }
+            ?: repo.resolveSubjectId(sheet, subjectName)
+        if (subjectId.isNullOrBlank()) return
+        val entries = buildSubTopicEntries(subjectName, mode, repo.getRoomTopicsForSubject(subjectId))
+        _state.update { it.copy(subTopics = entries, isLoading = false) }
     }
 
     /**
@@ -919,6 +947,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 // topicId পাওয়া না গেলে (পুরনো/legacy টপিক) নিচের পুরনো path-এ fallback
+            }
+
+            // ── FIX ("Topic Move/Rename করলে দেখা যাচ্ছে না"): Subject/Topic লিস্ট স্ক্রিনগুলো
+            // (depth 0/1) Room-এর reference-টেবিল থেকে আসে (দেখো rebuildSubjectsLazy/
+            // navigateToSubjectLazy — navigateBack()-এও একই ফিক্স আগে হয়েছিল), কিন্তু এখানে
+            // পুরনো bulk-content দিয়ে লিস্ট আবার বানানো হতো, যেটা Room-এর সাম্প্রতিক
+            // move/rename/delete প্রতিফলিত করে না (আর subjectId/topicId-ও হারিয়ে ফেলত)।
+            // তাই এই দুই লেভেলে সরাসরি Room থেকেই রিলোড — নেটওয়ার্ক/bulk fetch ছাড়াই। ──
+            if (path.subTopic == null) {
+                if (path.subject != null) reloadSubTopicsFromRoom(path.subject)
+                else rebuildCurrentTopLevelList()
+                return@launch
             }
 
             // ── আগে fetch ব্যর্থ হলে খালি AppContent() দিয়ে বিদ্যমান লিস্ট
