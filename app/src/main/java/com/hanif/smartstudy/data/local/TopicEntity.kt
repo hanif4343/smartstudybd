@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 
@@ -35,5 +36,9 @@ data class TopicEntity(
     val rowCount        : Int = 0,   // legacy/generic — fallback-only, নতুন কোডে ব্যবহার করা উচিত না
     val rowCountQuiz    : Int = 0,
     val rowCountQbank   : Int = 0,
-    val rowCountStudy   : Int = 0
+    val rowCountStudy   : Int = 0,
+    // ── Admin-সেট টপিক-সিরিয়াল (১,২,৩…)। ০ বা কম = সিরিয়াল দেওয়া নেই। subject+sheet
+    // ভেদে topicId আলাদা বলে আলাদা mode/tag-ভিত্তিক map লাগে না — দেখো util/TopicOrdering ──
+    @ColumnInfo(defaultValue = "0")
+    val sortOrder       : Int = 0
 )
