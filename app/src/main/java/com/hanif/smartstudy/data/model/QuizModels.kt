@@ -241,9 +241,15 @@ data class SubTopicEntry(
     // appear করেছে তাদের সরাসরি fbKey লিস্ট — ট্যাপ করলে repo.getRoomQuestionsByIds() দিয়ে
     // সরাসরি এই ID গুলো টেনে দেখানো হয়, কোনো subject/subTopic টেক্সট ম্যাচিং লাগে না
     // (দেখো QuizViewModel.selectQBankInstitutionUnderPost)
-    val linkedQuestionIds : List<String> = emptyList()
+    val linkedQuestionIds : List<String> = emptyList(),
+    // ── Admin-সেট টপিক-সিরিয়াল (Topics.sortOrder; ≤০ = দেওয়া নেই) — দেখো util/TopicOrdering ──
+    val sortOrder    : Int = 0
 ) {
-    val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
+    val progressPct: Int get() = if (totalQ > 0) ((doneQ * 100) / totalQ).coerceAtMost(100) else 0
+
+    /** ১০০% সম্পন্ন = টপিকের সব প্রশ্নেই উত্তর দেওয়া হয়েছে (doneQ = উত্তর-দেওয়া-প্রশ্ন-সংখ্যা)।
+     *  সম্পন্ন টপিক লিস্টের একদম নিচে যায় (TopicOrdering.displayOrder) */
+    val isComplete: Boolean get() = totalQ > 0 && doneQ >= totalQ
 
     // "mcq" | "written" | "mixed" — কার্ডে ব্যাজ/আইকন দেখাতে ব্যবহার হয়
     val questionTypeLabel: String get() = when {
