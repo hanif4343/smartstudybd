@@ -227,6 +227,30 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin: টপিক-সিরিয়াল (topicId → ১,২,৩…) — অফলাইন/ব্যর্থ হলে queue। একই subject-এর
+    // আগের pending থাকলে (একই topicId-র সেট) বাদ — শুধু সবশেষ ক্রমটাই sync হবে ──
+    /** একই topicId-র সেট নিয়ে আগে থেকে queue-তে থাকা টপিক-সিরিয়াল action বাদ দাও */
+    suspend fun dropPendingTopicOrder(ids: Set<String>) {
+        val queue = getAll().toMutableList()
+        val removed = queue.removeAll { a ->
+            a.type == "admin_set_topic_order" && try {
+                val m = gson.fromJson<Map<String, Any>>(a.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                @Suppress("UNCHECKED_CAST")
+                val old = (m["order"] as? Map<String, Any>)?.keys ?: emptySet()
+                old.any { it in ids }
+            } catch (_: Exception) { false }
+        }
+        if (removed) save(queue)
+    }
+
+    suspend fun enqueueAdminSetTopicOrder(order: Map<String, Int>) {
+        dropPendingTopicOrder(order.keys)
+        enqueue(PendingAction(
+            type    = "admin_set_topic_order",
+            payload = gson.toJson(mapOf("order" to order))
+        ))
+    }
+
     // ── একই mode(+tag[+subject]) এর জন্য আগে থেকে queue-তে থাকা reorder action
     //    থাকলে বাদ দাও — শুধু সবশেষ ক্রমটাই sync হওয়া উচিত, মাঝেরগুলো না ──
     private suspend fun removePendingReorder(type: String, mode: String, tag: String, subject: String? = null) {
@@ -263,7 +287,7 @@ class PendingQueue(private val context: Context) {
         getAll().filter {
             it.type == "admin_edit_question" || it.type == "admin_add_question" ||
             it.type == "admin_delete_question" || it.type == "admin_reorder_subject" ||
-            it.type == "admin_reorder_subtopic" || it.type == "admin_delete_subject_topic" ||
+            it.type == "admin_reorder_subtopic" || it.type == "admin_set_topic_order" || it.type == "admin_delete_subject_topic" ||
             it.type == "admin_move_questions" || it.type == "admin_move_topic"
         }
 
