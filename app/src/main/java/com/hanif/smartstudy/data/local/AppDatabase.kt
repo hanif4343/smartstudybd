@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class, QuestionProgressEntity::class, DeletedQuestionEntity::class],
+    entities = [QuestionEntity::class, TypingMistakeEntity::class, TypingHandStatsEntity::class, GeneratedPassageCacheEntity::class, StudyTypingProgressEntity::class, CustomPassageEntity::class, TypingSheetPassageEntity::class, TypingKeyStatEntity::class, CurriculumProgressEntity::class, TypingKeyPairStatEntity::class, SubjectEntity::class, TopicEntity::class, SubTopicEntity::class, TagEntity::class, PostEntity::class, InstitutionEntity::class, ExamAppearanceEntity::class, TopicSyncEntity::class, TypingCurriculumStageContentEntity::class, QuestionProgressEntity::class, DeletedQuestionEntity::class, TechniqueCacheEntity::class],
     // v1 → v2: QuestionEntity তে explanationIsPublic column যোগ হলো
     // v2 → v3: TypingMistakeEntity যোগ হলো — word-level mistake tracking
     // v3 → v4: TypingHandStatsEntity যোগ হলো — বাম/ডান হাতের error-rate tracking
@@ -71,7 +71,7 @@ import androidx.room.RoomDatabase
     // তালিকা চেক করে বাদ দেয় — server delete যত দেরিতেই কনফার্ম হোক না কেন,
     // প্রশ্নটা আর কখনো ফিরে আসে না। দেখো ContentRepository.markQuestionDeleted()/
     // syncToRoom()। fallbackToDestructiveMigration() থাকায় migration SQL লাগে না।
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -91,6 +91,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun typingCurriculumStageContentDao(): TypingCurriculumStageContentDao
     abstract fun questionProgressDao(): QuestionProgressDao
     abstract fun deletedQuestionDao(): DeletedQuestionDao
+    abstract fun techniqueCacheDao(): TechniqueCacheDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -101,6 +102,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_20_21 = object : androidx.room.migration.Migration(20, 21) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS technique_cache (" +
+                    "questionId TEXT NOT NULL, json TEXT NOT NULL, fetchedAt INTEGER NOT NULL, " +
+                    "PRIMARY KEY(questionId))"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -108,7 +119,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "smartstudy.db"
                 )
-                .addMigrations(MIGRATION_19_20)
+                .addMigrations(MIGRATION_19_20, MIGRATION_20_21)
                 .fallbackToDestructiveMigration()   // অন্য যেকোনো অমিল version-এর জন্য safety-net
                 .build()
                 .also { INSTANCE = it }
