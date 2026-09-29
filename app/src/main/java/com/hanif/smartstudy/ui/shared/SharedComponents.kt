@@ -1948,15 +1948,48 @@ fun UserTechniqueSection(
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
 
-    // ── remote (পাবলিক/অনুমোদিত) + লোকাল (নিজের প্রাইভেট, ফোনে সেভ থাকা) টেকনিক একসাথে মার্জ করো ──
-    suspend fun loadAll(): List<UserTechnique> {
-        val local  = LocalTechniqueStore.getForQuestion(context, questionId, myPhone)
-        val res    = FirebaseDataService.fetchTechniquesForQuestion(questionId, myPhone)
-        val remote = if (res is ApiResult.Success<*>) {
-            @Suppress("UNCHECKED_CAST")
-            (res.data as List<UserTechnique>).filter { it.userId != myPhone || it.isPublic }
-        } else emptyList() // অফলাইনে/নেটওয়ার্ক এরর হলেও লোকাল প্রাইভেট টেকনিক দেখাতে বাধা নেই
-        return (local + remote).sortedByDescending { it.timestamp }
+    // ── remote (পাবলিক/অনুমোদিত + নিজের ব্যাকআপ-করা প্রাইভেট) + লোকাল (ফোনে জমে থাকা —
+    // sync হোক বা না হোক, সবসময় local mirror) টেকনিক একসাথে মার্জ করো।
+    //
+    // FIX (Firebase quota): আগে প্রতিবার প্রশ্নে ঢুকলেই (টেকনিক থাকুক বা না থাকুক) Firebase-এ
+    // read হতো। এখন questionId-র জন্য Room-এ (technique_cache) একবার fetch হয়ে গেলে —
+    // সেটা "চিরকালের জন্য" cache, প্রতিদিন/TTL অনুযায়ী আবার fetch হয় না। cache row না থাকলে
+    // (নতুন প্রশ্ন, বা app-ইনস্টলের পর প্রথমবার) শুধু তখনই একবার আনা হয়, আর ব্যর্থ হলে
+    // (অফলাইন/নেটওয়ার্ক এরর) cache-এ কিছু লেখা হয় না — যাতে পরের বার আসল চেষ্টাটা আবার হয়।
+    // ইউজার চাইলে ম্যানুয়াল রিফ্রেশ আইকনে চেপে একটা প্রশ্নের cache invalidate করে আবার
+    // আনতে পারবে (নিচে দেখো)।
+    //
+    // নিজের প্রাইভেট টেকনিক সবসময় LocalTechniqueStore (local mirror) থেকে আসে — এটা এই
+    // cache-এর ওপর নির্ভর করে না, তাই cache পুরনো হলেও নিজের নতুন টেকনিক সাথে সাথেই দেখা যায়।
+    // sync হয়ে যাওয়া নিজের entry remote-cache-এও (fetch হওয়ার পর থেকে) থাকতে পারে —
+    // distinctBy(id) দিয়ে ডুপ্লিকেট বাদ যায়। ──
+    val techniqueCacheDao = remember { com.hanif.smartstudy.data.local.AppDatabase.getInstance(context).techniqueCacheDao() }
+    val gsonTech = remember { com.google.gson.Gson() }
+    val techListType = remember { object : com.google.gson.reflect.TypeToken<List<UserTechnique>>() {}.type }
+
+    suspend fun loadAll(forceRefresh: Boolean = false): List<UserTechnique> {
+        val local = LocalTechniqueStore.getForQuestion(context, questionId, myPhone)
+
+        if (forceRefresh) techniqueCacheDao.invalidate(questionId)
+        val cached = techniqueCacheDao.get(questionId)
+        val remote: List<UserTechnique> = if (cached != null) {
+            try { gsonTech.fromJson(cached.json, techListType) ?: emptyList() } catch (_: Exception) { emptyList() }
+        } else {
+            val res = FirebaseDataService.fetchTechniquesForQuestion(questionId, myPhone)
+            if (res is ApiResult.Success<*>) {
+                @Suppress("UNCHECKED_CAST")
+                val list = res.data as List<UserTechnique>
+                techniqueCacheDao.upsert(
+                    com.hanif.smartstudy.data.local.TechniqueCacheEntity(
+                        questionId = questionId,
+                        json       = gsonTech.toJson(list),
+                        fetchedAt  = System.currentTimeMillis()
+                    )
+                )
+                list
+            } else emptyList() // অফলাইনে/এরর — cache-এ কিছু লেখা হয়নি, তাই পরেরবার আবার চেষ্টা হবে
+        }
+        return (local + remote).distinctBy { it.id }.sortedByDescending { it.timestamp }
     }
 
     LaunchedEffect(questionId) {
@@ -1993,6 +2026,28 @@ fun UserTechniqueSection(
                 }
             } else {
                 Spacer(Modifier.width(1.dp))
+            }
+
+            // ── ম্যানুয়াল রিফ্রেশ — cache "চিরকালের জন্য" হওয়ায় অন্য কারো নতুন পাবলিক
+            // টেকনিক অটোমেটিক আসবে না; কেউ যদি নতুন কিছু আছে বলে সন্দেহ করে, এই আইকনে
+            // চেপে শুধু এই প্রশ্নটার cache মুছে জোর করে আবার Firebase থেকে আনতে পারবে
+            // (এটাও একটা মাত্র request, আর ইউজার-ইনিশিয়েটেড — অটোমেটিক/ডেইলি না) ──
+            var isRefreshing by remember(questionId) { mutableStateOf(false) }
+            IconButton(
+                onClick = {
+                    if (!isRefreshing) scope.launch {
+                        isRefreshing = true
+                        techniques = loadAll(forceRefresh = true)
+                        isRefreshing = false
+                    }
+                },
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    Icons.Default.Refresh, contentDescription = "নতুন টেকনিক আছে কিনা দেখুন",
+                    tint = OrangeTech.copy(alpha = if (isRefreshing) 0.4f else 0.8f),
+                    modifier = Modifier.size(15.dp)
+                )
             }
 
             // ── "টেকনিক যোগ করুন" টেক্সট বাটনের জায়গায় ছোট "+" আইকন —
@@ -2036,10 +2091,15 @@ fun UserTechniqueSection(
                     onEdit      = { editTarget = t; showAddDialog = true },
                     onDelete    = {
                         scope.launch {
-                            if (LocalTechniqueStore.isLocalId(t.id)) {
+                            if (!t.synced) {
+                                // এখনো Firebase-এ পাঠানোই হয়নি — শুধু ফোন থেকে মুছলেই যথেষ্ট
                                 LocalTechniqueStore.delete(context, t.id)
                             } else {
                                 FirebaseDataService.deleteTechnique(questionId, t.id)
+                                // প্রাইভেট টেকনিক sync হয়ে গেলে local mirror-এও একই id দিয়ে
+                                // একটা copy থাকে — শুধু Firebase থেকে মুছলে ওই local copy-টা
+                                // থেকেই যেত আর মুছে-ফেলার পরও আবার "ফিরে আসত"
+                                if (isOwn) LocalTechniqueStore.delete(context, t.id)
                             }
                             refresh()
                             feedbackMsg = "টেকনিক মুছে ফেলা হয়েছে"
@@ -2060,62 +2120,73 @@ fun UserTechniqueSection(
                     val target  = editTarget
                     val typeLbl = if (type == "explanation") "ব্যাখ্যা" else "টেকনিক"
 
-                    if (!isPublic) {
-                        // ── প্রাইভেট: সরাসরি ফোনেই সেভ, ইন্টারনেট লাগে না ──
-                        if (target == null) {
+                    // ── FIX: প্রাইভেট টেকনিক এখন ব্যাকগ্রাউন্ডে Firebase-এও sync হয় (দেখো
+                    // PrivateTechniqueSync), তাই sync-হওয়া প্রাইভেট এন্ট্রির id-ও আর "local_"
+                    // দিয়ে শুরু হয় না — শুধু id-প্রিফিক্স দেখে "আগে পাবলিক ছিল কিনা" বোঝা যায় না।
+                    // তাই এখন target.isPublic (আসল আগের অবস্থা) দিয়ে ৫টা case আলাদা করে হ্যান্ডেল
+                    // করা হচ্ছে — নাহলে sync-হওয়া প্রাইভেট এন্ট্রি এডিট করলে পুরনো Firebase copy
+                    // + local mirror দুটোই থেকে যেত আর নতুন একটা local_ কপি যোগ হতো, যেটা পরে
+                    // PrivateTechniqueSync আবার আপলোড করে ডুপ্লিকেট বানাত। ──
+                    when {
+                        // ১) নতুন এন্ট্রি, প্রাইভেট
+                        target == null && !isPublic -> {
                             LocalTechniqueStore.add(
-                                context    = context,
-                                questionId = questionId,
-                                userId     = myPhone,
-                                userName   = currentUser.displayName(),
-                                text       = text,
-                                type       = type
+                                context = context, questionId = questionId, userId = myPhone,
+                                userName = currentUser.displayName(), text = text, type = type
                             )
-                        } else if (LocalTechniqueStore.isLocalId(target.id)) {
+                            feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
+                        }
+                        // ২) আগে প্রাইভেট ছিল, এখনো প্রাইভেট — sync হয়ে থাকলে Firebase-এর একই
+                        // pushKey-তে আপডেট, নাহলে (এখনো আপলোড হয়নি) শুধু local mirror আপডেট
+                        target != null && !target.isPublic && !isPublic -> {
                             LocalTechniqueStore.update(context, target.id, text)
-                        } else {
-                            // আগে পাবলিক ছিল, এখন প্রাইভেট করা হচ্ছে: রিমোট থেকে সরিয়ে ফোনে নিয়ে আসো
+                            if (target.synced) {
+                                FirebaseDataService.updateTechnique(questionId, target.id, text, false, type)
+                            }
+                            feedbackMsg = "✅ প্রাইভেট $typeLbl আপডেট হয়েছে।"
+                        }
+                        // ৩) আগে পাবলিক ছিল, এখন প্রাইভেট করা হচ্ছে: রিমোট থেকে সরিয়ে ফোনে নিয়ে আসো
+                        target != null && target.isPublic && !isPublic -> {
                             FirebaseDataService.deleteTechnique(questionId, target.id)
                             LocalTechniqueStore.add(
-                                context    = context,
-                                questionId = questionId,
-                                userId     = myPhone,
-                                userName   = currentUser.displayName(),
-                                text       = text,
-                                type       = type
+                                context = context, questionId = questionId, userId = myPhone,
+                                userName = currentUser.displayName(), text = text, type = type
                             )
+                            feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
                         }
-                        feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
-                    } else {
-                        // ── পাবলিক: এডমিন অনুমোদনের জন্য সার্ভারে পাঠাতে হয়, তাই ইন্টারনেট লাগবে ──
-                        val res = if (target == null || LocalTechniqueStore.isLocalId(target.id)) {
-                            if (target != null) LocalTechniqueStore.delete(context, target.id)
-                            FirebaseDataService.saveTechnique(
-                                questionId = questionId,
-                                userId     = myPhone,
-                                userName   = currentUser.displayName(),
-                                text       = text,
-                                isPublic   = true,
-                                type       = type
+                        // ৪) পাবলিক করা হচ্ছে (নতুন, অথবা প্রাইভেট→পাবলিক) — এডমিন অনুমোদনের জন্য
+                        // সার্ভারে পাঠাতে হয়, তাই ইন্টারনেট লাগবে
+                        target == null || !target.isPublic -> {
+                            val res = FirebaseDataService.saveTechnique(
+                                questionId = questionId, userId = myPhone,
+                                userName = currentUser.displayName(), text = text,
+                                isPublic = true, type = type
                             )
-                        } else {
-                            FirebaseDataService.updateTechnique(questionId, target.id, text, true, type)
+                            if (res is ApiResult.Success<*>) {
+                                if (target != null) {
+                                    // আগের প্রাইভেট কপি (sync হয়ে থাকলে) মুছে ফেলো — নাহলে একই
+                                    // টেকনিক প্রাইভেট + pending-public দুইভাবে দেখা যাবে
+                                    LocalTechniqueStore.delete(context, target.id)
+                                    if (target.synced) {
+                                        FirebaseDataService.deleteTechnique(questionId, target.id)
+                                    }
+                                }
+                                feedbackMsg = "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
+                            } else {
+                                // নেটওয়ার্ক না থাকলে হারিয়ে না যায় — সাময়িকভাবে ফোনে প্রাইভেট হিসেবে রেখে দাও
+                                // (পুরনো প্রাইভেট কপি, থাকলে, অপরিবর্তিত থাকুক — কিছু হারাবে না)
+                                LocalTechniqueStore.add(
+                                    context = context, questionId = questionId, userId = myPhone,
+                                    userName = currentUser.displayName(), text = text, type = type
+                                )
+                                feedbackMsg = "⚠️ ইন্টারনেট সংযোগ নেই, তাই আপাতত প্রাইভেট হিসেবে ফোনে সেভ হয়েছে। " +
+                                    "নেট আসলে আবার এডিট করে 'পাবলিক' করে দিন।"
+                            }
                         }
-
-                        feedbackMsg = if (res is ApiResult.Success<*>) {
-                            "✅ সেভ হয়েছে! এডমিন অনুমোদনের পর সবাই দেখতে পাবে।"
-                        } else {
-                            // নেটওয়ার্ক না থাকলে হারিয়ে না যায় — সাময়িকভাবে ফোনে প্রাইভেট হিসেবে রেখে দাও
-                            LocalTechniqueStore.add(
-                                context    = context,
-                                questionId = questionId,
-                                userId     = myPhone,
-                                userName   = currentUser.displayName(),
-                                text       = text,
-                                type       = type
-                            )
-                            "⚠️ ইন্টারনেট সংযোগ নেই, তাই আপাতত প্রাইভেট হিসেবে ফোনে সেভ হয়েছে। " +
-                                "নেট আসলে আবার এডিট করে 'পাবলিক' করে দিন।"
+                        // ৫) আগে পাবলিক ছিল, পাবলিকই আছে — টেক্সট আপডেট শুধু
+                        else -> {
+                            FirebaseDataService.updateTechnique(questionId, target!!.id, text, true, type)
+                            feedbackMsg = "✅ আপডেট হয়েছে।"
                         }
                     }
 
