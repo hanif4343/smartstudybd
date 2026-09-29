@@ -562,6 +562,66 @@ class ContentRepository(private val context: Context) {
         refOk
     }
 
+    /** Settings → "সব প্রশ্ন ডাউনলোড" বাটনের ফলাফল — কতগুলো topic সফল/ব্যর্থ হলো তা UI-তে দেখানোর জন্য */
+    data class DownloadAllResult(
+        val startedOk : Boolean,   // false হলে শুরুই হয়নি (অফলাইন)
+        val total     : Int = 0,
+        val failed    : Int = 0
+    )
+
+    /**
+     * ── Settings → "📥 সব প্রশ্ন ডাউনলোড করুন" ──
+     * সব subject/topic-এর প্রশ্ন এক-দুই মিনিটে Room-এ নামিয়ে রাখে, যাতে অফলাইনেও পুরো
+     * অ্যাপ ব্যবহার করা যায়। এটা cacheNextTopicBatch()-এরই বাল্ক ভার্সন — একই hash-check
+     * লজিক ব্যবহার করে, তাই যেই topic ইতিমধ্যে Room-এ আছে ও অপরিবর্তিত, সেটা আবার
+     * নেটওয়ার্কে ফেচ করে না (দ্বিতীয়বার চাপলে শুধু নতুন/পরিবর্তিত topic-ই আসবে) —
+     * ফলে বারবার চাপলেও CDN Worker-এ অহেতুক লোড পড়ে না।
+     *
+     * Concurrency ইচ্ছাকৃতভাবে সীমিত (৬টা topic একসাথে) — একসাথে শত শত request পাঠিয়ে
+     * CDN Worker/GitHub API rate-limit-এ ধাক্কা দেওয়ার বদলে ধীরে-সুস্থে ব্যাচে ব্যাচে আনা।
+     *
+     * @param onProgress (doneCount, totalCount) — UI progress bar আপডেট করতে
+     */
+    suspend fun downloadAllContent(
+        onProgress: suspend (done: Int, total: Int) -> Unit
+    ): DownloadAllResult = withContext(Dispatchers.IO) {
+        if (!isOnline()) return@withContext DownloadAllResult(startedOk = false)
+
+        // সবার আগে reference (subjects/topics) ফ্রেশ করে নেওয়া — নাহলে নতুন যোগ হওয়া
+        // subject/topic Room-এ না থাকলে ডাউনলোড-লিস্টেই বাদ পড়ে যাবে
+        syncReferenceData(force = true)
+        syncExamAppearances()
+
+        val topics = refDao.getAllTopics()
+        val sheetBySubjectId = refDao.getAllSubjects().associate { it.subjectId to it.sheet }
+        val total = topics.size
+        var done = 0
+        var failed = 0
+        onProgress(0, total)
+
+        // ৬টা করে ব্যাচে parallel — পুরোটা একসাথে না ছুঁড়ে ধাপে ধাপে
+        topics.chunked(6).forEach { batch ->
+            kotlinx.coroutines.coroutineScope {
+                batch.map { topic ->
+                    kotlinx.coroutines.async {
+                        val sheet = sheetBySubjectId[topic.subjectId]
+                        if (sheet.isNullOrBlank()) return@async
+                        try {
+                            cacheNextTopicBatch(sheet, topic.topicId)
+                        } catch (e: Exception) {
+                            Log.w("Repo", "downloadAllContent: ${topic.topicId} failed: ${e.message}")
+                            failed++
+                        }
+                    }
+                }.forEach { it.await() }
+            }
+            done += batch.size
+            onProgress(done.coerceAtMost(total), total)
+        }
+        Log.d("Repo", "downloadAllContent: total=$total failed=$failed")
+        DownloadAllResult(startedOk = true, total = total, failed = failed)
+    }
+
     /**
      * একগুচ্ছ questionId (Exam_Appearances থেকে পাওয়া) দিয়ে সরাসরি সেই নির্দিষ্ট প্রশ্নগুলো
      * Room থেকে টেনে আনে (audience-filtered) — "পদ অনুযায়ী ব্রাউজ"-এ Post+Institution
