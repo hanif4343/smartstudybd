@@ -10,7 +10,12 @@ data class UserTechnique(
     val isPublic    : Boolean = false,
     val status      : String = "pending", // "pending" | "approved" | "rejected"
     val timestamp   : Long   = 0L,
-    val type        : String = "technique" // "technique" | "explanation" — ইউজার কোনটা যোগ করেছে
+    val type        : String = "technique", // "technique" | "explanation" — ইউজার কোনটা যোগ করেছে
+    // ── লোকাল-অনলি ফ্ল্যাগ (Firebase-এ কখনো পাঠানো হয় না, শুধু ফোনে থাকা LocalTechniqueStore-এর
+    // জন্য প্রাসঙ্গিক) — false মানে এটা এখনো Firebase-এ নেই, পরবর্তী batch sync-এ যাবে।
+    // Firebase থেকে fetch করা যেকোনো টেকনিক (নিজের হোক বা অন্যের) মানেই ইতিমধ্যে সেখানে আছে,
+    // তাই ডিফল্ট true। দেখো data/local/LocalTechniqueStore.kt আর util/PrivateTechniqueSync.kt ──
+    val synced      : Boolean = true
 ) {
     fun isPending()      = status == "pending"
     fun isApproved()     = status == "approved"
