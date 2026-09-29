@@ -44,6 +44,18 @@ class SmartStudyApp : Application() {
             FirebaseTokenProvider.ensureSignedIn()
         }
 
+        // ── Cold start-এ (app আগে থেকে লগইন করা থাকলে) admin bypass flag রিস্টোর ──
+        // saveUser()/clearUser() রানটাইমে flag আপডেট করে, কিন্তু app বন্ধ থেকে খোলার
+        // পর নতুন করে login না হলে সেই কল হয় না — তাই এখানে cached session থেকে একবার সেট ──
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val u = com.hanif.smartstudy.util.SessionManager(this@SmartStudyApp).getCurrentUser()
+                com.hanif.smartstudy.data.remote.CdnService.isAdminSession = u?.isAdmin() == true
+            } catch (e: Exception) {
+                Log.w("SmartStudyApp", "admin bypass restore failed: ${e.message}")
+            }
+        }
+
         // Phase 3: Periodic content sync + offline queue flush
         SyncWorker.schedulePeriodic(this)
 
