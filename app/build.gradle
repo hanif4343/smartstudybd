@@ -49,6 +49,8 @@ android {
         // কোনো compile-time নির্ভরতা নেই deploy হয়েছে কিনা তার ওপর। ──
         buildConfigField "String", "CDN_WORKER_URL", secretField("CDN_WORKER_URL")
         buildConfigField "String", "CDN_APP_SECRET", secretField("CDN_APP_SECRET")
+        // owner-only KV rate-limit bypass — Worker-এর ADMIN_BYPASS_SECRET-এর সাথে হুবহু মিলতে হবে
+        buildConfigField "String", "CDN_ADMIN_BYPASS", secretField("CDN_ADMIN_BYPASS_SECRET")
     }
 
     signingConfigs {
