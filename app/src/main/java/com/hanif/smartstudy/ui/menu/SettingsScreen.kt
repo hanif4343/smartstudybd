@@ -136,6 +136,60 @@ fun SettingsScreen(
                 }
             }
 
+            // ── সব প্রশ্ন ডাউনলোড (অফলাইন ব্যবহারের জন্য) ──
+            // "অফলাইন মোড" কার্ডের ঠিক নিচে রাখা — কারণ এই বাটনটা সেই ফিচারকেই পূর্ণ করে:
+            // অফলাইন মোড চালু করলে Firebase বন্ধ হয়, কিন্তু প্রশ্ন আগে থেকে ফোনে না থাকলে
+            // পড়ার কিছু থাকবে না। তাই দুটো একসাথে, ব্যবহারকারী স্বাভাবিকভাবেই বুঝবে।
+            SettingsCard("📥 সব প্রশ্ন ডাউনলোড করুন") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "সব বিষয়ের সব প্রশ্ন এখনই ফোনে নামিয়ে রাখুন — এরপর নেট না থাকলেও পুরো " +
+                        "অ্যাপ ব্যবহার করা যাবে। পরে নতুন প্রশ্ন যোগ হলে শুধু সেগুলোই আসবে, " +
+                        "আগেরগুলো আবার ডাউনলোড হবে না।",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.6f)
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick  = { vm.startDownloadAllContent() },
+                            enabled  = !state.isDownloadingAll,
+                            shape    = RoundedCornerShape(12.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                        ) {
+                            if (state.isDownloadingAll) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (state.downloadAllTotal > 0) "${state.downloadAllDone}/${state.downloadAllTotal}" else "শুরু হচ্ছে…",
+                                    fontFamily = NotoSansBengali, fontSize = 13.sp, color = Color.White
+                                )
+                            } else {
+                                Text("📥 ডাউনলোড শুরু করুন", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                    if (state.isDownloadingAll && state.downloadAllTotal > 0) {
+                        LinearProgressIndicator(
+                            progress = { state.downloadAllDone / state.downloadAllTotal.toFloat() },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = Indigo600
+                        )
+                    }
+                    state.downloadAllResultMsg?.let {
+                        Text(
+                            it, fontFamily = NotoSansBengali, fontSize = 12.sp,
+                            color = if (it.startsWith("✅")) Color(0xFF16A34A)
+                                    else if (it.startsWith("❌")) Color(0xFFDC2626)
+                                    else Color(0xFFD97706)
+                        )
+                    }
+                }
+            }
+
             // ── Data Source ফিচার সম্পূর্ণ সরানো হয়েছে ──
             // কারণ: আসল কনটেন্ট-রিড সবসময় CdnService দিয়েই হয় (দেখো CdnService.kt-এর
             // কমেন্ট "Gas diye kuno read noy — never")। Firebase/Google Sheet টগল UI-টা
