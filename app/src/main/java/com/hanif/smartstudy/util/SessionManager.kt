@@ -289,10 +289,14 @@ class SessionManager(private val context: Context) {
             p[KEY_USER_NAME] = user.name ?: ""
             user.picture?.let { p[KEY_USER_PIC] = it }
         }
+        // ── CdnService-কে জানানো: এই account admin কিনা — সেই অনুযায়ী পরের CDN
+        // request-এ KV rate-limit bypass header যাবে কিনা ঠিক হয় (দেখো CdnService.kt) ──
+        com.hanif.smartstudy.data.remote.CdnService.isAdminSession = user.isAdmin()
     }
 
     suspend fun clearUser() {
         context.dataStore.edit { it.remove(KEY_USER_JSON) }
+        com.hanif.smartstudy.data.remote.CdnService.isAdminSession = false
     }
 
     // ── Theme ─────────────────────────────────────────────────
