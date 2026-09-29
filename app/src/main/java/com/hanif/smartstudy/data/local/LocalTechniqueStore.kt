@@ -26,9 +26,29 @@ object LocalTechniqueStore {
 
     fun isLocalId(id: String) = id.startsWith(LOCAL_ID_PREFIX)
 
-    // ── প্রশ্ন অনুযায়ী এই ইউজারের প্রাইভেট টেকনিকগুলো পড়ো ──
+    // ── প্রশ্ন অনুযায়ী এই ইউজারের প্রাইভেট টেকনিকগুলো পড়ো (cloud-sync হোক বা না হোক —
+    // এটা সবসময় local mirror, তাই অফলাইনেও নিজের সব টেকনিক দেখা যায়) ──
     suspend fun getForQuestion(context: Context, questionId: String, userId: String): List<UserTechnique> {
         return getAll(context).filter { it.questionId == questionId && it.userId == userId }
+    }
+
+    /** এই ইউজারের যেসব টেকনিক এখনো Firebase-এ পাঠানো হয়নি (synced=false) — ব্যাকগ্রাউন্ড sync
+     *  (SmartStudyApp চালু হওয়ার সময় + SyncWorker) এগুলো সব একসাথে, একটা মাত্র batch-request-এ
+     *  আপলোড করার চেষ্টা করে — Firebase quota বাঁচাতে একে একে আলাদা রিকোয়েস্ট পাঠানো হয় না। */
+    suspend fun getUnsynced(context: Context, userId: String): List<UserTechnique> =
+        getAll(context).filter { it.userId == userId && !it.synced }
+
+    /** ব্যাচ-আপলোড সফল হওয়ার পর একসাথে সবগুলো id-কে synced=true করো। id কখনো বদলায় না
+     *  (client-এ generate করা id-ই সরাসরি Firebase-এর key হিসেবে ব্যবহার হয় — দেখো
+     *  util/PrivateTechniqueSync.kt), তাই future edit/delete-ও একই id দিয়েই কাজ করে। */
+    suspend fun markAllSynced(context: Context, ids: Set<String>) {
+        if (ids.isEmpty()) return
+        val all = getAll(context).toMutableList()
+        var changed = false
+        for (i in all.indices) {
+            if (all[i].id in ids && !all[i].synced) { all[i] = all[i].copy(synced = true); changed = true }
+        }
+        if (changed) save(context, all)
     }
 
     // ── নতুন প্রাইভেট টেকনিক ফোনে সেভ করো ──
@@ -49,7 +69,8 @@ object LocalTechniqueStore {
             isPublic   = false,
             status     = "approved", // প্রাইভেট টেকনিক/ব্যাখ্যা নিজে থেকেই দেখা যায়, অনুমোদন লাগে না
             timestamp  = System.currentTimeMillis(),
-            type       = type
+            type       = type,
+            synced     = false   // ব্যাচ sync (PrivateTechniqueSync) না হওয়া পর্যন্ত শুধু ফোনেই থাকবে
         )
         val all = getAll(context).toMutableList()
         all.add(technique)
@@ -57,7 +78,8 @@ object LocalTechniqueStore {
         return technique
     }
 
-    // ── লোকাল টেকনিক এডিট করো ──
+    // ── লোকাল টেকনিক এডিট করো (synced flag অপরিবর্তিত থাকে — সেভ করা থাকলে সেটাই থাকবে,
+    // কলার (SharedComponents.kt) প্রয়োজনে Firebase-এও আলাদা করে আপডেট পাঠাবে) ──
     suspend fun update(context: Context, id: String, text: String) {
         val all = getAll(context).toMutableList()
         val idx = all.indexOfFirst { it.id == id }
