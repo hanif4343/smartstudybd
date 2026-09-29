@@ -151,6 +151,28 @@ fun MainScreen(
         studyViewModel.setMode(StudyMode.STUDY)
     }
 
+    // ── Private technique background sync — app খোলার সময় একবার (idempotent,
+    // বারবার চালালেও সমস্যা নেই — শুধু synced=false থাকা entry-গুলোই পাঠায়)।
+    // ব্যর্থ হলে (অফলাইন ইত্যাদি) চুপচাপ থেমে যায়, পরের বার app খুললে বা
+    // SyncWorker periodic run-এ আবার চেষ্টা হবে — UI-কে ব্লক করে না। ──
+    LaunchedEffect(Unit) {
+        val u = session.getCurrentUser()
+        val phone = u?.phone
+        if (!phone.isNullOrBlank()) {
+            scope.launch {
+                try {
+                    com.hanif.smartstudy.util.PrivateTechniqueSync.syncNow(
+                        context  = context,
+                        userId   = phone,
+                        userName = u.displayName()
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("MainScreen", "PrivateTechniqueSync failed: ${e.message}")
+                }
+            }
+        }
+    }
+
     // Admin audience tag পরিবর্তন হলে সব ViewModel reload
     val menuState by menuViewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(menuState.adminViewingTag) {
