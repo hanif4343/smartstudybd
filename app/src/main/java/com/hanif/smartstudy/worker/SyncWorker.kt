@@ -66,6 +66,26 @@ class SyncWorker(
         Log.d(TAG, "SyncWorker started")
         var allSuccess = true
 
+        // ── Private technique sync — periodic background flush, যাতে শুধু app
+        // খোলার উপর নির্ভর করতে না হয় (কেউ অনেকক্ষণ app বন্ধ না করলেও কিছুক্ষণ
+        // পরপর background-এই sync হয়ে যাবে)। ব্যর্থ হলে allSuccess false করে না —
+        // এটা non-critical, পরের periodic run-এ আবার চেষ্টা হবে। ──
+        run {
+            val u = com.hanif.smartstudy.util.SessionManager(applicationContext).getCurrentUser()
+            val phone = u?.phone
+            if (!phone.isNullOrBlank()) {
+                try {
+                    com.hanif.smartstudy.util.PrivateTechniqueSync.syncNow(
+                        context  = applicationContext,
+                        userId   = phone,
+                        userName = u.displayName()
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "PrivateTechniqueSync failed: ${e.message}")
+                }
+            }
+        }
+
         // ── FIX (Speed Plan Task 1, one-time): fix-এর আগে জমে থাকা পুরনো
         // admin_add/edit/delete pending action (যেগুলো আগে সরাসরি Firebase-এ
         // লিখত) একবার purge করে দাও — এই flag ছাড়া প্রতিবার worker রান হলে
