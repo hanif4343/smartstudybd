@@ -27,6 +27,9 @@ import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.worker.SyncWorker
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -601,9 +604,9 @@ class ContentRepository(private val context: Context) {
 
         // ৬টা করে ব্যাচে parallel — পুরোটা একসাথে না ছুঁড়ে ধাপে ধাপে
         topics.chunked(6).forEach { batch ->
-            kotlinx.coroutines.coroutineScope {
+            coroutineScope {
                 batch.map { topic ->
-                    kotlinx.coroutines.async {
+                    async {
                         val sheet = sheetBySubjectId[topic.subjectId]
                         if (sheet.isNullOrBlank()) return@async
                         try {
@@ -613,7 +616,7 @@ class ContentRepository(private val context: Context) {
                             failed++
                         }
                     }
-                }.forEach { it.await() }
+                }.awaitAll()
             }
             done += batch.size
             onProgress(done.coerceAtMost(total), total)
