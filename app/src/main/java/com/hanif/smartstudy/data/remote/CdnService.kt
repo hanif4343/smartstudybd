@@ -46,6 +46,16 @@ object CdnService {
     private val WORKER_URL: String by lazy { BuildConfig.CDN_WORKER_URL.trimEnd('/') }
     private val APP_SECRET: String by lazy { BuildConfig.CDN_APP_SECRET }
 
+    // ── Admin bypass (KV rate-limit শুধু owner-এর জন্য স্কিপ) ──
+    // ADMIN_BYPASS বিল্ড-টাইম secret, শুধু Worker আর এই app-এর মধ্যে শেয়ার করা —
+    // কিন্তু হেডারে পাঠানো হয় শুধুমাত্র বর্তমানে লগইন-করা account সত্যিই admin হলে
+    // (isAdminSession, SessionManager.saveUser/clearUser থেকে runtime-এ সেট হয়)।
+    // তাই শুধু build secret জানলেই bypass হয় না — সাথে সার্ভার-ভেরিফায়েড admin
+    // account দিয়ে লগইন থাকাও লাগে। অন্য সব ইউজারের জন্য normal per-IP KV
+    // rate limiting আগের মতোই চলবে (দেখো worker.js-এর X-Admin-Bypass চেক)।
+    private val ADMIN_BYPASS: String by lazy { BuildConfig.CDN_ADMIN_BYPASS }
+    @Volatile var isAdminSession: Boolean = false
+
     // FIX (স্লো-অ্যাপ ডায়াগনসিস): আগে connectTimeout=10s/readTimeout=15s ছিল —
     // Worker misconfigured/unreachable হলে প্রতিটা CDN কল ~২৫ সেকেন্ড পর্যন্ত
     // আটকে থাকত (তারপর Room fallback)। এখন ৫s/৬s — misconfigured অবস্থায়ও
@@ -80,8 +90,13 @@ object CdnService {
         val subjectTotals : Map<String, Int> = emptyMap()
     )
 
-    @PublishedApi internal fun requestBuilder(path: String): Request.Builder =
-        Request.Builder().url("$WORKER_URL$path").header("X-App-Secret", APP_SECRET)
+    @PublishedApi internal fun requestBuilder(path: String): Request.Builder {
+        val b = Request.Builder().url("$WORKER_URL$path").header("X-App-Secret", APP_SECRET)
+        if (isAdminSession && ADMIN_BYPASS.isNotBlank()) {
+            b.header("X-Admin-Bypass", ADMIN_BYPASS)
+        }
+        return b
+    }
 
     /** manifest.json — no-cache (Worker-সাইডে সবসময় fresh), তাই এখানেও কোনো
      *  local caching নেই — caller (ContentRepository) ৫-মিনিট TTL দিয়ে
