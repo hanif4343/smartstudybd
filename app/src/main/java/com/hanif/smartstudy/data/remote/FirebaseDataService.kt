@@ -266,6 +266,45 @@ object FirebaseDataService {
         }
     }
 
+    /**
+     * প্রাইভেট টেকনিক ব্যাচ-আপলোড — Firebase-এর "multi-location update" ব্যবহার করে
+     * একাধিক প্রশ্নের একাধিক টেকনিক **একটা মাত্র HTTP request**-এ পাঠায় (PATCH রুট-এ, key
+     * হিসেবে "UserTechniques/{qId}/{id}" পাথ), প্রতিটার জন্য আলাদা আলাদা POST না করে —
+     * এতে Firebase quota (request-সংখ্যা) অনেক কম লাগে। id client-এ (LocalTechniqueStore)
+     * আগে থেকেই বানানো, তাই সার্ভার থেকে push-key ফেরত নেওয়ার দরকার নেই — দেখো
+     * util/PrivateTechniqueSync.kt (এটাই একমাত্র caller)।
+     */
+    suspend fun saveTechniquesBatch(items: List<com.hanif.smartstudy.data.model.UserTechnique>): ApiResult<Unit> {
+        if (items.isEmpty()) return ApiResult.Success(Unit)
+        return withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/.json$auth"
+                val root = JsonObject()
+                for (t in items) {
+                    val obj = JsonObject().apply {
+                        addProperty("questionId", t.questionId)
+                        addProperty("userId",     t.userId)
+                        addProperty("userName",   t.userName)
+                        addProperty("text",       t.text)
+                        addProperty("isPublic",   false)
+                        // প্রাইভেট — admin-approval দরকার নেই, লেখার সাথে সাথেই মালিকের কাছে দেখা যাবে
+                        addProperty("status",     "approved")
+                        addProperty("timestamp",  t.timestamp)
+                        addProperty("type",       t.type)
+                    }
+                    root.add("UserTechniques/${t.questionId}/${t.id}", obj)
+                }
+                val body = root.toString().toRequestBody("application/json".toMediaType())
+                val req  = Request.Builder().url(url).patch(body).build()
+                val resp = client.newCall(req).execute()
+                val ok   = resp.isSuccessful
+                resp.close()
+                if (ok) ApiResult.Success(Unit) else ApiResult.Error("HTTP ${resp.code}")
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
+    }
+
     suspend fun saveTechnique(
         questionId: String,
         userId    : String,
