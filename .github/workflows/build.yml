@@ -17,6 +17,7 @@ jobs:
       GAS_SECRET:       ${{ secrets.GAS_SECRET }}
       CDN_WORKER_URL:   ${{ secrets.CDN_WORKER_URL }}
       CDN_APP_SECRET:   ${{ secrets.CDN_APP_SECRET }}
+      CDN_ADMIN_BYPASS_SECRET: ${{ secrets.CDN_ADMIN_BYPASS_SECRET }}
 
     steps:
       - name: Checkout
