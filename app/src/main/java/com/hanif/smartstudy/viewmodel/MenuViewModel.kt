@@ -52,6 +52,11 @@ data class MenuUiState(
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
     val isOfflineMode   : Boolean            = false,
+    // ── "📥 সব প্রশ্ন ডাউনলোড করুন" বাটন — অফলাইন মোড কার্ডের নিচে দেখানো হয় ──
+    val isDownloadingAll     : Boolean       = false,
+    val downloadAllDone      : Int           = 0,
+    val downloadAllTotal     : Int           = 0,
+    val downloadAllResultMsg : String?       = null,
     // Settings → "Data Source" ড্রপডাউন — Firebase | Google Sheet
     val dataSourceMode  : com.hanif.smartstudy.data.model.DataSourceMode =
         com.hanif.smartstudy.data.model.DataSourceMode.FIREBASE,
@@ -613,6 +618,32 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             if (!on) {
                 // অফলাইন মোড বন্ধ হওয়া মাত্র pending queue sync চালু করে দাও
                 com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication())
+            }
+        }
+    }
+
+    // ── "📥 সব প্রশ্ন ডাউনলোড করুন" (অফলাইন মোড কার্ডের নিচে) ──
+    // সব subject/topic-এর প্রশ্ন এখনই Room-এ নামিয়ে রাখে, যাতে পরে নেট না থাকলেও পুরো
+    // অ্যাপ ব্যবহার করা যায়। দ্বিতীয়বার চাপলে শুধু নতুন/পরিবর্তিত topic-ই আসবে
+    // (ContentRepository.downloadAllContent()-এর hash-check এর কারণে) — তাই নিশ্চিন্তে
+    // মাঝে মাঝে চাপা যায়, প্রতিবার সব আবার নামবে না।
+    fun startDownloadAllContent() {
+        if (_state.value.isDownloadingAll) return
+        viewModelScope.launch {
+            _state.update { it.copy(isDownloadingAll = true, downloadAllDone = 0, downloadAllTotal = 0, downloadAllResultMsg = null) }
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val result = repo.downloadAllContent { done, total ->
+                _state.update { it.copy(downloadAllDone = done, downloadAllTotal = total) }
+            }
+            _state.update {
+                it.copy(
+                    isDownloadingAll = false,
+                    downloadAllResultMsg = when {
+                        !result.startedOk -> "❌ ইন্টারনেট সংযোগ নেই — অনলাইনে থেকে আবার চেষ্টা করুন"
+                        result.failed == 0 -> "✅ ${result.total}টা টপিক ডাউনলোড সম্পূর্ণ — এখন অফলাইনেও সবকিছু পড়া যাবে"
+                        else -> "⚠️ ${result.total - result.failed}/${result.total} টপিক ডাউনলোড হয়েছে, ${result.failed}টা ব্যর্থ — আবার চেষ্টা করলে শুধু বাকিগুলোই আসবে"
+                    }
+                )
             }
         }
     }
