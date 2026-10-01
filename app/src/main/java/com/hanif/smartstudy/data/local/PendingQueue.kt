@@ -178,6 +178,50 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── FIX ("edit/delete/move করার পর net slow হলে refresh-এ আবার পুরনো অবস্থা
+    // ফিরে আসে" বাগ): এই দুটো ফাংশন ContentRepository.cacheNextTopicBatch()
+    // ব্যবহার করে — CDN থেকে fresh ফেচ করা ডেটা Room-এ upsert করার ঠিক আগে,
+    // যেসব প্রশ্নে এখনো sync-অপেক্ষারত admin action আছে সেগুলো বাদ দিতে। কারণ:
+    // local-এ optimistically edit/delete/move হয়ে গেলেও, GAS/Sheet-এ সেটা
+    // পৌঁছাতে দেরি হলে (slow net/retry) ততক্ষণ CDN/manifest-এ পুরনো (আগের)
+    // কনটেন্টই থাকে — আর hash অন্য কোনো কারণে বদলে গেলে cacheNextTopicBatch
+    // সেই পুরনো কনটেন্ট ফেচ করে উপরে upsert করে ফেলত, optimistic local change
+    // মুছে/চাপা দিয়ে। এই ফিল্টার সেটা আটকায় — sync সফল না হওয়া পর্যন্ত
+    // local অবস্থাই টিকে থাকে, CDN-এর পুরনো ভার্সন তাকে ওভাররাইট করতে পারে না।
+    suspend fun getPendingQuestionIds(): Set<String> {
+        val all = getAll()
+        val out = mutableSetOf<String>()
+        all.forEach { action ->
+            try {
+                when (action.type) {
+                    "admin_edit_question", "admin_delete_question" -> {
+                        val map: Map<String, Any> = gson.fromJson(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                        (map["questionId"] as? String)?.let { out.add(it) }
+                    }
+                    "admin_move_questions" -> {
+                        val map: Map<String, Any> = gson.fromJson(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                        (map["ids"] as? List<*>)?.forEach { out.add(it.toString()) }
+                    }
+                }
+            } catch (e: Exception) { /* malformed payload হলে চুপচাপ skip — বাকি ফিল্টারিং থেমে না যায় */ }
+        }
+        return out
+    }
+
+    suspend fun getPendingMovedTopicIds(): Set<String> {
+        val all = getAll()
+        val out = mutableSetOf<String>()
+        all.forEach { action ->
+            if (action.type == "admin_move_topic") {
+                try {
+                    val map: Map<String, Any> = gson.fromJson(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                    (map["topicId"] as? String)?.let { out.add(it) }
+                } catch (e: Exception) { /* skip */ }
+            }
+        }
+        return out
+    }
+
     suspend fun enqueueAdminMoveTopic(
         topicId         : String,
         newSubjectId    : String,
