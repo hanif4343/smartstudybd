@@ -602,8 +602,16 @@ class ContentRepository(private val context: Context) {
         var failed = 0
         onProgress(0, total)
 
-        // ৬টা করে ব্যাচে parallel — পুরোটা একসাথে না ছুঁড়ে ধাপে ধাপে
-        topics.chunked(6).forEach { batch ->
+        // ── FIX ("ডাউনলোডের পর কোনো নতুন প্রশ্নই আর আসছিল না"): আগে ৬টা করে ব্যাচে
+        // বিরতিহীনভাবে সব topic-এ একসাথে GitHub Contents API কল যেত। GitHub-এর
+        // normal ৫০০০/ঘণ্টা limit-এর বাইরেও আলাদা একটা "secondary/burst rate
+        // limit" আছে যেটা অল্প সময়ে অনেক request দেখলে token-টাকে সাময়িকভাবে
+        // ব্লক করে দেয় — এরপর manifest.json সহ *সব* content fetch (নতুন প্রশ্নও)
+        // ৫০২ দিতে শুরু করে, যতক্ষণ না GitHub-এর block নিজে থেকে উঠে যায়। তাই
+        // এখন concurrency কমিয়ে ৩ আর প্রতি ব্যাচের পর ৩৫০ms বিরতি — পুরো ডাউনলোড
+        // কিছুটা ধীর হবে, কিন্তু GitHub-কে burst মনে হবে না, ভবিষ্যতে আবার এই
+        // সমস্যা হবে না।
+        topics.chunked(3).forEach { batch ->
             coroutineScope {
                 batch.map { topic ->
                     async {
@@ -618,6 +626,7 @@ class ContentRepository(private val context: Context) {
                     }
                 }.awaitAll()
             }
+            kotlinx.coroutines.delay(350)
             done += batch.size
             onProgress(done.coerceAtMost(total), total)
         }
@@ -787,6 +796,11 @@ class ContentRepository(private val context: Context) {
             // গেছে), অথবা এখনো publish হয়নি। কোনো error না — শুধু কিছু cache হয়নি।
             return@withContext false
         }
+        // ── FIX (optimistic move/delete/edit যেন refresh-এ পুরনো অবস্থায় ফিরে না
+        // যায়): এই topicId-তে এখনো sync-অপেক্ষারত "move topic" action থাকলে এই
+        // topic-টা পুরনো জায়গা থেকে সরে যাচ্ছে — পুরনো CDN কনটেন্ট দিয়ে এখন রিফ্রেশ
+        // করলে সেটা আবার ভরে উঠবে, তাই পুরোপুরি স্কিপ ──
+        if (queue.getPendingMovedTopicIds().contains(topicId)) return@withContext false
         val hash = entry.hash ?: ""
         // ── hash অপরিবর্তিত + Room-এ ইতিমধ্যে প্রশ্ন আছে মানে এই ভার্সন আগেই
         // cache করা — network call স্কিপ। hash ফাঁকা (পুরনো/legacy manifest) হলে
@@ -812,12 +826,21 @@ class ContentRepository(private val context: Context) {
             com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "$topicId আনা যায়নি")
             return@withContext false
         }
-        val entities = when (sheet) {
+        val entitiesRaw = when (sheet) {
             "Quiz"  -> (items as List<com.hanif.smartstudy.data.model.QuizItem>).map { it.toEntity(now) }
             "QBank" -> (items as List<com.hanif.smartstudy.data.model.QBankItem>).map { it.toEntity(now) }
             "Study" -> (items as List<com.hanif.smartstudy.data.model.StudyItem>).map { it.toEntity(now) }
             else    -> emptyList()
         }
+        // ── FIX ("edit/delete/move এর পর net slow হলে refresh-এ পুরনো অবস্থা ফিরে
+        // আসে"): CDN থেকে fresh আসা এই লিস্টে যদি এমন কোনো প্রশ্ন থাকে যেটা (ক)
+        // এই ডিভাইস থেকে delete করা হয়েছে (tombstone) বা (খ) edit/move করা হয়েছে
+        // কিন্তু এখনো Sheet-এ sync হয়নি (PendingQueue-তে এখনো আছে) — সেটা বাদ
+        // দেওয়া হচ্ছে, যাতে optimistic local change-টা পুরনো CDN ডেটা দিয়ে
+        // ওভাররাইট না হয়ে যায়। sync সফল হয়ে গেলে queue থেকে entry সরে যায়,
+        // তখন পরের refetch স্বাভাবিকভাবেই নতুন (সার্ভার-কনফার্মড) অবস্থা আনবে। ──
+        val protectedIds = deletedDao.idsForSheet(sheet.uppercase()).toSet() + queue.getPendingQuestionIds()
+        val entities = if (protectedIds.isEmpty()) entitiesRaw else entitiesRaw.filterNot { it.id in protectedIds }
         if (entities.isNotEmpty()) dao.upsertAll(entities)
         topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, hash))
         entities.isNotEmpty()
