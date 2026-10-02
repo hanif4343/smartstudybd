@@ -263,7 +263,12 @@ class MainActivity : ComponentActivity() {
             // মেইন থ্রেড আটকে থাকত — প্রতিবার app minimize/screen-off/অন্য অ্যাপে সুইচ
             // করার সময়ই এই freeze টা হতো (transition animation-ও আটকে যেত)। এখন
             // background coroutine এ fire-and-forget করা হচ্ছে, UI থ্রেড ব্লক হয় না।
-            lifecycleScope.launch(Dispatchers.IO) { session.recordSessionMinutes(sessionMin) }
+            lifecycleScope.launch(Dispatchers.IO) {
+                session.recordSessionMinutes(sessionMin)
+                // "আমার সময়" ফিচার — একই sessionMin সংখ্যাটা দিনের bucket-এও যোগ হয়
+                // (নতুন কোনো প্যারালাল টাইমার না, দেখো util/AppUsageTracker.kt)
+                com.hanif.smartstudy.util.AppUsageTracker.addMinutes(applicationContext, sessionMin)
+            }
         }
         SmartStudyFirebaseService.updatePresence(this, false)
     }
