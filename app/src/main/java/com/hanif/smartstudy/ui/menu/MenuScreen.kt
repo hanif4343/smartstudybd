@@ -80,6 +80,7 @@ fun MenuScreen(
             "testhistory" -> MenuNav.TEST_HISTORY
             "routine"     -> MenuNav.ROUTINE
             "wrongreview" -> MenuNav.WRONG_REVIEW
+            "studytime"   -> MenuNav.STUDY_TIME
             else          -> MenuNav.MAIN
         }
     }
@@ -121,6 +122,7 @@ fun MenuScreen(
                                     onOpenWeeklyTest = onOpenWeeklyTest)
             MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN }, onOpenTestHistory = { screen = MenuNav.TEST_HISTORY })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
+            MenuNav.STUDY_TIME  -> StudyTimeScreen(onBack = { screen = MenuNav.MAIN })
             MenuNav.SETTINGS    -> SettingsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
             MenuNav.BOOKMARKS   -> BookmarksPage(state, onBack = { screen = MenuNav.MAIN })
             MenuNav.LEADERBOARD -> LeaderboardScreen(state, onBack = { screen = MenuNav.MAIN })
@@ -163,7 +165,7 @@ fun MenuScreen(
     }
 }
 
-enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY, ROUTINE, WRONG_REVIEW }
+enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY, ROUTINE, WRONG_REVIEW, STUDY_TIME }
 
 // ─────────────────────────────────────────────────────────────
 //  Routine / Wrong Review — Home থেকে সরাসরি open হওয়ার জন্য dedicated screen
@@ -370,6 +372,7 @@ fun MainMenuScreen(
             // ── Menu items ──
             MenuGroup("📊 তথ্য") {
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
+                MenuRow("⏱ আমার সময়",    "অ্যাপে ও ফোনে কতক্ষণ কাটালেন",  Icons.Default.Timer)  { onNavigate(MenuNav.STUDY_TIME) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
                 // Speed Plan Task 4: হোল্ড করা থাকলে (ডিফল্ট) এই এন্ট্রি-পয়েন্টই
