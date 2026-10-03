@@ -81,6 +81,7 @@ fun MenuScreen(
             "routine"     -> MenuNav.ROUTINE
             "wrongreview" -> MenuNav.WRONG_REVIEW
             "studytime"   -> MenuNav.STUDY_TIME
+            "settings"    -> MenuNav.SETTINGS
             else          -> MenuNav.MAIN
         }
     }
