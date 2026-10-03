@@ -174,6 +174,7 @@ fun HomeScreen(
             onOpenMenu    = onOpenMenu,
             onSearchClick = onSearchClick,
             onBellClick   = { showNotifSheet = true; viewModel.loadNotifications() },
+            onSettingsClick = { onOpenMenuPage("settings") },
             onForceResyncClick = { viewModel.forceFullResync() }
         )
 
@@ -287,6 +288,7 @@ private fun HomeHeaderBar(
     onOpenMenu: () -> Unit,
     onSearchClick: () -> Unit,
     onBellClick: () -> Unit,
+    onSettingsClick: () -> Unit = {},
     onForceResyncClick: () -> Unit = {}
 ) {
     Row(
@@ -356,6 +358,11 @@ private fun HomeHeaderBar(
                     modifier = Modifier.size(20.dp)
                 )
             }
+        }
+        // থিম/রিমাইন্ডার/সাউন্ড সবগুলোই একই Settings স্ক্রিনে যায় -- Menu ট্যাবের লিস্টে
+        // না গিয়ে Home থেকেই এক ট্যাপে সরাসরি Settings-এ ঢোকার শর্টকাট
+        IconButton(onClick = onSettingsClick, modifier = Modifier.size(34.dp)) {
+            Icon(Icons.Default.Settings, contentDescription = "সেটিংস", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
         IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
             Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
