@@ -840,7 +840,12 @@ class ContentRepository(private val context: Context) {
         // ওভাররাইট না হয়ে যায়। sync সফল হয়ে গেলে queue থেকে entry সরে যায়,
         // তখন পরের refetch স্বাভাবিকভাবেই নতুন (সার্ভার-কনফার্মড) অবস্থা আনবে। ──
         val protectedIds = deletedDao.idsForSheet(sheet.uppercase()).toSet() + queue.getPendingQuestionIds()
-        val entities = if (protectedIds.isEmpty()) entitiesRaw else entitiesRaw.filterNot { it.id in protectedIds }
+        // FIX (build error "Unresolved reference: id"): entitiesRaw এখানে Room-এর
+        // QuestionEntity (Quiz/QBank/Study — সব toEntity() আসলে একই QuestionEntity
+        // রিটার্ন করে), যেটার "id" নামে কোনো ফিল্ড নেই — unique identifier এখানে
+        // "fbKey"। protectedIds-ও (deletedDao.idsForSheet + getPendingQuestionIds)
+        // আসলে fbKey/questionId ভ্যালুরই সেট।
+        val entities = if (protectedIds.isEmpty()) entitiesRaw else entitiesRaw.filterNot { it.fbKey in protectedIds }
         if (entities.isNotEmpty()) dao.upsertAll(entities)
         topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, hash))
         entities.isNotEmpty()
