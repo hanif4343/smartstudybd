@@ -140,6 +140,65 @@ fun SettingsScreen(
             // "অফলাইন মোড" কার্ডের ঠিক নিচে রাখা — কারণ এই বাটনটা সেই ফিচারকেই পূর্ণ করে:
             // অফলাইন মোড চালু করলে Firebase বন্ধ হয়, কিন্তু প্রশ্ন আগে থেকে ফোনে না থাকলে
             // পড়ার কিছু থাকবে না। তাই দুটো একসাথে, ব্যবহারকারী স্বাভাবিকভাবেই বুঝবে।
+            // ── 🔄 কনটেন্ট ভার্সন ও সিঙ্ক (Phase 4) ──
+            LaunchedEffect(Unit) { vm.loadContentSyncInfo() }
+            SettingsCard("🔄 কনটেন্ট ভার্সন ও সিঙ্ক") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val fmt = remember { java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("ফোনে থাকা ভার্সন", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(if (state.contentInstalledVersion > 0) "v${state.contentInstalledVersion}" else "—",
+                            fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("সার্ভারের সর্বশেষ ভার্সন", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(if (state.contentLatestVersion > 0) "v${state.contentLatestVersion}" else "চেক করা হয়নি",
+                            fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("শেষ সফল সিঙ্ক", fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(if (state.contentLastSyncAt > 0) fmt.format(java.util.Date(state.contentLastSyncAt)) else "এখনো হয়নি",
+                            fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    state.contentCheckMsg?.let {
+                        Text(it, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (it.startsWith("❌")) Color(0xFFDC2626)
+                                    else if (it.startsWith("🆕")) Color(0xFFD97706) else Color(0xFF16A34A))
+                    }
+                    state.contentSyncError?.let {
+                        Text("⚠️ শেষ সিঙ্ক সমস্যা: $it", fontFamily = NotoSansBengali, fontSize = 12.sp,
+                            color = Color(0xFFD97706))
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick  = { vm.checkContentUpdate() },
+                            enabled  = !state.isCheckingContentUpdate && !state.isDownloadingAll,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            shape    = RoundedCornerShape(12.dp)
+                        ) {
+                            if (state.isCheckingContentUpdate) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("আপডেট আছে কিনা?", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                            }
+                        }
+                        Button(
+                            onClick  = { vm.startDownloadAllContent() },
+                            enabled  = !state.isDownloadingAll,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            shape    = RoundedCornerShape(12.dp),
+                            colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                        ) {
+                            Text(if (state.isDownloadingAll) "সিঙ্ক চলছে…" else "🔄 এখনই Sync",
+                                fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.White)
+                        }
+                    }
+                    Text("সিঙ্ক ব্যর্থ হলেও ফোনে থাকা কনটেন্ট মুছে যায় না — অফলাইনে সব আগের মতোই চলবে।",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.55f))
+                }
+            }
+
             SettingsCard("📥 সব প্রশ্ন ডাউনলোড করুন") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
