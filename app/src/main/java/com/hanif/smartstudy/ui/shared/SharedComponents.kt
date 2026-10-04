@@ -48,8 +48,6 @@ import com.hanif.smartstudy.data.remote.CdnImageUploadService
 import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
-import com.hanif.smartstudy.ui.theme.LocalMcqViewStyle
-import com.hanif.smartstudy.ui.theme.McqViewStyle
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.ui.theme.NordicSage
 import com.hanif.smartstudy.ui.theme.NordicSageTint
@@ -275,6 +273,7 @@ fun QuestionCard(
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
     var activeEditField by remember { mutableStateOf<String?>(null) }
+    var showEditMenu    by remember { mutableStateOf(false) }   // ✎ আইকনের ড্রপডাউন (admin)
     // ── UX ফিচার: AI ব্যাখ্যা — অপশন সিলেক্ট করার সাথে সাথেই অটো-লোড হয় (নিচে
     // LaunchedEffect দেখো), item.id বদলালে (পরের প্রশ্নে গেলে) রিসেট হয়ে যায়।
     // scope = coroutineScope, যেহেতু suspend ফাংশন কল করতে হবে LaunchedEffect-এর
@@ -379,6 +378,33 @@ fun QuestionCard(
                     }
                     IconButton(onClick = onReport, modifier = Modifier.size(28.dp)) {
                         Text("🚩", fontSize = 15.sp)
+                    }
+                    // ✎ Edit — বুকমার্ক/রিপোর্টের পাশে একটাই আইকন (শুধু admin); চাপলে প্রশ্ন/অপশন/উত্তর বাছাই।
+                    // আগের ৬টা পিল-বাটন সারি সরানো হয়েছে — প্রশ্নের নিচে জায়গা বাঁচে, কাজ ১০০% একই।
+                    if (isAdminUser) {
+                        Box {
+                            IconButton(onClick = { showEditMenu = true }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Edit, "এডিট", tint = Indigo600, modifier = Modifier.size(18.dp))
+                            }
+                            DropdownMenu(expanded = showEditMenu, onDismissRequest = { showEditMenu = false }) {
+                                DropdownMenuItem(text = { Text("✎ প্রশ্ন", fontFamily = NotoSansBengali) },
+                                    onClick = { showEditMenu = false; activeEditField = "question" })
+                                if (item.isMcq()) {
+                                    DropdownMenuItem(text = { Text("✎ ক", fontFamily = NotoSansBengali) },
+                                        onClick = { showEditMenu = false; activeEditField = "optA" })
+                                    DropdownMenuItem(text = { Text("✎ খ", fontFamily = NotoSansBengali) },
+                                        onClick = { showEditMenu = false; activeEditField = "optB" })
+                                    DropdownMenuItem(text = { Text("✎ গ", fontFamily = NotoSansBengali) },
+                                        onClick = { showEditMenu = false; activeEditField = "optC" })
+                                    DropdownMenuItem(text = { Text("✎ ঘ", fontFamily = NotoSansBengali) },
+                                        onClick = { showEditMenu = false; activeEditField = "optD" })
+                                }
+                                if (item.isMcq() || item.isWritten()) {
+                                    DropdownMenuItem(text = { Text("✎ উত্তর", fontFamily = NotoSansBengali) },
+                                        onClick = { showEditMenu = false; activeEditField = "answer" })
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -524,27 +550,6 @@ fun QuestionCard(
                             tint     = Color(0xFF64748B),
                             modifier = Modifier.size(16.dp)
                         )
-                    }
-                }
-            }
-
-            if (isAdminUser) {
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    AdminEditPillButton("✎ প্রশ্ন", Color(0xFFEFF6FF), Color(0xFF1D4ED8), Color(0xFFBFDBFE)) {
-                        activeEditField = "question"
-                    }
-                    if (item.isMcq()) {
-                        AdminEditPillButton("✎ ক", Color(0xFFF0FDF4), Color(0xFF15803D), Color(0xFFBBF7D0)) { activeEditField = "optA" }
-                        AdminEditPillButton("✎ খ", Color(0xFFF0FDF4), Color(0xFF15803D), Color(0xFFBBF7D0)) { activeEditField = "optB" }
-                        AdminEditPillButton("✎ গ", Color(0xFFF0FDF4), Color(0xFF15803D), Color(0xFFBBF7D0)) { activeEditField = "optC" }
-                        AdminEditPillButton("✎ ঘ", Color(0xFFF0FDF4), Color(0xFF15803D), Color(0xFFBBF7D0)) { activeEditField = "optD" }
-                    }
-                    if (item.isMcq() || item.isWritten()) {
-                        AdminEditPillButton("✎ উত্তর", Color(0xFFFEF2F2), Color(0xFFDC2626), Color(0xFFFECACA)) { activeEditField = "answer" }
                     }
                 }
             }
@@ -1279,74 +1284,8 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
     )
 }
 
-// ── MCQ অপশন — Settings-এ বাছাই করা ডিজাইন অনুযায়ী রেন্ডার হয় ──
-// একই item/onAnswer, শুধু চেহারা আলাদা। নতুন ডিজাইন যোগ করতে McqViewStyle-এ entry
-// দিয়ে এখানে `when`-এ একটা লাইন বসান।
 @Composable
 fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
-    when (LocalMcqViewStyle.current) {
-        McqViewStyle.COMPACT_LIST -> McqOptionsCompact(item, onAnswer)
-        McqViewStyle.CARD_MODERN  -> McqOptionsCard(item, onAnswer)
-    }
-}
-
-// ডিজাইন ১ — কমপ্যাক্ট/লিস্ট: বক্স ছাড়া পাতলা সারি, মাঝে হালকা দাগ
-@Composable
-fun McqOptionsCompact(item: QuestionItem, onAnswer: (Int) -> Unit) {
-    val answered = item.answerState as? AnswerState.McqSelected
-    val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
-        .filter { it.second.isNotBlank() }
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val isDark = LocalDarkMode.current.value
-    val correctBg = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
-    val wrongBg   = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
-
-    Column(Modifier.fillMaxWidth()) {
-        options.forEachIndexed { i, (n, text) ->
-            val isSelected   = answered?.option == n
-            val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
-            val showCorrect  = answered != null && (isCorrectOpt || (isSelected && answered.isCorrect))
-            val showWrong    = answered != null && isSelected && !answered.isCorrect
-            val accent = when {
-                showCorrect -> GreenOk
-                showWrong   -> RedWrong
-                else        -> onSurface.copy(alpha = 0.55f)
-            }
-            val bg = when {
-                showCorrect -> correctBg
-                showWrong   -> wrongBg
-                else        -> Color.Transparent
-            }
-            val label = when {
-                showCorrect -> "✓"
-                showWrong   -> "✗"
-                else        -> listOf("A", "B", "C", "D").getOrNull(n - 1) ?: "?"
-            }
-            if (i > 0) Box(Modifier.fillMaxWidth().height(0.5.dp).background(onSurface.copy(alpha = 0.12f)))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 44.dp)
-                    .background(bg)
-                    .then(if (answered == null) Modifier.clickable { onAnswer(n) } else Modifier)
-                    .padding(horizontal = 6.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(label, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = accent,
-                    modifier = Modifier.width(22.dp))
-                Text(text, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    color = if (answered != null && !showCorrect && !showWrong)
-                        MaterialTheme.colorScheme.onSurfaceVariant else onSurface,
-                    fontFamily = NotoSansBengali, lineHeight = 17.sp,
-                    modifier = Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-// ডিজাইন ২ — কার্ড/মডার্ন: প্রতিটা অপশন আলাদা কার্ড (আগের লুকই)
-@Composable
-fun McqOptionsCard(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val answered = item.answerState as? AnswerState.McqSelected
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
