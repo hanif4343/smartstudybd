@@ -48,6 +48,8 @@ import com.hanif.smartstudy.data.remote.CdnImageUploadService
 import com.hanif.smartstudy.ui.components.RichContentText
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
+import com.hanif.smartstudy.ui.theme.LocalMcqViewStyle
+import com.hanif.smartstudy.ui.theme.McqViewStyle
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.ui.theme.NordicSage
 import com.hanif.smartstudy.ui.theme.NordicSageTint
@@ -1275,8 +1277,74 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
     )
 }
 
+// ── MCQ অপশন — Settings-এ বাছাই করা ডিজাইন অনুযায়ী রেন্ডার হয় ──
+// একই item/onAnswer, শুধু চেহারা আলাদা। নতুন ডিজাইন যোগ করতে McqViewStyle-এ entry
+// দিয়ে এখানে `when`-এ একটা লাইন বসান।
 @Composable
 fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
+    when (LocalMcqViewStyle.current) {
+        McqViewStyle.COMPACT_LIST -> McqOptionsCompact(item, onAnswer)
+        McqViewStyle.CARD_MODERN  -> McqOptionsCard(item, onAnswer)
+    }
+}
+
+// ডিজাইন ১ — কমপ্যাক্ট/লিস্ট: বক্স ছাড়া পাতলা সারি, মাঝে হালকা দাগ
+@Composable
+fun McqOptionsCompact(item: QuestionItem, onAnswer: (Int) -> Unit) {
+    val answered = item.answerState as? AnswerState.McqSelected
+    val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
+        .filter { it.second.isNotBlank() }
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val isDark = LocalDarkMode.current.value
+    val correctBg = if (isDark) Color(0xFF052E16) else Color(0xFFF0FDF4)
+    val wrongBg   = if (isDark) Color(0xFF3D1010) else Color(0xFFFFF1F2)
+
+    Column(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, (n, text) ->
+            val isSelected   = answered?.option == n
+            val isCorrectOpt = text.trim().equals(item.answer.trim(), ignoreCase = true)
+            val showCorrect  = answered != null && (isCorrectOpt || (isSelected && answered.isCorrect))
+            val showWrong    = answered != null && isSelected && !answered.isCorrect
+            val accent = when {
+                showCorrect -> GreenOk
+                showWrong   -> RedWrong
+                else        -> onSurface.copy(alpha = 0.55f)
+            }
+            val bg = when {
+                showCorrect -> correctBg
+                showWrong   -> wrongBg
+                else        -> Color.Transparent
+            }
+            val label = when {
+                showCorrect -> "✓"
+                showWrong   -> "✗"
+                else        -> listOf("A", "B", "C", "D").getOrNull(n - 1) ?: "?"
+            }
+            if (i > 0) Box(Modifier.fillMaxWidth().height(0.5.dp).background(onSurface.copy(alpha = 0.12f)))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .background(bg)
+                    .then(if (answered == null) Modifier.clickable { onAnswer(n) } else Modifier)
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(label, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = accent,
+                    modifier = Modifier.width(22.dp))
+                Text(text, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    color = if (answered != null && !showCorrect && !showWrong)
+                        MaterialTheme.colorScheme.onSurfaceVariant else onSurface,
+                    fontFamily = NotoSansBengali, lineHeight = 17.sp,
+                    modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+// ডিজাইন ২ — কার্ড/মডার্ন: প্রতিটা অপশন আলাদা কার্ড (আগের লুকই)
+@Composable
+fun McqOptionsCard(item: QuestionItem, onAnswer: (Int) -> Unit) {
     val answered = item.answerState as? AnswerState.McqSelected
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
