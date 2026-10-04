@@ -932,9 +932,13 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     // ── Load active users (Admin) ─────────────────────────────
     fun loadActiveUsers() {
         if (!_state.value.isAdmin) return
+        // অফলাইনে নেটওয়ার্ক কল না করা — আগে এটা ঝুলে থাকত (অ্যাপ ধীর লাগত) আর লাল "ইউজার লিস্ট খালি" দেখাত
+        if (!isReallyOnline()) return
         viewModelScope.launch {
             try {
-                val users = com.hanif.smartstudy.data.remote.UserSyncService.fetchActiveUsers()
+                val users = kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                    com.hanif.smartstudy.data.remote.UserSyncService.fetchActiveUsers()
+                } ?: return@launch
                 _state.update { it.copy(activeUsers = users, error = if (users.isEmpty()) "ইউজার লিস্ট খালি (${users.size})" else null) }
             } catch (e: Exception) {
                 Log.e("Admin", "loadActiveUsers: ${e.message}")
@@ -1023,6 +1027,22 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── সত্যিকারের অনলাইন কিনা (admin edit/delete/move সব জায়গায় একই চেক) ──
+    // আগে শুধু NET_CAPABILITY_INTERNET দেখা হতো — ডেটা/ওয়াইফাই "সংযুক্ত" কিন্তু আসলে নেট নেই
+    // এমন অবস্থায়ও সেটা true হয়, ফলে অ্যাপ ধরে নিত অনলাইন, GAS কলে ৩০ সেকেন্ড আটকে থাকত,
+    // আর ততক্ষণ Sync ট্যাবে pending আইটেম দেখা যেত না + অ্যাপ ধীর লাগত।
+    // এখন VALIDATED (সত্যিই নেট পৌঁছাচ্ছে) লাগে, আর ম্যানুয়াল "অফলাইন মোড" চালু থাকলেও অফলাইন ধরা হয়।
+    private fun isReallyOnline(): Boolean {
+        if (session.isOfflineMode()) return false
+        return try {
+            val cm = getApplication<android.app.Application>()
+                .getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (e: Exception) { false }
+    }
+
     // ── Admin: Edit Question (offline-aware) ──────────────────
     fun adminEditQuestion(sheet: String, rowKey: String, fields: Map<String, String>, questionPreview: String = "") {
         android.util.Log.d("AdminEdit", "adminEditQuestion called: sheet=$sheet rowKey='$rowKey' fields=$fields isAdmin=${_state.value.isAdmin}")
@@ -1079,12 +1099,15 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     val cm = getApplication<android.app.Application>()
                         .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                             as android.net.ConnectivityManager
-                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    val isOnline = isReallyOnline()
                     android.util.Log.d("AdminEdit", "background sync: isOnline=$isOnline")
 
                     if (isOnline) {
-                        when (val r = adminUpdateField(sheet, rowKey, fields)) {
+                        // ১০ সেকেন্ডে সাড়া না এলে ব্যর্থ ধরে queue-তে রাখা হয় (৩০-২৮০ সেকেন্ড আটকে না থেকে)
+                        val sendResult = kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                            adminUpdateField(sheet, rowKey, fields)
+                        } ?: com.hanif.smartstudy.data.remote.ApiResult.Error("timeout")
+                        when (val r = sendResult) {
                             is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                 android.util.Log.i("AdminEdit", "Background sync SUCCESS: $sheet/$rowKey")
                             }
@@ -1156,8 +1179,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 val cm = getApplication<android.app.Application>()
                     .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                         as android.net.ConnectivityManager
-                val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                    ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                val isOnline = isReallyOnline()
 
                 if (isOnline) {
                     when (val r = adminDeleteRow(sheet, rowKey)) {
@@ -1561,8 +1583,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     val cm = getApplication<android.app.Application>()
                         .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                             as android.net.ConnectivityManager
-                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    val isOnline = isReallyOnline()
                     android.util.Log.d("AdminDeleteSubject", "background sync: isOnline=$isOnline")
 
                     if (isOnline) {
@@ -1708,8 +1729,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     val cm = getApplication<android.app.Application>()
                         .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                             as android.net.ConnectivityManager
-                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    val isOnline = isReallyOnline()
 
                     if (isOnline) {
                         var realTopicId = finalNewTopicId
@@ -1830,8 +1850,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     val cm = getApplication<android.app.Application>()
                         .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
                             as android.net.ConnectivityManager
-                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    val isOnline = isReallyOnline()
 
                     if (isOnline) {
                         when (val r = com.hanif.smartstudy.data.remote.GasContentService
