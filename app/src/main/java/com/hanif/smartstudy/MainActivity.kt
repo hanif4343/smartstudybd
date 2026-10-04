@@ -187,6 +187,7 @@ class MainActivity : ComponentActivity() {
             val darkFlow  = remember { session.darkModeFlow() }
             val themeFlow = remember { session.themeColorFlow() }
             val scaleFlow = remember { session.fontScaleFlow() }
+            val mcqFlow   = remember { session.mcqViewStyleFlow() }
             // ── PERF FIX: আগে initial ভ্যালু হিসেবে session.isDarkMode()/getThemeColor()/
             // getFontScale() সরাসরি কল হতো — এগুলো Composable body-র সাধারণ argument
             // বলে প্রতিবার recomposition এ আবার কল হতো। remember দিয়ে শুধু প্রথমবারই
@@ -194,16 +195,21 @@ class MainActivity : ComponentActivity() {
             val initialDark  = remember { session.isDarkMode() }
             val initialTheme = remember { session.getThemeColor() }
             val initialScale = remember { session.getFontScale() }
+            val initialMcq   = remember { session.getMcqViewStyle() }
             val isDark    by darkFlow.collectAsState(initial = initialDark)
             val themeStr  by themeFlow.collectAsState(initial = initialTheme)
             val uiScale   by scaleFlow.collectAsState(initial = initialScale)
+            val mcqStyleId by mcqFlow.collectAsState(initial = initialMcq)
             val appTheme  = themeFromString(themeStr)
 
             val isOnline by ConnectivityObserver.observe(this@MainActivity)
                 .collectAsState(initial = true)
             val pendingSync = remember { session.getPendingSyncCount() }
 
-            SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
+            SmartStudyTheme(
+                darkTheme = isDark, appTheme = appTheme, uiScale = uiScale,
+                mcqViewStyle = com.hanif.smartstudy.ui.theme.McqViewStyle.fromId(mcqStyleId)
+            ) {
                 // ── টেক্সট সিলেকশন টুলবার (Copy/Select all/Share/Web Search/Read Aloud) ──
                 // পুরো অ্যাপের রুটে একবার wrap করলেই সব স্ক্রিনের SelectionContainer এ
                 // এই ৫টা অপশনই আসবে — আলাদা করে প্রতিটা স্ক্রিন এডিট করার দরকার নেই।
@@ -265,9 +271,6 @@ class MainActivity : ComponentActivity() {
             // background coroutine এ fire-and-forget করা হচ্ছে, UI থ্রেড ব্লক হয় না।
             lifecycleScope.launch(Dispatchers.IO) {
                 session.recordSessionMinutes(sessionMin)
-                // "আমার সময়" ফিচার — একই sessionMin সংখ্যাটা দিনের bucket-এও যোগ হয়
-                // (নতুন কোনো প্যারালাল টাইমার না, দেখো util/AppUsageTracker.kt)
-                com.hanif.smartstudy.util.AppUsageTracker.addMinutes(applicationContext, sessionMin)
             }
         }
         SmartStudyFirebaseService.updatePresence(this, false)
