@@ -1,0 +1,5 @@
+GitHub repo থেকে এই ফাইলগুলো DELETE করুন (না করলেও build ঠিক হবে, তবে অপ্রয়োজনীয় পড়ে থাকবে):
+
+app/src/main/java/com/hanif/smartstudy/util/DeviceUsageStats.kt
+app/src/main/java/com/hanif/smartstudy/ui/menu/StudyTimeScreen.kt
+app/src/main/java/com/hanif/smartstudy/util/AppUsageTracker.kt
