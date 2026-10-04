@@ -565,32 +565,8 @@ object FirebaseDataService {
         return adminUpdateQuestionField(sheet, rowKey, fields)
     }
 
-    /** Admin: নতুন question Firebase এ push করো */
-    suspend fun adminAddQuestion(sheet: String, fields: Map<String, String>): ApiResult<String> =
-        withContext(Dispatchers.IO) {
-            try {
-                val auth = authQuery()
-                val url  = "${BuildConfig.FIREBASE_URL.trimEnd('/')}/$sheet.json$auth"
-                val obj  = JsonObject().apply {
-                    fields.forEach { (k, v) -> addProperty(k, v) }
-                    addProperty("createdAt", System.currentTimeMillis())
-                    // নতুন প্রশ্নও "updatedAt" দিয়ে স্ট্যাম্প — নইলে delta sync query তে ধরা পড়বে না
-                    addProperty("updatedAt", System.currentTimeMillis())
-                }
-                val body = obj.toString().toRequestBody("application/json".toMediaType())
-                val resp = client.newCall(Request.Builder().url(url).post(body).build()).execute()
-                val respBody = resp.body?.string() ?: ""
-                resp.close()
-                if (resp.isSuccessful) {
-                    val pushKey = try {
-                        com.google.gson.JsonParser.parseString(respBody)
-                            .asJsonObject.get("name")?.asString ?: ""
-                    } catch (e: Exception) { "" }
-                    touchMetaUpdatedAt()
-                    ApiResult.Success(pushKey)
-                } else ApiResult.Error("Firebase error: ${resp.code}")
-            } catch (e: Exception) { ApiResult.Error(e.message ?: "Add failed") }
-        }
+    // adminAddQuestion() (Firebase-এ সরাসরি প্রশ্ন push) Phase 2-তে সরানো হয়েছে — কোনো caller ছিল না,
+    // আর প্রশ্নের master content Firebase-এ লেখা যাবে না (content = GAS/CDN)।
 
     // ── fetchPendingReports()/resolveReportAndNotify() সরানো হলো — MenuViewModel-এর
     // loadPendingReports/resolveReport wrapper (এখন-মোছা) ছাড়া আর কোনো caller ছিল না,
@@ -602,143 +578,9 @@ object FirebaseDataService {
     // wrapper (এখন-মোছা) ছাড়া আর কোনো caller ছিল না, নিশ্চিত করে মুছে ফেলা হলো। ──
 
 
-    /**
-     * Admin: একটি Subject অথবা SubTopic এর নাম rename করো।
-     * - renameSubTopic = false হলে: subject নাম বদলাবে (subTopic ফাঁকা রাখলে সব sub_topic সহ পুরো subject rename হবে)
-     * - renameSubTopic = true হলে: শুধু sub_topic নাম বদলাবে (subject অপরিবর্তিত থাকবে, subject দিয়ে scope করা হয়)
-     * sheets প্যারামিটারে একটি বা একাধিক sheet ("Quiz","QBank","Study") দেওয়া যাবে।
-     * প্রতিটি sheet এ matching সব row খুঁজে বের করে শুধু subject/sub_topic ফিল্ড PATCH করা হয় —
-     * বাকি সব ফিল্ড (question, options, answer, audience ইত্যাদি) অপরিবর্তিত থাকে।
-     */
-    @Deprecated(
-        "পুরনো 'content-পড়ার' পথ — পুরো Quiz/QBank/Study node Firebase থেকে ডাউনলোড করে subject/" +
-        "sub_topic টেক্সট মিলিয়ে rename করে (একই fragile pattern যেটা এই ফাইলের টপ কমেন্টে বর্ণিত " +
-        "invisible-character bug-এর কারণ ছিল)। Admin Web App-এ এটা ইতিমধ্যে GAS `renameReferenceItem` " +
-        "action (subject_id/topic_id দিয়ে ঠিক ১টা reference-রো বদলায়, Quiz/QBank/Study টাচ করে না) " +
-        "দিয়ে প্রতিস্থাপিত হয়ে গেছে (Phase 5, ReferenceManagerTab.jsx)। Phase 6 item 13-এ AdminPage.kt " +
-        "থেকে rename ফিচার সরে যাবে — subject/topic rename এখন থেকে শুধু Admin Web App দিয়ে হবে।"
-    )
-    suspend fun adminRenameSubjectOrTopic(
-        sheets         : List<String>,
-        oldSubject     : String,
-        oldSubTopic    : String,   // ফাঁকা হলে পুরো subject rename (renameSubTopic=false এর সময়)
-        newName        : String,
-        renameSubTopic : Boolean
-    ): ApiResult<Int> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            var totalUpdated = 0
-            var anySheetHadData = false
+    // adminRenameSubjectOrTopic() Phase 2-তে সরানো হয়েছে (@Deprecated, caller ছিল না, Firebase-এ content লিখত)।
 
-            for (sheet in sheets) {
-                val json = client.newCall(
-                    Request.Builder().url("$base/$sheet.json$auth").get().build()
-                ).execute().body?.string() ?: "null"
-                if (json == "null") continue
-
-                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
-                if (raw.isEmpty()) continue
-                anySheetHadData = true
-
-                val matching = raw.filter { (_, v) ->
-                    val s  = normalizeFieldValue(v["subject"]?.toString())
-                    val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
-                    if (renameSubTopic) {
-                        // SubTopic rename — subject এর মধ্যেই scope, exact sub_topic match লাগবে
-                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true) &&
-                        st.equals(normalizeFieldValue(oldSubTopic), ignoreCase = true)
-                    } else {
-                        // Subject rename — পুরো subject এর সব প্রশ্ন (sub_topic যাই হোক)
-                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true)
-                    }
-                }
-                if (matching.isEmpty()) continue
-
-                matching.forEach { (key, _) ->
-                    val obj = JsonObject().apply {
-                        if (renameSubTopic) addProperty("sub_topic", newName.trim())
-                        else addProperty("subject", newName.trim())
-                        addProperty("updatedAt", System.currentTimeMillis())
-                    }
-                    val body = obj.toString().toRequestBody("application/json".toMediaType())
-                    val resp = client.newCall(
-                        Request.Builder().url("$base/$sheet/$key.json$auth").patch(body).build()
-                    ).execute()
-                    if (resp.isSuccessful) totalUpdated++
-                    resp.close()
-                }
-            }
-
-            if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
-            if (totalUpdated == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
-            touchMetaUpdatedAt()
-            ApiResult.Success(totalUpdated)
-        } catch (e: Exception) { ApiResult.Error(e.message ?: "Rename failed") }
-    }
-
-    /**
-     * Admin: Subject/SubTopic অনুযায়ী মিলে যাওয়া সব প্রশ্ন Firebase থেকে ডিলিট করো —
-     * adminRenameSubjectOrTopic-এর মতোই matching logic (subject+sub_topic scope), শুধু
-     * rename এর বদলে প্রতিটা matching key-তে DELETE কল যায়। deleteSubTopic=false হলে
-     * পুরো subject-এর সব প্রশ্ন (সব অধ্যায়সহ) মুছে যায়।
-     */
-    @Deprecated(
-        "পুরনো 'content-পড়ার' পথ — দেখো adminRenameSubjectOrTopic এর @Deprecated নোট, একই কারণ " +
-        "প্রযোজ্য। Admin Web App-এ এটা GAS `deleteByReferenceId` action (row_start/row_count " +
-        "index ব্যবহার করে single contiguous delete, বড় Subject-এও দ্রুত) দিয়ে প্রতিস্থাপিত " +
-        "হয়ে গেছে (Phase 5, DeleteTab.jsx)। Phase 6 item 13-এ AdminPage.kt থেকে subject/topic " +
-        "delete ফিচার সরে যাবে।"
-    )
-    suspend fun adminDeleteBySubjectOrTopic(
-        sheets         : List<String>,
-        oldSubject     : String,
-        oldSubTopic    : String,
-        deleteSubTopic : Boolean
-    ): ApiResult<Int> = withContext(Dispatchers.IO) {
-        try {
-            val auth = authQuery()
-            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
-            var totalDeleted = 0
-            var anySheetHadData = false
-
-            for (sheet in sheets) {
-                val json = client.newCall(
-                    Request.Builder().url("$base/$sheet.json$auth").get().build()
-                ).execute().body?.string() ?: "null"
-                if (json == "null") continue
-
-                val raw: Map<String, Map<String, Any>> = parseRowMap(json)
-                if (raw.isEmpty()) continue
-                anySheetHadData = true
-
-                val matching = raw.filter { (_, v) ->
-                    val s  = normalizeFieldValue(v["subject"]?.toString())
-                    val st = normalizeFieldValue((v["sub_topic"] ?: v["subTopic"])?.toString())
-                    if (deleteSubTopic) {
-                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true) &&
-                        st.equals(normalizeFieldValue(oldSubTopic), ignoreCase = true)
-                    } else {
-                        s.equals(normalizeFieldValue(oldSubject), ignoreCase = true)
-                    }
-                }
-                if (matching.isEmpty()) continue
-
-                matching.forEach { (key, _) ->
-                    val resp = client.newCall(
-                        Request.Builder().url("$base/$sheet/$key.json$auth").delete().build()
-                    ).execute()
-                    if (resp.isSuccessful) totalDeleted++
-                    resp.close()
-                }
-            }
-
-            if (!anySheetHadData) return@withContext ApiResult.Error("কোনো sheet এ ডেটা নেই")
-            if (totalDeleted == 0) return@withContext ApiResult.Error("কোনো matching প্রশ্ন পাওয়া যায়নি")
-            touchMetaUpdatedAt()
-            ApiResult.Success(totalDeleted)
-        } catch (e: Exception) { ApiResult.Error(e.message ?: "Delete failed") }
-    }
+    // adminDeleteBySubjectOrTopic() Phase 2-তে সরানো হয়েছে (@Deprecated, caller ছিল না, Firebase-এ content লিখত)।
 
     // ── 🔔 Notification inbox ─────────────────────────────────────────
     // "Notifications/{phone}/{key}" node — এই একই node NotificationPollWorker.kt
