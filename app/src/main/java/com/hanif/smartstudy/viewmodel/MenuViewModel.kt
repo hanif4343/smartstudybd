@@ -51,6 +51,7 @@ data class MenuUiState(
     val isDarkMode      : Boolean            = false,
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
+    val mcqViewStyle    : String             = "card",
     val isOfflineMode   : Boolean            = false,
     // ── "📥 সব প্রশ্ন ডাউনলোড করুন" বাটন — অফলাইন মোড কার্ডের নিচে দেখানো হয় ──
     val isDownloadingAll     : Boolean       = false,
@@ -126,17 +127,6 @@ data class MenuUiState(
     // Delete Question (পুরো কার্ড — প্রশ্ন+অপশন+উত্তর+ব্যাখ্যা)
     val isDeletingQuestion: Boolean          = false,
     val deleteSuccessMsg  : String?          = null,
-    // Add Question
-    val isAddingQuestion  : Boolean          = false,
-    val addQuestionMsg    : String?          = null,
-    // Bulk Question Uploader (admin app এর মতো — local-first, sync হবে পরে)
-    val isBulkUploading   : Boolean          = false,
-    val bulkUploadTotal   : Int              = 0,
-    val bulkUploadDone    : Int              = 0,
-    val bulkUploadSent    : Int              = 0,
-    val bulkUploadFailed  : Int              = 0,
-    val bulkUploadLog     : List<String>     = emptyList(),
-    val bulkUploadResultMsg: String?         = null,
     // Subject/SubTopic Rename
     val isRenaming        : Boolean          = false,
     val renameMsg         : String?          = null,
@@ -146,12 +136,6 @@ data class MenuUiState(
     val isMovingContent   : Boolean          = false,
     val moveContentMsg    : String?          = null,
     // Model Test bulk-generate (Admin)
-    // ── Subject/SubTopic taxonomy (dropdown suggestions এর জন্য) ──
-    // key: sheet ("Quiz"/"QBank"/"Study") → distinct subject list
-    val adminSubjectsBySheet  : Map<String, List<String>> = emptyMap(),
-    // key: "sheet|subject" → distinct subTopic list
-    val adminSubTopicsByKey   : Map<String, List<String>> = emptyMap(),
-    val isLoadingTaxonomy     : Boolean      = false,
     // Offline admin edits
     val pendingEdits      : List<com.hanif.smartstudy.data.local.PendingAction> = emptyList(),
     val isSyncingEdits    : Boolean          = false,
@@ -311,6 +295,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val localUser  = session.getCurrentUser()
             val isDark     = session.isDarkMode()
+            val mcqStyle   = session.getMcqViewStyle()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
             val offlineOn  = session.isOfflineMode()
@@ -379,6 +364,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     user           = localUser,
                     isAdmin        = localUser?.isAdmin() ?: false,
                     isDarkMode     = isDark,
+                    mcqViewStyle   = mcqStyle,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
                     isOfflineMode  = offlineOn,
@@ -522,6 +508,14 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             session.setDarkMode(on)
             _state.update { it.copy(isDarkMode = on) }
+        }
+    }
+
+    // ── MCQ ভিউ স্টাইল ────────────────────────────────────────
+    fun setMcqViewStyle(id: String) {
+        viewModelScope.launch {
+            session.setMcqViewStyle(id)
+            _state.update { it.copy(mcqViewStyle = id) }
         }
     }
 
@@ -1345,221 +1339,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Admin: Report Queue ফাংশন দুটো (loadPendingReports, resolveReport)
     // সম্পূর্ণ সরানো হলো — উপরের কমেন্ট দেখুন (Phase 6 item 13, dead code)। ──
-    // ── Admin: Add New Question (offline-aware) ───────────────
-    fun adminAddQuestion(sheet: String, fields: Map<String, String>) {
-        if (!_state.value.isAdmin) return
-        val questionPreview = fields["question"] ?: ""
-        viewModelScope.launch {
-            _state.update { it.copy(isAddingQuestion = true, addQuestionMsg = null) }
-            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            // অস্থায়ী লোকাল id — background sync সফল হলে আসল Firebase/Sheet id
-            // দিয়ে replace হয়ে যাবে (replaceLocalIdAndPersist দিয়ে), fail/offline
-            // হলে এটাই থেকে যাবে যতক্ষণ না পরে sync হয়
-            val localId = "-local" + System.currentTimeMillis().toString(36) +
-                    (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
-            // ── FIX: adminEditQuestion-এর মতোই — আগে network কল (Firebase/Sheet)
-            // শেষ হওয়া পর্যন্ত অপেক্ষা করে তারপর local cache-এ যোগ হতো, তাই "নতুন
-            // প্রশ্ন যোগ" করাও কয়েক সেকেন্ড দেরি করে দেখাতো। এখন প্রথমে localId
-            // দিয়ে সাথে সাথেই local cache + UI তে যোগ হয়ে যায়, network sync
-            // সম্পূর্ণ ব্যাকগ্রাউন্ডে/silently চলে। ──
-            try {
-                repo.addContentAndPersist(sheet, localId, fields)
-                _state.update { it.copy(isAddingQuestion = false,
-                    addQuestionMsg = "✅ প্রশ্ন যোগ হয়েছে!",
-                    contentEditVersion = it.contentEditVersion + 1) }
-            } catch (e: Exception) {
-                _state.update { it.copy(isAddingQuestion = false,
-                    addQuestionMsg = "❌ সংরক্ষণ ব্যর্থ হয়েছে: ${e.message ?: "unknown error"}") }
-                return@launch
-            }
-
-            launch {
-                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-                try {
-                    val cm = getApplication<android.app.Application>()
-                        .getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
-                            as android.net.ConnectivityManager
-                    val isOnline = cm.getNetworkCapabilities(cm.activeNetwork)
-                        ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-
-                    if (isOnline) {
-                        when (val r = adminAddRow(sheet, fields)) {
-                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                                // আসল server id দিয়ে অস্থায়ী localId replace করো —
-                                // UI-তে প্রশ্নটা যেখানে ছিল সেখানেই থাকবে, শুধু id বদলাবে
-                                repo.replaceLocalIdAndPersist(sheet, localId, r.data)
-                            }
-                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                                loadPendingEdits()
-                            }
-                        }
-                    } else {
-                        q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                        loadPendingEdits()
-                    }
-                } catch (e: Exception) {
-                    try {
-                        q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                        loadPendingEdits()
-                    } catch (_: Exception) { }
-                }
-            }
-        }
-    }
-
-    fun clearAddQuestionMsg() { _state.update { it.copy(addQuestionMsg = null) } }
-
-    // ── Admin: Bulk Question Upload (offline-aware, local-first) ───────────────
-    // admin-app এর BulkUploaderPage এর মতোই কাজ করে: একসাথে অনেক প্রশ্ন { } ব্লক বা
-    // লাইন-বাই-লাইন পার্স করে একটার পর একটা adminAddQuestion-এর মতোই সেভ করে।
-    // প্রতিটি আইটেম আগে সাথে সাথে লোকাল cache-এ (in-memory + disk) দেখানো হয়,
-    // তারপর অনলাইন থাকলে Firebase-এ push করার চেষ্টা হয়; fail/offline হলে
-    // PendingQueue-তে জমা থাকে এবং নেট/quota ঠিক হলে SyncWorker স্বয়ংক্রিয়ভাবে sync করে দেয়।
-    private var bulkUploadJob: kotlinx.coroutines.Job? = null
-
-    fun adminStopBulkUpload() { bulkUploadJob?.cancel() }
-
-    fun adminClearBulkUploadResult() { _state.update { it.copy(bulkUploadResultMsg = null, bulkUploadLog = emptyList()) } }
-
-    fun adminBulkAddQuestions(sheet: String, entries: List<Map<String, String>>) {
-        if (!_state.value.isAdmin) return
-        if (entries.isEmpty()) return
-        bulkUploadJob?.cancel()
-        bulkUploadJob = viewModelScope.launch {
-            _state.update { it.copy(
-                isBulkUploading = true, bulkUploadTotal = entries.size, bulkUploadDone = 0,
-                bulkUploadSent = 0, bulkUploadFailed = 0, bulkUploadLog = emptyList(), bulkUploadResultMsg = null
-            ) }
-            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            val q    = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
-            val cm = getApplication<android.app.Application>()
-                .getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-
-            var sent = 0
-            var failed = 0
-            val BATCH = 6
-            var i = 0
-            while (i < entries.size) {
-                ensureActive()
-                val batch = entries.subList(i, minOf(i + BATCH, entries.size))
-
-                // ধাপ ১: নেটওয়ার্ক কল (Firebase push) গুলো একসাথে সমান্তরালে চালাও — দ্রুত হওয়ার জন্য
-                val netResults = batch.map { fields ->
-                    async(kotlinx.coroutines.Dispatchers.IO) {
-                        val isOnline = try {
-                            cm.getNetworkCapabilities(cm.activeNetwork)
-                                ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-                        } catch (e: Exception) { false }
-                        if (!isOnline) {
-                            fields to null
-                        } else {
-                            val r = try {
-                                adminAddRow(sheet, fields)
-                            } catch (e: Exception) {
-                                com.hanif.smartstudy.data.remote.ApiResult.Error(e.message ?: "unknown")
-                            }
-                            fields to r
-                        }
-                    }
-                }.map { it.await() }
-
-                // ধাপ ২: লোকাল cache (in-memory + disk) এ লেখা — একটার পর একটা (সমান্তরাল লিখলে
-                // ContentRepository-র in-memory cache race-condition-এ পড়তে পারে বলে সিরিয়ালি করা হলো)
-                netResults.forEach { (fields, r) ->
-                    val questionPreview = fields["question"] ?: ""
-                    val localId = "-local" + System.currentTimeMillis().toString(36) +
-                            (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
-                    val (ok, logLine) = try {
-                        when (r) {
-                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                                repo.addContentAndPersist(sheet, r.data, fields)
-                                true to "✔ ${questionPreview.take(45)}"
-                            }
-                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                                repo.addContentAndPersist(sheet, localId, fields)
-                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                                false to "⚠ সংরক্ষিত (sync বাকি): ${questionPreview.take(35)} [${r.message}]"
-                            }
-                            null -> {
-                                repo.addContentAndPersist(sheet, localId, fields)
-                                q.enqueueAdminAdd(sheet, localId, fields, questionPreview)
-                                false to "📴 অফলাইনে সংরক্ষিত: ${questionPreview.take(40)}"
-                            }
-                        }
-                    } catch (e: Exception) {
-                        false to "❌ ব্যর্থ: ${questionPreview.take(35)} [${e.message ?: "unknown"}]"
-                    }
-                    if (ok) sent++ else failed++
-                    _state.update {
-                        it.copy(
-                            bulkUploadDone   = it.bulkUploadDone + 1,
-                            bulkUploadSent   = sent,
-                            bulkUploadFailed = failed,
-                            bulkUploadLog    = (it.bulkUploadLog + logLine).takeLast(100),
-                            contentEditVersion = it.contentEditVersion + 1
-                        )
-                    }
-                }
-                i += BATCH
-            }
-            loadPendingEdits()
-            _state.update { it.copy(
-                isBulkUploading = false,
-                bulkUploadResultMsg = "✅ সম্পন্ন — মোট ${entries.size}টি, সফল $sent টি" +
-                    (if (failed > 0) ", অফলাইন/pending $failed টি (auto sync হবে)" else "")
-            ) }
-        }
-    }
-
-    // ── Admin: Subject/SubTopic taxonomy লোড করো (dropdown suggestion এর জন্য) ──
-    // Rename/Bulk/AddQuestion — এই তিনটা tab এই একই taxonomy share করে, তাই
-    // একবার লোড করে state এ cache রাখা হয় (পুরো content fetch করা লাগে,
-    // তাই বারবার না করাই ভালো — admin চাইলে refresh icon দিয়ে আবার লোড করবে)।
-    fun loadAdminTaxonomy(forceRefresh: Boolean = false) {
-        if (!_state.value.isAdmin) return
-        if (_state.value.adminSubjectsBySheet.isNotEmpty() && !forceRefresh) return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoadingTaxonomy = true) }
-            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            when (val r = repo.getContent(forceRefresh)) {
-                is com.hanif.smartstudy.data.repository.DataState.Success -> {
-                    val content = r.data
-                    val subjectsBySheet = mutableMapOf<String, List<String>>()
-                    val subTopicsByKey  = mutableMapOf<String, MutableSet<String>>()
-
-                    fun <T> index(sheet: String, items: List<T>, subjectOf: (T) -> String?, subTopicOf: (T) -> String?) {
-                        val subjects = sortedSetOf<String>()
-                        items.forEach { item ->
-                            val subj = subjectOf(item)?.trim().orEmpty()
-                            if (subj.isBlank()) return@forEach
-                            subjects.add(subj)
-                            val sub = subTopicOf(item)?.trim().orEmpty()
-                            if (sub.isNotBlank()) {
-                                subTopicsByKey.getOrPut("$sheet|$subj") { sortedSetOf() }.add(sub)
-                            }
-                        }
-                        subjectsBySheet[sheet] = subjects.toList()
-                    }
-
-                    index("Quiz",  content.quiz,  { it.subject }, { it.subTopic })
-                    index("QBank", content.qbank, { it.subject }, { it.subTopic })
-                    index("Study", content.study, { it.subject }, { it.subTopic })
-
-                    _state.update { it.copy(
-                        isLoadingTaxonomy    = false,
-                        adminSubjectsBySheet = subjectsBySheet,
-                        adminSubTopicsByKey  = subTopicsByKey.mapValues { (_, v) -> v.toList() }
-                    )}
-                }
-                is com.hanif.smartstudy.data.repository.DataState.Error -> {
-                    _state.update { it.copy(isLoadingTaxonomy = false) }
-                }
-                else -> _state.update { it.copy(isLoadingTaxonomy = false) }
-            }
-        }
-    }
-
     // ── Admin: Bulk Audience Update ফাংশন সরানো হলো — উপরের কমেন্ট দেখুন
     // (Phase 6 item 13, dead code)। clearBulkMsg() নিচেই আছে, এখনো অন্য কোথাও
     // ব্যবহার হতে পারে বলে স্পর্শ করা হয়নি। ──
