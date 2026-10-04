@@ -36,6 +36,9 @@ class PendingQueue(private val context: Context) {
         val queue = getAll().toMutableList()
         queue.add(action)
         save(queue)
+        // নেট ফিরলেই যেন নিজে নিজে sync হয় — WorkManager শুধু তখনই চালায় যখন নেটওয়ার্ক সংযুক্ত
+        // (আগে শুধু ১৫ মিনিটের periodic worker ভরসা ছিল, তাই নেট আসার পরও আইটেম পড়ে থাকত)
+        try { com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(context) } catch (e: Exception) { /* queue সেভ হয়ে গেছে; পরের রানে sync হবে */ }
     }
 
     // ── Quiz answer offline ──
