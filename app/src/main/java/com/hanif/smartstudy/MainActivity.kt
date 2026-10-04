@@ -187,7 +187,6 @@ class MainActivity : ComponentActivity() {
             val darkFlow  = remember { session.darkModeFlow() }
             val themeFlow = remember { session.themeColorFlow() }
             val scaleFlow = remember { session.fontScaleFlow() }
-            val mcqFlow   = remember { session.mcqViewStyleFlow() }
             // ── PERF FIX: আগে initial ভ্যালু হিসেবে session.isDarkMode()/getThemeColor()/
             // getFontScale() সরাসরি কল হতো — এগুলো Composable body-র সাধারণ argument
             // বলে প্রতিবার recomposition এ আবার কল হতো। remember দিয়ে শুধু প্রথমবারই
@@ -195,21 +194,16 @@ class MainActivity : ComponentActivity() {
             val initialDark  = remember { session.isDarkMode() }
             val initialTheme = remember { session.getThemeColor() }
             val initialScale = remember { session.getFontScale() }
-            val initialMcq   = remember { session.getMcqViewStyle() }
             val isDark    by darkFlow.collectAsState(initial = initialDark)
             val themeStr  by themeFlow.collectAsState(initial = initialTheme)
             val uiScale   by scaleFlow.collectAsState(initial = initialScale)
-            val mcqStyleId by mcqFlow.collectAsState(initial = initialMcq)
             val appTheme  = themeFromString(themeStr)
 
             val isOnline by ConnectivityObserver.observe(this@MainActivity)
                 .collectAsState(initial = true)
             val pendingSync = remember { session.getPendingSyncCount() }
 
-            SmartStudyTheme(
-                darkTheme = isDark, appTheme = appTheme, uiScale = uiScale,
-                mcqViewStyle = com.hanif.smartstudy.ui.theme.McqViewStyle.fromId(mcqStyleId)
-            ) {
+            SmartStudyTheme(darkTheme = isDark, appTheme = appTheme, uiScale = uiScale) {
                 // ── টেক্সট সিলেকশন টুলবার (Copy/Select all/Share/Web Search/Read Aloud) ──
                 // পুরো অ্যাপের রুটে একবার wrap করলেই সব স্ক্রিনের SelectionContainer এ
                 // এই ৫টা অপশনই আসবে — আলাদা করে প্রতিটা স্ক্রিন এডিট করার দরকার নেই।
@@ -228,13 +222,8 @@ class MainActivity : ComponentActivity() {
                         )
                         ToastHost(state = toastState)
 
-                        OfflineBanner(
-                            isOffline        = !isOnline,
-                            pendingSyncCount = pendingSync,
-                            modifier         = Modifier
-                                .align(Alignment.BottomCenter)
-                                .navigationBarsPadding()
-                        )
+                        // নিচের "ইন্টারনেট সংযোগ নেই" বার সরানো হলো — ওপরের লাল পট্টিই যথেষ্ট
+                        // (একই কথা দুবার দেখাত)। pending sync সংখ্যা Admin → Sync ট্যাবে দেখা যায়।
 
                         // ── স্ট্রিক ও অ্যাচিভমেন্ট ইনফো-কার্ড (সাবমিটের আগে দেখা যেত) —
                         // ইউজারের অনুরোধে সরিয়ে দেওয়া হলো ──
