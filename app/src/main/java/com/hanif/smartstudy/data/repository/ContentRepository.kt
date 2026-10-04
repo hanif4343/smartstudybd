@@ -589,14 +589,7 @@ class ContentRepository(private val context: Context) {
     suspend fun downloadAllContent(
         onProgress: suspend (done: Int, total: Int) -> Unit
     ): DownloadAllResult = withContext(Dispatchers.IO) {
-        if (!isOnline()) {
-            session.saveContentSyncFailure("ইন্টারনেট সংযোগ ছিল না")
-            return@withContext DownloadAllResult(startedOk = false)
-        }
-
-        // ── Phase 4: এই সিঙ্কে যে manifest ভার্সনের কনটেন্ট আনা হচ্ছে সেটা আগেই জেনে রাখি।
-        // ব্যর্থ হলে null — তখন সিঙ্ক চলবে, কিন্তু ইনস্টল-ভার্সন আপডেট হবে না। ──
-        val syncManifest = fetchLatestManifestFresh()
+        if (!isOnline()) return@withContext DownloadAllResult(startedOk = false)
 
         // সবার আগে reference (subjects/topics) ফ্রেশ করে নেওয়া — নাহলে নতুন যোগ হওয়া
         // subject/topic Room-এ না থাকলে ডাউনলোড-লিস্টেই বাদ পড়ে যাবে
@@ -639,14 +632,6 @@ class ContentRepository(private val context: Context) {
             onProgress(done.coerceAtMost(total), total)
         }
         Log.d("Repo", "downloadAllContent: total=$total failed=$failed")
-        // ── Phase 4: স্ট্যাটাস সেভ — লোকাল কনটেন্ট কোনো অবস্থাতেই এখানে মুছে যায় না ──
-        if (failed == 0 && syncManifest != null) {
-            session.saveContentSyncSuccess(syncManifest.version)
-        } else if (failed == 0) {
-            session.saveContentSyncFailure("সার্ভারের ভার্সন জানা যায়নি — টপিক নামানো হয়েছে, ভার্সন যাচাই হয়নি")
-        } else {
-            session.saveContentSyncFailure("$failed টা টপিক নামানো যায়নি — আবার Sync করুন (পুরনো কনটেন্ট ঠিক আছে)")
-        }
         DownloadAllResult(startedOk = true, total = total, failed = failed)
     }
 
@@ -883,15 +868,6 @@ class ContentRepository(private val context: Context) {
         val fresh = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return _manifestCache
         _manifestCache = fresh
         _manifestCachedAt = now
-        return fresh
-    }
-
-    /** TTL এড়িয়ে manifest সরাসরি সার্ভার থেকে — "Sync Now"/"আপডেট আছে কিনা" চেকের জন্য।
-     *  ব্যর্থ হলে null (পুরনো cache ফেরত দেওয়া হয় না, যাতে ভুল "আপ-টু-ডেট" না দেখায়)। */
-    suspend fun fetchLatestManifestFresh(): com.hanif.smartstudy.data.remote.CdnService.Manifest? {
-        val fresh = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return null
-        _manifestCache = fresh
-        _manifestCachedAt = System.currentTimeMillis()
         return fresh
     }
 
