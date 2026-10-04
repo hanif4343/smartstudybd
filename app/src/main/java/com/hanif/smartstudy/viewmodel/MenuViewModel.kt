@@ -51,16 +51,8 @@ data class MenuUiState(
     val isDarkMode      : Boolean            = false,
     val appTheme        : AppTheme           = AppTheme.INDIGO,
     val isSoundOff      : Boolean            = false,
-    val mcqViewStyle    : String             = "card",
     val isOfflineMode   : Boolean            = false,
     // ── "📥 সব প্রশ্ন ডাউনলোড করুন" বাটন — অফলাইন মোড কার্ডের নিচে দেখানো হয় ──
-    // ── কনটেন্ট সিঙ্ক স্ট্যাটাস (Phase 4) ──
-    val contentInstalledVersion : Int         = 0,
-    val contentLatestVersion    : Int         = 0,     // 0 = এখনো চেক করা হয়নি / জানা যায়নি
-    val contentLastSyncAt       : Long        = 0L,
-    val contentSyncError        : String?     = null,
-    val contentCheckMsg         : String?     = null,
-    val isCheckingContentUpdate : Boolean     = false,
     val isDownloadingAll     : Boolean       = false,
     val downloadAllDone      : Int           = 0,
     val downloadAllTotal     : Int           = 0,
@@ -302,7 +294,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val localUser  = session.getCurrentUser()
             val isDark     = session.isDarkMode()
-            val mcqStyle   = session.getMcqViewStyle()
             val theme      = themeFromString(session.getThemeColor())
             val soundOff   = session.isSoundOff()
             val offlineOn  = session.isOfflineMode()
@@ -371,7 +362,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     user           = localUser,
                     isAdmin        = localUser?.isAdmin() ?: false,
                     isDarkMode     = isDark,
-                    mcqViewStyle   = mcqStyle,
                     appTheme       = theme,
                     isSoundOff     = soundOff,
                     isOfflineMode  = offlineOn,
@@ -518,14 +508,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── MCQ ভিউ স্টাইল ────────────────────────────────────────
-    fun setMcqViewStyle(id: String) {
-        viewModelScope.launch {
-            session.setMcqViewStyle(id)
-            _state.update { it.copy(mcqViewStyle = id) }
-        }
-    }
-
     // ── Theme color ───────────────────────────────────────────
 
     fun setTheme(theme: AppTheme) {
@@ -628,38 +610,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     // অ্যাপ ব্যবহার করা যায়। দ্বিতীয়বার চাপলে শুধু নতুন/পরিবর্তিত topic-ই আসবে
     // (ContentRepository.downloadAllContent()-এর hash-check এর কারণে) — তাই নিশ্চিন্তে
     // মাঝে মাঝে চাপা যায়, প্রতিবার সব আবার নামবে না।
-    fun loadContentSyncInfo() {
-        viewModelScope.launch {
-            val info = session.getContentSyncInfo()
-            _state.update { it.copy(
-                contentInstalledVersion = info.installedVersion,
-                contentLastSyncAt       = info.lastSyncAt,
-                contentSyncError        = info.lastError
-            ) }
-        }
-    }
-
-    /** "আপডেট আছে কিনা দেখুন" — শুধু সার্ভারের ভার্সন জানে, কিছু ডাউনলোড করে না */
-    fun checkContentUpdate() {
-        if (_state.value.isCheckingContentUpdate) return
-        viewModelScope.launch {
-            _state.update { it.copy(isCheckingContentUpdate = true, contentCheckMsg = null) }
-            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
-            val m = try { repo.fetchLatestManifestFresh() } catch (e: Exception) { null }
-            _state.update {
-                if (m == null) it.copy(
-                    isCheckingContentUpdate = false,
-                    contentCheckMsg = "❌ সার্ভারের সাথে যোগাযোগ করা যায়নি — ফোনে থাকা কনটেন্ট দিয়েই সব চলবে"
-                ) else it.copy(
-                    isCheckingContentUpdate = false,
-                    contentLatestVersion = m.version,
-                    contentCheckMsg = if (m.version > it.contentInstalledVersion)
-                        "🆕 নতুন কনটেন্ট আছে (ভার্সন ${m.version})" else "✅ আপনার কনটেন্ট আপ-টু-ডেট"
-                )
-            }
-        }
-    }
-
     fun startDownloadAllContent() {
         if (_state.value.isDownloadingAll) return
         viewModelScope.launch {
@@ -678,7 +628,6 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 )
             }
-            loadContentSyncInfo()
         }
     }
 
