@@ -342,7 +342,7 @@ fun MainMenuScreen(
             // ── Routine ও Wrong Review — এখন dedicated screen, এখানে শুধু quick-access row ──
             MenuGroup("📋 আজকের কার্যক্রম") {
                 MenuRow("✅ আজকের রুটিন",   "পড়ার রুটিন দেখো/যোগ করো",  Icons.Default.CalendarMonth) { onNavigate(MenuNav.ROUTINE) }
-                val wrongCount = quizViewModel?.getWrongQuestions()?.size ?: wrongItems.size
+                val wrongCount = wrongItems.size   // প্রতিবার recomposition-এ ভারী গণনা না করে — state থেকেই (Menu ধীর হওয়ার কারণ)
                 MenuRow("❌ ভুল প্রশ্ন Review", "$wrongCount টি ভুল প্রশ্ন", Icons.Default.Cancel, tint = Color(0xFFDC2626)) { onNavigate(MenuNav.WRONG_REVIEW) }
             }
 
@@ -387,9 +387,7 @@ fun MainMenuScreen(
             }
 
             MenuGroup("⚙️ সেটিংস") {
-                MenuRow("🎨 থিম ও রঙ",     "Dark mode, রঙ বদলাও",   Icons.Default.Palette)      { onNavigate(MenuNav.SETTINGS) }
-                MenuRow("🔔 রিমাইন্ডার",   "পড়ার সময় নির্ধারণ",   Icons.Default.Alarm)        { onNavigate(MenuNav.SETTINGS) }
-                MenuRow("🔊 সাউন্ড",       "শব্দ চালু/বন্ধ",         Icons.Default.VolumeUp)     { onNavigate(MenuNav.SETTINGS) }
+                MenuRow("⚙️ সেটিংস",   "ডার্ক মোড, রিমাইন্ডার, সাউন্ড, অফলাইন",   Icons.Default.Settings)  { onNavigate(MenuNav.SETTINGS) }
             }
 
             if (state.isAdmin) {
