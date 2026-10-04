@@ -3071,16 +3071,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val countMap  = counts.associate {
             val p = it.split("="); p.getOrElse(0){""} to (p.getOrElse(1){"1"}.toIntOrNull() ?: 1)
         }
+        // ── পারফরম্যান্স ফিক্স: আগে প্রতিটা ভুল-প্রশ্নের জন্য পুরো Quiz/QBank/Study তালিকা
+        // (হাজার হাজার সারি) নতুন করে QuestionItem-এ রূপান্তর করা হতো — Menu/Home খোলার সময়
+        // মূল থ্রেডে এটাই অ্যাপ ধীর করত। এখন প্রতি শীটে একবার id-অনুযায়ী সূচি (raw item, কোনো
+        // রূপান্তর ছাড়া) বানিয়ে শুধু মিলে যাওয়া প্রশ্নগুলোই রূপান্তর করা হয়। ফলাফল একই। ──
+        val quizIdx  by lazy(LazyThreadSafetyMode.NONE) { content.quiz.associateBy  { it.id ?: "" } }
+        val qbankIdx by lazy(LazyThreadSafetyMode.NONE) { content.qbank.associateBy { it.id ?: "" } }
+        val studyIdx by lazy(LazyThreadSafetyMode.NONE) { content.study.associateBy { it.id ?: "" } }
         return ids.mapNotNull { entry ->
             val parts  = entry.split(":", limit = 2)
             val sheet  = parts.getOrElse(0) { "quiz" }
             val qId    = parts.getOrElse(1) { "" }
-            val pool   = when (sheet) {
-                "qbank" -> content.qbank.map { QuestionItem.fromQBankItem(it) }
-                "study" -> content.study.map { QuestionItem.fromStudyItem(it) }
-                else    -> content.quiz.map  { QuestionItem.fromQuizItem(it)  }
-            }
-            val q = pool.find { it.id == qId } ?: return@mapNotNull null
+            val q = when (sheet) {
+                "qbank" -> qbankIdx[qId]?.let { QuestionItem.fromQBankItem(it) }
+                "study" -> studyIdx[qId]?.let { QuestionItem.fromStudyItem(it) }
+                else    -> quizIdx[qId]?.let  { QuestionItem.fromQuizItem(it)  }
+            } ?: return@mapNotNull null
             q to (countMap[entry] ?: 1)
         }.sortedByDescending { it.second }
     }
