@@ -666,8 +666,8 @@ fun QuestionListScreen(
                                     // ── UX ফিক্স: Admin কন্ট্রোল ডিফল্ট-হাইড, "🔧 Admin Tools" টগল
                                     // (vmState.isAdminControlsExpanded) অন করলেই সব কার্ডে একসাথে
                                     // এই move-row/edit-pill-row দেখা যাবে ──
-                                    onAdminEdit = if (vmState.isAdminControlsExpanded) onAdminEdit else null,
-                                    onAdminDelete = if (vmState.isAdminControlsExpanded) onAdminDelete else null,
+                                    onAdminEdit = onAdminEdit,   // সবসময় পাস — edit পিল সবসময় দেখা যায়; null হলে Firebase-এ সরাসরি লিখত (ভুল পথ)
+                                    onAdminDelete = onAdminDelete,
                                     onMoveSubject = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                         singleMoveQuestionId = q.id
                                         moveDialogOpenTopicFirst = false
@@ -708,8 +708,8 @@ fun QuestionListScreen(
                             onReport    = { reportIdx = globalIdx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
-                            onAdminEdit = if (vmState.isAdminControlsExpanded) onAdminEdit else null,
-                            onAdminDelete = if (vmState.isAdminControlsExpanded) onAdminDelete else null,
+                            onAdminEdit = onAdminEdit,   // সবসময় পাস — edit পিল সবসময় দেখা যায়; null হলে Firebase-এ সরাসরি লিখত (ভুল পথ)
+                            onAdminDelete = onAdminDelete,
                             onMoveSubject = if (vmState.isAdminControlsExpanded && onAdminMoveQuestions != null) ({
                                 singleMoveQuestionId = q.id
                                 moveDialogOpenTopicFirst = false
