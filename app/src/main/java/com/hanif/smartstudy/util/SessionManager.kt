@@ -95,6 +95,10 @@ class SessionManager(private val context: Context) {
         val KEY_OB_DONE          = booleanPreferencesKey("ob_done")
         val KEY_SOUND_OFF        = booleanPreferencesKey("sound_off")
         val KEY_MCQ_VIEW_STYLE   = stringPreferencesKey("mcq_view_style")   // "card" | "compact"
+        // ── কনটেন্ট সিঙ্ক স্ট্যাটাস (Phase 4) — শুধু তথ্য দেখানোর জন্য, কনটেন্ট নিজে এখানে নেই ──
+        val KEY_CONTENT_INSTALLED_VER = intPreferencesKey("content_installed_version")
+        val KEY_CONTENT_LAST_SYNC_AT  = longPreferencesKey("content_last_sync_at")
+        val KEY_CONTENT_LAST_ERROR    = stringPreferencesKey("content_last_sync_error")
         // Study মোডে "শুধু প্রশ্ন দেখ" ফিচার — চালু থাকলে উত্তর/ব্যাখ্যা/টেকনিক
         // ডিফল্টভাবে লুকানো থাকে, "উত্তর দেখুন" বাটনে চাপলে তবেই দেখা যায়।
         // টগল বাটনটা Study screen-এর নিজের টপবারেই থাকে (Settings/Menu-তে নয়),
@@ -310,6 +314,32 @@ class SessionManager(private val context: Context) {
 
     suspend fun setDarkMode(on: Boolean) {
         context.dataStore.edit { it[KEY_DARK_MODE] = on }
+    }
+
+    // ── কনটেন্ট সিঙ্ক স্ট্যাটাস ──
+    data class ContentSyncInfo(val installedVersion: Int, val lastSyncAt: Long, val lastError: String?)
+
+    suspend fun getContentSyncInfo(): ContentSyncInfo {
+        val p = context.dataStore.data.first()
+        return ContentSyncInfo(
+            installedVersion = p[KEY_CONTENT_INSTALLED_VER] ?: 0,
+            lastSyncAt       = p[KEY_CONTENT_LAST_SYNC_AT] ?: 0L,
+            lastError        = p[KEY_CONTENT_LAST_ERROR]?.takeIf { it.isNotBlank() }
+        )
+    }
+
+    /** সিঙ্ক সম্পূর্ণ সফল হলে — ভার্সন+সময় সেভ, পুরনো error মুছে যায় */
+    suspend fun saveContentSyncSuccess(version: Int, at: Long = System.currentTimeMillis()) {
+        context.dataStore.edit {
+            if (version > 0) it[KEY_CONTENT_INSTALLED_VER] = version
+            it[KEY_CONTENT_LAST_SYNC_AT] = at
+            it.remove(KEY_CONTENT_LAST_ERROR)
+        }
+    }
+
+    /** সিঙ্ক ব্যর্থ/আংশিক হলে — শুধু error বার্তা সেভ; ইনস্টল-করা ভার্সন ও লোকাল কনটেন্ট অপরিবর্তিত */
+    suspend fun saveContentSyncFailure(message: String) {
+        context.dataStore.edit { it[KEY_CONTENT_LAST_ERROR] = message }
     }
 
     // ── MCQ ভিউ স্টাইল ("card" ডিফল্ট | "compact") ──
