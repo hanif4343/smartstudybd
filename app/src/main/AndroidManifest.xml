@@ -3,13 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- ── "আমার সময়" ফিচার: অন্য অ্যাপে কতক্ষণ গেল দেখানোর জন্য (দেখো
-         util/DeviceUsageStats.kt)। এটা runtime dialog দেয় না — Settings → Usage Access-এ
-         গিয়ে ইউজারকে নিজে চালু করতে হয়, declare করাটা শুধু ওই special permission-এর জন্য
-         ম্যানিফেস্ট-লেভেলে প্রয়োজনীয় ঘোষণা। ── -->
-    <uses-permission
-        android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
