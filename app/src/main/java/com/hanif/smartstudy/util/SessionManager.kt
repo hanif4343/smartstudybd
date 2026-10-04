@@ -94,6 +94,7 @@ class SessionManager(private val context: Context) {
         val KEY_THEME_COLOR      = stringPreferencesKey("theme_color")   // "indigo"|"teal"|"rose"|"amber"
         val KEY_OB_DONE          = booleanPreferencesKey("ob_done")
         val KEY_SOUND_OFF        = booleanPreferencesKey("sound_off")
+        val KEY_MCQ_VIEW_STYLE   = stringPreferencesKey("mcq_view_style")   // "card" | "compact"
         // Study মোডে "শুধু প্রশ্ন দেখ" ফিচার — চালু থাকলে উত্তর/ব্যাখ্যা/টেকনিক
         // ডিফল্টভাবে লুকানো থাকে, "উত্তর দেখুন" বাটনে চাপলে তবেই দেখা যায়।
         // টগল বাটনটা Study screen-এর নিজের টপবারেই থাকে (Settings/Menu-তে নয়),
@@ -309,6 +310,17 @@ class SessionManager(private val context: Context) {
 
     suspend fun setDarkMode(on: Boolean) {
         context.dataStore.edit { it[KEY_DARK_MODE] = on }
+    }
+
+    // ── MCQ ভিউ স্টাইল ("card" ডিফল্ট | "compact") ──
+    fun getMcqViewStyle(): String = runBlocking {
+        cachedPrefs()[KEY_MCQ_VIEW_STYLE] ?: "card"
+    }
+
+    fun mcqViewStyleFlow(): Flow<String> = context.dataStore.data.map { it[KEY_MCQ_VIEW_STYLE] ?: "card" }
+
+    suspend fun setMcqViewStyle(id: String) {
+        context.dataStore.edit { it[KEY_MCQ_VIEW_STYLE] = id }
     }
 
     fun getThemeColor(): String = runBlocking {
