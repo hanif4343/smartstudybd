@@ -43,11 +43,7 @@ fun AdminPage(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("🛡️ Admin Panel", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
-                        Text("${state.activeUsers.count { it.isOnline }} জন এখন অনলাইন",
-                            fontSize = 10.sp, color = GreenOk, fontFamily = NotoSansBengali)
-                    }
+                    Text("🛡️ Admin Panel", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold)
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepIndigo,
@@ -75,8 +71,8 @@ fun AdminPage(
                     }
             }
 
-            // Auto-load users when admin panel first opens
-            LaunchedEffect(Unit) { vm.loadActiveUsers(); vm.loadPendingEdits() }
+            // প্যানেল খুললে pending edit তালিকা লোড (ইউজার তালিকা আর লাগে না — সরানো হয়েছে)
+            LaunchedEffect(Unit) { vm.loadPendingEdits() }
 
             // Sync ট্যাব (⏳ Sync, index 0) খোলার সময় প্রতিবার fresh করে নাও — যাতে
             // এইমাত্র করা offline edit-ও সাথে সাথে দেখা যায়
