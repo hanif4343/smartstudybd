@@ -221,6 +221,39 @@ fun SettingsScreen(
                 }
             }
 
+            // ── MCQ ভিউ ডিজাইন ──
+            SettingsCard("📝 MCQ ভিউ") {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("প্রশ্নের অপশন কোন ডিজাইনে দেখতে চান? (Quiz, QBank সব জায়গায় একই)",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                    McqViewStyle.entries.forEach { style ->
+                        val selected = state.mcqViewStyle == style.id
+                        val accent = MaterialTheme.colorScheme.primary
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.5.dp,
+                                    if (selected) accent else MaterialTheme.colorScheme.onSurface.copy(0.2f),
+                                    RoundedCornerShape(12.dp))
+                                .clickable { vm.setMcqViewStyle(style.id) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected, onClick = { vm.setMcqViewStyle(style.id) })
+                            Spacer(Modifier.width(6.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(style.label, fontFamily = NotoSansBengali, fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text(style.description, fontFamily = NotoSansBengali, fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(0.55f))
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── Theme color ──
             SettingsCard("🎨 থিম রঙ") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
