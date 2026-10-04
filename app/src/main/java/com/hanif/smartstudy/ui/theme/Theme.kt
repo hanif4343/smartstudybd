@@ -145,7 +145,6 @@ fun SmartStudyTheme(
     darkTheme : Boolean  = isSystemInDarkTheme(),
     appTheme  : AppTheme = AppTheme.INDIGO,
     uiScale   : Float    = 1.0f,   // <-- এটাই পুরো app ছোট/বড় করে
-    mcqViewStyle : McqViewStyle = McqViewStyle.DEFAULT,   // MCQ ডিজাইন (Settings থেকে)
     content   : @Composable () -> Unit
 ) {
     val darkMode     = remember { mutableStateOf(darkTheme) }
@@ -181,7 +180,6 @@ fun SmartStudyTheme(
         LocalDarkMode  provides darkMode,
         LocalAppTheme  provides themeState,
         LocalUiScale   provides uiScaleState,
-        LocalMcqViewStyle provides mcqViewStyle,
         LocalDensity   provides scaledDensity        // <-- পুরো app scale হয়
     ) {
         MaterialTheme(
