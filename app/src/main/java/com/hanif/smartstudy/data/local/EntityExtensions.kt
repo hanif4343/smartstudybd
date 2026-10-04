@@ -44,6 +44,23 @@ fun QuizItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEnt
     syncedAt     = syncedAt
 )
 
+// ── Phase 10: নষ্ট/ফাঁকা সারি থেকে অ্যাপ বাঁচানো ──
+// CDN থেকে আসা কোনো সারি স্পষ্টভাবে ব্যবহার-অযোগ্য হলে (আইডি নেই, বা Quiz/QBank-এ প্রশ্ন/ছবি
+// কিছুই নেই, বা শুধু placeholder "প্রশ্ন") সেটা Room-এ লেখা হয় না। এটা কোনো প্রশ্ন "ঠিক করে" না,
+// আন্দাজও করে না — শুধু অকেজো সারি এড়ায়। Unidentified subject/topic-এর প্রশ্ন বাদ যায় না।
+// STUDY শীটে ফাঁকা question বৈধ (শুধু ব্যাখ্যা/নোট থাকতে পারে), তাই সেখানে শুধু আইডি চেক হয়।
+private val PLACEHOLDER_QUESTIONS = setOf("প্রশ্ন", "প্রশ্ন:", "Question", "question")
+
+fun QuestionEntity.isUsable(): Boolean {
+    if (fbKey.isBlank()) return false
+    if (sheet.equals("STUDY", ignoreCase = true)) return true
+    val hasMedia = imageUrl.isNotBlank() || visualUrl.isNotBlank() || questionPaperUrls.isNotBlank()
+    val q = question.trim()
+    if (q.isBlank()) return hasMedia
+    if (q in PLACEHOLDER_QUESTIONS && !hasMedia) return false
+    return true
+}
+
 fun QBankItem.toEntity(syncedAt: Long = System.currentTimeMillis()) = QuestionEntity(
     sheet        = "QBANK",
     fbKey        = id ?: "",
