@@ -366,7 +366,12 @@ class PendingQueue(private val context: Context) {
 
     // ── 5+ বার fail হলে drop করো ──
     suspend fun dropFailed() {
-        val queue = getAll().filter { it.retryCount < 5 }.toMutableList()
+        // Phase 8: admin_* অ্যাকশন (edit/delete/move/reorder) কখনো নীরবে ফেলা হয় না — এগুলো আপনার
+        // করা আসল সংশোধন; ফেলে দিলে অ্যাপে বদল দেখা যায় কিন্তু মাস্টারে পৌঁছায় না। তাই এগুলো
+        // কিউতে থেকে যায় (Admin → Sync ট্যাবে দেখা যাবে) আর পরের worker রানে আবার চেষ্টা হয়।
+        // শুধু কম-গুরুত্বপূর্ণ ব্যবহারকারী-অ্যাকশন (quiz_answer, xp_update, study_progress) ৫ বার
+        // ব্যর্থ হলে বাদ যায় — আগের মতোই।
+        val queue = getAll().filter { it.retryCount < 5 || it.type.startsWith("admin_") }.toMutableList()
         save(queue)
     }
 
