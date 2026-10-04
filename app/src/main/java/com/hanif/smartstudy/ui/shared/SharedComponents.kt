@@ -573,6 +573,8 @@ fun QuestionCard(
                     Spacer(Modifier.height(6.dp))
                     QuestionPaperGallery(urls = questionPaperImages)
                 }
+                // Phase 6: এই প্রশ্ন কোন কোন পরীক্ষায় এসেছে (খালি হলে কিছু দেখায় না)
+                ExamAppearanceInfo(questionId = item.id)
             }
 
             Spacer(Modifier.height(8.dp))
