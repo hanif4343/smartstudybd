@@ -190,7 +190,15 @@ fun RoutineFullScreen(
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp)
         ) {
+            val routineVm: com.hanif.smartstudy.viewmodel.RoutineViewModel = viewModel()
+            val goal by routineVm.goal.collectAsState()
+            val todayRoutine by routineVm.state.collectAsState()
+            com.hanif.smartstudy.ui.home.SmartRoutineHeader(
+                goal = goal, routine = todayRoutine, onSaveGoal = { routineVm.saveGoal(it) }
+            )
+            Spacer(Modifier.height(12.dp))
             DailyRoutineCard(
+                vm = routineVm,
                 highlightRoutineItemId   = highlightRoutineItemId,
                 onRoutineItemHighlighted = onRoutineItemHighlighted,
                 onOpenStudy       = onOpenStudy,
