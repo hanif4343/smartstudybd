@@ -16,7 +16,10 @@ data class RoutineItem(
     // ── প্রতি আইটেমের নিজস্ব সময় + রিমাইন্ডার (alarm_create_v0-এর কনসেপ্টের মতো) ──
     val reminderEnabled : Boolean = false,  // এই আইটেমের জন্য আলাদা alarm অন/অফ
     val reminderHour    : Int     = -1,     // 0-23, -1 মানে সেট করা হয়নি
-    val reminderMinute  : Int     = -1      // 0-59, -1 মানে সেট করা হয়নি
+    val reminderMinute  : Int     = -1,     // 0-59, -1 মানে সেট করা হয়নি
+
+    // ── স্মার্ট প্ল্যান থেকে নিজে তৈরি হওয়া আইটেম (পুরনো সেভ করা ডেটায় ডিফল্ট false) ──
+    val auto            : Boolean = false
 ) {
     val hasReminder: Boolean get() = reminderEnabled && reminderHour in 0..23 && reminderMinute in 0..59
 
