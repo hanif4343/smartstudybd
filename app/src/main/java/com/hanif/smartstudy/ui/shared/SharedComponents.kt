@@ -281,6 +281,10 @@ fun QuestionCard(
     var aiExplanation by remember(item.id) { mutableStateOf<String?>(null) }
     var isLoadingAiExplanation by remember(item.id) { mutableStateOf(false) }
     var aiExplanationFailed by remember(item.id) { mutableStateOf(false) }
+    // DB-তে ব্যাখ্যা থাকলে AI অটো আসে না; ইউজার "AI ব্যাখ্যা দেখুন" চাপলে aiRequested=true।
+    // retry চাপলে aiAttempt বাড়ে (LaunchedEffect আবার চলে)।
+    var aiRequested by remember(item.id) { mutableStateOf(false) }
+    var aiAttempt   by remember(item.id) { mutableStateOf(0) }
 
     Card(
         modifier  = modifier.fillMaxWidth(),
@@ -723,9 +727,14 @@ fun QuestionCard(
             // AI ব্যাখ্যা অটো-লোড হয় — শুধু MCQ-এর জন্যই (Study mode-এ showAnswerBox
             // সবসময় true, প্রতিটা কার্ডে না চেয়েই AI কল হয়ে যেত, তাই এখানে item.isMcq()
             // চেক করে সেটা এড়ানো হলো — user স্পষ্ট বলেছেন "press any options" মানে) ──
-            LaunchedEffect(item.id, item.answerState) {
+            // ── নিয়ম: DB-তে (দেখার অনুমতি আছে এমন) ব্যাখ্যা থাকলে AI অটো আনা হয় না —
+            // ইউজার চাইলে "AI ব্যাখ্যা দেখুন" বাটন চাপবে। DB-তে ব্যাখ্যা না থাকলে অটো দেখায়। ──
+            val dbExplanationVisible = displayExplanation.isNotBlank() &&
+                (item.explanationIsPublic || currentUser?.isAdmin() == true)
+            LaunchedEffect(item.id, item.answerState, aiRequested, aiAttempt) {
                 val requestFn = onRequestAiExplanation
-                if (item.isMcq() && item.answerState !is AnswerState.Unanswered &&
+                val allowed = !dbExplanationVisible || aiRequested
+                if (allowed && item.isMcq() && item.answerState !is AnswerState.Unanswered &&
                     requestFn != null && aiExplanation == null && !isLoadingAiExplanation) {
                     isLoadingAiExplanation = true
                     aiExplanationFailed = false
@@ -892,56 +901,74 @@ fun QuestionCard(
             // হয় (উপরের LaunchedEffect), admin-এর static ব্যাখ্যার নিচে আলাদা বক্সে
             // দেখা যায় (দুটো গুলিয়ে না যায়, তাই "🤖 AI ব্যাখ্যা" লেবেল দেওয়া) ──
             if (item.isMcq() && item.answerState !is AnswerState.Unanswered && onRequestAiExplanation != null) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
+                val aiShape = RoundedCornerShape(14.dp)
                 when {
+                    // DB-তে ব্যাখ্যা আছে + ইউজার এখনো চায়নি → ছোট বাটন (অটো AI কল হয় না)
+                    dbExplanationVisible && !aiRequested && aiExplanation == null -> {
+                        OutlinedButton(
+                            onClick  = { aiRequested = true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                            shape    = aiShape,
+                            border   = BorderStroke(1.dp, Indigo600.copy(alpha = 0.45f))
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null, tint = Indigo600, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("AI ব্যাখ্যা দেখুন", fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Indigo600)
+                        }
+                    }
                     isLoadingAiExplanation -> {
                         Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Indigo600.copy(alpha = 0.06f))
-                                .padding(10.dp),
+                            Modifier.fillMaxWidth().clip(aiShape)
+                                .background(Indigo600.copy(alpha = 0.06f)).padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Indigo600)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "🤖 AI ব্যাখ্যা লোড হচ্ছে...",
-                                fontSize = 11.sp, fontFamily = NotoSansBengali,
-                                color = Indigo600, fontWeight = FontWeight.Medium
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Indigo600)
+                            Spacer(Modifier.width(10.dp))
+                            Text("AI ব্যাখ্যা তৈরি হচ্ছে…", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                                color = Indigo600, fontWeight = FontWeight.Medium)
                         }
                     }
                     aiExplanation != null -> {
+                        val pretty = remember(aiExplanation) { formatAiExplanation(aiExplanation ?: "") }
                         Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                            Modifier.fillMaxWidth().clip(aiShape)
                                 .background(Indigo600.copy(alpha = 0.06f))
-                                .padding(10.dp)
+                                .border(1.dp, Indigo600.copy(alpha = 0.18f), aiShape)
+                                .padding(14.dp)
                         ) {
-                            Text(
-                                "🤖 AI ব্যাখ্যা",
-                                fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                                color = Indigo600, fontFamily = NotoSansBengali
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoAwesome, null, tint = Indigo600, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("AI ব্যাখ্যা", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = Indigo600, fontFamily = NotoSansBengali)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(Indigo600.copy(alpha = 0.15f)))
+                            Spacer(Modifier.height(10.dp))
+                            RichContentText(
+                                text      = pretty,
+                                textColor = MaterialTheme.colorScheme.onSurface,
+                                fontSize  = 14
                             )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                aiExplanation ?: "",
-                                fontSize = 12.sp, fontFamily = NotoSansBengali,
-                                color = MaterialTheme.colorScheme.onSurface, lineHeight = 17.sp
-                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text("AI-তৈরি ব্যাখ্যা — ভুল থাকতে পারে, মূল বইয়ের সাথে মিলিয়ে নিন",
+                                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                         }
                     }
                     aiExplanationFailed -> {
-                        // ── নীরব ব্যর্থতা — API key সেট না থাকলে/সব প্রোভাইডার fail
-                        // করলে এটা প্রায়ই ঘটবে, তাই বড় এরর না দেখিয়ে ছোট্ট, অপ্রতুল
-                        // (non-intrusive) নোট দেখানো হয় ──
-                        Text(
-                            "🤖 AI ব্যাখ্যা এই মুহূর্তে আনা যায়নি",
-                            fontSize = 10.sp, fontFamily = NotoSansBengali,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        // ── ব্যর্থ হলে ছোট নোট + আবার চেষ্টার বাটন ──
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("AI ব্যাখ্যা এই মুহূর্তে আনা যায়নি",
+                                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                modifier = Modifier.weight(1f))
+                            TextButton(onClick = { aiExplanationFailed = false; aiAttempt += 1 }) {
+                                Text("আবার চেষ্টা", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Indigo600)
+                            }
+                        }
                     }
                 }
             }
