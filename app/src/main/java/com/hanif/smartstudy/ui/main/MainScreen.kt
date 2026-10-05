@@ -175,6 +175,14 @@ fun MainScreen(
 
     // Admin audience tag পরিবর্তন হলে সব ViewModel reload
     val menuState by menuViewModel.state.collectAsStateWithLifecycle()
+    // Home-এর "Challenge চালু করুন" → সেটিং সেভ হওয়ার পর (state আপডেট হলে) ট্যাব খোলা, নইলে নিচের গার্ড ফিরিয়ে দিত
+    var openChallengeWhenEnabled by remember { mutableStateOf(false) }
+    LaunchedEffect(openChallengeWhenEnabled, menuState.challengesEnabled) {
+        if (openChallengeWhenEnabled && menuState.challengesEnabled) {
+            currentTab = BottomTab.CHALLENGE
+            openChallengeWhenEnabled = false
+        }
+    }
     LaunchedEffect(menuState.adminViewingTag) {
         if (menuState.isAdmin) {
             quizViewModel.adminRefreshContent()
@@ -458,6 +466,14 @@ fun MainScreen(
                     onOpenFocusMode = { showFocusModeInfo = true },
                     onOpenAiChat    = { showAiChat = true },
                     onOpenViva      = { showViva = true },
+                    challengesEnabled = menuState.challengesEnabled,
+                    buddyEnabled      = menuState.buddyEnabled,
+                    onOpenChallenge   = { currentTab = BottomTab.CHALLENGE },
+                    onSetChallengesEnabled = { on ->
+                        menuViewModel.setChallengesEnabled(on)
+                        if (on) openChallengeWhenEnabled = true
+                    },
+                    onSetBuddyEnabled = { on -> menuViewModel.setBuddyEnabled(on) },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
