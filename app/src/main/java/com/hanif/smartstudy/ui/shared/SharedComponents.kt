@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1806,6 +1807,12 @@ private fun NordicInfoBox(
     collapsible   : Boolean = false,
     startExpanded : Boolean = true,
     extraAction   : (@Composable () -> Unit)? = null,
+    // ── ঐচ্ছিক স্টাইল (ডিফল্টে আগের চেহারাই) — ব্যাখ্যা/টেকনিক বক্সের জন্য আলাদা, স্পষ্ট রঙ ──
+    borderColor   : Color? = null,
+    barColor      : Color? = null,
+    headingColor  : Color? = null,
+    headingSize   : androidx.compose.ui.unit.TextUnit = 13.sp,
+    elevation     : androidx.compose.ui.unit.Dp = 0.dp,
     content       : @Composable () -> Unit
 ) {
     var expanded by remember { mutableStateOf(startExpanded) }
@@ -1817,10 +1824,19 @@ private fun NordicInfoBox(
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = tint
+        color = tint,
+        border = borderColor?.let { androidx.compose.foundation.BorderStroke(1.dp, it) },
+        shadowElevation = elevation
     ) {
         Column(
             Modifier
+                .then(
+                    if (barColor != null)
+                        Modifier.drawBehind {
+                            drawRect(barColor, size = androidx.compose.ui.geometry.Size(5.dp.toPx(), size.height))
+                        }
+                    else Modifier
+                )
                 .then(
                     if (collapsible)
                         Modifier.clickable(
@@ -1829,7 +1845,7 @@ private fun NordicInfoBox(
                         ) { expanded = !expanded }
                     else Modifier
                 )
-                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .padding(start = if (barColor != null) 19.dp else 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -1848,8 +1864,9 @@ private fun NordicInfoBox(
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        heading, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        color = accent, fontFamily = NotoSansBengali
+                        heading, fontSize = headingSize,
+                        fontWeight = if (headingColor != null) FontWeight.ExtraBold else FontWeight.Bold,
+                        color = headingColor ?: accent, fontFamily = NotoSansBengali
                     )
                     if (collapsible) {
                         Spacer(Modifier.width(4.dp))
@@ -1919,19 +1936,30 @@ fun AnswerBox(
 //    চাপলে খোলে। এডমিনের জন্য সবসময় খোলা থাকবে — বাটনের দরকার নেই। ──
 @Composable
 fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
+    // ── রঙ: নীল পটভূমি + গাঢ় লেখা (আগে ধূসর লেখা হালকা নীলে মিশে যেত); ডার্ক মোডে আলাদা প্যালেট ──
+    val dark = LocalDarkMode.current.value
+    val tint    = if (dark) Color(0xFF1B2740) else Color(0xFFEEF4FF)
+    val accent  = if (dark) Color(0xFF60A5FA) else Color(0xFF2563EB)
+    val border  = if (dark) Color(0xFF2F4673) else Color(0xFFBFD2F5)
+    val heading = if (dark) Color(0xFF93C5FD) else Color(0xFF1E40AF)
+    val body    = if (dark) Color(0xFFE5E7EB) else Color(0xFF1F2937)
     NordicInfoBox(
         heading       = "ব্যাখ্যা",
         icon          = Icons.Default.MenuBook,
-        accent        = NordicBlue,
-        tint          = NordicBlueTint,
+        accent        = accent,
+        tint          = tint,
         onEdit        = onEdit,
         collapsible   = !isAdmin,
-        startExpanded = isAdmin
+        startExpanded = isAdmin,
+        borderColor   = border,
+        barColor      = accent,
+        headingColor  = heading,
+        headingSize   = 14.sp
     ) {
         RichContentText(
             text      = text,
-            textColor = NordicMuted,
-            fontSize  = 12
+            textColor = body,
+            fontSize  = 14
         )
     }
 }
@@ -1944,19 +1972,31 @@ fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean 
 @Composable
 fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
     if (text.isBlank()) return
+    // ── টেকনিক: উজ্জ্বল হলুদ-অ্যাম্বার বক্স + মোটা বর্ডার + ছায়া + গাঢ় বাদামি লেখা —
+    // যেন ব্যাখ্যার চেয়ে আলাদা ও সহজে চোখে পড়ে (মনে রাখার ট্রিকটাই আসল জিনিস) ──
+    val dark = LocalDarkMode.current.value
+    val tint    = if (dark) Color(0xFF3D2C05) else Color(0xFFFFF3C4)
+    val accent  = if (dark) Color(0xFFFBBF24) else Color(0xFFF59E0B)
+    val heading = if (dark) Color(0xFFFCD34D) else Color(0xFF92400E)
+    val body    = if (dark) Color(0xFFFFF1C2) else Color(0xFF3B2A00)
     NordicInfoBox(
         heading       = "মনে রাখার টেকনিক",
         icon          = Icons.Default.Lightbulb,
-        accent        = NordicClay,
-        tint          = NordicClayTint,
+        accent        = accent,
+        tint          = tint,
         onEdit        = onEdit,
         collapsible   = !isAdmin,
-        startExpanded = isAdmin
+        startExpanded = isAdmin,
+        borderColor   = accent,
+        barColor      = accent,
+        headingColor  = heading,
+        headingSize   = 15.sp,
+        elevation     = 3.dp
     ) {
         RichContentText(
             text      = text,
-            textColor = NordicClay,
-            fontSize  = 12
+            textColor = body,
+            fontSize  = 14
         )
     }
 }
