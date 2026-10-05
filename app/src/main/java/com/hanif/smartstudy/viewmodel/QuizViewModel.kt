@@ -2996,6 +2996,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 mode       = mode.name,
                 isCorrect  = isCorrect
             )
+            // Routine: এই টপিকে আজ ১০টা উত্তর হলে রুটিন-আইটেম নিজে ✅ হয় (ব্যর্থ হলে চুপচাপ বাদ)
+            com.hanif.smartstudy.data.local.RoutineAutoTracker.onAnswered(getApplication(), q.subject, q.subTopic)
         }
     }
 
