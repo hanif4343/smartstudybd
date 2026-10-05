@@ -90,6 +90,15 @@ class RoutineCache(private val context: Context) {
         return newItem
     }
 
+    /** স্মার্ট প্ল্যান: আগের auto আইটেম সরিয়ে নতুন auto আইটেম বসায়; নিজে যোগ করা আইটেম অক্ষত থাকে */
+    suspend fun replaceAutoItems(newItems: List<RoutineItem>): List<RoutineItem> {
+        val routine = getTodayRoutine()
+        val removed = routine.items.filter { it.auto }
+        val kept    = routine.items.filterNot { it.auto }
+        saveRoutine(routine.copy(items = kept + newItems))
+        return removed
+    }
+
     suspend fun toggleItem(id: String) {
         val routine = getTodayRoutine()
         val updated = routine.items.map {
