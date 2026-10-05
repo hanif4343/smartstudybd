@@ -145,6 +145,11 @@ fun HomeScreen(
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
     onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
+    challengesEnabled : Boolean = false,       // Settings-এর "লাইভ ফিচার" টগল (ডিফল্ট বন্ধ)
+    buddyEnabled      : Boolean = false,
+    onOpenChallenge   : () -> Unit = {},       // Challenge ট্যাব খোলা
+    onSetChallengesEnabled : (Boolean) -> Unit = {},
+    onSetBuddyEnabled      : (Boolean) -> Unit = {},
     onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -197,7 +202,7 @@ fun HomeScreen(
             }
         }
 
-        if (state.isOffline) OfflineBanner()
+        // Home-এর নিজস্ব অফলাইন ব্যানার সরানো হলো — ওপরের লাল পট্টিই একমাত্র বার্তা
 
         Column(
             modifier            = Modifier.padding(horizontal = 12.dp),
@@ -220,7 +225,12 @@ fun HomeScreen(
                 onOpenMockTest = onOpenMockTest,
                 onOpenFocusMode = onOpenFocusMode,
                 onOpenAiChat = onOpenAiChat,
-                onOpenViva = onOpenViva
+                onOpenViva = onOpenViva,
+                challengesEnabled = challengesEnabled,
+                buddyEnabled = buddyEnabled,
+                onOpenChallenge = onOpenChallenge,
+                onSetChallengesEnabled = onSetChallengesEnabled,
+                onSetBuddyEnabled = onSetBuddyEnabled
             )
 
             // ── App feature (এডমিন-অনলি "প্রশ্ন সংখ্যা CDN vs App" ড্যাশবোর্ড) —
@@ -427,21 +437,20 @@ private fun HomeQuickAccessGrid(
     onOpenMockTest : (Boolean) -> Unit = {},
     onOpenFocusMode: () -> Unit = {},
     onOpenAiChat   : () -> Unit = {},
-    onOpenViva     : () -> Unit = {}
+    onOpenViva     : () -> Unit = {},
+    challengesEnabled : Boolean = false,
+    buddyEnabled      : Boolean = false,
+    onOpenChallenge   : () -> Unit = {},
+    onSetChallengesEnabled : (Boolean) -> Unit = {},
+    onSetBuddyEnabled      : (Boolean) -> Unit = {}
 ) {
     var showMockTestPicker by remember { mutableStateOf(false) }
+    // বন্ধ থাকা ফিচারে ট্যাপ করলে "চালু করবেন?" ডায়ালগ: "challenge" | "buddy" | null
+    var askEnable by remember { mutableStateOf<String?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-        GridCategorySection(
-            title = "Learning", titleColor = Color(0xFF059669), onExplore = onOpenQuizTab,
-            tiles = listOf(
-                // নিচের নেভিগেশন বার (Quiz 🎯 / QBank 📚 / Study 📖) এর আইকনের সাথে মিলিয়ে
-                GridTileData(emojiIcon("🎯"), "Quiz",  Color(0xFF059669), onOpenQuizTab),
-                GridTileData(emojiIcon("📚"), "QBank", Color(0xFFDB2777), onOpenQBankTab),
-                GridTileData(emojiIcon("📖"), "Study", Color(0xFF2563EB), onOpenStudyTab)
-            )
-        )
+        // "Learning" সেকশন (Quiz/QBank/Study) সরানো — নিচের নেভিগেশন বারেই আছে
 
         GridCategorySection(
             title = "Practice", titleColor = Color(0xFFEA580C), onExplore = onOpenTyping,
@@ -457,24 +466,44 @@ private fun HomeQuickAccessGrid(
         )
 
         GridCategorySection(
-            title = "Progress", titleColor = Color(0xFF2563EB), onExplore = { onOpenMenuPage("stats") },
+            title = "Together", titleColor = Color(0xFF2563EB),
+            onExplore = { if (challengesEnabled) onOpenChallenge() else askEnable = "challenge" },
             tiles = listOf(
-                GridTileData(vecIcon(Icons.Default.EmojiEvents), "Leaderboard",   Color(0xFFF59E0B), { onOpenMenuPage("leaderboard") }),
-                // ── আগে এখানে "Statistics" ছিল (onOpenMenuPage("stats")) — এখন সেই
-                // জায়গায় নতুন "AI Chat" (ডাউট সলভার) ফিচার। Statistics এখনো Menu থেকে
-                // এবং "Explore →" (উপরের onExplore) থেকে খোলা যায়, শুধু এই কুইক-টাইলটা
-                // সরিয়ে AI Chat বসানো হয়েছে। ──
-                GridTileData(vecIcon(Icons.Default.SmartToy),    "AI Chat",       Color(0xFF4F46E5), onOpenAiChat),
-                GridTileData(vecIcon(Icons.Default.Bookmark),    "Saved Question", Color(0xFF64748B), { onOpenMenuPage("bookmarks") })
+                GridTileData(vecIcon(Icons.Default.EmojiEvents), "Challenge",   Color(0xFFF59E0B),
+                    { if (challengesEnabled) onOpenChallenge() else askEnable = "challenge" }),
+                GridTileData(vecIcon(Icons.Default.Diversity1),  "Study Buddy", Color(0xFF0D9488),
+                    { if (buddyEnabled) onOpenMenuPage("studybuddy") else askEnable = "buddy" }),
+                GridTileData(vecIcon(Icons.Default.SmartToy),    "AI Chat",     Color(0xFF4F46E5), onOpenAiChat)
             )
         )
 
+        // Routine টাইল সরানো হলো (ব্যবহার হয় না); Leaderboard/Saved Question Menu-তে আছে
         val mgmtTiles = buildList {
-            add(GridTileData(vecIcon(Icons.Default.CalendarMonth),       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
             add(GridTileData(vecIcon(Icons.Default.CenterFocusStrong),   "Focus Mode", Color(0xFF0D9488), onOpenFocusMode))
             if (isAdmin) add(GridTileData(vecIcon(Icons.Default.AdminPanelSettings), "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
         }
         GridCategorySection(title = "Management", titleColor = Color(0xFF7C3AED), onExplore = onOpenMenu, tiles = mgmtTiles)
+    }
+
+    // বন্ধ থাকা ফিচারে ট্যাপ → "চালু করবেন?" (চালু করলে সাথে সাথে খুলে যায়)
+    askEnable?.let { which ->
+        val isChallenge = which == "challenge"
+        AlertDialog(
+            onDismissRequest = { askEnable = null },
+            title = { Text(if (isChallenge) "Challenge" else "Study Buddy",
+                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
+            text = { Text("এই ফিচারটা এখন বন্ধ আছে। চালু করবেন? (Settings → লাইভ ফিচার থেকে যেকোনো সময় বন্ধ করা যায়)",
+                fontFamily = NotoSansBengali, fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(onClick = {
+                    askEnable = null
+                    if (isChallenge) onSetChallengesEnabled(true)
+                    else { onSetBuddyEnabled(true); onOpenMenuPage("studybuddy") }
+                }) { Text("চালু করুন", fontFamily = NotoSansBengali) }
+            },
+            dismissButton = { TextButton(onClick = { askEnable = null }) { Text("এখন না", fontFamily = NotoSansBengali) } }
+        )
     }
 
     if (showMockTestPicker) {
