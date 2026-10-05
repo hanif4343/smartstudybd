@@ -479,6 +479,7 @@ private fun HomeQuickAccessGrid(
 
         // Routine টাইল সরানো হলো (ব্যবহার হয় না); Leaderboard/Saved Question Menu-তে আছে
         val mgmtTiles = buildList {
+            add(GridTileData(vecIcon(Icons.Default.CalendarMonth),       "Routine",    Color(0xFFEA580C), { onOpenMenuPage("routine") }))
             add(GridTileData(vecIcon(Icons.Default.CenterFocusStrong),   "Focus Mode", Color(0xFF0D9488), onOpenFocusMode))
             if (isAdmin) add(GridTileData(vecIcon(Icons.Default.AdminPanelSettings), "Admin Menu", Color(0xFF7C3AED), { onOpenMenuPage("admin") }))
         }
@@ -625,6 +626,7 @@ fun DailyRoutineCard(
 ) {
     val routine by vm.state.collectAsState()
     val subjectOptions by vm.subjectOptions.collectAsState()
+    val planMessage by vm.planMessage.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var focusItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
     var reminderEditItem by remember { mutableStateOf<com.hanif.smartstudy.data.model.RoutineItem?>(null) }
@@ -696,6 +698,29 @@ fun DailyRoutineCard(
                     }
                 }
             }
+
+            // ── ✨ স্মার্ট প্ল্যান: এক চাপে আজকের তালিকা (দুর্বল + নতুন টপিক) ──
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick  = { vm.generateSmartPlan() },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
+            ) {
+                Text(
+                    if (routine.items.any { it.auto }) "🔄 স্মার্ট প্ল্যান আবার বানান" else "✨ আজকের স্মার্ট প্ল্যান বানান",
+                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White
+                )
+            }
+            planMessage?.let { msg ->
+                Text(msg, fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold,
+                    color = if (msg.startsWith("✨")) GreenMint else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp))
+                LaunchedEffect(msg) { kotlinx.coroutines.delay(4000); vm.clearPlanMessage() }
+            }
+            Text("কোনো টপিকে আজ ${com.hanif.smartstudy.data.local.RoutineAutoTracker.TARGET}টা প্রশ্নের উত্তর দিলে আইটেমটা নিজে ✅ হয়ে যাবে",
+                fontSize = 10.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
 
             if (routine.items.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
