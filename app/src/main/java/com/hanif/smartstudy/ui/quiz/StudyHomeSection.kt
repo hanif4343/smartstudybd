@@ -188,7 +188,7 @@ fun StudyHomeSection(
                             fontFamily = NotoSansBengali, color = StudyGreenDark)
                         Text(
                             if (st != null && st.isFresh()) "এখন পড়ছে: ${st.topic}"
-                            else "আজ ${buddyState.buddyProgress.progressPct}% সম্পন্ন",
+                            else if (buddyState.buddyProgress.progressPct >= 0) "আজ ${buddyState.buddyProgress.progressPct}% সম্পন্ন" else "Study Buddy",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
