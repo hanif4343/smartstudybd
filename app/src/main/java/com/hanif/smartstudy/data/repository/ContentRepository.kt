@@ -1210,6 +1210,41 @@ class ContentRepository(private val context: Context) {
         return progressDao.wrongQuestionIds(userId, mode).toSet()
     }
 
+    /**
+     * Study Nav Phase 4 — "এই Topic-এ তোমার N টি ভুল": Quiz/QBank/Study তিন sheet-এর
+     * একই-নামের Topic (প্রতি sheet-এর আলাদা subjectId/topicId নাম দিয়ে রিজলভ করে) মিলিয়ে।
+     * Room-only, instant; রিজলভ না হলে ওই sheet বাদ।
+     */
+    suspend fun getTopicWrongCountAllModes(subject: String, topic: String): Int {
+        val userId = session.getCurrentUser()?.phone ?: return 0
+        var total = 0
+        for ((sheet, mode) in listOf("Quiz" to "QUIZ", "QBank" to "QBANK", "Study" to "STUDY")) {
+            val sid = resolveSubjectId(sheet, subject)?.takeIf { it.isNotBlank() } ?: continue
+            val tid = resolveTopicId(sid, topic)?.takeIf { it.isNotBlank() } ?: continue
+            total += progressDao.wrongCountForTopic(userId, mode, tid)
+        }
+        return total
+    }
+
+    /**
+     * Study Nav Phase 5 — একটা Topic-এর (attempted, correct): Quiz/QBank/Study তিন sheet-এর
+     * একই-নামের Topic মিলিয়ে। Topic-status (Weak/Strong/Practicing...) হিসাবের ভিত্তি। Room-only।
+     */
+    suspend fun getTopicStatsAllModes(subject: String, topic: String): Pair<Int, Int> {
+        val userId = session.getCurrentUser()?.phone ?: return 0 to 0
+        var attempted = 0
+        var correct = 0
+        for ((sheet, mode) in listOf("Quiz" to "QUIZ", "QBank" to "QBANK", "Study" to "STUDY")) {
+            val sid = resolveSubjectId(sheet, subject)?.takeIf { it.isNotBlank() } ?: continue
+            val tid = resolveTopicId(sid, topic)?.takeIf { it.isNotBlank() } ?: continue
+            progressDao.statsForTopics(userId, mode, listOf(tid)).forEach {
+                attempted += it.attempted
+                correct   += it.correct
+            }
+        }
+        return attempted to correct
+    }
+
     suspend fun getAttemptedQuestionIds(mode: String): Set<String> {
         val userId = session.getCurrentUser()?.phone ?: return emptySet()
         return progressDao.attemptedQuestionIds(userId, mode).toSet()
