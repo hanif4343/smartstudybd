@@ -143,6 +143,31 @@
       ".write": "auth != null"
     },
 
+    "BuddyStudying": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "BuddyKnocks": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "BuddyDays": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "BuddyGoals": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "BuddyFocus": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
     "Notifications": {
       ".read": "auth != null",
       ".write": "auth != null",
