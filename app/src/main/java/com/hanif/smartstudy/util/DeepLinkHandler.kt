@@ -25,7 +25,8 @@ data class DeepLinkAction(
     val tab           : String? = null,
     val menuPage      : String? = null,
     val challengeId   : String? = null,
-    val routineItemId : String? = null   // Daily Routine item id → highlight on Home tab
+    val routineItemId : String? = null,  // Daily Routine item id → highlight on Home tab
+    val topic         : String? = null   // Study Together: নির্দিষ্ট Topic-এ সরাসরি খোলা (subject-এর সাথে)
 ) {
     enum class Type { QUIZ, QBANK, STUDY, SEARCH, REPORTS, TECHNIQUES, MENU, CHALLENGE, ROUTINE, FOCUS, NONE }
 }
@@ -57,7 +58,8 @@ fun Intent.parseDeepLink(): DeepLinkAction {
             challengeId = fcmChallengeId,
             subject     = getStringExtra("subject"),
             routineItemId = getStringExtra("routineItemId") ?: getStringExtra("item_id"),
-            qsheet      = getStringExtra("qsheet")
+            qsheet      = getStringExtra("qsheet"),
+            topic       = getStringExtra("topic")
         )
     }
 
@@ -97,7 +99,8 @@ fun deepLinkFromNotificationData(
     challengeId   : String?,
     subject       : String? = null,
     routineItemId : String? = null,
-    qsheet        : String? = null
+    qsheet        : String? = null,
+    topic         : String? = null
 ): DeepLinkAction {
     val fcmUrl = url; val fcmQid = questionId; val fcmTab = tab
     val fcmType = type; val fcmChallengeId = challengeId
@@ -105,6 +108,10 @@ fun deepLinkFromNotificationData(
         // Routine reminder tap → go to Home, highlight the specific routine item
         fcmType == "routine_reminder" ->
             DeepLinkAction(DeepLinkAction.Type.ROUTINE, routineItemId = routineItemId?.ifBlank { null })
+
+        // Study Together আমন্ত্রণ tap → সরাসরি বন্ধুর পড়া Topic-এ (Study Nav Phase 6)
+        fcmType == "study_together" ->
+            DeepLinkAction(DeepLinkAction.Type.STUDY, subject = subject?.ifBlank { null }, topic = topic?.ifBlank { null })
 
         // ফোকাস মোড ব্যাকগ্রাউন্ড রিমাইন্ডার tap → সরাসরি ফোকাস-সাবজেক্টের Study স্ক্রিনে (Part ৪)
         fcmType == "focus_reminder" ->
