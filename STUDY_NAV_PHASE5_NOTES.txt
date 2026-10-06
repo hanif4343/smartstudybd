@@ -1,0 +1,16 @@
+Study Nav — Phase 5 (Smart Revision)   [Phase 1–4 ফাইলও এই zip-এ আছে]
+
+NEW:
+  ui/quiz/StudyRevision.kt — Topic-status, Spaced-revision স্টোর, Quick Revision সেশন
+EDITED (Phase 5):
+  ui/quiz/StudyHomeSection.kt  — status সারাংশ + "🔄 আজ Revision দরকার" + Start Revision (viewModel প্যারাম যোগ)
+  ui/quiz/StudyTopicToolbar.kt — Quick Revision ব্যানার (① Quick Note → ② ৩টি প্রশ্ন → ③ Wrong Review → ✅ শেষ)
+  ui/quiz/CoreScreen.kt        — Topic খুললে ভিজিট রেকর্ড; Topic-লিস্টে স্ট্যাটাস ম্যাপ
+  ui/quiz/SubjectListScreen.kt — Topic কার্ডে স্ট্যাটাস ব্যাজ
+  viewmodel/QuizViewModel.kt, data/repository/ContentRepository.kt — topicStats() (Room-only)
+
+স্ট্যাটাস: ⚪ Not Started · 🔵 Learning · 🟡 Practicing · 🟢 Strong · 🔴 Weak · 🔄 Needs Revision
+  (Quiz/QBank/Study উত্তরের ফলাফল + Study activity + সময় থেকে হিসাব; হাতে বাটন চাপা লাগে না)
+  Weak: ≥৩ চেষ্টায় <৫০% সঠিক বা ≥৩টি ভুল | Strong: ≥৫ চেষ্টায় ≥৮০% সঠিক
+Spaced revision: প্রথম পড়ার ১ দিন পর → রিভিশন শেষ হলে ৩ → ৭ → ১৪ → ৩০ → ৬০ দিন।
+সব লোকাল (SharedPreferences + Room), নতুন Sheet কলাম/নেটওয়ার্ক কল নেই।
