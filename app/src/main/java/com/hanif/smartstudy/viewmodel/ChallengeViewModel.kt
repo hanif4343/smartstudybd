@@ -561,6 +561,40 @@ class ChallengeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Navigation ────────────────────────────────────────
 
+    /**
+     * Study Nav Phase 6 — Study Topic থেকে "🎯 Buddy Challenge": Study Buddy-কে আগে থেকেই invite-এ
+     * বসিয়ে, Topic/প্রশ্ন-সংখ্যা সেট করে Create স্ক্রিন খোলে — ইউজার শুধু Create চাপলেই হয়।
+     * (প্রশ্ন Quiz sheet থেকে; ওই Topic Quiz-এ না থাকলে পুরো Subject ধরা হয়)
+     */
+    fun prepareStudyBuddyChallenge(buddyPhone: String, subject: String, subTopic: String, count: Int = 10) {
+        viewModelScope.launch {
+            val buddy = runCatching { com.hanif.smartstudy.data.remote.UserSyncService.fetchUser(buddyPhone) }.getOrNull()
+            if (buddy == null) {
+                _state.update { it.copy(toast = "বন্ধুর তথ্য পাওয়া যায়নি, আবার চেষ্টা করো") }
+                return@launch
+            }
+            val c        = ContentRepository.getMemCache()
+            val filtered = c?.forUser(session.getCurrentUser())
+            val subjects = filtered?.quiz.orEmpty().map { it.subject ?: "" }
+                .filter { it.isNotBlank() }.distinct().sorted()
+            val subTopics = filtered?.quiz.orEmpty().filter { it.subject == subject }
+                .map { it.subTopic ?: "" }.filter { it.isNotBlank() }.distinct().sorted()
+            val n = count.coerceIn(5, 30)
+            _state.update { it.copy(
+                screen           = ChallengeScreen.CreateSetup,
+                invitedUsers     = listOf(buddy),
+                selectedSource   = "Quiz",
+                subjects         = if (subjects.isNotEmpty()) subjects else it.subjects,
+                selectedSubject  = subject,
+                subTopics        = subTopics,
+                selectedSubTopic = if (subTopic in subTopics) subTopic else "",
+                questionCount    = n,
+                timeLimitSec     = n * 60,
+                error            = null
+            )}
+        }
+    }
+
     fun openCreateSetup() = _state.update { it.copy(screen = ChallengeScreen.CreateSetup, error = null) }
     fun goHome()          { challengeObserveJob?.cancel(); timerJob?.cancel()
         _state.update { it.copy(screen = ChallengeScreen.Home, challenge = null, questions = emptyList(), answers = mutableMapOf()) } }
