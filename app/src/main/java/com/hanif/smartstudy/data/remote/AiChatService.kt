@@ -55,7 +55,8 @@ object AiChatService {
     suspend fun sendMessage(
         history: List<AiChatMessage>,
         keys   : AiApiKeys,
-        contextPrefix: String? = null
+        contextPrefix: String? = null,
+        maxTokens: Int = 700
     ): String? = withContext(Dispatchers.IO) {
         if (!keys.hasAnyKey()) return@withContext null
         val systemPrompt = if (contextPrefix.isNullOrBlank()) SYSTEM_PROMPT else "$SYSTEM_PROMPT\n\n$contextPrefix"
@@ -67,7 +68,8 @@ object AiChatService {
                     apiKey  = keys.groq,
                     model   = "llama-3.3-70b-versatile",
                     history = history,
-                    systemPrompt = systemPrompt
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens
                 )
             }.onFailure { Log.w(TAG, "Groq failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -80,7 +82,8 @@ object AiChatService {
                     apiKey  = keys.mistral,
                     model   = "mistral-small-latest",
                     history = history,
-                    systemPrompt = systemPrompt
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens
                 )
             }.onFailure { Log.w(TAG, "Mistral failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -93,7 +96,8 @@ object AiChatService {
                     apiKey  = keys.cerebras,
                     model   = "llama-3.3-70b",
                     history = history,
-                    systemPrompt = systemPrompt
+                    systemPrompt = systemPrompt,
+                    maxTokens = maxTokens
                 )
             }.onFailure { Log.w(TAG, "Cerebras failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
@@ -101,7 +105,7 @@ object AiChatService {
 
         // ── Gemini সবার শেষে — এটা প্রায়ই ফেইল করে (free-tier rate limit/region ইস্যু) ──
         if (keys.gemini.isNotBlank()) {
-            runCatching { callGemini(keys.gemini, history, systemPrompt) }
+            runCatching { callGemini(keys.gemini, history, systemPrompt, maxTokens) }
                 .onFailure { Log.w(TAG, "Gemini failed: ${it.message}") }
                 .getOrNull()?.let { return@withContext it }
         }
@@ -110,7 +114,7 @@ object AiChatService {
     }
 
     // ── Groq / Mistral / Cerebras — তিনটাই OpenAI-compatible chat completions ফরম্যাট ──
-    private fun callOpenAiCompatible(url: String, apiKey: String, model: String, history: List<AiChatMessage>, systemPrompt: String): String? {
+    private fun callOpenAiCompatible(url: String, apiKey: String, model: String, history: List<AiChatMessage>, systemPrompt: String, maxTokens: Int): String? {
         val messages = JSONArray().apply {
             put(JSONObject().apply { put("role", "system"); put("content", systemPrompt) })
             history.forEach { m ->
@@ -124,7 +128,7 @@ object AiChatService {
             put("model", model)
             put("messages", messages)
             put("temperature", 0.4)
-            put("max_tokens", 700)
+            put("max_tokens", maxTokens)
         }
         val req = Request.Builder()
             .url(url)
@@ -145,7 +149,7 @@ object AiChatService {
         }
     }
 
-    private fun callGemini(apiKey: String, history: List<AiChatMessage>, systemPrompt: String): String? {
+    private fun callGemini(apiKey: String, history: List<AiChatMessage>, systemPrompt: String, maxTokens: Int): String? {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
         val contents = JSONArray().apply {
             history.forEach { m ->
@@ -162,7 +166,7 @@ object AiChatService {
             })
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.4)
-                put("maxOutputTokens", 700)
+                put("maxOutputTokens", maxTokens)
             })
         }
         val req = Request.Builder()
