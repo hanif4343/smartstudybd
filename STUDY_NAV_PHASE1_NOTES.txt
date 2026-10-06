@@ -1,0 +1,11 @@
+Study Nav — Phase 1 (Study Foundation)
+
+NEW:
+  app/src/main/java/com/hanif/smartstudy/ui/quiz/StudyHomeSection.kt
+EDITED:
+  app/src/main/java/com/hanif/smartstudy/ui/quiz/CoreScreen.kt
+  app/src/main/java/com/hanif/smartstudy/ui/quiz/SubjectListScreen.kt
+  app/src/main/java/com/hanif/smartstudy/viewmodel/QuizViewModel.kt
+
+Study ট্যাবের Subject লিস্টের ওপরে "আমার পড়াশোনা": Continue Learning, Overall Progress, Recent (৫টা)।
+Recent লোকাল SharedPreferences-এ — নতুন Sheet কলাম/নেটওয়ার্ক কল লাগে না।
