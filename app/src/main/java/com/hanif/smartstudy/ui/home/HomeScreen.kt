@@ -214,6 +214,9 @@ fun HomeScreen(
 
             AdBannerPlaceholder()
 
+            // ── Study Buddy B2: Home Buddy card (বন্ধু থাকলেই দেখায়) ──
+            if (buddyEnabled) com.hanif.smartstudy.ui.menu.BuddyHomeCard(onOpen = { onOpenMenuPage("studybuddy") })
+
             HomeQuickAccessGrid(
                 isAdmin        = isAdmin,
                 onOpenQuizTab  = onOpenQuizTab,
