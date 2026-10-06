@@ -328,7 +328,11 @@ fun SubjectListScreen(
     // (AudienceFilter.audienceGroupLabel(user), যেমন "চাকরি (Job)" বা "মাস্টার্স
     // ১ বর্ষ") — শুধু দেখানোর জন্য, বাড়তি কিছু না (কোনো টগল/বাটন না, শুধু লেবেল)।
     // null/ফাঁকা দিলে কিছুই রেন্ডার হয় না (আগের আচরণ অক্ষত)।
-    audienceLabel : String? = null
+    audienceLabel : String? = null,
+    // ── Study Nav Phase 1: Subject গ্রিডের ওপরে বসানোর অপশনাল কনটেন্ট
+    // (Study ট্যাবে "আমার পড়াশোনা" — Continue/Progress/Recent)। null হলে কিছুই
+    // render হয় না, Quiz/QBank অপরিবর্তিত। ──
+    headerSlot    : (@Composable () -> Unit)? = null
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -430,6 +434,11 @@ fun SubjectListScreen(
 
         if (isAdmin && isReorderMode) {
             item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
+        }
+
+        // ── Study Nav Phase 1: "আমার পড়াশোনা" (Continue/Progress/Recent) ──
+        if (headerSlot != null) {
+            item { headerSlot() }
         }
 
         // ── QBank পরীক্ষা-ক্যাটাগরি চিপ (বিসিএস/প্রাথমিক/নিবন্ধন) — filter bar-এর ঠিক ওপরে,
@@ -1509,7 +1518,9 @@ fun SubTopicListScreen(
     // ইনডেক্স বাইরে থেকে (ViewModel-এ) সংরক্ষণ করে ফিরে আসার সময় সেখান থেকেই
     // পুনরুদ্ধার করা হয়। ──
     initialScrollIndex: Int = 0,
-    onScrollIndexChanged: (Int) -> Unit = {}
+    onScrollIndexChanged: (Int) -> Unit = {},
+    // ── Study Nav Phase 5: Topic-নাম → স্ট্যাটাস (Weak/Strong/Needs Revision...) — খালি = ব্যাজ নেই ──
+    statusByTopic: Map<String, StudyTopicStatus> = emptyMap()
 ) {
     val isQBank = mode == StudyMode.QBANK
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -1636,7 +1647,8 @@ fun SubTopicListScreen(
                     isLast  = idx == visibleSubTopics.lastIndex,
                     onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
                     onMoveDown = { onMoveSubTopic(idx, idx + 1) },
-                    reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
+                    reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null,
+                    status = statusByTopic[st.name]
                 )
             }
         }
@@ -1691,7 +1703,8 @@ private fun SubTopicCard(
     isLast  : Boolean = false,
     onMoveUp   : () -> Unit = {},
     onMoveDown : () -> Unit = {},
-    reviewPct : Int? = null
+    reviewPct : Int? = null,
+    status : StudyTopicStatus? = null
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -1738,7 +1751,15 @@ private fun SubTopicCard(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        color = textColor, fontFamily = NotoSansBengali)
+                        color = textColor, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f, fill = false))
+                    // ── Study Nav Phase 5: Topic-status ব্যাজ (Not Started-এ কিছু দেখায় না) ──
+                    if (status != null && status != StudyTopicStatus.NOT_STARTED) {
+                        Text("${status.emoji} ${status.label}", fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = status.color, fontFamily = NotoSansBengali, maxLines = 1,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(status.color.copy(alpha = 0.12f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
                     color = mutedColor, fontFamily = NotoSansBengali)
