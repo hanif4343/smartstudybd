@@ -273,6 +273,12 @@ fun QuestionCard(
     modifier       : Modifier = Modifier
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
+    // ── Study Nav Phase 2: Study মোডে রিডার সেটিংস (ফন্ট/স্পেসিং/থিম/উইডথ) প্রযোজ্য ──
+    val readerCtx = androidx.compose.ui.platform.LocalContext.current
+    val reader: StudyReaderSettings? = if (mode == StudyMode.STUDY) {
+        remember { StudyReaderStore.init(readerCtx) }
+        StudyReaderStore.settings
+    } else null
     var activeEditField by remember { mutableStateOf<String?>(null) }
     var showEditMenu    by remember { mutableStateOf(false) }   // ✎ আইকনের ড্রপডাউন (admin)
     // ── UX ফিচার: AI ব্যাখ্যা — অপশন সিলেক্ট করার সাথে সাথেই অটো-লোড হয় (নিচে
@@ -290,10 +296,17 @@ fun QuestionCard(
     Card(
         modifier  = modifier.fillMaxWidth(),
         shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors    = CardDefaults.cardColors(
+            containerColor = reader?.bgColor() ?: MaterialTheme.colorScheme.surface
+        ),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(
+            Modifier.padding(
+                horizontal = 12.dp + (reader?.width?.extraPadding ?: 0.dp),
+                vertical   = 12.dp
+            )
+        ) {
             // ── _studyNoQ logic — index.html এর মতো ──
             // Study mode এ প্রশ্ন না থাকলে explanation/answer কেই প্রশ্ন হিসেবে দেখাবে
             // (links সহ — PDF/image/video সব render হবে)
@@ -447,13 +460,15 @@ fun QuestionCard(
                         com.hanif.smartstudy.ui.components.MediaLinkParser.parse(displayQuestion)
                             .any { it !is com.hanif.smartstudy.ui.components.MediaSegment.PlainText }
                     }
-                    if (studyNoQ || hasMediaLink) {
-                        // Explanation-as-question অথবা প্রশ্নে মিডিয়া-লিংক থাকলে —
-                        // RichContentText (PDF/image/video লিংক render করবে)
+                    val useReaderBlocks = reader != null && hasStudyBlockMarkup(displayQuestion)
+                    if (studyNoQ || hasMediaLink || useReaderBlocks) {
+                        // Explanation-as-question অথবা প্রশ্নে মিডিয়া-লিংক/ব্লক-মার্কআপ থাকলে —
+                        // RichContentText (PDF/image/video লিংক + হেডিং/লিস্ট/টেবিল render করবে)
                         RichContentText(
                             text      = displayQuestion,
-                            textColor = MaterialTheme.colorScheme.onSurface,
-                            fontSize  = 14
+                            textColor = reader?.textColor() ?: MaterialTheme.colorScheme.onSurface,
+                            fontSize  = 14,
+                            reader    = reader
                         )
                     } else {
                         // সাধারণ প্রশ্ন — QuestionText (LaTeX support + Study mode এ word-highlight TTS +
@@ -462,7 +477,8 @@ fun QuestionCard(
                             text           = displayQuestion,
                             ttsKey         = if (mode == StudyMode.STUDY) "${item.id}_qa" else null,
                             formatStyle    = item.formatStyle,
-                            answerForBlank = item.answer
+                            answerForBlank = item.answer,
+                            fontScale      = reader?.fontScale ?: 1f
                         )
                     }
                 }
@@ -773,7 +789,8 @@ fun QuestionCard(
                     ttsOffset   = ttsAnswerOffset,
                     onEdit      = if (isAdminUser) ({ activeEditField = "answer" }) else null,
                     isStudyDone = item.isStudyDone,
-                    onStudyDone = if (mode == StudyMode.STUDY) onStudyDone else null
+                    onStudyDone = if (mode == StudyMode.STUDY) onStudyDone else null,
+                    reader      = reader
                 )
             } else if (mode == StudyMode.STUDY) {
                 // ── উত্তর বক্স না থাকলেও (যেমন studyNoQ বা খালি answer) "পড়া হয়েছে"
@@ -882,7 +899,8 @@ fun QuestionCard(
                 ExplanationBox(
                     text    = displayExplanation,
                     onEdit  = if (isAdminUser) ({ activeEditField = "explanation" }) else null,
-                    isAdmin = isAdminUser
+                    isAdmin = isAdminUser,
+                    reader  = reader
                 )
                 if (!item.explanationIsPublic) {
                     Spacer(Modifier.height(2.dp))
@@ -985,7 +1003,8 @@ fun QuestionCard(
                 TechniqueBox(
                     text    = item.technique,
                     onEdit  = if (isAdminUser) ({ activeEditField = "technique" }) else null,
-                    isAdmin = true
+                    isAdmin = true,
+                    reader  = reader
                 )
             }
 
@@ -1238,7 +1257,9 @@ fun QuestionText(
     ttsKey: String? = null,
     ttsOffset: Int = 0,
     formatStyle: String = "",
-    answerForBlank: String = ""
+    answerForBlank: String = "",
+    // ── Study Nav Phase 2: রিডার ফন্ট-স্কেল (1f = আগের আকার) ──
+    fontScale: Float = 1f
 ) {
     val richFormatted = remember(text, formatStyle, answerForBlank) {
         when {
@@ -1262,19 +1283,19 @@ fun QuestionText(
         // highlight/fillblank/জেনেরিক-মার্কডাউন পার্স হয়ে গেছে — সরাসরি সেটাই
         // দেখাও (LaTeX/TTS এখানে প্রযোজ্য না, এই কেসগুলো সবসময় সাধারণ টেক্সট
         // নিয়েই কাজ করে)
-        Text(text = richFormatted, fontSize = 14.sp, modifier = modifier)
+        Text(text = richFormatted, fontSize = (14f * fontScale).sp, modifier = modifier)
     } else if (hasLatex) {
         // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
         MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 300.dp))
     } else if (ttsKey != null) {
-        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = 14, spokenOffset = ttsOffset)
+        HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = (14f * fontScale).toInt(), spokenOffset = ttsOffset)
     } else {
         SelectableSmartText(
             text       = text,
-            fontSize   = 14,
+            fontSize   = (14f * fontScale).toInt(),
             fontWeight = FontWeight.Bold,
             color      = MaterialTheme.colorScheme.onSurface,
-            lineHeight = 22,
+            lineHeight = (22f * fontScale).toInt(),
             modifier   = modifier
         )
     }
@@ -1903,7 +1924,8 @@ fun AnswerBox(
     ttsOffset   : Int = 0,
     onEdit      : (() -> Unit)? = null,
     isStudyDone : Boolean = false,
-    onStudyDone : (() -> Unit)? = null
+    onStudyDone : (() -> Unit)? = null,
+    reader      : StudyReaderSettings? = null
 ) {
     NordicInfoBox(
         heading = "উত্তর",
@@ -1917,7 +1939,7 @@ fun AnswerBox(
             HighlightedSpeakingText(
                 text      = text,
                 ttsKey    = ttsKey,
-                fontSize  = 13,
+                fontSize  = reader?.scaledSp(13) ?: 13,
                 fontWeight = FontWeight.Medium,
                 baseColor = NordicInk,
                 spokenOffset = ttsOffset
@@ -1926,7 +1948,8 @@ fun AnswerBox(
             RichContentText(
                 text      = text,
                 textColor = NordicInk,
-                fontSize  = 13
+                fontSize  = 13,
+                reader    = reader
             )
         }
     }
@@ -1935,7 +1958,7 @@ fun AnswerBox(
 // ── ব্যাখ্যা বক্স — সাধারণ ইউজারের জন্য ডিফল্টভাবে বন্ধ/হাইড থাকে, বাটনে
 //    চাপলে খোলে। এডমিনের জন্য সবসময় খোলা থাকবে — বাটনের দরকার নেই। ──
 @Composable
-fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
+fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false, reader: StudyReaderSettings? = null) {
     // ── রঙ: নীল পটভূমি + গাঢ় লেখা (আগে ধূসর লেখা হালকা নীলে মিশে যেত); ডার্ক মোডে আলাদা প্যালেট ──
     val dark = LocalDarkMode.current.value
     val tint    = if (dark) Color(0xFF1B2740) else Color(0xFFEEF4FF)
@@ -1959,7 +1982,8 @@ fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean 
         RichContentText(
             text      = text,
             textColor = body,
-            fontSize  = 14
+            fontSize  = 14,
+            reader    = reader
         )
     }
 }
@@ -1970,7 +1994,7 @@ fun ExplanationBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean 
 //    `item.technique.isNotBlank()` চেক করা আছে, তাই টেকনিক না থাকলে
 //    বাটনও দেখা যাবে না (স্বয়ংক্রিয়ভাবেই)। ──
 @Composable
-fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false) {
+fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = false, reader: StudyReaderSettings? = null) {
     if (text.isBlank()) return
     // ── টেকনিক: উজ্জ্বল হলুদ-অ্যাম্বার বক্স + মোটা বর্ডার + ছায়া + গাঢ় বাদামি লেখা —
     // যেন ব্যাখ্যার চেয়ে আলাদা ও সহজে চোখে পড়ে (মনে রাখার ট্রিকটাই আসল জিনিস) ──
@@ -1996,7 +2020,8 @@ fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = 
         RichContentText(
             text      = text,
             textColor = body,
-            fontSize  = 14
+            fontSize  = 14,
+            reader    = reader
         )
     }
 }
