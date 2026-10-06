@@ -39,6 +39,10 @@ interface QuestionProgressDao {
     @Query("SELECT questionId FROM question_progress WHERE userId = :userId AND mode = :mode AND isCorrect = 0")
     suspend fun wrongQuestionIds(userId: String, mode: String): List<String>
 
+    // ── Study Nav Phase 4: একটা টপিকে সর্বশেষ attempt-এ ভুল হওয়া প্রশ্নের সংখ্যা ──
+    @Query("SELECT COUNT(*) FROM question_progress WHERE userId = :userId AND mode = :mode AND topicId = :topicId AND isCorrect = 0")
+    suspend fun wrongCountForTopic(userId: String, mode: String, topicId: String): Int
+
     @Query("SELECT questionId FROM question_progress WHERE userId = :userId AND mode = :mode")
     suspend fun attemptedQuestionIds(userId: String, mode: String): List<String>
 
