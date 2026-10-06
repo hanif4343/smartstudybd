@@ -95,6 +95,7 @@ fun StudyBuddyScreen(
                     onNudge       = { vm.sendNudge() },
                     onRemove      = { showRemoveDialog = true }
                 )
+                BuddySocialSection(vm, state)
             } else {
                 NoBuddyCard(
                     phoneInput   = phoneInput,
@@ -291,10 +292,10 @@ private fun BuddyProgressRow(label: String, pct: Int, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text("$pct%", fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(if (pct < 0) "🔒 লুকানো" else "$pct%", fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
         }
         LinearProgressIndicator(
-            progress = { pct / 100f },
+            progress = { pct.coerceAtLeast(0) / 100f },
             modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
             color    = color,
             trackColor = color.copy(0.15f)
@@ -356,13 +357,13 @@ fun StudyBuddyQuickButton(
             )
         }
         // বাডি আছে এবং তার progress 100% — ছোট badge
-        if (state.hasBuddy && state.buddyProgress.progressPct >= 100) {
+        if (state.hasBuddy && (state.buddyProgress.progressPct >= 100 || state.knocks.isNotEmpty())) {
             Box(
                 Modifier
                     .size(8.dp)
                     .align(Alignment.TopEnd)
                     .clip(RoundedCornerShape(50))
-                    .background(Color(0xFF22C55E))
+                    .background(if (state.knocks.isNotEmpty()) Color(0xFFEF4444) else Color(0xFF22C55E))
             )
         }
     }
@@ -399,6 +400,7 @@ fun StudyBuddyQuickButton(
                         onNudge       = { vm.sendNudge() },
                         onRemove      = { vm.removeBuddy() }
                     )
+                    BuddySocialSection(vm, state)
                 } else {
                     NoBuddyCard(
                         phoneInput    = phoneInput,
