@@ -90,6 +90,12 @@ object StudyFocusTimer {
         endAtMs = System.currentTimeMillis() + minutes * 60_000L
     }
 
+    /** Buddy shared session-এর জন্য — দুজনের শেষ-সময় একই (সিঙ্ক) */
+    fun startUntil(topicName: String, endMs: Long) {
+        topic = topicName
+        endAtMs = endMs
+    }
+
     fun stop() { endAtMs = 0L; topic = "" }
 }
 
