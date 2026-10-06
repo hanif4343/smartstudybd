@@ -217,7 +217,9 @@ fun QuestionListScreen(
     // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
     // করতে হবে না — এমনিতেই কাজ করবে। ইচ্ছা করলে override করাও যায় ──
     onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? =
-        { q -> viewModel.regenerateMcqOptions(q) }
+        { q -> viewModel.regenerateMcqOptions(q) },
+    // ── Study Nav Phase 4: Study টুলবার থেকে অন্য ট্যাবে যাওয়া (Practice/Wrong Review) ──
+    onStudyAction: ((StudyAction) -> Unit)? = null
 ) {
     val pageSize = QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
@@ -461,6 +463,19 @@ fun QuestionListScreen(
 
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
+
+                // ── Study Nav Phase 4: 🎯 Exam Focus / ⚡ Quick Notes / 📝 Practice / 🔴 Wrong Review /
+                // 🗓 Routine / ⏱ Focus — শুধু Study মোডে, LazyColumn-এর বাইরে (তাই আইটেম-ইনডেক্স-ভিত্তিক
+                // স্ক্রলিং/হাইলাইট লজিক অপরিবর্তিত থাকে) ──
+                if (mode == StudyMode.STUDY && subTopic.isNotBlank()) {
+                    StudyTopicToolbar(
+                        viewModel     = viewModel,
+                        subject       = subject,
+                        topic         = subTopic,
+                        questions     = pagedQuestions,
+                        onStudyAction = onStudyAction
+                    )
+                }
 
                 // ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না — সম্পূর্ণ ফাঁকা
                 // স্ক্রিন"): আগে pagedQuestions খালি থাকলে LazyColumn-ও খালি থাকত —
@@ -1732,6 +1747,24 @@ private fun QuestionTopBar(
             }
             // ── Study/QBank: "শুধু প্রশ্ন দেখ" টগল — QBank-এ শুধু Written প্রশ্ন
             //    থাকলেই দেখা যায় (MCQ-তে উত্তর এমনিতেই সিলেক্ট করার আগ পর্যন্ত হাইড থাকে) ──
+            // ── Study Nav Phase 2: "Aa" পড়ার সেটিংস (ফন্ট/লাইন স্পেসিং/উইডথ/থিম/ফুলস্ক্রিন) ──
+            if (mode == StudyMode.STUDY) {
+                var showReaderSettings by remember { mutableStateOf(false) }
+                StudyFullscreenEffect(StudyReaderStore.settings.fullscreen)
+                StudyFocusTicker()
+                IconButton(onClick = { showReaderSettings = true }) {
+                    Text(
+                        "Aa",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali
+                    )
+                }
+                if (showReaderSettings) {
+                    StudyReaderSettingsSheet(onDismiss = { showReaderSettings = false })
+                }
+            }
             if (showRevealRecallIcons && onToggleStudyRevealMode != null) {
                 IconButton(onClick = onToggleStudyRevealMode) {
                     Icon(
