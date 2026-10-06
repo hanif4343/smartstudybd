@@ -1,0 +1,19 @@
+Study Nav — Phase 3 (Media)   [Phase 1 + 2 ফাইলও এই zip-এ আছে]
+
+NEW:
+  ui/components/StudyMediaCards.kt — Study-এর Resource কার্ড (YouTube/Facebook/PDF/Website/Image gallery)
+EDITED (Phase 3):
+  ui/components/MediaViewer.kt — WebLink সেগমেন্ট (parse(allowWeb=true) এ), RichContentText→Study রিডারে হ্যান্ডঅফ, openVideoApp internal
+  ui/shared/StudyReader.kt     — "Show Images" / "Show YouTube/Facebook" সেটিংস
+
+Study মোডে লিংক আর সাধারণ বাটন না — কার্ড:
+  🎥 YouTube: থাম্বনেইল + শিরোনাম + ▶ Watch      🔵 Facebook: শিরোনাম + ▶ Watch
+  📕 PDF: শিরোনাম + Open                         🌐 Website: শিরোনাম + ডোমেইন + Open
+  🖼️ ছবি: ক্যাপশন + ট্যাপে জুম; পরপর ২+ ছবি = স্ক্রল-যোগ্য "Images & Diagrams" গ্যালারি
+  ২+ রিসোর্স হলে "📎 Lesson Resources" হেডার; "✓ Verified" ব্যাজ
+
+শিরোনাম/Verified লেখার নিয়ম (নতুন Sheet কলাম লাগে না — যেকোনো টেক্সট ঘরে):
+  [শিরোনাম](https://লিংক)
+  [শিরোনাম|verified](https://লিংক)      ← ✓ Verified ব্যাজ
+  শিরোনামহীন সাধারণ লিংকও কাজ করে (ডিফল্ট শিরোনাম)।
+Quiz/QBank অপরিবর্তিত (নতুন রেন্ডারার শুধু Study রিডারে)।
