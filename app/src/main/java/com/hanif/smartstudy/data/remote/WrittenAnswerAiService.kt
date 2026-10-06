@@ -198,10 +198,17 @@ object WrittenAnswerAiService {
         question     : String,
         correctAnswer: String,
         subjectTopic : String,
-        keys         : AiApiKeys
+        keys         : AiApiKeys,
+        // ── অপশনগুলোর টেক্সট (A-D) — Idioms/Synonym/Antonym/বাগধারা/এক কথায় প্রকাশ
+        // ধরনের "অর্থ-ভিত্তিক" টপিকে প্রতিটা অপশনেরই অর্থ/ব্যাখ্যা দরকার হয়, তাই পাস করা হয়।
+        // খালি থাকলে (পুরনো কলার) আচরণ আগের মতোই ──
+        options      : List<String> = emptyList()
     ): String? = withContext(Dispatchers.IO) {
         if (question.isBlank() || !keys.hasAnyKey()) return@withContext null
-        val prompt = buildExplainQuestionPrompt(question, correctAnswer, subjectTopic)
+        val prompt = if (isMeaningBasedTopic(subjectTopic, question))
+            buildMeaningBasedPrompt(question, correctAnswer, subjectTopic, options)
+        else
+            buildExplainQuestionPrompt(question, correctAnswer, subjectTopic)
 
         // ── httpFast + বড় max_tokens (৪০০) — ৩-১০ লাইনের ব্যাখ্যা যেন মাঝপথে
         // কেটে না যায় (tryAllProviders/callOpenAiCompatibleText-এর শেয়ার্ড
@@ -253,7 +260,7 @@ object WrittenAnswerAiService {
             // ── ৪০০ থেকে ৭০০-তে বাড়ানো হলো — গণিতের ধাপে-ধাপে সমাধান কখনো ১০ লাইনের
             // বেশি হতে পারে (explainQuestion()-এর প্রম্পট এখন সেটা অনুমতি দেয়),
             // মাঝপথে কেটে না যায় তার জন্য এই হেডরুম ──
-            put("max_tokens", 700)
+            put("max_tokens", 900)
         }
         val req = Request.Builder()
             .url(url)
@@ -282,7 +289,7 @@ object WrittenAnswerAiService {
             put("contents", contents)
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.3)
-                put("maxOutputTokens", 700)
+                put("maxOutputTokens", 900)
             })
         }
         val req = Request.Builder()
@@ -373,6 +380,56 @@ object WrittenAnswerAiService {
             }
         }
 
+    // ── "অর্থ-ভিত্তিক" টপিক শনাক্তকরণ: Idioms, Synonym, Antonym, Similar word, বাগধারা,
+    // এক কথায় প্রকাশ, সমার্থক/বিপরীত শব্দ, প্রবাদ, Phrasal verb, One word substitution ইত্যাদি।
+    // এসবে কোনো গ্রামার-রুল নেই — অপশনের শব্দগুলোরই অর্থ/ব্যাখ্যা দরকার। বিষয়/টপিকের নাম
+    // অথবা প্রশ্নের টেক্সটে এই কীওয়ার্ড থাকলেই ধরা হয় (দুটোর যেকোনো একটাতে) ──
+    private val MEANING_KEYWORDS = listOf(
+        "idiom", "phrase", "synonym", "antonym", "similar word", "similar meaning", "opposite",
+        "one word", "one-word", "substitution", "vocabulary", "vocab", "word meaning", "meaning of",
+        "phrasal", "proverb", "homonym", "homophone", "same meaning", "nearest meaning",
+        "বাগধারা", "বাগ্ধারা", "বাক্যাংশ", "প্রবাদ", "প্রবচন", "এক কথায়", "একক কথায়", "এককথায়",
+        "সমার্থক", "সমার্থ", "প্রতিশব্দ", "বিপরীত", "বিপরীতার্থক", "শব্দার্থ", "শব্দের অর্থ",
+        "অর্থ কী", "অর্থ কি", "অর্থ কোনটি", "অর্থ হলো", "ভাবার্থ", "সমোচ্চারিত", "ভিন্নার্থক"
+    )
+
+    fun isMeaningBasedTopic(subjectTopic: String, question: String): Boolean {
+        val hay = (subjectTopic + " " + question).lowercase()
+        return MEANING_KEYWORDS.any { hay.contains(it) }
+    }
+
+    private fun buildMeaningBasedPrompt(
+        question: String, correctAnswer: String, subjectTopic: String, options: List<String>
+    ): String {
+        val opts = options.map { it.trim() }.filter { it.isNotBlank() }
+        val optBlock = if (opts.isEmpty()) "(অপশন দেওয়া নেই)"
+        else opts.mapIndexed { i, o -> "${'A' + i}) $o" }.joinToString("\n")
+        return """
+তুমি একজন অভিজ্ঞ শিক্ষক। এটা একটা অর্থ/শব্দভাণ্ডার-ভিত্তিক প্রশ্ন (Idiom / Synonym / Antonym /
+বাগধারা / এক কথায় প্রকাশ / সমার্থক / বিপরীত শব্দ ধরনের)। এখানে কোনো গ্রামার-রুল বোঝানোর দরকার নেই —
+দরকার প্রশ্নে ও অপশনে থাকা শব্দ/বাগধারাগুলোর আসল অর্থ।
+
+বিষয়/টপিক: ${subjectTopic.ifBlank { "(অজানা)" }}
+প্রশ্ন: $question
+অপশন:
+$optBlock
+সঠিক উত্তর: ${correctAnswer.ifBlank { "(দেওয়া নেই — নিজে বুঝে ঠিক করো)" }}
+
+আউটপুট ফরম্যাট (ঠিক এই ক্রমে, ছোট ছোট লাইনে):
+১. প্রথম লাইন: **✅ সঠিক: <সঠিক উত্তর>** — তার বাংলা অর্থ (দরকারে ইংরেজি অর্থ/ব্যবহার বন্ধনীতে)।
+   বাগধারা/Idiom হলে ভাবার্থ + সম্ভব হলে ছোট একটা উদাহরণ বাক্য (বাংলা বা ছোট ইংরেজি)।
+২. তারপর প্রতিটা অপশন এক লাইনে: "• <অপশন> — বাংলা অর্থ"। সঠিকটাকে ✅ দিয়ে চিহ্নিত করো। ভুল
+   অপশনে অর্থের সাথে (দরকার হলে) এক ছোট বাক্যে বলো কেন এটা প্রশ্নের সাথে মেলে না।
+   প্রশ্নের নিজের মূল শব্দ/বাগধারাটারও অর্থ দাও (যদি অপশনের বাইরে হয়)।
+৩. শেষে চাইলে ১ লাইনে "💡 মনে রাখার টিপ" — শুধু সত্যিই কাজে লাগলে (যেমন শব্দের মূল/সম্পর্কিত শব্দ)।
+
+ভাষার নিয়ম (খুব গুরুত্বপূর্ণ): পুরো ইংরেজি বাক্যে ব্যাখ্যা লিখবে না। ব্যাখ্যা/অর্থ বাংলায়, শব্দ ও
+বাগধারা ইংরেজিতে — প্রয়োজন অনুযায়ী বাংলা-ইংরেজি স্বাভাবিকভাবে মিশিয়ে, ঠিক যেভাবে ক্লাসে শিক্ষক
+বোঝান। অর্থ নিয়ে নিশ্চিত না হলে অনুমানে লিখো না — "অর্থ নিশ্চিত নয়" বলো।
+ভূমিকা/সম্ভাষণ ছাড়াই সরাসরি শুরু করো। মোট ৮-১২ লাইনের বেশি না।
+""".trimIndent()
+    }
+
     private fun buildExplainQuestionPrompt(question: String, correctAnswer: String, subjectTopic: String): String = """
 তুমি একজন অভিজ্ঞ, বন্ধুত্বপূর্ণ শিক্ষক। নিচের প্রশ্নটা একজন শিক্ষার্থীকে বুঝিয়ে দাও, ঠিক যেভাবে
 ক্লাসে সামনাসামনি বোঝাতে — এমনভাবে যেন শিক্ষার্থী পড়েই পুরো ব্যাপারটা বুঝে যায়।
@@ -393,6 +450,9 @@ object WrittenAnswerAiService {
    ঠিক যেভাবে একজন শিক্ষক ক্লাসে দুই ভাষা মিশিয়ে বোঝান।
 ৩. অন্য যেকোনো বিষয় হলে — কেন এই উত্তরটাই সঠিক, মূল ধারণা/কারণ কী, সেটা স্পষ্ট ও সহজ ভাষায়
    ব্যাখ্যা করো (দরকার হলে ইংরেজি পরিভাষা মিশিয়ে)।
+
+ভাষার নিয়ম: পুরো ইংরেজি বাক্যে (full English sentence) ব্যাখ্যা লিখবে না। ব্যাখ্যা বাংলায়,
+আর শুধু প্রয়োজনীয় টার্ম/rule/শব্দ/উদাহরণ ইংরেজিতে — দুই ভাষা স্বাভাবিকভাবে মিশিয়ে।
 
 দৈর্ঘ্য: সাধারণ প্রশ্নে কমপক্ষে ৩ লাইন, সর্বোচ্চ ১০ লাইন। তবে গণিতের ধাপে-ধাপে সমাধানে
 প্রয়োজনে ১০ লাইনের বেশি হলেও সমস্যা নেই — প্রতিটা ধাপ সম্পূর্ণ দেখানোই আগে, অহেতুক
