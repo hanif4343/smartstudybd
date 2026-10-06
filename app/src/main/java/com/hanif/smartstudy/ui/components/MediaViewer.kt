@@ -80,6 +80,9 @@ sealed class MediaSegment {
     data class ImageLink(val url: String)  : MediaSegment()
     data class VideoLink(val url: String, val isYoutube: Boolean) : MediaSegment()
     data class PdfLink(val url: String)    : MediaSegment()
+    // ── Study Nav Phase 3: সাধারণ ওয়েবসাইট/আর্টিকেল লিংক — শুধু parse(allowWeb = true)
+    // দিলে তৈরি হয় (Study রিডার), ডিফল্টে কখনো না → বাকি অ্যাপের আচরণ অপরিবর্তিত ──
+    data class WebLink(val url: String)    : MediaSegment()
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -117,7 +120,10 @@ object MediaLinkParser {
         RegexOption.IGNORE_CASE
     )
 
-    fun parse(text: String): List<MediaSegment> {
+    // Study Nav Phase 3: PDF/ছবি/ভিডিও ছাড়া বাকি http(s) লিংক (allowWeb=true হলে)
+    private val WEB_REGEX = Regex("""https?://[^\s"'>)\]]+""", RegexOption.IGNORE_CASE)
+
+    fun parse(text: String, allowWeb: Boolean = false): List<MediaSegment> {
         if (text.isBlank()) return emptyList()
 
         data class Found(val start: Int, val end: Int, val segment: MediaSegment)
@@ -153,6 +159,17 @@ object MediaLinkParser {
                 val cleanUrl = m.value.trimEnd(',', '।', '।')
                 val isYt = cleanUrl.contains("youtube.com") || cleanUrl.contains("youtu.be")
                 allFound += Found(m.range.first, m.range.last + 1, MediaSegment.VideoLink(cleanUrl, isYt))
+            }
+        }
+
+        // ── Step 4 (শুধু allowWeb): বাকি সাধারণ ওয়েব লিংক ──
+        if (allowWeb) {
+            WEB_REGEX.findAll(text).forEach { m ->
+                val covered = allFound.any { f -> m.range.first >= f.start && m.range.first < f.end }
+                if (!covered) {
+                    val clean = m.value.trimEnd(',', '।', '.', ';')
+                    allFound += Found(m.range.first, m.range.first + clean.length, MediaSegment.WebLink(clean))
+                }
             }
         }
 
@@ -208,8 +225,17 @@ object MediaLinkParser {
 fun RichContentText(
     text: String,
     textColor: Color = Color(0xFF1E293B),
-    fontSize: Int = 14
+    fontSize: Int = 14,
+    // ── Study Nav Phase 2: non-null হলে প্লেইন-টেক্সট অংশ ব্লক-রেন্ডারারে (হেডিং/লিস্ট/
+    // টেবিল...) + রিডার সেটিংসে (ফন্ট/স্পেসিং) দেখায়। null = আগের আচরণ হুবহু। ──
+    reader: com.hanif.smartstudy.ui.shared.StudyReaderSettings? = null
 ) {
+    // ── Study Nav Phase 3: Study রিডারে নতুন Resource-কার্ড রেন্ডারার (StudyMediaCards.kt) ──
+    if (reader != null) {
+        StudyRichContent(text = text, textColor = textColor, fontSize = fontSize, reader = reader)
+        return
+    }
+
     val segments = remember(text) { MediaLinkParser.parse(text) }
 
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
@@ -226,13 +252,22 @@ fun RichContentText(
                 is MediaSegment.PlainText -> {
                     if (seg.text.isNotBlank()) {
                         androidx.compose.foundation.text.selection.SelectionContainer {
-                            Text(
-                                text       = parseRichAnnotated(seg.text, fontSize.toFloat()),
-                                color      = textColor,
-                                fontSize   = fontSize.sp,
-                                fontFamily = NotoSansBengali,
-                                lineHeight  = (fontSize + 6).sp
-                            )
+                            if (reader != null) {
+                                com.hanif.smartstudy.ui.shared.StudyRichBlocks(
+                                    text       = seg.text,
+                                    settings   = reader,
+                                    baseSizeSp = fontSize,
+                                    textColor  = textColor
+                                )
+                            } else {
+                                Text(
+                                    text       = parseRichAnnotated(seg.text, fontSize.toFloat()),
+                                    color      = textColor,
+                                    fontSize   = fontSize.sp,
+                                    fontFamily = NotoSansBengali,
+                                    lineHeight  = (fontSize + 6).sp
+                                )
+                            }
                         }
                     }
                 }
@@ -249,6 +284,8 @@ fun RichContentText(
                     val ctx = LocalContext.current
                     PdfButton(url = seg.url, onClick = { openPdfExternal(ctx, seg.url) })
                 }
+                // WebLink শুধু parse(allowWeb=true)-তে আসে (Study রিডার, উপরে early-return) — এই পথে কখনো না
+                is MediaSegment.WebLink -> Unit
             }
         }
     }
@@ -372,7 +409,7 @@ fun VideoButton(url: String, isYoutube: Boolean) {
 // index এর openVideoApp() হুবহু Kotlin port:
 //   YT → vnd.youtube:{videoId} intent (app) → fallback browser
 //   FB → fb://facewebmodal/f?href={encoded} intent → fallback browser (1500ms delay)
-private fun openVideoApp(ctx: Context, url: String) {
+internal fun openVideoApp(ctx: Context, url: String) {
     try {
         when {
             url.contains("youtube.com") || url.contains("youtu.be") -> {
