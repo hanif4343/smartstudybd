@@ -1,0 +1,23 @@
+STUDY NAV - PHASE 7 (AI) নোট
+=============================
+নতুন কোনো key/Sheet কলাম/Firebase node লাগে না — Settings-এ সেভ করা আগের AI key
+(Groq → Mistral → Cerebras → Gemini, AiChatService) ব্যবহার হয়।
+
+ফিচার:
+1. 🤖 AI বাটন (Topic toolbar) → শিট:
+   - 💬 জিজ্ঞেস করো: লেসনের কনটেন্ট context দিয়ে চ্যাট (Ask about this lesson)
+     কুইক বাটন: 🧒 সহজ করে বোঝাও (Explain simply), 📌 মূল পয়েন্ট, 🧠 মনে রাখার কৌশল
+   - 📝 AI Practice: লেসন থেকে ৩/৫/১০টি MCQ তৈরি; উত্তর বাছলেই ফিডব্যাক + ব্যাখ্যা + স্কোর।
+     এগুলো শুধু শিটে থাকে — Master QBank / Sheet-এ কিছু যোগ হয় না।
+2. Study Home → 🤖 AI Study Plan (Weak / Revision দরকার এমন Topic দেখে আজকের ছোট পরিকল্পনা
+   + সাজেস্টেড Topic লিস্ট, ট্যাপ করলে Topic খোলে)।
+
+ফাইল:
+নতুন:      ui/quiz/StudyAiSheet.kt
+পরিবর্তিত: ui/quiz/StudyTopicToolbar.kt, ui/quiz/StudyHomeSection.kt,
+           data/remote/AiChatService.kt (maxTokens প্যারামিটার, ডিফল্ট ৭০০ — আগের আচরণ অপরিবর্তিত)
+
+সতর্কতা:
+- AI key না থাকলে শিটে Settings-এ key দিতে বলা হয়।
+- AI-র MCQ ভুল হতে পারে; JSON পার্স না হলে "আবার চেষ্টা করো" দেখায়।
+- কম্পাইল করে দেখা যায়নি (Android SDK নেই)।
