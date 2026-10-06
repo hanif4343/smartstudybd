@@ -306,6 +306,228 @@ class BuddyRepository {
         } catch (e: Exception) { Log.e(TAG, "sendStudyInvite: ${e.message}"); false }
     }
 
+    // ── Study Buddy Phase B1: Knock + Buddy Streak ───────────
+
+    private val knocksRef get() = db.getReference("BuddyKnocks")
+    private val daysRef   get() = db.getReference("BuddyDays")
+
+    suspend fun sendKnock(me: User, toPhone: String, kind: String, message: String): Boolean {
+        return try {
+            val myPhone = me.phone ?: return false
+            val toKey = toPhone.firebaseKey()
+            val id = knocksRef.child(toKey).push().key ?: return false
+            knocksRef.child(toKey).child(id).setValue(mapOf(
+                "id" to id, "fromPhone" to myPhone, "fromName" to me.displayName(),
+                "kind" to kind, "message" to message, "at" to System.currentTimeMillis(),
+                "status" to "PENDING", "reply" to "", "replyAt" to 0L
+            )).await()
+            val (title, body) = when (kind) {
+                KnockKind.FOCUS -> "⏱ ${me.displayName()} একসাথে Focus করতে চাইছে" to message
+                KnockKind.ASK   -> "❓ ${me.displayName()} একটা প্রশ্নের কৌশল জানতে চাইছে" to message
+                else            -> "👋 ${me.displayName()} knock করেছে!" to message.ifBlank { "চলো আজ একটু পড়ি!" }
+            }
+            sendBuddyPush(toPhone, title, body, "buddy_knock")
+            true
+        } catch (e: Exception) { Log.e(TAG, "sendKnock: ${e.message}"); false }
+    }
+
+    /** কারো inbox observe করো (নিজেরটা → আসা knock; বন্ধুরটা → আমার পাঠানোগুলোর উত্তর) */
+    fun observeKnocks(ownerPhone: String): Flow<List<BuddyKnock>> = callbackFlow {
+        val ref = knocksRef.child(ownerPhone.firebaseKey()).limitToLast(30)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val list = mutableListOf<BuddyKnock>()
+                for (c in snapshot.children) {
+                    @Suppress("UNCHECKED_CAST")
+                    val m = c.value as? Map<String, Any> ?: continue
+                    list.add(BuddyKnock(
+                        id        = (m["id"] as? String) ?: (c.key ?: ""),
+                        fromPhone = m["fromPhone"] as? String ?: "",
+                        fromName  = m["fromName"] as? String ?: "",
+                        kind      = m["kind"] as? String ?: KnockKind.KNOCK,
+                        message   = m["message"] as? String ?: "",
+                        at        = (m["at"] as? Number)?.toLong() ?: 0L,
+                        status    = m["status"] as? String ?: "PENDING",
+                        reply     = m["reply"] as? String ?: "",
+                        replyAt   = (m["replyAt"] as? Number)?.toLong() ?: 0L
+                    ))
+                }
+                trySend(list)
+            }
+            override fun onCancelled(error: DatabaseError) { Log.e(TAG, "observeKnocks: ${error.message}") }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    suspend fun respondKnock(me: User, knock: BuddyKnock, status: String, reply: String): Boolean {
+        return try {
+            val myPhone = me.phone ?: return false
+            knocksRef.child(myPhone.firebaseKey()).child(knock.id).updateChildren(mapOf(
+                "status" to status, "reply" to reply, "replyAt" to System.currentTimeMillis()
+            )).await()
+            val (title, body) = when (status) {
+                "ACCEPTED" -> "✅ ${me.displayName()} রাজি!" to "তোমার knock-এ ${me.displayName()} \"চল\" বলেছে।"
+                "LATER"    -> "🕒 ${me.displayName()} পরে করবে" to "তোমার knock-এ ${me.displayName()} \"পরে\" বলেছে।"
+                else       -> "💡 ${me.displayName()} কৌশল জানিয়েছে" to reply.take(120)
+            }
+            sendBuddyPush(knock.fromPhone, title, body, "buddy_knock_reply")
+            true
+        } catch (e: Exception) { Log.e(TAG, "respondKnock: ${e.message}"); false }
+    }
+
+    /** আজ কত মিনিট পড়েছি — Buddy Streak হিসাবের জন্য দিনভিত্তিক রেকর্ড (/BuddyDays/{key}/{yyyy-MM-dd}) */
+    suspend fun recordDay(myPhone: String, day: String, minutes: Int) {
+        try { daysRef.child(myPhone.firebaseKey()).child(day).setValue(minutes).await() }
+        catch (e: Exception) { Log.e(TAG, "recordDay: ${e.message}") }
+    }
+
+    fun observeDays(phone: String): Flow<Map<String, Int>> = callbackFlow {
+        val ref = daysRef.child(phone.firebaseKey()).limitToLast(35)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val out = HashMap<String, Int>()
+                for (c in snapshot.children) {
+                    val k = c.key ?: continue
+                    out[k] = (c.value as? Number)?.toInt() ?: 0
+                }
+                trySend(out)
+            }
+            override fun onCancelled(error: DatabaseError) { Log.e(TAG, "observeDays: ${error.message}") }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    // ── Study Buddy Phase B3: Shared Goal ─────────────────────
+
+    private val goalsRef get() = db.getReference("BuddyGoals")
+
+    fun pairKey(a: String, b: String): String = listOf(a.firebaseKey(), b.firebaseKey()).sorted().joinToString("__")
+
+    suspend fun saveGoal(pk: String, g: BuddyGoal, toPhone: String, fromName: String): Boolean {
+        return try {
+            goalsRef.child(pk).removeValue().await()   // আগের goal + progress মুছে নতুন শুরু
+            goalsRef.child(pk).child("goal").setValue(mapOf(
+                "id" to g.id, "title" to g.title, "metric" to g.metric, "target" to g.target,
+                "mode" to g.mode, "days" to g.days, "startMs" to g.startMs,
+                "createdBy" to g.createdBy, "createdByName" to g.createdByName
+            )).await()
+            val kind = if (g.mode == GoalMode.RACE) "⚔️ Challenge" else "🤝 Team Goal"
+            sendBuddyPush(toPhone, "$kind: ${g.title}",
+                "$fromName নতুন লক্ষ্য দিয়েছে — ${g.target} ${g.unit}, ${g.days} দিনে। দেখো!", "buddy_goal")
+            true
+        } catch (e: Exception) { Log.e(TAG, "saveGoal: ${e.message}"); false }
+    }
+
+    suspend fun clearGoal(pk: String) {
+        try { goalsRef.child(pk).removeValue().await() } catch (e: Exception) { Log.e(TAG, "clearGoal: ${e.message}") }
+    }
+
+    suspend fun updateGoalProgress(pk: String, myPhone: String, value: Int, reachedAt: Long) {
+        try {
+            val m = mutableMapOf<String, Any>("value" to value, "updatedAt" to System.currentTimeMillis())
+            if (reachedAt > 0L) m["reachedAt"] = reachedAt
+            goalsRef.child(pk).child("progress").child(myPhone.firebaseKey()).updateChildren(m).await()
+        } catch (e: Exception) { Log.e(TAG, "updateGoalProgress: ${e.message}") }
+    }
+
+    /** goal + দুজনের progress — { phoneKey → (value, reachedAt) } */
+    data class GoalNode(val goal: BuddyGoal?, val progress: Map<String, Pair<Int, Long>>)
+
+    fun observeGoal(pk: String): Flow<GoalNode> = callbackFlow {
+        val ref = goalsRef.child(pk)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                @Suppress("UNCHECKED_CAST")
+                val gm = snapshot.child("goal").value as? Map<String, Any>
+                val goal = gm?.let {
+                    BuddyGoal(
+                        id = it["id"] as? String ?: "", title = it["title"] as? String ?: "",
+                        metric = it["metric"] as? String ?: GoalMetric.QUESTIONS,
+                        target = (it["target"] as? Number)?.toInt() ?: 100,
+                        mode = it["mode"] as? String ?: GoalMode.TEAM,
+                        days = (it["days"] as? Number)?.toInt() ?: 7,
+                        startMs = (it["startMs"] as? Number)?.toLong() ?: 0L,
+                        createdBy = it["createdBy"] as? String ?: "",
+                        createdByName = it["createdByName"] as? String ?: ""
+                    )
+                }
+                val prog = HashMap<String, Pair<Int, Long>>()
+                for (c in snapshot.child("progress").children) {
+                    val k = c.key ?: continue
+                    prog[k] = ((c.child("value").value as? Number)?.toInt() ?: 0) to
+                        ((c.child("reachedAt").value as? Number)?.toLong() ?: 0L)
+                }
+                trySend(GoalNode(goal, prog))
+            }
+            override fun onCancelled(error: DatabaseError) { Log.e(TAG, "observeGoal: ${error.message}") }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    // ── Study Buddy Phase B4: Study Together (shared Focus) ───
+
+    private val focusRef get() = db.getReference("BuddyFocus")
+
+    suspend fun startFocus(pk: String, me: User, toPhone: String, minutes: Int): Long? {
+        return try {
+            val myPhone = me.phone ?: return null
+            val now = System.currentTimeMillis()
+            focusRef.child(pk).setValue(mapOf(
+                "startMs" to now, "minutes" to minutes, "startedBy" to myPhone,
+                "members" to mapOf(myPhone.firebaseKey() to mapOf("name" to me.displayName(), "joinedAt" to now, "leftAt" to 0L))
+            )).await()
+            sendBuddyPush(toPhone, "🟢 ${me.displayName()} Focus শুরু করেছে",
+                "একসাথে $minutes মিনিট পড়বি? Study Buddy খুলে Join করো!", "buddy_focus")
+            now
+        } catch (e: Exception) { Log.e(TAG, "startFocus: ${e.message}"); null }
+    }
+
+    suspend fun joinFocus(pk: String, me: User): Boolean {
+        return try {
+            val k = (me.phone ?: return false).firebaseKey()
+            focusRef.child(pk).child("members").child(k).setValue(
+                mapOf("name" to me.displayName(), "joinedAt" to System.currentTimeMillis(), "leftAt" to 0L)
+            ).await()
+            true
+        } catch (e: Exception) { Log.e(TAG, "joinFocus: ${e.message}"); false }
+    }
+
+    suspend fun leaveFocus(pk: String, myPhone: String) {
+        try { focusRef.child(pk).child("members").child(myPhone.firebaseKey()).child("leftAt")
+            .setValue(System.currentTimeMillis()).await() }
+        catch (e: Exception) { Log.e(TAG, "leaveFocus: ${e.message}") }
+    }
+
+    fun observeFocus(pk: String): Flow<BuddyFocusSession?> = callbackFlow {
+        val ref = focusRef.child(pk)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (!snapshot.exists()) { trySend(null); return }
+                val members = snapshot.child("members").children.mapNotNull { c ->
+                    val k = c.key ?: return@mapNotNull null
+                    FocusMember(
+                        phoneKey = k,
+                        name     = c.child("name").value as? String ?: "",
+                        joinedAt = (c.child("joinedAt").value as? Number)?.toLong() ?: 0L,
+                        leftAt   = (c.child("leftAt").value as? Number)?.toLong() ?: 0L
+                    )
+                }
+                trySend(BuddyFocusSession(
+                    startMs   = (snapshot.child("startMs").value as? Number)?.toLong() ?: 0L,
+                    minutes   = (snapshot.child("minutes").value as? Number)?.toInt() ?: 25,
+                    startedBy = snapshot.child("startedBy").value as? String ?: "",
+                    members   = members
+                ))
+            }
+            override fun onCancelled(error: DatabaseError) { Log.e(TAG, "observeFocus: ${error.message}") }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
     // ── Helpers ───────────────────────────────────────────
 
     private suspend fun sendBuddyPush(toPhone: String, title: String, body: String, notifType: String) {
@@ -380,7 +602,11 @@ class BuddyRepository {
         "doneMinutes" to p.doneMinutes,
         "goalMinutes" to p.goalMinutes,
         "progressPct" to p.progressPct,
-        "lastNudgeAt" to p.lastNudgeAt
+        "lastNudgeAt" to p.lastNudgeAt,
+        "streak"       to p.streak,
+        "routineDone"  to p.routineDone,
+        "routineTotal" to p.routineTotal,
+        "quizAcc"      to p.quizAcc
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -391,6 +617,10 @@ class BuddyRepository {
         doneMinutes = (map["doneMinutes"] as? Long)?.toInt() ?: (map["doneMinutes"] as? Number)?.toInt() ?: 0,
         goalMinutes = (map["goalMinutes"] as? Long)?.toInt() ?: (map["goalMinutes"] as? Number)?.toInt() ?: 20,
         progressPct = (map["progressPct"] as? Long)?.toInt() ?: (map["progressPct"] as? Number)?.toInt() ?: 0,
-        lastNudgeAt = (map["lastNudgeAt"] as? Long) ?: (map["lastNudgeAt"] as? Number)?.toLong() ?: 0L
+        lastNudgeAt = (map["lastNudgeAt"] as? Long) ?: (map["lastNudgeAt"] as? Number)?.toLong() ?: 0L,
+        streak       = (map["streak"] as? Number)?.toInt() ?: -1,
+        routineDone  = (map["routineDone"] as? Number)?.toInt() ?: -1,
+        routineTotal = (map["routineTotal"] as? Number)?.toInt() ?: -1,
+        quizAcc      = (map["quizAcc"] as? Number)?.toInt() ?: -1
     )
 }
