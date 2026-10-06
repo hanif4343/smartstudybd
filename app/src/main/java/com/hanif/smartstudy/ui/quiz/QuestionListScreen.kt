@@ -702,8 +702,8 @@ fun QuestionListScreen(
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     },
                                     onAskAi = { voiceAiIdx = localIdx },
-                                    onRequestAiExplanation = { question, answer, subjectTopic ->
-                                        viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                                    onRequestAiExplanation = { question, answer, subjectTopic, options ->
+                                        viewModel.explainQuestionWithAi(question, answer, subjectTopic, options)
                                     }
                                 )
                             }
@@ -745,8 +745,8 @@ fun QuestionListScreen(
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             },
                             onAskAi = { voiceAiIdx = localIdx },
-                            onRequestAiExplanation = { question, answer, subjectTopic ->
-                                viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                            onRequestAiExplanation = { question, answer, subjectTopic, options ->
+                                viewModel.explainQuestionWithAi(question, answer, subjectTopic, options)
                             }
                         )
                         }
