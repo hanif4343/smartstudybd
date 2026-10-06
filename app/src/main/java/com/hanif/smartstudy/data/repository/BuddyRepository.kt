@@ -242,6 +242,70 @@ class BuddyRepository {
         }
     }
 
+    // ── Study Nav Phase 6: Study Together ────────────────────
+
+    private val buddyStudyingRef get() = db.getReference("BuddyStudying")
+
+    suspend fun setStudying(myPhone: String, myName: String, subject: String, topic: String): Boolean {
+        return try {
+            buddyStudyingRef.child(myPhone.firebaseKey()).setValue(mapOf(
+                "name" to myName, "subject" to subject, "topic" to topic,
+                "at" to System.currentTimeMillis()
+            )).await()
+            true
+        } catch (e: Exception) { Log.e(TAG, "setStudying: ${e.message}"); false }
+    }
+
+    suspend fun clearStudying(myPhone: String) {
+        try { buddyStudyingRef.child(myPhone.firebaseKey()).removeValue().await() }
+        catch (e: Exception) { Log.e(TAG, "clearStudying: ${e.message}") }
+    }
+
+    fun observeBuddyStudying(buddyPhone: String): Flow<BuddyStudying?> = callbackFlow {
+        val ref = buddyStudyingRef.child(buddyPhone.firebaseKey())
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                @Suppress("UNCHECKED_CAST")
+                val map = snapshot.value as? Map<String, Any>
+                trySend(map?.let {
+                    BuddyStudying(
+                        phone   = buddyPhone,
+                        name    = it["name"] as? String ?: "",
+                        subject = it["subject"] as? String ?: "",
+                        topic   = it["topic"] as? String ?: "",
+                        at      = (it["at"] as? Long) ?: (it["at"] as? Number)?.toLong() ?: 0L
+                    )
+                })
+            }
+            override fun onCancelled(error: DatabaseError) { Log.e(TAG, "observeBuddyStudying: ${error.message}") }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    /** "এই lessonটা একসাথে পড়বি?" — বন্ধুর কাছে push + inbox; ট্যাপ করলে সরাসরি ওই Topic-এ খোলে */
+    suspend fun sendStudyInvite(fromName: String, toPhone: String, subject: String, topic: String): Boolean {
+        return try {
+            val title = "🤝 একসাথে পড়বি?"
+            val body  = "$fromName \"$topic\" ($subject) পড়ছে — তুইও জয়েন কর!"
+            val phoneEncoded = toPhone.firebaseKey()
+            val notifKey = "notif_${System.currentTimeMillis()}"
+            db.getReference("Notifications/$phoneEncoded/$notifKey").setValue(mapOf(
+                "title" to title, "body" to body, "type" to "study_together",
+                "url" to "study", "subject" to subject, "topic" to topic,
+                "read" to false, "time" to System.currentTimeMillis()
+            )).await()
+            val fcmToken = com.hanif.smartstudy.data.remote.FcmAdminService.fetchTokenForPhone(toPhone)
+            if (!fcmToken.isNullOrBlank()) {
+                com.hanif.smartstudy.data.remote.FcmAdminService.sendToToken(
+                    token = fcmToken, title = title, body = body,
+                    data  = mapOf("type" to "study_together", "url" to "study", "subject" to subject, "topic" to topic)
+                )
+            }
+            true
+        } catch (e: Exception) { Log.e(TAG, "sendStudyInvite: ${e.message}"); false }
+    }
+
     // ── Helpers ───────────────────────────────────────────
 
     private suspend fun sendBuddyPush(toPhone: String, title: String, body: String, notifType: String) {
