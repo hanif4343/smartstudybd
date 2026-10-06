@@ -1590,14 +1590,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * ইংরেজি গ্রামার হলে গঠনতন্ত্র/লজিক বুঝিয়ে (দেখো
      * WrittenAnswerAiService.explainQuestion()-এর প্রম্পট, ঠিক এই নিয়মেই লেখা)।
      */
-    suspend fun explainQuestionWithAi(question: String, correctAnswer: String, subjectTopic: String): String? {
+    suspend fun explainQuestionWithAi(
+        question: String, correctAnswer: String, subjectTopic: String,
+        options: List<String> = emptyList()
+    ): String? {
         val keys = session.getAiApiKeys()
         if (!keys.hasAnyKey() || question.isBlank()) return null
         return com.hanif.smartstudy.data.remote.WrittenAnswerAiService.explainQuestion(
             question      = question,
             correctAnswer = correctAnswer,
             subjectTopic  = subjectTopic,
-            keys          = keys
+            keys          = keys,
+            options       = options
         )
     }
 
