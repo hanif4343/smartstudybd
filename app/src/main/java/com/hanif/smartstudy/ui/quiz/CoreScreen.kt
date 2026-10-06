@@ -37,7 +37,9 @@ fun CoreScreen(
     // ── Subject/SubTopic "Move" (ফাইল ম্যানেজারের মতো — একটা Topic তার আন্ডারের সব
     // প্রশ্নসহ অন্য Subject-এ move) — SubTopicListScreen-এর "Admin" মেনুর "📦 Move to
     // Subject" থেকে ট্রিগার হয়। destination-এ same নামের Topic থাকলে auto-merge। ──
-    onAdminMoveSubTopic   : ((sheet: String, subject: String, oldName: String, newSubject: String, newTopicName: String) -> Unit)? = null
+    onAdminMoveSubTopic   : ((sheet: String, subject: String, oldName: String, newSubject: String, newTopicName: String) -> Unit)? = null,
+    // ── Study Nav Phase 4: Study টুলবার থেকে Quiz/Wrong Review-তে যাওয়া — MainScreen হ্যান্ডেল করে ──
+    onStudyAction         : ((StudyAction) -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val ctx   = LocalContext.current
@@ -70,6 +72,40 @@ fun CoreScreen(
         if (!qbankAdminMsg.isNullOrBlank()) {
             android.widget.Toast.makeText(ctx, qbankAdminMsg, android.widget.Toast.LENGTH_SHORT).show()
             viewModel.clearQBankAdminMsg()
+        }
+    }
+
+    // ── Study Nav Phase 1: Study-তে কোনো Topic খুললে "Continue/Recent"-এর জন্য লোকালি
+    // রেকর্ড করা হয়। প্রগ্রেস-% বদলালেও (subTopics রিলোড) আপডেট হয়। ──
+    val recentStore = remember { StudyRecentStore(ctx) }
+    // ── Phase 5: Smart Revision — Topic খুললে Spaced-revision ট্র্যাকিং-এ রেকর্ড ──
+    val revisionStore = remember { StudyRevisionStore(ctx) }
+    LaunchedEffect(mode, state.navPath, state.subTopics) {
+        val subj  = state.navPath.subject
+        val topic = state.navPath.subTopic
+        if (mode == StudyMode.STUDY && subj != null && topic != null) {
+            val pct = state.subTopics.firstOrNull { it.name == topic }?.progressPct ?: 0
+            recentStore.record(subj, topic, pct)
+        }
+    }
+    LaunchedEffect(mode, state.navPath.subject, state.navPath.subTopic) {
+        val subj  = state.navPath.subject
+        val topic = state.navPath.subTopic
+        if (mode == StudyMode.STUDY && subj != null && topic != null) revisionStore.recordVisit(subj, topic)
+    }
+    // ── Phase 5: Study Topic-লিস্টে প্রতিটা Topic-এর স্ট্যাটাস-ব্যাজ (Weak/Strong/Needs Revision...) ──
+    var topicStatuses by remember { mutableStateOf<Map<String, StudyTopicStatus>>(emptyMap()) }
+    LaunchedEffect(mode, state.navPath.subject, state.subTopics) {
+        val subj = state.navPath.subject
+        if (mode == StudyMode.STUDY && subj != null && state.navPath.subTopic == null && state.subTopics.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val entries = revisionStore.load().filter { it.subject == subj }.associateBy { it.topic }
+            topicStatuses = state.subTopics.filter { !it.isModelTest }.associate { st ->
+                val (att, cor) = viewModel.topicStats(subj, st.name)
+                st.name to computeTopicStatus(entries[st.name], att, cor, now)
+            }
+        } else if (state.navPath.subject == null) {
+            topicStatuses = emptyMap()
         }
     }
 
@@ -281,6 +317,7 @@ fun CoreScreen(
         state.navPath.depth() == 2 -> {
             QuestionListScreen(
                 viewModel           = viewModel,
+                onStudyAction       = onStudyAction,
                 mode                = state.mode,
                 subject             = state.navPath.subject ?: "",
                 subTopic            = state.navPath.subTopic ?: "",
@@ -328,6 +365,7 @@ fun CoreScreen(
                 subTopics   = state.subTopics,
                 isLoading   = state.isLoading,
                 onSubTopic  = { viewModel.navigateToSubTopicLazy(it) },
+                statusByTopic = if (mode == StudyMode.STUDY) topicStatuses else emptyMap(),
                 reviewProgress = state.reviewProgressTopics,
                 onModelTest = { viewModel.openModelTestZone(it) },
                 onBack      = { viewModel.navigateBack() },
@@ -575,7 +613,17 @@ fun CoreScreen(
                 qbankSearchQuery        = state.qbankSearchQuery,
                 onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
                 isRefreshing = state.isRefreshing,
-                onRefresh    = { viewModel.refreshCurrentMode() }
+                onRefresh    = { viewModel.refreshCurrentMode() },
+                // ── Study Nav Phase 1: শুধু Study ট্যাবে "আমার পড়াশোনা" ──
+                headerSlot   = if (mode == StudyMode.STUDY) {
+                    @Composable {
+                        StudyHomeSection(
+                            subjects    = state.subjects,
+                            viewModel   = viewModel,
+                            onOpenTopic = { subj, topic -> viewModel.openStudyTopicDirect(subj, topic) }
+                        )
+                    }
+                } else null
             )
         }
     }
