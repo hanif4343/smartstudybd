@@ -34,6 +34,19 @@ data class BuddyProgress(
     val lastNudgeAt  : Long   = 0L
 )
 
+// ── Study Nav Phase 6 (Study Together): বন্ধু এখন কোন Topic পড়ছে — /BuddyStudying/{key} ──
+data class BuddyStudying(
+    val phone   : String = "",
+    val name    : String = "",
+    val subject : String = "",
+    val topic   : String = "",
+    val at      : Long   = 0L
+) {
+    /** ২০ মিনিটের মধ্যে আপডেট হলেই "এখন পড়ছে" ধরা হয় (অ্যাপ হঠাৎ বন্ধ হলে পুরনো ডেটা ভুল না দেখায়) */
+    fun isFresh(now: Long = System.currentTimeMillis()) =
+        topic.isNotBlank() && at > 0L && now - at <= 20 * 60 * 1000L
+}
+
 data class BuddyState(
     val hasBuddy        : Boolean        = false,
     val buddy           : BuddyLink?     = null,
@@ -41,6 +54,7 @@ data class BuddyState(
     val buddyProgress   : BuddyProgress  = BuddyProgress(),
     val incomingRequest : BuddyRequest?  = null,
     val outgoingRequest : BuddyRequest?  = null,
+    val buddyStudying   : BuddyStudying? = null,
     val searchResults   : List<User>     = emptyList(),
     val isLoading       : Boolean        = false,
     val toast           : String?        = null,
