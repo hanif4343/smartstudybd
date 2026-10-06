@@ -33,6 +33,7 @@ class BuddyViewModel(app: Application) : AndroidViewModel(app) {
     private var buddyWatchJob   : Job? = null
     private var progressWatchJob: Job? = null
     private var requestWatchJob : Job? = null
+    private var studyingWatchJob: Job? = null
 
     init {
         val me = session.getCurrentUser()
@@ -61,6 +62,17 @@ class BuddyViewModel(app: Application) : AndroidViewModel(app) {
                 repo.observeMyBuddy(myPhone).collect { link ->
                     _state.update { it.copy(hasBuddy = link != null, buddy = link) }
                     progressWatchJob?.cancel()
+                    // ── Study Nav Phase 6: বন্ধু এখন কোন Topic পড়ছে (Study Together) ──
+                    studyingWatchJob?.cancel()
+                    if (link != null) {
+                        studyingWatchJob = viewModelScope.launch {
+                            repo.observeBuddyStudying(link.buddyPhone).collect { st ->
+                                _state.update { it.copy(buddyStudying = st) }
+                            }
+                        }
+                    } else {
+                        _state.update { it.copy(buddyStudying = null) }
+                    }
                     if (link != null) {
                         progressWatchJob = viewModelScope.launch {
                             repo.observeBuddyProgress(link.buddyPhone).collect { prog ->
@@ -179,6 +191,34 @@ class BuddyViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(toast = if (ok) "👀 ${buddy.buddyName} কে তাগাদা পাঠানো হয়েছে!"
                                  else "❌ পাঠাতে সমস্যা হয়েছে")
+            }
+        }
+    }
+
+    // ── Study Nav Phase 6: Study Together ───────────────────
+
+    /** Study-তে Topic খুললে — বন্ধু থাকলে "এখন পড়ছে" জানিয়ে রাখা (বন্ধু না থাকলে কিছুই করে না) */
+    fun setStudying(subject: String, topic: String) {
+        val me = session.getCurrentUser() ?: return
+        val myPhone = me.phone ?: return
+        if (!_state.value.hasBuddy) return
+        viewModelScope.launch { repo.setStudying(myPhone, me.displayName(), subject, topic) }
+    }
+
+    fun clearStudying() {
+        val myPhone = session.getCurrentUser()?.phone ?: return
+        if (!_state.value.hasBuddy) return
+        viewModelScope.launch { repo.clearStudying(myPhone) }
+    }
+
+    /** 🤝 "এই lessonটা একসাথে পড়বি?" */
+    fun inviteToStudy(subject: String, topic: String) {
+        val me    = session.getCurrentUser() ?: return
+        val buddy = _state.value.buddy ?: return
+        viewModelScope.launch {
+            val ok = repo.sendStudyInvite(me.displayName(), buddy.buddyPhone, subject, topic)
+            _state.update {
+                it.copy(toast = if (ok) "🤝 ${buddy.buddyName} কে আমন্ত্রণ পাঠানো হয়েছে!" else "❌ আমন্ত্রণ পাঠাতে সমস্যা হয়েছে")
             }
         }
     }
