@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 
 data class QuizUiState(
@@ -568,6 +569,34 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *   Room থেকে instant।
      * - অফলাইন (নেটওয়ার্ক এক্সসেপশন) → চুপচাপ ধরে Room-এ যা আছে তাই দেখানো হয়।
      */
+    /**
+     * Study Nav Phase 1 — "Continue Learning"/"Recent" থেকে সরাসরি Topic-এ ঢোকা।
+     * আগে Subject-এর Topic লিস্ট লোড হওয়া পর্যন্ত অপেক্ষা করে (isLoading=false),
+     * তারপর Topic খোলে — যাতে navigateToSubjectLazy()-এর ব্যাকগ্রাউন্ড আপডেট
+     * পরে এসে প্রশ্ন-লিস্টের লোডিং স্টেট নষ্ট না করে।
+     */
+    fun openStudyTopicDirect(subject: String, topic: String) {
+        viewModelScope.launch {
+            navigateToSubjectLazy(subject)
+            // navigateToSubjectLazy() সিঙ্ক্রোনাসলি isLoading=true করে, তাই এখানে সত্যিই অপেক্ষা হয়
+            withTimeoutOrNull(5000L) {
+                _state.first { !it.isLoading && it.navPath.subject == subject }
+            }
+            // Topic এই sheet-এ না থাকলে (যেমন Quiz-এ নেই) Subject-এর Topic লিস্টেই থামে
+            if (_state.value.navPath.subject == subject && _state.value.subTopics.any { it.name == topic }) {
+                navigateToSubTopicLazy(topic)
+            }
+        }
+    }
+
+    /** Study Nav Phase 5 — Topic-এর (attempted, correct), Topic-status হিসাবের জন্য */
+    suspend fun topicStats(subject: String, topic: String): Pair<Int, Int> =
+        runCatching { repo.getTopicStatsAllModes(subject, topic) }.getOrDefault(0 to 0)
+
+    /** Study Nav Phase 4 — বর্তমান Topic-এ মোট কয়টা প্রশ্ন ভুল (Quiz+QBank+Study) */
+    suspend fun topicWrongCount(subject: String, topic: String): Int =
+        runCatching { repo.getTopicWrongCountAllModes(subject, topic) }.getOrDefault(0)
+
     fun navigateToSubTopicLazy(topicName: String) {
         val subject = _state.value.navPath.subject ?: return
         var topicId = _state.value.subTopics.find { it.name == topicName }?.topicId.orEmpty()
