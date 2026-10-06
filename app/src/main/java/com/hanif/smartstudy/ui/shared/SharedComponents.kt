@@ -268,7 +268,7 @@ fun QuestionCard(
     // অটো-লোড হয় — গণিত হলে ধাপে ধাপে, ইংরেজি গ্রামার হলে গঠনতন্ত্র/লজিকসহ (দেখো
     // QuizViewModel.explainQuestionWithAi()/WrittenAnswerAiService.explainQuestion())।
     // null থাকলে (API key সেট নেই, বা এই স্ক্রিনে এখনো wire করা হয়নি) কিছুই দেখাবে না। ──
-    onRequestAiExplanation: (suspend (question: String, answer: String, subjectTopic: String) -> String?)? = null,
+    onRequestAiExplanation: (suspend (question: String, answer: String, subjectTopic: String, options: List<String>) -> String?)? = null,
     studyRevealMode: Boolean = false,
     modifier       : Modifier = Modifier
 ) {
@@ -292,6 +292,11 @@ fun QuestionCard(
     // retry চাপলে aiAttempt বাড়ে (LaunchedEffect আবার চলে)।
     var aiRequested by remember(item.id) { mutableStateOf(false) }
     var aiAttempt   by remember(item.id) { mutableStateOf(0) }
+    // ── Admin: AI ব্যাখ্যা এক ক্লিকে (বা হালকা এডিট করে) ডাটাবেজে (Sheet) সেভ — অটো নয়,
+    // শুধু Admin ক্লিক করলেই। একবার সেভ হলে সেটা সাধারণ DB ব্যাখ্যা হয়ে যায় (সবাই দেখে),
+    // তখন আর AI কল লাগে না ──
+    var aiSavedToDb     by remember(item.id) { mutableStateOf(false) }
+    var showAiEditDialog by remember(item.id) { mutableStateOf(false) }
 
     Card(
         modifier  = modifier.fillMaxWidth(),
@@ -757,7 +762,11 @@ fun QuestionCard(
                     aiExplanationFailed = false
                     val subjectTopic = "${item.subject} - ${item.subTopic}".trim(' ', '-')
                     val result = runCatching {
-                        requestFn(item.question, item.answer, subjectTopic)
+                        requestFn(
+                            item.question, item.answer, subjectTopic,
+                            listOf(item.optionA, item.optionB, item.optionC, item.optionD)
+                                .map { it.trim() }.filter { it.isNotBlank() }
+                        )
                     }.getOrNull()
                     if (result.isNullOrBlank()) {
                         aiExplanationFailed = true
@@ -949,6 +958,13 @@ fun QuestionCard(
                                 color = Indigo600, fontWeight = FontWeight.Medium)
                         }
                     }
+                    // সেভ হয়ে গেছে এবং DB-ব্যাখ্যা এখন উপরের ExplanationBox-এ দেখা যাচ্ছে —
+                    // একই লেখা দুইবার না দেখিয়ে শুধু ছোট স্ট্যাটাস ──
+                    aiSavedToDb && dbExplanationVisible -> {
+                        Text("✅ AI ব্যাখ্যা DB-তে সেভ হয়েছে — এখন থেকে সবাই এটাই দেখবে",
+                            fontSize = 11.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+                    }
                     aiExplanation != null -> {
                         val pretty = remember(aiExplanation) { formatAiExplanation(aiExplanation ?: "") }
                         Column(
@@ -975,6 +991,53 @@ fun QuestionCard(
                             Text("AI-তৈরি ব্যাখ্যা — ভুল থাকতে পারে, মূল বইয়ের সাথে মিলিয়ে নিন",
                                 fontSize = 10.sp, fontFamily = NotoSansBengali,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+
+                            // ── Admin-only: DB-তে সেভ (এক ক্লিক) / এডিট করে সেভ ──
+                            if (isAdminUser && onAdminEdit != null) {
+                                Spacer(Modifier.height(10.dp))
+                                Box(Modifier.fillMaxWidth().height(1.dp).background(Indigo600.copy(alpha = 0.15f)))
+                                Spacer(Modifier.height(10.dp))
+                                val hasDbExp = item.explanation.isNotBlank()
+                                val adminSheet = item.sourceSheet.ifBlank {
+                                    when {
+                                        item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
+                                        item.isStudy() -> "Study"
+                                        else           -> "Quiz"
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            onAdminEdit(adminSheet, item.id, mapOf("explanation" to pretty), item.question.take(60))
+                                            aiSavedToDb = true
+                                        },
+                                        modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+                                    ) {
+                                        Text(if (hasDbExp) "💾 DB-তে রিপ্লেস" else "💾 DB-তে সেভ",
+                                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp, color = Color.White)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { showAiEditDialog = true },
+                                        modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                        border = BorderStroke(1.dp, Indigo600.copy(alpha = 0.5f))
+                                    ) {
+                                        Text("✏️ এডিট করে সেভ", fontFamily = NotoSansBengali,
+                                            fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Indigo600)
+                                    }
+                                }
+                                if (hasDbExp) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("⚠️ এই প্রশ্নে আগে থেকেই DB-ব্যাখ্যা আছে — সেভ করলে সেটা বদলে যাবে",
+                                        fontSize = 10.sp, fontFamily = NotoSansBengali,
+                                        color = Color(0xFFF59E0B))
+                                }
+                            }
                         }
                     }
                     aiExplanationFailed -> {
@@ -1017,6 +1080,22 @@ fun QuestionCard(
             }
             }
         }
+    }
+
+    // ── AI ব্যাখ্যা হালকা এডিট করে DB-তে সেভ — বিদ্যমান "ব্যাখ্যা" এডিট ডায়ালগই ব্যবহার হয়
+    // (ভ্যালু আগে থেকে AI-র লেখা দিয়ে ভরা), সেভ করলে একই onAdminEdit পথে Sheet-এ যায় ──
+    if (isAdminUser && showAiEditDialog && aiExplanation != null) {
+        AdminFieldEditDialog(
+            item         = item,
+            fieldId      = "explanation",
+            initialValue = formatAiExplanation(aiExplanation ?: ""),
+            onDismiss    = {
+                showAiEditDialog = false
+                onAdminRefresh?.invoke()
+            },
+            onAdminEdit   = onAdminEdit,
+            onAdminDelete = null
+        )
     }
 
     // ── Admin per-field এডিট পপআপ — activeEditField সেট হলে খুলে যায় ──
