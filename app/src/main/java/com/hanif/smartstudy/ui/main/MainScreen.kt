@@ -217,6 +217,12 @@ fun MainScreen(
             DeepLinkAction.Type.STUDY      -> {
                 currentTab = BottomTab.STUDY
                 action.questionId?.let { studyViewModel.navigateToQuestion(it) }
+                // ── Study Nav Phase 6: "একসাথে পড়বি?" আমন্ত্রণ → সরাসরি ওই Topic-এ ──
+                val dlSubject = action.subject
+                val dlTopic   = action.topic
+                if (action.questionId == null && !dlSubject.isNullOrBlank() && !dlTopic.isNullOrBlank()) {
+                    studyViewModel.openStudyTopicDirect(dlSubject, dlTopic)
+                }
             }
             DeepLinkAction.Type.SEARCH     -> { showSearch = true }
             DeepLinkAction.Type.REPORTS    -> {
@@ -543,6 +549,35 @@ fun MainScreen(
                 BottomTab.STUDY -> CoreScreen(
                     mode      = StudyMode.STUDY,
                     viewModel = studyViewModel,
+                    // ── Study Nav Phase 4: Study টুলবার → Quiz (Practice) / Home (Wrong Review) ──
+                    onStudyAction = { action ->
+                        when (action) {
+                            is com.hanif.smartstudy.ui.quiz.StudyAction.Practice -> {
+                                currentTab = BottomTab.QUIZ
+                                if (action.count > 0) {
+                                    quizViewModel.startInstantTestFor(action.subject, action.topic, action.count)
+                                } else {
+                                    quizViewModel.openStudyTopicDirect(action.subject, action.topic)
+                                }
+                            }
+                            is com.hanif.smartstudy.ui.quiz.StudyAction.OpenWrongReview -> {
+                                currentTab = BottomTab.HOME
+                            }
+                            // ── Phase 6: Buddy Challenge (Study Buddy আগে থেকেই invite-এ বসানো) ──
+                            is com.hanif.smartstudy.ui.quiz.StudyAction.BuddyChallenge -> {
+                                if (menuState.challengesEnabled) {
+                                    currentTab = BottomTab.CHALLENGE
+                                    challengeViewModel.prepareStudyBuddyChallenge(action.buddyPhone, action.subject, action.topic)
+                                } else {
+                                    android.widget.Toast.makeText(context, "চ্যালেঞ্জ ফিচার এখন বন্ধ আছে", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            // ── Phase 6: বন্ধু যে Topic পড়ছে সেখানে Join ──
+                            is com.hanif.smartstudy.ui.quiz.StudyAction.OpenTopic -> {
+                                studyViewModel.openStudyTopicDirect(action.subject, action.topic)
+                            }
+                        }
+                    },
                     onAchievementUnlocked = onAchievementUnlocked,
                     onStreakUpdated       = onStreakUpdated,
                     onAdminEdit = { sheet, rowKey, fields, preview ->
