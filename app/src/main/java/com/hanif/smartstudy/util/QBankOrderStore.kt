@@ -27,21 +27,25 @@ object QBankOrderStore {
         if (prefs == null) prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    fun getLocal(kind: String): List<String> = try {
-        val raw = prefs?.getString("local_$kind", null) ?: return emptyList()
-        val a = JSONArray(raw)
-        (0 until a.length()).map { a.getString(it) }
-    } catch (_: Exception) { emptyList() }
+    fun getLocal(kind: String): List<String> {
+        return try {
+            val raw = prefs?.getString("local_$kind", null) ?: return emptyList()
+            val a = JSONArray(raw)
+            (0 until a.length()).map { a.getString(it) }
+        } catch (_: Exception) { emptyList() }
+    }
 
     fun setLocal(kind: String, list: List<String>) {
         prefs?.edit()?.putString("local_$kind", JSONArray(list).toString())?.apply()
     }
 
-    fun getServer(kind: String): Map<String, Int> = try {
-        val raw = prefs?.getString("server_$kind", null) ?: return emptyMap()
-        val o = JSONObject(raw)
-        o.keys().asSequence().associateWith { o.getInt(it) }
-    } catch (_: Exception) { emptyMap() }
+    fun getServer(kind: String): Map<String, Int> {
+        return try {
+            val raw = prefs?.getString("server_$kind", null) ?: return emptyMap()
+            val o = JSONObject(raw)
+            o.keys().asSequence().associateWith { o.getInt(it) }
+        } catch (_: Exception) { emptyMap() }
+    }
 
     /** CDN থেকে আসা সিরিয়াল (খালি হলে আগেরটা অপরিবর্তিত) */
     fun setServer(kind: String, map: Map<String, Int>) {
