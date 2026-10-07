@@ -2280,30 +2280,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun rebuildQBankYears(@Suppress("UNUSED_PARAMETER") content: AppContent) {
         repo.syncExamAppearances()
 
-        // ── প্রতিটা সালের ভেতরে (প্রতিষ্ঠান × পদবী) জোড়াগুলো subTopics-এ রাখা হয় — যাতে
-        // ক্যাটাগরি-চিপ (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক/১৬-২০) সাল-মোডেও কাজ করে ও প্রশ্ন-সংখ্যা মেলে ──
-        val institutions = repo.getRoomInstitutions().associateBy { it.institutionId }
-        val posts        = repo.getRoomPosts().associateBy { it.postId }
-        val byYear = repo.getRoomAppearancesWithYear().groupBy { it.year }
-
         val years = repo.getRoomAppearanceYearCounts()
             .map { yc ->
-                val pairs = (byYear[yc.subject] ?: emptyList())
-                    .groupBy { it.institutionId to it.postId }
-                    .map { (key, apps) ->
-                        val inst = institutions[key.first]?.name.orEmpty()
-                        val post = posts[key.second]?.name.orEmpty()
-                        val qIds = apps.map { it.questionId }.distinct()
-                        SubTopicEntry(
-                            name = "$inst · $post", subject = yc.subject,
-                            totalQ = qIds.size, doneQ = 0, linkedQuestionIds = qIds
-                        )
-                    }
                 SubjectEntry(
                     name   = yc.subject,   // subject কলামেই বছর বসানো (SubjectCount reuse, দেখো ReferenceDao)
                     totalQ = yc.count,
                     doneQ  = 0,
-                    subTopics = pairs
+                    linkedQuestionIds = emptyList()  // ভারী হতে পারে বলে লিস্ট-লেভেলে না এনে ট্যাপ করলে আনা হয় (নিচে selectQBankYear)
                 )
             }
             .sortedByDescending { it.name }   // সাম্প্রতিক সাল আগে (ডিফল্ট)
@@ -2349,13 +2332,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             val bookmarks = _state.value.bookmarkedIds
 
-            // ── সিলেক্টেড ক্যাটাগরি অনুযায়ী ফিল্টার (সাল-কার্ডের সংখ্যার সাথে মিলিয়ে) ──
-            val yearEntry = _state.value.qbankYears.find { it.name == year }
-            val ids = if (yearEntry != null && yearEntry.subTopics.isNotEmpty()) {
-                yearEntry.subTopics
-                    .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name), com.hanif.smartstudy.util.QBankCategory.selected) }
-                    .flatMap { it.linkedQuestionIds }.distinct()
-            } else repo.getRoomAppearanceQuestionIdsForYear(year)
+            val ids = repo.getRoomAppearanceQuestionIdsForYear(year)
             if (myToken != qbankYearLoadToken) return@launch
 
             // ── FIX ("০/০ প্রশ্ন" বাগ, একই প্যাটার্ন): Room-এ না-থাকা linkedQuestionId
