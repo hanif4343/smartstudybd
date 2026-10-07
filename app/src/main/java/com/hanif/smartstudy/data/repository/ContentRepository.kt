@@ -1406,7 +1406,8 @@ class ContentRepository(private val context: Context) {
                 // তাই যেকোনো একটা এলেই যথেষ্ট (correct-কে অগ্রাধিকার, GAS-এর সোর্স-অফ-ট্রুথ) ──
                 answer      = fields["correct"] ?: fields["answer"] ?: existing.answer,
                 explanation = fields["explanation"] ?: existing.explanation,
-                technique   = fields["technique"]    ?: existing.technique
+                technique   = fields["technique"]    ?: existing.technique,
+                questionPaperUrls = fields["QuestionPaper"] ?: existing.questionPaperUrls
             )
             dao.upsert(updated)
         }
