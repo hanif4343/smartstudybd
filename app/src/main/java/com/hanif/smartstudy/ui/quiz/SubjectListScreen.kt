@@ -213,14 +213,6 @@ private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolea
         listOf(subject.name) + subject.subTopics.map { it.name }, category
     )
 
-/** সাল-কার্ডের প্রশ্ন-সংখ্যা — সিলেক্টেড ক্যাটাগরির appearance-গুলো থেকে (distinct প্রশ্ন) */
-private fun yearCountForCategory(subject: SubjectEntry, category: String): Int {
-    if (subject.subTopics.isEmpty()) return subject.totalQ
-    return subject.subTopics
-        .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name), category) }
-        .flatMap { it.linkedQuestionIds }.distinct().size
-}
-
 @Composable
 private fun ExamCategoryChipsRow(
     selected: String,
@@ -363,7 +355,7 @@ fun SubjectListScreen(
         // সাজানোর মোডে ফিল্টার/সার্চ বন্ধ — নাহলে দেখানো লিস্টের index আর আসল লিস্টের index মিলত না
         if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
             list = list.filter { examCategoryMatches(it, selectedExamCategory) }
-            if (qbankSearchQuery.isNotBlank()) {
+            if (qbankSearchQuery.isNotBlank() && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
                 list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
             }
         }
@@ -440,13 +432,20 @@ fun SubjectListScreen(
             item {
                 ExamCategoryChipsRow(
                     selected = selectedExamCategory,
-                    onSelect = { com.hanif.smartstudy.util.QBankCategory.selected = it }
+                    onSelect = {
+                        com.hanif.smartstudy.util.QBankCategory.selected = it
+                        // ফিল্টার শুধু ১৬-২০ গ্রেডে; অন্য ক্যাটাগরিতে পদবী-মোড (যেখানে সরাসরি প্রশ্নপত্র খোলে)
+                        if (it != com.hanif.smartstudy.util.QBankCategory.GRADE &&
+                            qbankFilterMode != QBankFilterMode.DESIGNATION) {
+                            onQBankFilterModeChange(QBankFilterMode.DESIGNATION)
+                        }
+                    }
                 )
             }
         }
 
         // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + সার্চ ──
-        if (showQBankFilterBar) {
+        if (showQBankFilterBar && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
             item {
                 QBankFilterBar(
                     filterMode        = qbankFilterMode,
@@ -524,9 +523,10 @@ fun SubjectListScreen(
                         QBankSubjectCard(
                             subject = subject,
                             onClick = {
-                                // সব ক্যাটাগরিতেই (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক/১৬-২০) একই ফ্লো —
-                                // প্রতিষ্ঠান-লিস্ট ও ফিল্টার সবখানে পাওয়া যাবে (আগে সরাসরি প্রশ্নপত্রে ঢুকে যেত)
-                                onSubject(subject.name)
+                                // বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংকে সরাসরি প্রশ্নপত্র; ১৬-২০ গ্রেডে আগের মতো প্রতিষ্ঠান-লিস্ট
+                                val direct = onSubjectDirect
+                                if (direct != null && selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) direct(subject.name)
+                                else onSubject(subject.name)
                             },
                             reorderEnabled = isAdmin && isReorderMode,
                             isFirst = idx == 0,
@@ -542,7 +542,7 @@ fun SubjectListScreen(
                             },
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
-                                QBankFilterMode.YEAR        -> "${yearCountForCategory(subject, selectedExamCategory)} টি প্রশ্ন"
+                                QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
                                 QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                                 QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                             }
