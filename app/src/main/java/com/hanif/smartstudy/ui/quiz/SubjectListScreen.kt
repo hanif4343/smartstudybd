@@ -202,51 +202,23 @@ private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<Subje
 // তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
 private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 
-// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — বিসিএস/প্রাথমিক/নিবন্ধন/১৬-২০ গ্রেড। নতুন ক্যাটাগরি
-// লাগলে এখানে শুধু একটা নাম যোগ করলেই চিপ-রো তে দেখা যাবে। ──
-private val EXAM_CATEGORIES = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "১৬-২০ গ্রেড")
-
-// ── এই ক্যাটাগরিতে কার্ড ট্যাপ করলে প্রতিষ্ঠান-লিস্ট এড়িয়ে সরাসরি প্রশ্নপত্রে ঢোকে না
-// (আগের মতোই প্রতিষ্ঠান-লিস্ট দেখায়) ──
-private const val GRADE_CATEGORY = "১৬-২০ গ্রেড"
+// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — নিয়মগুলো util/QBankCategory.kt-তে (ViewModel-ও ব্যবহার করে) ──
+private val EXAM_CATEGORIES = com.hanif.smartstudy.util.QBankCategory.ALL
 
 // ── সিলেক্টেড চিপ ফাইল-লেভেলে রাখা হয়েছে — প্রশ্নপত্র থেকে back করলে স্ক্রিন নতুন করে
-// compose হয়, তখন remember রিসেট হয়ে সবসময় "বিসিএস" চিপে ফিরে যেত ──
-private var rememberedExamCategory by mutableStateOf(EXAM_CATEGORIES.first())
+// compose হয়, তখন remember রিসেট হয়ে সবসময় প্রথম চিপে ফিরে যেত। ViewModel-ও পড়ে (সাল-মোড) ──
 
-// "১৬-২০ গ্রেড" আলাদা কোনো নাম-প্যাটার্ন খোঁজে না — এটা catch-all: বিসিএস/প্রাথমিক/
-// নিবন্ধন এই তিনটার কোনোটাতেই যেসব subject মিলে না (যেমন ১৬-২০ গ্রেডের সরকারি চাকরির
-// প্রশ্ন, বা ভবিষ্যতে নতুন যেকোনো কাস্টম subject), সেগুলো এমনিতেই এখানে চলে আসবে —
-// আলাদা করে প্রতিটা subject নাম match করার দরকার নেই।
-private fun nameMatchesCategory(name: String, category: String): Boolean {
-    val n = name.trim().lowercase()
-    return when (category) {
-        "বিসিএস"   -> n.contains("bcs") || name.contains("বিসিএস")
-        "প্রাথমিক" -> n.contains("primary") || name.contains("প্রাথমিক")
-        // শিক্ষক নিবন্ধন (NTRCA) তিন ভাগে আসে: কলেজ পর্যায় / স্কুল পর্যায় / স্কুল পর্যায়-২ — এই
-        // নামগুলোতে নিজে "নিবন্ধন" শব্দ নাও থাকতে পারে, তাই এগুলোও এই ক্যাটাগরির ধরা হয় ──
-        "নিবন্ধন"  -> n.contains("ntrca") || n.contains("registration") || name.contains("নিবন্ধন") ||
-                      name.contains("কলেজ পর্যায়") || name.contains("স্কুল পর্যায়")
-        else       -> false
-    }
-}
+private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolean =
+    com.hanif.smartstudy.util.QBankCategory.matches(
+        listOf(subject.name) + subject.subTopics.map { it.name }, category
+    )
 
-/**
- * ক্যাটাগরি-ম্যাচ এখন কার্ডের নিজের নাম *অথবা* তার ভেতরের (nested) নামগুলো — পদবী-কার্ডের ক্ষেত্রে
- * তার আন্ডারের প্রতিষ্ঠানের নাম, প্রতিষ্ঠান-কার্ডের ক্ষেত্রে আন্ডারের পদবীর নাম। ফলে "কলেজ পর্যায়"
- * পদবী যদি "শিক্ষক নিবন্ধন" প্রতিষ্ঠানের আন্ডারে থাকে, সেটা নিবন্ধন চিপেই আসবে (আগে নামে "নিবন্ধন"
- * না থাকায় ভুল করে "১৬-২০ গ্রেড"-এ চলে যেত)।
- * "১৬-২০ গ্রেড" আলাদা কোনো নাম-প্যাটার্ন খোঁজে না — এটা catch-all: বিসিএস/প্রাথমিক/নিবন্ধন এই
- * তিনটার কোনোটাতেই যেগুলো মিলে না সেগুলো এমনিতেই এখানে চলে আসে।
- */
-private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolean {
-    val names = listOf(subject.name) + subject.subTopics.map { it.name }
-    fun hit(cat: String) = names.any { nameMatchesCategory(it, cat) }
-    return when (category) {
-        "বিসিএস", "প্রাথমিক", "নিবন্ধন" -> hit(category)
-        "১৬-২০ গ্রেড" -> !hit("বিসিএস") && !hit("প্রাথমিক") && !hit("নিবন্ধন")
-        else -> true
-    }
+/** সাল-কার্ডের প্রশ্ন-সংখ্যা — সিলেক্টেড ক্যাটাগরির appearance-গুলো থেকে (distinct প্রশ্ন) */
+private fun yearCountForCategory(subject: SubjectEntry, category: String): Int {
+    if (subject.subTopics.isEmpty()) return subject.totalQ
+    return subject.subTopics
+        .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name), category) }
+        .flatMap { it.linkedQuestionIds }.distinct().size
 }
 
 @Composable
@@ -385,7 +357,7 @@ fun SubjectListScreen(
     // বা বাংলা নাম থাকলে মিলবে)। নতুন কোনো Subject যোগ হলে (যেমন ভবিষ্যতে "প্রাথমিক
     // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
     // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
-    val selectedExamCategory = rememberedExamCategory
+    val selectedExamCategory = com.hanif.smartstudy.util.QBankCategory.selected
     val displaySubjects = run {
         var list = subjects
         // সাজানোর মোডে ফিল্টার/সার্চ বন্ধ — নাহলে দেখানো লিস্টের index আর আসল লিস্টের index মিলত না
@@ -468,7 +440,7 @@ fun SubjectListScreen(
             item {
                 ExamCategoryChipsRow(
                     selected = selectedExamCategory,
-                    onSelect = { rememberedExamCategory = it }
+                    onSelect = { com.hanif.smartstudy.util.QBankCategory.selected = it }
                 )
             }
         }
@@ -552,9 +524,9 @@ fun SubjectListScreen(
                         QBankSubjectCard(
                             subject = subject,
                             onClick = {
-                                val direct = onSubjectDirect
-                                if (direct != null && selectedExamCategory != GRADE_CATEGORY) direct(subject.name)
-                                else onSubject(subject.name)
+                                // সব ক্যাটাগরিতেই (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক/১৬-২০) একই ফ্লো —
+                                // প্রতিষ্ঠান-লিস্ট ও ফিল্টার সবখানে পাওয়া যাবে (আগে সরাসরি প্রশ্নপত্রে ঢুকে যেত)
+                                onSubject(subject.name)
                             },
                             reorderEnabled = isAdmin && isReorderMode,
                             isFirst = idx == 0,
@@ -570,7 +542,7 @@ fun SubjectListScreen(
                             },
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
-                                QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
+                                QBankFilterMode.YEAR        -> "${yearCountForCategory(subject, selectedExamCategory)} টি প্রশ্ন"
                                 QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                                 QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                             }
