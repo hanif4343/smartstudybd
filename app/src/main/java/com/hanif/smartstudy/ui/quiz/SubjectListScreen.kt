@@ -218,16 +218,34 @@ private var rememberedExamCategory by mutableStateOf(EXAM_CATEGORIES.first())
 // নিবন্ধন এই তিনটার কোনোটাতেই যেসব subject মিলে না (যেমন ১৬-২০ গ্রেডের সরকারি চাকরির
 // প্রশ্ন, বা ভবিষ্যতে নতুন যেকোনো কাস্টম subject), সেগুলো এমনিতেই এখানে চলে আসবে —
 // আলাদা করে প্রতিটা subject নাম match করার দরকার নেই।
-private fun examCategoryMatches(subjectName: String, category: String): Boolean {
-    val n = subjectName.trim().lowercase()
+private fun nameMatchesCategory(name: String, category: String): Boolean {
+    val n = name.trim().lowercase()
     return when (category) {
-        "বিসিএস"      -> n.contains("bcs") || subjectName.contains("বিসিএস")
-        "প্রাথমিক"    -> n.contains("primary") || subjectName.contains("প্রাথমিক")
-        "নিবন্ধন"     -> n.contains("ntrca") || n.contains("registration") || subjectName.contains("নিবন্ধন")
-        "১৬-২০ গ্রেড" -> !examCategoryMatches(subjectName, "বিসিএস") &&
-                          !examCategoryMatches(subjectName, "প্রাথমিক") &&
-                          !examCategoryMatches(subjectName, "নিবন্ধন")
-        else          -> true
+        "বিসিএস"   -> n.contains("bcs") || name.contains("বিসিএস")
+        "প্রাথমিক" -> n.contains("primary") || name.contains("প্রাথমিক")
+        // শিক্ষক নিবন্ধন (NTRCA) তিন ভাগে আসে: কলেজ পর্যায় / স্কুল পর্যায় / স্কুল পর্যায়-২ — এই
+        // নামগুলোতে নিজে "নিবন্ধন" শব্দ নাও থাকতে পারে, তাই এগুলোও এই ক্যাটাগরির ধরা হয় ──
+        "নিবন্ধন"  -> n.contains("ntrca") || n.contains("registration") || name.contains("নিবন্ধন") ||
+                      name.contains("কলেজ পর্যায়") || name.contains("স্কুল পর্যায়")
+        else       -> false
+    }
+}
+
+/**
+ * ক্যাটাগরি-ম্যাচ এখন কার্ডের নিজের নাম *অথবা* তার ভেতরের (nested) নামগুলো — পদবী-কার্ডের ক্ষেত্রে
+ * তার আন্ডারের প্রতিষ্ঠানের নাম, প্রতিষ্ঠান-কার্ডের ক্ষেত্রে আন্ডারের পদবীর নাম। ফলে "কলেজ পর্যায়"
+ * পদবী যদি "শিক্ষক নিবন্ধন" প্রতিষ্ঠানের আন্ডারে থাকে, সেটা নিবন্ধন চিপেই আসবে (আগে নামে "নিবন্ধন"
+ * না থাকায় ভুল করে "১৬-২০ গ্রেড"-এ চলে যেত)।
+ * "১৬-২০ গ্রেড" আলাদা কোনো নাম-প্যাটার্ন খোঁজে না — এটা catch-all: বিসিএস/প্রাথমিক/নিবন্ধন এই
+ * তিনটার কোনোটাতেই যেগুলো মিলে না সেগুলো এমনিতেই এখানে চলে আসে।
+ */
+private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolean {
+    val names = listOf(subject.name) + subject.subTopics.map { it.name }
+    fun hit(cat: String) = names.any { nameMatchesCategory(it, cat) }
+    return when (category) {
+        "বিসিএস", "প্রাথমিক", "নিবন্ধন" -> hit(category)
+        "১৬-২০ গ্রেড" -> !hit("বিসিএস") && !hit("প্রাথমিক") && !hit("নিবন্ধন")
+        else -> true
     }
 }
 
@@ -370,8 +388,9 @@ fun SubjectListScreen(
     val selectedExamCategory = rememberedExamCategory
     val displaySubjects = run {
         var list = subjects
-        if (showQBankFilterBar) {
-            list = list.filter { examCategoryMatches(it.name, selectedExamCategory) }
+        // সাজানোর মোডে ফিল্টার/সার্চ বন্ধ — নাহলে দেখানো লিস্টের index আর আসল লিস্টের index মিলত না
+        if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
+            list = list.filter { examCategoryMatches(it, selectedExamCategory) }
             if (qbankSearchQuery.isNotBlank()) {
                 list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
             }
