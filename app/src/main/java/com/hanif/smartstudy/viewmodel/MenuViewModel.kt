@@ -1607,17 +1607,34 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
 
             // ── destination নাম থেকে আসল subjectId রিজলভ (GAS action id-ভিত্তিক) ──
-            val newSubjectId = contentRepo.resolveSubjectId(sheet, newSubjectName)
+            var newSubjectId = contentRepo.resolveSubjectId(sheet, newSubjectName)
             if (newSubjectId == null) {
-                _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ \"$newSubjectName\" নামে কোনো Subject পাওয়া যায়নি") }
-                return@launch
+                // ── নতুন Subject: এই মোডের (sheet) জন্যই তৈরি হয় — Quiz/QBank/Study-র Subject আলাদা।
+                // GAS-এ (addReferenceItem, sheet সহ) আসল id নিয়ে লোকাল reference-এও যোগ করা হয়;
+                // তাই ইন্টারনেট দরকার। ──
+                if (!isReallyOnline()) {
+                    _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ নতুন Subject \"$newSubjectName\" তৈরি করতে ইন্টারনেট লাগবে") }
+                    return@launch
+                }
+                when (val cr = com.hanif.smartstudy.data.remote.GasContentService
+                    .addReferenceItem("subjects", newSubjectName, sheet = sheet)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        newSubjectId = cr.data
+                        try { contentRepo.addRoomSubjectLocal(cr.data, newSubjectName, sheet) } catch (_: Exception) { }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ নতুন Subject তৈরি ব্যর্থ: ${cr.message}") }
+                        return@launch
+                    }
+                }
             }
+            val newSubjectId2: String = newSubjectId ?: return@launch
 
             // ── destination Topic না থাকলে — এরর না দিয়ে সাথে সাথেই নতুন বানানো হয়
             // (adminAddQuestion()-এর অস্থায়ী localId প্যাটার্নের মতোই: প্রথমে
             // "-localT..." দিয়ে instant local reference-এ যোগ, ব্যাকগ্রাউন্ডে GAS-এর
             // addReferenceItem দেওয়া আসল id দিয়ে replace) ──
-            var newTopicId = contentRepo.resolveTopicId(newSubjectId, newSubTopicName)
+            var newTopicId = contentRepo.resolveTopicId(newSubjectId2, newSubTopicName)
             var isNewTopic = false
             var localTempTopicId: String? = null
             if (newTopicId == null) {
@@ -1625,7 +1642,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 localTempTopicId = "-localT" + System.currentTimeMillis().toString(36) +
                         (0..5).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
                 try {
-                    contentRepo.addRoomTopicLocal(localTempTopicId, newSubjectId, newSubTopicName)
+                    contentRepo.addRoomTopicLocal(localTempTopicId, newSubjectId2, newSubTopicName)
                 } catch (e: Exception) {
                     android.util.Log.w("AdminMove", "Local temp topic insert failed (non-fatal): ${e.message}")
                 }
@@ -1656,7 +1673,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 contentRepo.patchContentBulkAndPersist(sheet, ids.toSet(), mapOf("subject" to newSubjectName, "sub_topic" to newSubTopicName))
                 try {
-                    contentRepo.moveRoomQuestionsByIds(sheet, ids, newSubjectName, newSubTopicName, newSubjectId, finalNewTopicId, oldTopicId)
+                    contentRepo.moveRoomQuestionsByIds(sheet, ids, newSubjectName, newSubTopicName, newSubjectId2, finalNewTopicId, oldTopicId)
                 } catch (e: Exception) {
                     android.util.Log.w("AdminMove", "Room questions move failed (non-fatal): ${e.message}")
                 }
@@ -1684,7 +1701,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                         var realTopicId = finalNewTopicId
                         if (isNewTopic) {
                             when (val cr = com.hanif.smartstudy.data.remote.GasContentService
-                                .addReferenceItem("topics", newSubTopicName, newSubjectId)) {
+                                .addReferenceItem("topics", newSubTopicName, newSubjectId2)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     realTopicId = cr.data
                                     // ── লোকাল অস্থায়ী topicId আসল id দিয়ে replace —
@@ -1698,30 +1715,30 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                                     android.util.Log.e("AdminMove", "addReferenceItem FAILED: ${cr.message} — queueing")
-                                    q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, "", createIfMissing = true)
+                                    q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId2, newSubTopicName, "", createIfMissing = true)
                                     loadPendingEdits()
                                     return@launch
                                 }
                             }
                         }
                         when (val r = com.hanif.smartstudy.data.remote.GasContentService
-                            .moveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, realTopicId)) {
+                            .moveQuestions(sheet, ids, newSubjectName, newSubjectId2, newSubTopicName, realTopicId)) {
                             is com.hanif.smartstudy.data.remote.ApiResult.Success ->
                                 android.util.Log.i("AdminMove", "Background sheet move SUCCESS: ${r.data}টি প্রশ্ন")
                             is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                                 android.util.Log.e("AdminMove", "Background sheet move FAILED: ${r.message} — queueing")
-                                q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, realTopicId)
+                                q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId2, newSubTopicName, realTopicId)
                                 loadPendingEdits()
                             }
                         }
                     } else {
-                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, finalNewTopicId, createIfMissing = isNewTopic)
+                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId2, newSubTopicName, finalNewTopicId, createIfMissing = isNewTopic)
                         loadPendingEdits()
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("AdminMove", "EXCEPTION in background sync: ${e.message}", e)
                     try {
-                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId, newSubTopicName, finalNewTopicId, createIfMissing = isNewTopic)
+                        q.enqueueAdminMoveQuestions(sheet, ids, newSubjectName, newSubjectId2, newSubTopicName, finalNewTopicId, createIfMissing = isNewTopic)
                         loadPendingEdits()
                     } catch (e2: Exception) {
                         android.util.Log.e("AdminMove", "QUEUE ALSO FAILED: ${e2.message}", e2)
