@@ -707,6 +707,27 @@ object GasContentService {
         }
 
     /**
+     * QBank পদবী/প্রতিষ্ঠান সিরিয়াল — Posts/Institutions ট্যাবের "sort_order" কলামে (GAS
+     * setReferenceOrder)। refType: "posts" | "institutions"; order: id → ১,২,৩…। setTopicOrder-এর
+     * মতোই ৫০টা করে chunk; কোনো chunk ব্যর্থ হলে Error (caller queue-তে রাখে, আবার পাঠানো নিরাপদ)।
+     */
+    suspend fun setReferenceOrder(refType: String, order: Map<String, Int>): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+            if (order.isEmpty()) return@withContext ApiResult.Success(Unit)
+            try {
+                for (chunk in order.entries.chunked(50)) {
+                    val packed = chunk.joinToString(",") { "${it.key}:${it.value}" }
+                    val ok = callGetAction(mapOf("action" to "setReferenceOrder", "refType" to refType, "order" to packed))
+                    if (!ok) return@withContext ApiResult.Error("সিরিয়াল Sheet-এ সেভ হয়নি (GAS আপডেট/ডিপ্লয় করা আছে তো?)")
+                }
+                ApiResult.Success(Unit)
+            } catch (e: Exception) {
+                ApiResult.Error(e.message ?: "Network error")
+            }
+        }
+
+    /**
      * App feature request ৩ (QBank Admin — পদবী/প্রতিষ্ঠান Rename): GAS-এর
      * `renameReferenceItem` action কল করে — Subjects/Topics/Posts/Institutions
      * যেকোনো reference-ট্যাবের একটা এন্ট্রি নাম বদলায় (id দিয়ে খুঁজে, ঠিক ১টা রো)।
