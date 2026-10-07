@@ -1063,6 +1063,7 @@ fun QuestionListScreen(
     if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
         AdminMoveQuestionsPickerDialog(
             subjects        = vmState.subjects.map { it.name },
+            onLoadSubjects  = { viewModel.adminSubjectsForMove(moveSheetKey) },
             selectedCount   = moveTargetIds.size,
             currentSubject  = subject,
             currentSubTopic = subTopic,
@@ -1339,6 +1340,8 @@ fun QuestionListScreen(
 @Composable
 private fun AdminMoveQuestionsPickerDialog(
     subjects        : List<String>,
+    // এই মোডের সব Subject (খালি/নতুনসহ) — লোড হলে `subjects`-এর জায়গা নেয়; ব্যর্থ/খালি হলে আগেরটাই
+    onLoadSubjects  : suspend () -> List<String> = { emptyList() },
     selectedCount   : Int,
     currentSubject  : String,
     currentSubTopic : String,
@@ -1354,6 +1357,9 @@ private fun AdminMoveQuestionsPickerDialog(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
 
+    var allSubjects by remember { mutableStateOf(subjects) }
+    var addingNewSubject by remember { mutableStateOf(false) }
+    var newSubjectText by remember { mutableStateOf("") }
     var pickedSubject by remember { mutableStateOf(currentSubject) }
     var pickedTopic by remember { mutableStateOf<String?>(null) }
     var topicsLoading by remember { mutableStateOf(false) }
@@ -1387,6 +1393,8 @@ private fun AdminMoveQuestionsPickerDialog(
     // auto-open হয়ে যায়, এক ট্যাপেই কাজ হয়ে যায়। Subject সেগমেন্ট থেকে খোলা
     // হলে (openTopicFirst == false) বদলে Subject dropdown-টাই সরাসরি auto-open হয়। ──
     LaunchedEffect(Unit) {
+        val loaded = try { onLoadSubjects() } catch (e: Exception) { emptyList() }
+        if (loaded.isNotEmpty()) allSubjects = loaded
         loadTopicsFor(currentSubject, autoOpenTopicMenu = openTopicFirst)
         if (!openTopicFirst) subjectMenuExpanded = true
     }
@@ -1407,7 +1415,7 @@ private fun AdminMoveQuestionsPickerDialog(
                     "Subject আর Topic বেছে নিলেই সাথে সাথে Move হয়ে যাবে",
                     fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
                 )
-                if (subjects.isEmpty()) {
+                if (allSubjects.isEmpty()) {
                     Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
 
@@ -1429,7 +1437,7 @@ private fun AdminMoveQuestionsPickerDialog(
                         expanded = subjectMenuExpanded,
                         onDismissRequest = { subjectMenuExpanded = false }
                     ) {
-                        subjects.forEach { subj ->
+                        allSubjects.forEach { subj ->
                             DropdownMenuItem(
                                 text = { Text(subj, fontFamily = NotoSansBengali, fontSize = 13.sp) },
                                 onClick = {
@@ -1444,6 +1452,51 @@ private fun AdminMoveQuestionsPickerDialog(
                                     }
                                 }
                             )
+                        }
+                        Divider()
+                        // ── এই মোডে নতুন Subject (অন্য মোডে দেখা যাবে না) ──
+                        DropdownMenuItem(
+                            text = {
+                                Text("🆕 নতুন Subject যোগ করুন", fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                    color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                            },
+                            onClick = {
+                                subjectMenuExpanded = false
+                                addingNewSubject = true
+                                newSubjectText = ""
+                            }
+                        )
+                    }
+                }
+
+                // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সিলেক্ট হয়, তারপর Topic (নতুন) লিখে move ──
+                if (addingNewSubject) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = newSubjectText,
+                            onValueChange = { newSubjectText = it },
+                            label = { Text("নতুন Subject-এর নাম", fontFamily = NotoSansBengali) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                val name = newSubjectText.trim()
+                                if (name.isNotBlank()) {
+                                    if (name !in allSubjects) allSubjects = allSubjects + name
+                                    pickedSubject = name
+                                    pickedTopic = null
+                                    topicsCache[name] = topicsCache[name] ?: emptyList()
+                                    addingNewSubject = false
+                                    // নতুন Subject-এ Topic নেই — সরাসরি নতুন-Topic ফিল্ড
+                                    addingNewTopic = true
+                                    newTopicText = ""
+                                }
+                            },
+                            enabled = newSubjectText.isNotBlank()
+                        ) {
+                            Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                                color = if (newSubjectText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
                         }
                     }
                 }
