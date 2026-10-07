@@ -181,6 +181,23 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun consumeStreak()      { _pendingStreak.value = 0 }
 
     private var timerJob: Job? = null
+
+    // ── FIX (টাইমআউটে/পেজ বদলালে রেজাল্ট ফাঁকা + উত্তর হারিয়ে যাওয়া): প্রশ্ন ৫০টা করে পেজে
+    // লোড হয় আর goToPage() প্রতিবার লিস্ট নতুন (Unanswered) প্রশ্ন দিয়ে বদলে দিত — ফলে আগের
+    // পেজের উত্তর হারাত, answeredCount ০ হতো আর টাইমারও নতুন করে শুরু হতো। এখন উত্তরগুলো
+    // answerStore-এ (sourceKey → উত্তর-দেওয়া প্রশ্ন) জমা থাকে, পেজ বদলালে আবার বসানো হয়,
+    // আর submitQuiz() পুরো কুইজের (quizAllItems) ওপর হিসাব করে ──
+    private val answerStore = LinkedHashMap<String, QuestionItem>()
+    private var quizAllItems: List<QuestionItem> = emptyList()
+    private var keepPageProgress = false
+
+    private fun snapshotAnswers() {
+        _state.value.questions.forEach { q ->
+            if (q.answerState !is AnswerState.Unanswered && q.answerState !is AnswerState.Skipped) {
+                answerStore[q.sourceKey()] = q
+            }
+        }
+    }
     private var loadJob: Job? = null   // cancellable load job
 
     // ── FIX: টপিক পরিবর্তনের রেস-কন্ডিশন বাগ — আগে দ্রুত একের পর এক টপিক পাল্টালে
@@ -712,6 +729,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .sortedBy { isMastered(it.id, _state.value.mode) || it.isStudyDone }
             val total = allSorted.size
             val items = allSorted.take(PAGE_SIZE)
+            quizAllItems = allSorted
             Log.d("QuizVM", "navigateToSubTopicLazy: $topicName ($topicId) cached=$total loaded_page1=${items.size}")
 
             // দ্বিতীয়বার চেক — Room থেকে items বের করতেও কিছুটা সময় লাগে, ততক্ষণে
@@ -1334,6 +1352,44 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * ── FIX ("Retry চাপলে কাজ করে না"): আগে Retry = navigateBack() + navigateToSubTopicLazy()
+     * ছিল — navigateBack() নিজের rebuildSubTopics() আলাদা coroutine-এ চালায়, সেটা পরে এসে
+     * navPath/স্টেট ওভাররাইট করতে পারত (রেস), ফলে ট্যাপে কিছুই হতো না বা টপিক-লিস্টে চলে যেত।
+     * এখন কোনো নেভিগেশন ছাড়াই (navPath অপরিবর্তিত) একই টপিকের ১ম পেজ নতুন করে লোড হয় —
+     * উত্তর রিসেট, নতুন টাইমার, রেজাল্ট বন্ধ। ──
+     */
+    fun retryCurrentTopic() {
+        val st0 = _state.value
+        val subject  = st0.navPath.subject ?: return
+        val subTopic = st0.navPath.subTopic ?: return
+        timerJob?.cancel()
+        subTopicLoadJob?.cancel()
+        subTopicLoadToken++
+        answerStore.clear()
+        keepPageProgress = false
+        _state.update {
+            it.copy(showResult = false, result = null, isQuizActive = false,
+                    answeredCount = 0, currentPage = 0, timerSec = 0)
+        }
+        viewModelScope.launch {
+            val sheet = _state.value.mode.name
+            val user     = session.getCurrentUser()
+            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            var topicId = _state.value.subTopics.find { it.name == subTopic }?.topicId.orEmpty()
+            if (topicId.isBlank()) {
+                val subjectId = _state.value.subjects.find { it.name == subject }?.subjectId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: repo.resolveSubjectId(sheet, subject)
+                if (!subjectId.isNullOrBlank()) topicId = repo.resolveTopicId(subjectId, subTopic).orEmpty()
+            }
+            if (topicId.isNotBlank()) loadQuestionsFromRoomByTopic(sheet, topicId, tag, 0)
+            else loadQuestionsFromRoom(sheet, subject, subTopic, tag, 0)
+        }
+    }
+
     /** ResultModal-এর "আবার চেষ্টা" — Model Test হলে একই টেস্ট আবার শুরু করে */
     fun retryModelTest() {
         val mt = _state.value.activeModelTest ?: return
@@ -1654,13 +1710,47 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        val questions  = _state.value.questions   // draft-finalize এর পর আপডেটেড লিস্ট রি-রিড
+        // ── FIX: বর্তমান পেজের উত্তর জমা করে, পুরো কুইজ (সব পেজ) মিলিয়ে হিসাব — আগে শুধু
+        // বর্তমান পেজের ≤৫০ প্রশ্ন গোনা হতো, তাই অন্য পেজে থাকা অবস্থায় টাইমআউট হলে আগের
+        // পেজের উত্তরগুলো রেজাল্টে আসত না (সব স্কিপ/ফাঁকা)। ──
+        snapshotAnswers()
+        val pageQs = _state.value.questions   // draft-finalize এর পর আপডেটেড লিস্ট রি-রিড
+        val usePaged = _state.value.totalQuestions > pageQs.size &&
+            quizAllItems.size == _state.value.totalQuestions &&
+            pageQs.all { p -> quizAllItems.any { it.sourceKey() == p.sourceKey() } }
+        val questions = if (usePaged) quizAllItems.map { b -> answerStore[b.sourceKey()] ?: b } else pageQs
         val totalTime  = _state.value.totalTimeSec
         val elapsed    = totalTime - _state.value.timerSec
         var correct = 0; var wrong = 0; var skipped = 0; var recorded = 0
         val subjectMap = mutableMapOf<String, SubjectScore>()
+        val reviewItems = ArrayList<ResultReviewItem>()
 
-        questions.forEach { q ->
+        questions.forEachIndexed { qi, q ->
+            val st = q.answerState
+            val statusKey = when {
+                st is AnswerState.McqSelected      -> if (st.isCorrect) "correct" else "wrong"
+                st is AnswerState.WrittenSubmitted -> if (st.isCorrect) "correct" else "wrong"
+                st is AnswerState.WrittenRecorded  -> "recorded"
+                else -> "skipped"
+            }
+            val yourText = when (st) {
+                is AnswerState.McqSelected -> when (st.option) {
+                    1 -> q.optionA; 2 -> q.optionB; 3 -> q.optionC; 4 -> q.optionD; else -> ""
+                }
+                is AnswerState.WrittenSubmitted -> st.userText
+                is AnswerState.WrittenRecorded  -> st.userText
+                else -> ""
+            }
+            reviewItems.add(
+                ResultReviewItem(
+                    number        = qi + 1,
+                    question      = q.question.ifBlank { q.explanation.ifBlank { q.answer } },
+                    yourAnswer    = yourText,
+                    correctAnswer = resolveCorrectText(q),
+                    status        = statusKey,
+                    subject       = q.subject
+                )
+            )
             when (val a = q.answerState) {
                 is AnswerState.McqSelected      -> { if (a.isCorrect) correct++ else wrong++ }
                 is AnswerState.WrittenSubmitted -> { if (a.isCorrect) correct++ else wrong++ }
@@ -1674,7 +1764,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val xp = correct * 5 + (correct - wrong).coerceAtLeast(0) * 2
-        val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap, recorded)
+        val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap, recorded, reviewItems)
         _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
 
         // ── "এখন টেস্ট দাও" (Mock Test) রেজাল্ট হিস্ট্রিতে জমা রাখো ──
@@ -1845,6 +1935,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startTimer(questionCount: Int) {
         val totalSec = questionCount * 60
+        answerStore.clear()   // নতুন কুইজ শুরু — আগের কুইজের জমানো উত্তর বাদ
         timerJob?.cancel()
         _state.update { it.copy(timerSec = totalSec, totalTimeSec = totalSec, isQuizActive = true) }
         timerJob = viewModelScope.launch {
@@ -2866,6 +2957,10 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // ক্যাশের সাথে বেমানান হওয়ায় ২য় পাতা থেকে সবসময় ফাঁকা ফলাফল দিত। ──
         val topicId = _state.value.subTopics.find { it.name == subTopic }?.topicId
 
+        // পেজ বদলের আগে এই পেজের উত্তরগুলো জমা রাখো; লোডারকে বলো টাইমার/উত্তর রিসেট না করতে
+        snapshotAnswers()
+        keepPageProgress = _state.value.mode != StudyMode.STUDY && _state.value.isQuizActive
+
         viewModelScope.launch {
             if (!topicId.isNullOrBlank()) {
                 loadQuestionsFromRoomByTopic(sheet, topicId, tag, safePage)
@@ -2909,20 +3004,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("QuizVM", "loadQuestionsFromRoomByTopic: page=$page total=$total loaded=${questions.size}")
 
         val mode = _state.value.mode
+        // ── পেজ-নেভিগেশন (goToPage) হলে উত্তর/টাইমার ধরে রাখো; নতুন কুইজ হলে রিসেট ──
+        val keep = keepPageProgress
+        keepPageProgress = false
+        quizAllItems = allSorted
+        val pageItems = if (keep) questions.map { q ->
+            answerStore[q.sourceKey()]?.let { a -> q.copy(answerState = a.answerState) } ?: q
+        } else questions
         _state.update {
             it.copy(
-                questions       = questions,
+                questions       = pageItems,
                 totalQuestions  = total,
                 currentPage     = page,
                 questionsLoading = false,
-                isQuizActive    = mode != StudyMode.STUDY,
+                isQuizActive    = if (keep) it.isQuizActive else mode != StudyMode.STUDY,
                 showResult      = false,
                 result          = null,
-                answeredCount   = 0,
-                timerSec        = 0
+                answeredCount   = if (keep) answerStore.size else 0,
+                timerSec        = if (keep) it.timerSec else 0
             )
         }
-        if (mode != StudyMode.STUDY) startTimer(total)  // timer total প্রশ্ন দিয়ে
+        if (mode != StudyMode.STUDY && !keep) startTimer(total)  // timer total প্রশ্ন দিয়ে
     }
 
     /**
@@ -2956,20 +3058,27 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("QuizVM", "loadQuestionsFromRoom: page=$page total=$total loaded=${questions.size}")
 
         val mode = _state.value.mode
+        // ── পেজ-নেভিগেশন (goToPage) হলে উত্তর/টাইমার ধরে রাখো; নতুন কুইজ হলে রিসেট ──
+        val keep = keepPageProgress
+        keepPageProgress = false
+        quizAllItems = allSorted
+        val pageItems = if (keep) questions.map { q ->
+            answerStore[q.sourceKey()]?.let { a -> q.copy(answerState = a.answerState) } ?: q
+        } else questions
         _state.update {
             it.copy(
-                questions       = questions,
+                questions       = pageItems,
                 totalQuestions  = total,
                 currentPage     = page,
                 questionsLoading = false,
-                isQuizActive    = mode != StudyMode.STUDY,
+                isQuizActive    = if (keep) it.isQuizActive else mode != StudyMode.STUDY,
                 showResult      = false,
                 result          = null,
-                answeredCount   = 0,
-                timerSec        = 0
+                answeredCount   = if (keep) answerStore.size else 0,
+                timerSec        = if (keep) it.timerSec else 0
             )
         }
-        if (mode != StudyMode.STUDY) startTimer(total)  // timer total প্রশ্ন দিয়ে
+        if (mode != StudyMode.STUDY && !keep) startTimer(total)  // timer total প্রশ্ন দিয়ে
     }
 
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
