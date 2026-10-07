@@ -152,6 +152,7 @@ class SyncWorker(
             "admin_reorder_subject" -> syncAdminReorderSubject(payload)
             "admin_reorder_subtopic" -> syncAdminReorderSubTopic(payload)
             "admin_set_topic_order" -> syncAdminSetTopicOrder(payload)
+            "admin_set_reference_order" -> syncAdminSetReferenceOrder(payload)
             "admin_delete_subject_topic" -> syncAdminDeleteSubjectTopic(payload)
             "admin_move_questions" -> syncAdminMoveQuestions(payload)
             "admin_move_topic" -> syncAdminMoveTopic(payload)
@@ -547,6 +548,25 @@ class SyncWorker(
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminSetTopicOrder error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/ব্যর্থ হওয়া QBank পদবী/প্রতিষ্ঠান সিরিয়াল — GAS "setReferenceOrder" ──
+    private suspend fun syncAdminSetReferenceOrder(payload: Map<*, *>): Boolean {
+        return try {
+            val refType = payload["refType"]?.toString() ?: return true
+            val orderRaw = payload["order"] as? Map<*, *> ?: return true
+            val order = orderRaw.entries.associate { (k, v) ->
+                k.toString() to (v?.toString()?.toDoubleOrNull()?.toInt() ?: 0)
+            }
+            if (order.isEmpty()) return true
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService.setReferenceOrder(refType, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> true
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> { Log.w(TAG, "syncAdminSetReferenceOrder failed: ${r.message}"); false }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminSetReferenceOrder error: ${e.message}")
             false
         }
     }
