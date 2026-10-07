@@ -236,6 +236,9 @@ interface ReferenceDao {
     @Query("SELECT * FROM exam_appearances WHERE postId = :postId")
     suspend fun getAppearancesForPost(postId: String): List<ExamAppearanceEntity>
 
+    @Query("SELECT * FROM exam_appearances WHERE year != ''")
+    suspend fun getAllAppearancesWithYear(): List<ExamAppearanceEntity>
+
     @Query("SELECT * FROM exam_appearances WHERE institutionId = :institutionId")
     suspend fun getAppearancesForInstitution(institutionId: String): List<ExamAppearanceEntity>
 
