@@ -290,6 +290,26 @@ class PendingQueue(private val context: Context) {
         if (removed) save(queue)
     }
 
+    // ── Admin: QBank পদবী/প্রতিষ্ঠান সিরিয়াল — refType ("posts"/"institutions") প্রতি শুধু সবশেষটা ──
+    suspend fun enqueueAdminSetReferenceOrder(refType: String, order: Map<String, Int>) {
+        dropPendingReferenceOrder(refType)
+        enqueue(PendingAction(
+            type    = "admin_set_reference_order",
+            payload = gson.toJson(mapOf("refType" to refType, "order" to order))
+        ))
+    }
+
+    suspend fun dropPendingReferenceOrder(refType: String) {
+        val queue = getAll().toMutableList()
+        val removed = queue.removeAll { a ->
+            a.type == "admin_set_reference_order" && try {
+                val m = gson.fromJson<Map<String, Any>>(a.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                m["refType"]?.toString() == refType
+            } catch (_: Exception) { false }
+        }
+        if (removed) save(queue)
+    }
+
     suspend fun enqueueAdminSetTopicOrder(order: Map<String, Int>) {
         dropPendingTopicOrder(order.keys)
         enqueue(PendingAction(
