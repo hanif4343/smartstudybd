@@ -221,10 +221,11 @@ fun QuestionListScreen(
     // ── Study Nav Phase 4: Study টুলবার থেকে অন্য ট্যাবে যাওয়া (Practice/Wrong Review) ──
     onStudyAction: ((StudyAction) -> Unit)? = null
 ) {
-    val pageSize = QuizViewModel.PAGE_SIZE
+    // QBank-এ পেজিনেশন নেই — সব প্রশ্ন এক পেজে (pageSize বিশাল ধরা হয়)
+    val pageSize = if (mode == StudyMode.QBANK) Int.MAX_VALUE else QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
     val effectiveTotal = if (totalQuestions > 0) totalQuestions else questions.size
-    val totalPages = (effectiveTotal + pageSize - 1) / pageSize
+    val totalPages = if (mode == StudyMode.QBANK) 1 else (effectiveTotal + pageSize - 1) / pageSize
     val safeCurrentPage = currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
     val pageOffset = safeCurrentPage * pageSize
     // questions এখন শুধু current page এর data (Room থেকে loaded)
@@ -798,12 +799,12 @@ fun QuestionListScreen(
                     if (mode != StudyMode.STUDY) {
                         Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = if (mode == StudyMode.QBANK) Arrangement.Center else Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // ── Prev ──
+                            // ── Prev ── (QBank-এ পেজিনেশন নেই, তাই Prev/Next লুকানো)
                             val prevEnabled = safeCurrentPage > 0
-                            Button(
+                            if (mode != StudyMode.QBANK) Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage - 1) },
                                 enabled = prevEnabled,
                                 shape   = RoundedCornerShape(16.dp),
@@ -845,7 +846,7 @@ fun QuestionListScreen(
                             // ── Next — শেষ পেজে disabled (হাইড না করে dim, বাটন
                             // এদিক-ওদিক লাফায় না) ──
                             val nextEnabled = !isLastPage
-                            Button(
+                            if (mode != StudyMode.QBANK) Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage + 1) },
                                 enabled = nextEnabled,
                                 shape   = RoundedCornerShape(16.dp),
