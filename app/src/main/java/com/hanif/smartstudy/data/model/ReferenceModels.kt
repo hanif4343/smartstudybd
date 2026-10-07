@@ -67,12 +67,15 @@ data class TagRef(
 
 data class PostRef(
     @SerializedName("post_id")   val postId : String? = null,
-    @SerializedName("post_name") val name   : String? = null
+    @SerializedName("post_name") val name   : String? = null,
+    // Admin-সেট সিরিয়াল (Posts ট্যাবের "sort_order", GAS setReferenceOrder); Number/String দুটোই আসতে পারে
+    @SerializedName("sort_order") val sortOrder : Any? = null
 )
 
 data class InstitutionRef(
     @SerializedName("institution_id")   val institutionId : String? = null,
-    @SerializedName("institution_name") val name           : String? = null
+    @SerializedName("institution_name") val name           : String? = null,
+    @SerializedName("sort_order")       val sortOrder      : Any?    = null
 )
 
 data class ExamAppearanceRef(
