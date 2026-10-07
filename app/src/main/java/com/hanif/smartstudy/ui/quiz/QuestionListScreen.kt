@@ -587,7 +587,7 @@ fun QuestionListScreen(
                         // পরের প্রশ্ন কার্ডটা স্মুথলি স্ক্রল হয়ে ওপরে উঠে আসে — ঠিক Study
                         // mode-এর "পড়া হয়েছে" টিকের মতোই আচরণ (কার্ড হাইড হয় না)। student-
                         // দের কাছে সম্পূর্ণ অদৃশ্য (isReviewMode শুধু admin-এর জন্যই true হয়)।
-                        if (vmState.isReviewMode) {
+                        if (vmState.isReviewMode && mode != StudyMode.QBANK) {
                             ReviewTickButton(
                                 reviewed = q.reviewed,
                                 onClick = {
@@ -1773,7 +1773,7 @@ private fun QuestionTopBar(
             }
             // ── Review System (Admin-only) — শুধু Admin দেখে, student-দের কাছে অদৃশ্য।
             // ইতিমধ্যে থাকা 👁️/⌨️ আইকনের পাশেই বসে, একই স্টাইলে ──
-            if (isAdmin && onToggleReviewMode != null) {
+            if (isAdmin && onToggleReviewMode != null && mode != StudyMode.QBANK) {
                 IconButton(onClick = onToggleReviewMode) {
                     Icon(
                         Icons.Default.FactCheck,
