@@ -433,6 +433,7 @@ class ContentRepository(private val context: Context) {
     suspend fun getRoomAppearancesForPost(postId: String)          = refDao.getAppearancesForPost(postId)
     suspend fun getRoomAppearancesForInstitution(institutionId: String) = refDao.getAppearancesForInstitution(institutionId)
     // ── FIX ("সাল ট্যাবে ডেটা আসেনি") — দেখো ReferenceDao.getAppearanceYearCounts এর নোট ──
+    suspend fun getRoomAppearancesWithYear()                      = refDao.getAllAppearancesWithYear()
     suspend fun getRoomAppearanceYearCounts()                     = refDao.getAppearanceYearCounts()
     suspend fun getRoomAppearanceQuestionIdsForYear(year: String) = refDao.getAppearanceQuestionIdsForYear(year)
 
