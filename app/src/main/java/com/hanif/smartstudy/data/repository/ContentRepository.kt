@@ -339,6 +339,18 @@ class ContentRepository(private val context: Context) {
             institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
         )
         reapplyTopicOrderOverrides()
+        // ── QBank পদবী/প্রতিষ্ঠান সিরিয়াল (CDN-এর sort_order) — সাধারণ ইউজারদের জন্য সংরক্ষণ;
+        // admin-এর লোকাল ক্রম (QBankOrderStore LOCAL) সবসময় এর ওপরে থাকে ──
+        try {
+            com.hanif.smartstudy.util.QBankOrderStore.init(context)
+            fun numOf(a: Any?): Int? = (a as? Number)?.toInt() ?: a?.toString()?.trim()?.toDoubleOrNull()?.toInt()
+            posts?.let { l -> com.hanif.smartstudy.util.QBankOrderStore.setServer(
+                com.hanif.smartstudy.util.QBankOrderStore.POST,
+                l.mapNotNull { r -> val id = r.postId; val n = numOf(r.sortOrder); if (!id.isNullOrBlank() && n != null && n > 0) id to n else null }.toMap()) }
+            institutions?.let { l -> com.hanif.smartstudy.util.QBankOrderStore.setServer(
+                com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION,
+                l.mapNotNull { r -> val id = r.institutionId; val n = numOf(r.sortOrder); if (!id.isNullOrBlank() && n != null && n > 0) id to n else null }.toMap()) }
+        } catch (_: Exception) { }
         _lastRefSyncAt = now
         Log.d("Repo", "syncReferenceData (CDN): subjects=${subjects.size} topics=${topics.size}")
         true
@@ -1668,6 +1680,11 @@ class ContentRepository(private val context: Context) {
     /** অস্থায়ী লোকাল topicId দিয়ে সাথে সাথে Room reference-এ (Topics টেবিলে) নতুন
      *  Topic-এন্ট্রি যোগ করে — যাতে UI-তে সাথে সাথেই দেখা যায়, ব্যাকগ্রাউন্ডে GAS আসল
      *  id দিলে replaceRoomTopicId() দিয়ে বদলে নিতে হবে। */
+    /** নতুন Subject (GAS থেকে আসল id পাওয়ার পর) লোকাল reference-এ সাথে সাথে যোগ — tagId ফাঁকা = সবার জন্য */
+    suspend fun addRoomSubjectLocal(subjectId: String, name: String, sheet: String) = withContext(Dispatchers.IO) {
+        refDao.upsertSubjects(listOf(com.hanif.smartstudy.data.local.SubjectEntity(subjectId = subjectId, name = name, sheet = sheet, tagId = "")))
+    }
+
     suspend fun addRoomTopicLocal(topicId: String, subjectId: String, name: String) = withContext(Dispatchers.IO) {
         refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(
             topicId = topicId, subjectId = subjectId, name = name
