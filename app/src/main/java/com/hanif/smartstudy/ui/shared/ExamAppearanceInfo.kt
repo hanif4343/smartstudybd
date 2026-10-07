@@ -65,7 +65,9 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
         }
     }
 
-    if (lines.isEmpty()) return
+    // শুধু ২+ বার এলে দেখাও — ১টা appearance মানে প্রশ্নটা কেবল ওই চলতি প্রশ্নপত্রেই আছে
+    // (আলাদা করে বলার কিছু নেই), "এসেছে" লেখা অর্থবহ হয় ২ বা তার বেশি পরীক্ষায় থাকলে ──
+    if (lines.size < 2) return
 
     Column(
         modifier
