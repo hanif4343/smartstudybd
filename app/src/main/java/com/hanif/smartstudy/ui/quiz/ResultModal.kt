@@ -21,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.shared.*
@@ -39,6 +41,8 @@ fun ResultModal(
 ) {
     val context    = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // ── সঠিক/ভুল/স্কিপ বক্সে ট্যাপ করলে ফিল্টার করা প্রশ্ন-তালিকার পপআপ ("correct"/"wrong"/"skipped") ──
+    var reviewFilter by remember { mutableStateOf<String?>(null) }
 
     // ── Interstitial: background load করো ──
     var interstitialAd by remember { mutableStateOf<InterstitialAd?>(null) }
@@ -116,14 +120,24 @@ fun ResultModal(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val canReview = result.reviewItems.isNotEmpty()
                     ResultStatBox("✅", result.correct.toString(), "সঠিক",
-                        Color(0xFFF0FDF4), GreenOk, Modifier.weight(1f))
+                        Color(0xFFF0FDF4), GreenOk, Modifier.weight(1f),
+                        onClick = if (canReview && result.correct > 0) ({ reviewFilter = "correct" }) else null)
                     ResultStatBox("❌", result.wrong.toString(), "ভুল",
-                        Color(0xFFFFF1F2), RedWrong, Modifier.weight(1f))
+                        Color(0xFFFFF1F2), RedWrong, Modifier.weight(1f),
+                        onClick = if (canReview && result.wrong > 0) ({ reviewFilter = "wrong" }) else null)
                     ResultStatBox("⏭", result.skipped.toString(), "স্কিপ",
-                        Color(0xFFFFFBEB), AmberWarn, Modifier.weight(1f))
+                        Color(0xFFFFFBEB), AmberWarn, Modifier.weight(1f),
+                        onClick = if (canReview && result.skipped > 0) ({ reviewFilter = "skipped" }) else null)
                     ResultStatBox("⭐", "+${result.xpEarned}", "XP",
                         Color(0xFFF5F3FF), Indigo600, Modifier.weight(1f))
+                }
+                if (result.reviewItems.isNotEmpty()) {
+                    Text("👆 সঠিক / ভুল / স্কিপে ট্যাপ করে সেই প্রশ্নগুলো দেখুন",
+                        fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
                 Spacer(Modifier.height(16.dp))
             }
@@ -178,6 +192,15 @@ fun ResultModal(
                     }
                 }
             }
+        }
+
+        // ── ফিল্টার করা প্রশ্ন-তালিকার পপআপ ──
+        reviewFilter?.let { f ->
+            ReviewFilterDialog(
+                filter    = f,
+                list      = result.reviewItems.filter { it.status == f },
+                onDismiss = { reviewFilter = null }
+            )
         }
 
         // ── ঠিক উপরে-ডান কোণায় সুন্দর একটা Close বাটন — ট্যাপ করলে Home-এর মতোই
@@ -237,11 +260,14 @@ private fun ResultStatBox(
     label    : String,
     bg       : Color,
     valueColor: Color,
-    modifier : Modifier
+    modifier : Modifier,
+    onClick  : (() -> Unit)? = null
 ) {
     Column(
         modifier            = modifier.clip(RoundedCornerShape(14.dp))
-            .background(bg).padding(vertical = 10.dp),
+            .background(bg)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(icon, fontSize = 18.sp)
@@ -249,6 +275,82 @@ private fun ResultStatBox(
             color = valueColor, fontFamily = NotoSansBengali)
         Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold,
             fontFamily = NotoSansBengali)
+    }
+}
+
+@Composable
+private fun ReviewFilterDialog(
+    filter   : String,
+    list     : List<ResultReviewItem>,
+    onDismiss: () -> Unit
+) {
+    val (icon, label, accent) = when (filter) {
+        "correct" -> Triple("✅", "সঠিক উত্তর", GreenOk)
+        "wrong"   -> Triple("❌", "ভুল উত্তর", RedWrong)
+        else      -> Triple("⏭", "স্কিপ করা প্রশ্ন", AmberWarn)
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.82f),
+            shape    = RoundedCornerShape(20.dp),
+            color    = MaterialTheme.colorScheme.surface
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 12.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("$icon $label (${list.size})", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                        color = accent, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "বন্ধ করুন")
+                    }
+                }
+                Divider()
+                if (list.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("কোনো প্রশ্ন নেই", fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(list) { r ->
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(accent.copy(alpha = 0.07f))
+                                    .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Text("প্রশ্ন ${r.number}" + if (r.subject.isNotBlank()) " • ${r.subject}" else "",
+                                    fontSize = 10.sp, fontWeight = FontWeight.Bold, color = accent,
+                                    fontFamily = NotoSansBengali)
+                                Spacer(Modifier.height(4.dp))
+                                Text(r.question, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+                                if (filter == "wrong" && r.yourAnswer.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("❌ আপনার উত্তর: ${r.yourAnswer}", fontSize = 12.sp, color = RedWrong,
+                                        fontFamily = NotoSansBengali)
+                                }
+                                if (r.correctAnswer.isNotBlank()) {
+                                    Spacer(Modifier.height(if (filter == "wrong") 3.dp else 8.dp))
+                                    Text("✅ সঠিক উত্তর: ${r.correctAnswer}", fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold, color = GreenOk, fontFamily = NotoSansBengali)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
