@@ -1,0 +1,45 @@
+এই zip-এ আগের "AI ব্যাখ্যা" আপডেট + নতুন ৩টা ইস্যু ফিক্স একসাথে (cumulative) — আগের zip আলাদা বসানো লাগবে না।
+শুধু EDITED ফাইলগুলো, একই ফোল্ডার স্ট্রাকচারে (app/src/main/java/com/hanif/smartstudy/ এর ভেতরে):
+
+  data/model/QuizModels.kt            (নতুন ResultReviewItem + QuizResult.reviewItems)
+  data/remote/WrittenAnswerAiService.kt  (AI ব্যাখ্যা — আগের আপডেট)
+  viewmodel/QuizViewModel.kt
+  ui/quiz/ResultModal.kt
+  ui/quiz/CoreScreen.kt
+  ui/quiz/SubjectListScreen.kt
+  ui/quiz/QuestionListScreen.kt       (AI ব্যাখ্যা — আগের আপডেট)
+  ui/shared/SharedComponents.kt       (AI ব্যাখ্যা — আগের আপডেট)
+
+━━ ইস্যু ১: রেজাল্টে সঠিক/ভুল-এ ক্লিক করলে ফিল্টার করা পপআপ ━━
+  - রেজাল্ট শিটে ✅ সঠিক / ❌ ভুল / ⏭ স্কিপ বক্সে ট্যাপ করলে পপআপ খোলে — শুধু সেই ধরনের
+    প্রশ্নগুলো। ভুল-তে "আপনার উত্তর" (লাল) + "সঠিক উত্তর" (সবুজ), সঠিক/স্কিপে সঠিক উত্তর।
+  - গণনা শূন্য হলে সেই বক্স ট্যাপযোগ্য না। নিচে ছোট হিন্ট লেখা আছে।
+  - ডেটা আসে submitQuiz()-এ বানানো reviewItems থেকে (হিস্ট্রি/Firebase-এ যায় না)।
+
+━━ ইস্যু ২: টাইমআউটে অটো-সাবমিটে রেজাল্ট ফাঁকা + Retry কাজ করছিল না ━━
+  মূল কারণ (QuizViewModel):
+   (ক) প্রশ্ন ৫০টা করে পেজে লোড হয়, আর পেজ বদলালে goToPage() লিস্ট নতুন Unanswered প্রশ্নে
+       বদলে দিত → আগের পেজের উত্তর হারাত, answeredCount ০ হতো, আর টাইমার আবার নতুন করে
+       শুরু হতো। টাইমআউটে submitQuiz() শুধু বর্তমান পেজের প্রশ্ন গুনত → ফাঁকা/সব-স্কিপ রেজাল্ট।
+   (খ) Retry = navigateBack() + navigateToSubTopicLazy() — navigateBack() নিজের আলাদা coroutine-এ
+       টপিক-লিস্ট rebuild করে, সেটা রেস করে নেভিগেশন ওভাররাইট করত → ট্যাপে কিছু হতো না।
+  ফিক্স:
+   - উত্তরগুলো answerStore-এ জমা থাকে; পেজ বদলালে ফিরিয়ে বসানো হয়, answeredCount ঠিক থাকে,
+     টাইমার আর রিসেট হয় না।
+   - submitQuiz() এখন পুরো কুইজ (সব পেজ) মিলিয়ে সঠিক/ভুল/স্কিপ গোনে।
+   - Retry এখন নতুন retryCurrentTopic(): কোনো নেভিগেশন ছাড়াই একই টপিক রিলোড, উত্তর রিসেট,
+     নতুন টাইমার, রেজাল্ট বন্ধ।
+
+━━ ইস্যু ৩: Rename-এ টেক্সট বক্স একদম নিচে স্ক্রল করে যেতে হতো ━━
+  - Subject / Topic / Post (পদবী) / Institution / Year সব Rename একই AdminRenamePickerDialog
+    ব্যবহার করে — এখন যেটা সিলেক্ট করবেন ঠিক তার নিচেই "নতুন নাম" বক্স আসে (পুরনো নাম দিয়ে
+    ভরা, শুধু এডিট করলেই হয়), কার্সরও অটো সেখানে যায়। নাম না বদলালে বাটন চালু হয় না।
+  - একই UX Move-ডায়ালগেও (Destination Topic-এর নাম) দেওয়া হয়েছে।
+
+কোনো Room schema / GAS action / Firebase node / applicationId বদলায়নি।
+NOT BUILT/TESTED — এখানে Android SDK নেই। build করে টেস্ট করুন:
+  ক) ৫০+ প্রশ্নের টপিকে পেজ ১-এ উত্তর দিন → পেজ ২-এ যান → টাইমার রিসেট হচ্ছে না, টাইমআউট/Submit-এ
+     রেজাল্টে আগের উত্তরগুলো গোনা হচ্ছে
+  খ) ছোট টপিকে টাইমআউট হতে দিন → রেজাল্টে সঠিক/ভুল ঠিক আছে; Retry চাপলে নতুন কুইজ শুরু
+  গ) রেজাল্টে সঠিক/ভুল/স্কিপে ট্যাপ → পপআপ
+  ঘ) Admin → Rename → আইটেম সিলেক্ট করলে নিচেই বক্স
