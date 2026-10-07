@@ -301,7 +301,10 @@ data class QuizResult(
     val subjectBreakdown: Map<String, SubjectScore> = emptyMap(),
     // Model Test-এর written প্রশ্নে অটো-চেক হয় না — কতগুলো উত্তর "সংরক্ষিত" হয়েছে
     // (সঠিক/ভুল বিচার না করে) সেটা এখানে থাকে, এডমিন পরে যাচাই করবে
-    val recorded     : Int = 0
+    val recorded     : Int = 0,
+    // ── রেজাল্টে সঠিক/ভুল/স্কিপ বক্সে ট্যাপ করলে ফিল্টার করা প্রশ্ন-তালিকা দেখানোর জন্য
+    // (শুধু UI-তে; হিস্ট্রি/Firebase-এ যায় না) ──
+    val reviewItems  : List<ResultReviewItem> = emptyList()
 ) {
     val pct: Int get() = if (total > 0) (correct * 100) / total else 0
     val emoji: String get() = when {
@@ -317,6 +320,16 @@ data class QuizResult(
         else      -> "আরো পড়তে হবে!"
     }
 }
+
+/** status: "correct" | "wrong" | "skipped" | "recorded" */
+data class ResultReviewItem(
+    val number       : Int,
+    val question     : String,
+    val yourAnswer   : String,
+    val correctAnswer: String,
+    val status       : String,
+    val subject      : String = ""
+)
 
 data class SubjectScore(
     val subject: String,
