@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -923,39 +924,55 @@ private fun AdminRenamePickerDialog(
     onDismiss: () -> Unit
 ) {
     var selected by remember { mutableStateOf(items.firstOrNull() ?: "") }
-    var newName  by remember { mutableStateOf("") }
+    // ── UX ফিক্স: "নতুন নাম" বক্স আগে সব আইটেমের একদম নিচে ছিল (লম্বা লিস্টে স্ক্রল করে শেষে
+    // যেতে হতো)। এখন যেটা সিলেক্ট করবেন ঠিক তার নিচেই বক্স আসে, পুরনো নাম দিয়ে ভরা (শুধু এডিট
+    // করলেই হয়), আর সিলেক্ট করার সাথে সাথে কার্সরও ওখানে চলে যায় ──
+    var newName  by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(selected) {
+        if (selected.isNotBlank()) {
+            kotlinx.coroutines.delay(120)
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
         text = {
             Column(
                 Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("কোনটা Rename করবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("কোনটা Rename করবেন? (সিলেক্ট করলেই নিচে নতুন নামের বক্স আসবে)",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 if (items.isEmpty()) {
                     Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
                 items.forEach { name ->
+                    val pick = { selected = name; newName = name }
                     Row(
-                        Modifier.fillMaxWidth().clickable { selected = name }.padding(vertical = 2.dp),
+                        Modifier.fillMaxWidth().clickable { pick() }.padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        RadioButton(selected = selected == name, onClick = { selected = name })
+                        RadioButton(selected = selected == name, onClick = { pick() })
                         Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
                     }
+                    if (selected == name) {
+                        OutlinedTextField(
+                            value = newName, onValueChange = { newName = it },
+                            label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                            singleLine = false,
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp)
+                                .focusRequester(focusRequester)
+                        )
+                    }
                 }
-                OutlinedTextField(
-                    value = newName, onValueChange = { newName = it },
-                    label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         },
         confirmButton = {
-            val canConfirm = selected.isNotBlank() && newName.isNotBlank()
+            val canConfirm = selected.isNotBlank() && newName.trim().isNotBlank() && newName.trim() != selected
             TextButton(
-                onClick = { if (canConfirm) { onConfirm(selected, newName); onDismiss() } },
+                onClick = { if (canConfirm) { onConfirm(selected, newName.trim()); onDismiss() } },
                 enabled = canConfirm
             ) { Text("Rename করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
         },
@@ -1100,6 +1117,14 @@ private fun AdminMoveTopicPickerDialog(
                             colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
                         Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
                     }
+                    // ── নাম বদলানোর বক্স সিলেক্ট করা টপিকের ঠিক নিচেই (নিচে স্ক্রল করতে হয় না) ──
+                    if (selectedTopic == name) {
+                        OutlinedTextField(
+                            value = newTopicName, onValueChange = { newTopicName = it },
+                            label = { Text("Destination-এ Topic-এর নাম", fontFamily = NotoSansBengali) },
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp)
+                        )
+                    }
                 }
 
                 Divider(Modifier.padding(vertical = 4.dp))
@@ -1119,11 +1144,6 @@ private fun AdminMoveTopicPickerDialog(
                 }
 
                 Divider(Modifier.padding(vertical = 4.dp))
-                OutlinedTextField(
-                    value = newTopicName, onValueChange = { newTopicName = it },
-                    label = { Text("Destination-এ Topic-এর নাম", fontFamily = NotoSansBengali) },
-                    modifier = Modifier.fillMaxWidth()
-                )
                 Text(
                     "ℹ️ ওই বিষয়ে আগে থেকেই এই নামে কোনো অধ্যায় থাকলে, দুটো এক হয়ে যাবে (merge) — নাহলে নতুন অধ্যায় হিসেবে যোগ হবে।",
                     fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
