@@ -155,9 +155,21 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val historyCache = TestHistoryCache(app)
     private val localModelTestStore = LocalModelTestStore(app)
     private val emojiStore = com.hanif.smartstudy.data.local.EmojiOverrideStore(app)
+    // QBank পদবী/প্রতিষ্ঠান/সাল সিরিয়াল (স্থায়ী) — দেখো util/QBankOrderStore
+    init { com.hanif.smartstudy.util.QBankOrderStore.init(app) }
 
     // ── Admin "Move Question(s)" ডায়ালগের Subject-এর পাশে Expand বাটনে ট্যাপ করলে
     // ওই Subject-এর Topic লিস্ট Room থেকে লাইভ আনতে (নাম দিয়ে subjectId রিজলভ করে) ──
+    /**
+     * Move ডায়ালগের Subject লিস্ট — শুধুমাত্র বর্তমান মোডের (Quiz/QBank/Study) সব Subject, প্রশ্ন
+     * থাকুক বা না থাকুক (আগে state.subjects ব্যবহার হতো, যেটা "অন্তত একটা প্রশ্ন আছে" + audience
+     * ফিল্টারে ছাঁটা, তাই খালি/নতুন Subject-এ কিছু সরানো যেত না)। প্রতিটা মোডের Subject/Topic
+     * আলাদা: subjects.sheet কলাম অনুযায়ী, আর Topic সবসময় তার Subject-এর অধীনে।
+     */
+    suspend fun adminSubjectsForMove(sheet: String): List<String> =
+        repo.getRoomSubjectsRefBySheet(sheet).map { it.name }.filter { it.isNotBlank() }.distinct()
+            .sortedWith { a, b -> com.hanif.smartstudy.util.TopicOrdering.naturalCompare(a, b) }
+
     suspend fun adminTopicsForSubject(sheet: String, subject: String): List<String> {
         val subjectId = repo.resolveSubjectId(sheet, subject) ?: return emptyList()
         return repo.getRoomTopicsForSubject(subjectId).map { it.name }
@@ -2160,6 +2172,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     linkedQuestionIds = qIds
                 )
             }.sortedBy { it.name }
+                .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.topicId }) }
             SubjectEntry(
                 name      = inst.name,
                 totalQ    = subTopics.sumOf { it.totalQ },
@@ -2168,6 +2181,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 subjectId = inst.institutionId
             )
         }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
+            .let { l -> com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION, l) { it.subjectId } }
 
         Log.d("QuizVM", "rebuildQBankInstitutions: ${entries.size}")
         _state.update { it.copy(qbankInstitutions = entries, isLoading = false) }
@@ -2274,7 +2288,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     linkedQuestionIds = emptyList()  // ভারী হতে পারে বলে লিস্ট-লেভেলে না এনে ট্যাপ করলে আনা হয় (নিচে selectQBankYear)
                 )
             }
-            .sortedByDescending { it.name }   // সাম্প্রতিক সাল আগে
+            .sortedByDescending { it.name }   // সাম্প্রতিক সাল আগে (ডিফল্ট)
+            .let { l -> com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.YEAR, l) { it.name } }   // admin-সেট স্থায়ী ক্রম থাকলে সেটা
         Log.d("QuizVM", "rebuildQBankYears: ${years.size}")
         _state.update { it.copy(qbankYears = years, isLoading = false) }
     }
@@ -2391,6 +2406,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     linkedQuestionIds = qIds
                 )
             }.sortedBy { it.name }
+                .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION, l) { it.topicId }) }
             SubjectEntry(
                 name      = post.name,
                 totalQ    = subTopics.sumOf { it.totalQ },
@@ -2399,6 +2415,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 subjectId = post.postId
             )
         }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
+            .let { l -> com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.subjectId } }
 
         Log.d("QuizVM", "rebuildQBankPosts: ${entries.size}")
         _state.update { it.copy(qbankPosts = entries, isLoading = false) }
@@ -2890,6 +2907,140 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // QBank সিরিয়াল (পদবী / প্রতিষ্ঠান / সাল) — Quiz-এর টপিক-সিরিয়ালের মতোই স্থায়ী।
+    // admin ▲▼ বা Serial Manager দিয়ে সাজালে: (১) সাথে সাথে লোকাল স্থায়ী স্টোরে (QBankOrderStore —
+    // অনলাইন/অফলাইন/রিফ্রেশ/রিসিঙ্ক/রিস্টার্ট কিছুতেই যায় না), (২) পদবী/প্রতিষ্ঠান হলে Sheet-এ
+    // sort_order (সব ইউজারের জন্য; ব্যর্থ/অফলাইনে হলে queue)। সাল-এর কোনো reference-টেবিল নেই,
+    // তাই সাল-এর ক্রম admin-এর ডিভাইসে স্থায়ী। নেস্টেড লিস্টের (পদবীর ভেতরে প্রতিষ্ঠান / প্রতিষ্ঠানের
+    // ভেতরে পদবী) সাজানোও ওই আইটেমের গ্লোবাল ক্রমেই বসে (স্লট-মার্জ, দেখো mergeOrder)।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private fun qbankSerial(list: List<SubTopicEntry>): List<SubTopicEntry> =
+        list.mapIndexed { i, e -> e.copy(sortOrder = i + 1) }
+
+    /** রিনেটওয়ার্ক ছাড়াই বর্তমান স্টেটের সব QBank লিস্ট সংরক্ষিত ক্রমে আবার সাজায় */
+    private fun reapplyQBankOrderToState() {
+        val S = com.hanif.smartstudy.util.QBankOrderStore
+        _state.update { st ->
+            st.copy(
+                qbankPosts = S.apply(S.POST, st.qbankPosts) { it.subjectId }
+                    .map { e -> e.copy(subTopics = qbankSerial(S.apply(S.INSTITUTION, e.subTopics) { it.topicId })) },
+                qbankInstitutions = S.apply(S.INSTITUTION, st.qbankInstitutions) { it.subjectId }
+                    .map { e -> e.copy(subTopics = qbankSerial(S.apply(S.POST, e.subTopics) { it.topicId })) },
+                qbankYears = S.apply(S.YEAR, st.qbankYears) { it.name },
+                qbankInstitutionsUnderPost = qbankSerial(S.apply(S.INSTITUTION, st.qbankInstitutionsUnderPost) { it.topicId }),
+                qbankDesignationsUnderInstitution = qbankSerial(S.apply(S.POST, st.qbankDesignationsUnderInstitution) { it.topicId })
+            )
+        }
+    }
+
+    private fun commitQBankOrder(kind: String, shownBefore: List<String>, newSeq: List<String>) {
+        val S = com.hanif.smartstudy.util.QBankOrderStore
+        S.setLocal(kind, S.mergeOrder(S.getLocal(kind), shownBefore, newSeq))
+        reapplyQBankOrderToState()
+        if (kind == S.YEAR) {
+            _state.update { it.copy(orderSavedMsg = "✅ সালের ক্রম সংরক্ষিত (এই ডিভাইসে স্থায়ী)") }
+        } else {
+            pushQBankOrder(kind)
+        }
+    }
+
+    private fun pushQBankOrder(kind: String) {
+        val S = com.hanif.smartstudy.util.QBankOrderStore
+        orderSaveJob?.cancel()
+        orderSaveJob = viewModelScope.launch {
+            _state.update { it.copy(isSavingOrder = true, orderSavedMsg = null) }
+            val refType = if (kind == S.POST) "posts" else "institutions"
+            val ids = if (kind == S.POST) repo.getRoomPosts().sortedBy { it.name }.map { it.postId }
+                      else repo.getRoomInstitutions().sortedBy { it.name }.map { it.institutionId }
+            val order = S.apply(kind, ids) { it }.mapIndexed { i, id -> id to (i + 1) }.toMap()
+            val pendingQueue = com.hanif.smartstudy.data.local.PendingQueue(getApplication<Application>())
+            if (!repo.isOnline()) {
+                pendingQueue.enqueueAdminSetReferenceOrder(refType, order)
+                _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "📴 অফলাইনে সংরক্ষিত — net আসলে auto sync হবে") }
+                return@launch
+            }
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService.setReferenceOrder(refType, order)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    pendingQueue.dropPendingReferenceOrder(refType)
+                    _state.update { it.copy(isSavingOrder = false, orderSavedMsg = "✅ ক্রম সংরক্ষিত — সব ইউজার পরের sync-এ এই ক্রম দেখবে") }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    pendingQueue.enqueueAdminSetReferenceOrder(refType, order)
+                    com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(getApplication<Application>())
+                    _state.update { it.copy(isSavingOrder = false,
+                        orderSavedMsg = "⚠️ এখনই sync হয়নি (${r.message}) — queue-তে রাখা হয়েছে, পরে auto sync হবে") }
+                }
+            }
+        }
+    }
+
+    private fun qbankTopKind(): String {
+        val S = com.hanif.smartstudy.util.QBankOrderStore
+        return when (_state.value.qbankFilterMode) {
+            QBankFilterMode.INSTITUTION -> S.INSTITUTION
+            QBankFilterMode.YEAR        -> S.YEAR
+            else                        -> S.POST
+        }
+    }
+    private fun qbankTopList(): List<SubjectEntry> = when (qbankTopKind()) {
+        com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION -> _state.value.qbankInstitutions
+        com.hanif.smartstudy.util.QBankOrderStore.YEAR        -> _state.value.qbankYears
+        else                                                  -> _state.value.qbankPosts
+    }
+    private fun qbankTopKey(kind: String, e: SubjectEntry) =
+        if (kind == com.hanif.smartstudy.util.QBankOrderStore.YEAR) e.name else e.subjectId
+
+    /** QBank টপ-লিস্টে (পদবী/প্রতিষ্ঠান/সাল) ▲▼ — index গুলো এখনকার (আন-ফিল্টার্ড) লিস্টের */
+    fun moveQBankTop(from: Int, to: Int) {
+        if (!_state.value.isAdmin) return
+        val kind = qbankTopKind(); val list = qbankTopList()
+        if (from !in list.indices || to !in list.indices) return
+        val keys = list.map { qbankTopKey(kind, it) }
+        val seq = keys.toMutableList().also { val k = it.removeAt(from); it.add(to, k) }
+        commitQBankOrder(kind, keys, seq)
+    }
+
+    /** Serial Manager (টপ-লিস্ট) — নামের নতুন ক্রম */
+    fun applyQBankTopSerial(orderedNames: List<String>) {
+        if (!_state.value.isAdmin) return
+        val kind = qbankTopKind(); val list = qbankTopList()
+        val byName = list.associateBy { it.name }
+        val seq = orderedNames.mapNotNull { byName[it] }.map { qbankTopKey(kind, it) }
+        if (seq.size != list.size) return
+        commitQBankOrder(kind, list.map { qbankTopKey(kind, it) }, seq)
+    }
+
+    private fun qbankNestedKind(): String =
+        if (_state.value.qbankFilterMode == QBankFilterMode.INSTITUTION)
+            com.hanif.smartstudy.util.QBankOrderStore.POST       // প্রতিষ্ঠানের ভেতরে পদবী
+        else com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION // পদবীর ভেতরে প্রতিষ্ঠান
+    private fun qbankNestedList(): List<SubTopicEntry> =
+        com.hanif.smartstudy.util.TopicOrdering.serialOrder(
+            if (_state.value.qbankFilterMode == QBankFilterMode.INSTITUTION) _state.value.qbankDesignationsUnderInstitution
+            else _state.value.qbankInstitutionsUnderPost
+        )
+
+    /** নেস্টেড লিস্টে (পদবীর ভেতরে প্রতিষ্ঠান / প্রতিষ্ঠানের ভেতরে পদবী) ▲▼ */
+    fun moveQBankNested(from: Int, to: Int) {
+        if (!_state.value.isAdmin) return
+        val list = qbankNestedList().filterNot { it.isModelTest }
+        if (from !in list.indices || to !in list.indices) return
+        val keys = list.map { it.topicId }
+        val seq = keys.toMutableList().also { val k = it.removeAt(from); it.add(to, k) }
+        commitQBankOrder(qbankNestedKind(), keys, seq)
+    }
+
+    fun applyQBankNestedSerial(orderedNames: List<String>) {
+        if (!_state.value.isAdmin) return
+        val list = qbankNestedList().filterNot { it.isModelTest }
+        val byName = list.associateBy { it.name }
+        val seq = orderedNames.mapNotNull { byName[it] }.map { it.topicId }
+        if (seq.size != list.size) return
+        commitQBankOrder(qbankNestedKind(), list.map { it.topicId }, seq)
+    }
 
     fun clearOrderSavedMsg() { _state.update { it.copy(orderSavedMsg = null) } }
 
