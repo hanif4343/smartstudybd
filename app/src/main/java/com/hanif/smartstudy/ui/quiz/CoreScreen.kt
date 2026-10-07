@@ -252,12 +252,8 @@ fun CoreScreen(
                         // Phase 6-এর লেজি টপিক-নাম, তাই navigateToSubTopicLazy() ব্যবহার করতে
                         // হবে (topicId নাম দিয়ে state.subTopics থেকে resolve করে) — নাহলে পুরনো
                         // path Room-এ কিছু না পেয়ে আবার পুরো sheet fetch করতে যেত।
-                        val subj = state.navPath.subject
-                        val st   = state.navPath.subTopic
-                        if (subj != null && st != null) {
-                            viewModel.navigateBack()
-                            viewModel.navigateToSubTopicLazy(st)
-                        }
+                        // নেভিগেশন ছাড়াই একই টপিক রিলোড (দেখো QuizViewModel.retryCurrentTopic())
+                        viewModel.retryCurrentTopic()
                     }
                 },
                 onHome  = {
