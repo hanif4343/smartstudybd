@@ -432,6 +432,50 @@ fun QuestionCard(
                 }
             }
 
+            // ── QBank: "মূল প্রশ্ন দেখুন" — প্রশ্নের একদম উপরে (আগে নিচে "প্রশ্নপত্র দেখুন" ছিল)।
+            // Admin-এর জন্য ডানে + আইকন: গ্যালারি থেকে ছবি → CDN আপলোড → "QuestionPaper"
+            // কলামে কমা দিয়ে যোগ। ছবি না থাকলেও Admin-এ বারটা দেখা যায় (প্রথম ছবি যোগের জন্য) ──
+            if (mode == StudyMode.QBANK) {
+                val qpContext = LocalContext.current
+                val qpScope   = rememberCoroutineScope()
+                var qpUploading by remember { mutableStateOf(false) }
+                var qpError     by remember { mutableStateOf<String?>(null) }
+                // সফল আপলোডের পর item-এর প্রপ ফ্রেশ না হওয়া পর্যন্ত লোকাল কপিতে দেখানো হয়
+                var qpExtra     by remember(item.id) { mutableStateOf(listOf<String>()) }
+                val qpImages = (item.questionPaperImageList() + qpExtra).distinct()
+                val qpLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                    uri ?: return@rememberLauncherForActivityResult
+                    qpScope.launch {
+                        qpUploading = true; qpError = null
+                        when (val r = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(qpContext, uri, "question-paper", "qp")) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                val all = (qpImages + r.data).distinct()
+                                qpExtra = qpExtra + r.data
+                                val sheetKey = item.sourceSheet.ifBlank { "QBank" }
+                                try {
+                                    onAdminEdit?.invoke(sheetKey, item.id, mapOf("QuestionPaper" to all.joinToString(",")), item.question.take(60))
+                                        ?: FirebaseDataService.adminUpdateQuestionField(sheetKey, item.id, mapOf("QuestionPaper" to all.joinToString(",")))
+                                } catch (_: Exception) { }
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> qpError = r.message
+                        }
+                        qpUploading = false
+                    }
+                }
+                if (qpImages.isNotEmpty() || isAdminUser) {
+                    QuestionPaperGallery(
+                        urls        = qpImages,
+                        isAdmin     = isAdminUser,
+                        isUploading = qpUploading,
+                        onAddImage  = { qpLauncher.launch("image/*") }
+                    )
+                    qpError?.let {
+                        Text(it, fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+
             Spacer(Modifier.height(6.dp))
 
             // প্রশ্ন — QuestionText (LaTeX support আছে) + RichContentText (link support)
@@ -599,11 +643,6 @@ fun QuestionCard(
             // লিংক), শুধু QBank-এই থাকে। এমনিতে হাইড থাকে, প্রয়োজন হলে ট্যাপ করে
             // দেখা যায় — সবসময় খোলা থাকলে লিস্টে অনেক জায়গা নিয়ে নিত ──
             if (mode == StudyMode.QBANK) {
-                val questionPaperImages = item.questionPaperImageList()
-                if (questionPaperImages.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    QuestionPaperGallery(urls = questionPaperImages)
-                }
                 // Phase 6: এই প্রশ্ন কোন কোন পরীক্ষায় এসেছে (খালি হলে কিছু দেখায় না)
                 ExamAppearanceInfo(questionId = item.id)
             }
@@ -2753,41 +2792,66 @@ fun ZoomableImage(url: String) {
 // দিয়েই দেখানো হয়, তাই ট্যাপ করলে ফুল-স্ক্রিন জুম করেও দেখা যাবে। ──
 // ────────────────────────────────────────────────────────────────
 @Composable
-fun QuestionPaperGallery(urls: List<String>, modifier: Modifier = Modifier) {
-    if (urls.isEmpty()) return
+fun QuestionPaperGallery(
+    urls: List<String>,
+    modifier: Modifier = Modifier,
+    isAdmin: Boolean = false,
+    isUploading: Boolean = false,
+    onAddImage: (() -> Unit)? = null
+) {
+    if (urls.isEmpty() && !(isAdmin && onAddImage != null)) return
     var expanded by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxWidth()) {
         Surface(
-            onClick = { expanded = !expanded },
+            onClick = { if (urls.isNotEmpty()) expanded = !expanded },
             shape   = RoundedCornerShape(10.dp),
             color   = Indigo600.copy(alpha = 0.10f),
             border  = BorderStroke(1.dp, Indigo600.copy(alpha = 0.3f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                Modifier.padding(start = 12.dp, top = 3.dp, bottom = 3.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.Image, null, tint = Indigo600, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = if (urls.size > 1) "প্রশ্নপত্র দেখুন (${urls.size}টি ছবি)" else "প্রশ্নপত্র দেখুন",
+                    text = when {
+                        urls.isEmpty()  -> "মূল প্রশ্ন (ছবি নেই)"
+                        urls.size > 1   -> "মূল প্রশ্ন দেখুন (${urls.size}টি ছবি)"
+                        else            -> "মূল প্রশ্ন দেখুন"
+                    },
                     fontFamily = NotoSansBengali,
                     fontSize   = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color      = Indigo600,
                     modifier   = Modifier.weight(1f)
                 )
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "লুকান" else "দেখুন",
-                    tint     = Indigo600,
-                    modifier = Modifier.size(18.dp)
-                )
+                if (isAdmin && onAddImage != null) {
+                    if (isUploading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(8.dp).size(18.dp),
+                            strokeWidth = 2.dp, color = Indigo600
+                        )
+                    } else {
+                        IconButton(onClick = onAddImage, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Add, contentDescription = "মূল প্রশ্নের ছবি যোগ করুন",
+                                tint = Indigo600, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                if (urls.isNotEmpty()) {
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "লুকান" else "দেখুন",
+                        tint     = Indigo600,
+                        modifier = Modifier.padding(end = 8.dp).size(18.dp)
+                    )
+                }
             }
         }
-        AnimatedVisibility(visible = expanded) {
+        AnimatedVisibility(visible = expanded && urls.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
                 urls.forEach { url ->
                     ZoomableImage(url = url)
