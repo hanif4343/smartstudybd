@@ -704,7 +704,7 @@ internal fun HomeBottomTilesRow(onLeaderboard: () -> Unit, onSupport: () -> Unit
     Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         HdBigTile("Leaderboard", "শীর্ষ শিক্ষার্থী", Icons.Default.EmojiEvents, Color(0xFFFBBF24), Color(0xFFF97316), onLeaderboard, Modifier.weight(1f))
         HdBigTile("Support", "AI সাহায্য", Icons.Default.SupportAgent, Color(0xFF818CF8), Color(0xFF4F46E5), onSupport, Modifier.weight(1f))
-        HdBigTile("Tools", "সব টুলস", Icons.Default.Build, Color(0xFF2DD4BF), Color(0xFF0D9488), onTools, Modifier.weight(1f))
+        HdBigTile("More", "আরও সব", Icons.Default.Build, Color(0xFF2DD4BF), Color(0xFF0D9488), onTools, Modifier.weight(1f))
     }
 }
 
@@ -740,7 +740,7 @@ private fun HdBigTile(title: String, sub: String, icon: ImageVector, c1: Color, 
 internal fun HomeToolsSheet(entries: List<HdQuickEntry>, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("🛠 Tools", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+            Text("⋯ More", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
             entries.chunked(4).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { e ->
