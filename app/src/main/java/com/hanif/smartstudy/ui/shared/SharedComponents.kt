@@ -432,67 +432,6 @@ fun QuestionCard(
                 }
             }
 
-            // ── QBank: "মূল প্রশ্ন দেখুন" — প্রশ্নের একদম উপরে (আগে নিচে "প্রশ্নপত্র দেখুন" ছিল)।
-            // Admin-এর জন্য ডানে + আইকন: গ্যালারি থেকে ছবি → CDN আপলোড → "QuestionPaper"
-            // কলামে কমা দিয়ে যোগ। ছবি না থাকলেও Admin-এ বারটা দেখা যায় (প্রথম ছবি যোগের জন্য) ──
-            if (mode == StudyMode.QBANK) {
-                val qpContext = LocalContext.current
-                val qpScope   = rememberCoroutineScope()
-                var qpUploading by remember { mutableStateOf(false) }
-                var qpError     by remember { mutableStateOf<String?>(null) }
-                // সফল আপলোডের পর item-এর প্রপ ফ্রেশ না হওয়া পর্যন্ত লোকাল কপিতে দেখানো হয়
-                var qpExtra     by remember(item.id) { mutableStateOf(listOf<String>()) }
-                val qpImages = (item.questionPaperImageList() + qpExtra).distinct()
-                val qpLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-                    uri ?: return@rememberLauncherForActivityResult
-                    qpScope.launch {
-                        qpUploading = true; qpError = null
-                        when (val r = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(qpContext, uri, "question-paper", "qp")) {
-                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                                val all = (qpImages + r.data).distinct()
-                                qpExtra = qpExtra + r.data
-                                val sheetKey = item.sourceSheet.ifBlank { "QBank" }
-                                try {
-                                    // onAdminEdit → লোকাল ক্যাশ + Google Sheet (GAS) + CDN dirty-mark (Firebase না)
-                                    onAdminEdit?.invoke(sheetKey, item.id, mapOf("QuestionPaper" to all.joinToString(",")), item.question.take(60))
-                                } catch (_: Exception) { }
-                            }
-                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> qpError = r.message
-                        }
-                        qpUploading = false
-                    }
-                }
-                // ── "মূল প্রশ্ন দেখুন" বাটন আর প্রতিটা প্রশ্নে নেই — প্রশ্নপত্রের একদম ওপরে
-                // একবারই দেখায় (QuestionListScreen), আর শুধু লিংক থাকলে। এখানে শুধু Admin-এর
-                // জন্য ছোট একটা "+" আইকন থাকে মূল-প্রশ্নের ছবি আপলোডের জন্য (Student-এ কিছুই না)। ──
-                if (isAdminUser) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (qpExtra.isNotEmpty()) {
-                            Text("✓ মূল প্রশ্নের ছবি যোগ হয়েছে", fontSize = 10.sp,
-                                color = Color(0xFF059669), fontFamily = NotoSansBengali)
-                        }
-                        if (qpUploading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.padding(6.dp).size(16.dp),
-                                strokeWidth = 2.dp, color = Indigo600
-                            )
-                        } else {
-                            IconButton(onClick = { qpLauncher.launch("image/*") }, modifier = Modifier.size(30.dp)) {
-                                Icon(Icons.Default.Image, contentDescription = "মূল প্রশ্নের ছবি যোগ করুন",
-                                    tint = Indigo600.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    }
-                    qpError?.let {
-                        Text(it, fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
-                    }
-                }
-            }
-
             Spacer(Modifier.height(6.dp))
 
             // প্রশ্ন — QuestionText (LaTeX support আছে) + RichContentText (link support)
@@ -2877,9 +2816,9 @@ fun QuestionPaperGallery(
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = when {
-                        urls.isEmpty()  -> "মূল প্রশ্ন (ছবি নেই)"
-                        urls.size > 1   -> "মূল প্রশ্ন দেখুন (${urls.size}টি ছবি)"
-                        else            -> "মূল প্রশ্ন দেখুন"
+                        urls.isEmpty()  -> "মূল প্রশ্নপত্র (ছবি নেই)"
+                        urls.size > 1   -> "মূল প্রশ্নপত্র (${urls.size}টি ছবি)"
+                        else            -> "মূল প্রশ্নপত্র"
                     },
                     fontFamily = NotoSansBengali,
                     fontSize   = 12.sp,
@@ -2950,7 +2889,7 @@ fun QuestionPaperButtonRow(
                     val tint = Indigo600.copy(alpha = if (enabled) 1f else 0.35f)
                     Icon(Icons.Default.Image, null, tint = tint, modifier = Modifier.size(16.dp))
                     Text(
-                        "মূল প্রশ্ন দেখুন", fontFamily = NotoSansBengali,
+                        "মূল প্রশ্নপত্র", fontFamily = NotoSansBengali,
                         fontSize = 12.sp, fontWeight = FontWeight.Bold, color = tint
                     )
                     if (enabled) {
@@ -2969,6 +2908,92 @@ fun QuestionPaperButtonRow(
                 urls.forEach { url -> ZoomableImage(url = url) }
             }
         }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// QBank — হেডারে বসানোর কমপ্যাক্ট "মূল প্রশ্নপত্র" পিল বাটন। ছবি না থাকলে হালকা রঙে
+// (ক্লিক কাজ করে না), তবে Admin-এর জন্য সবসময় সক্রিয় (প্রথম ছবি যোগ করার জন্য)।
+// onDark = true হলে গাঢ়/রঙিন হেডারের (যেমন প্রশ্নপত্র এক্সাম-স্ক্রিন) জন্য সাদা টিন্ট। ──
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun QuestionPaperHeaderButton(
+    enabled: Boolean,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onDark: Boolean = false
+) {
+    val base = if (onDark) Color.White else Indigo600
+    val tint = base.copy(alpha = if (enabled) 1f else 0.4f)
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape   = RoundedCornerShape(10.dp),
+        color   = base.copy(alpha = if (enabled) (if (onDark) 0.16f else 0.10f) else 0.05f),
+        border  = BorderStroke(1.dp, base.copy(alpha = if (enabled) 0.35f else 0.15f)),
+        modifier = modifier
+    ) {
+        Row(
+            Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(Icons.Default.Image, null, tint = tint, modifier = Modifier.size(14.dp))
+            Text(
+                "মূল প্রশ্নপত্র", fontFamily = NotoSansBengali,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tint, maxLines = 1
+            )
+            if (enabled) {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null, tint = tint, modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// QBank — "মূল প্রশ্নপত্র" বাটন চাপলে হেডারের নিচে খোলা ছবির প্যানেল (জুম করা যায়)।
+// Admin হলে একটা "ছবি যোগ" বাটনও থাকে — আগে প্রতিটা প্রশ্নের এডিট-বাটনের নিচে
+// ছিল, এখন শুধু এখানে (পুরো প্রশ্নপত্রের জন্য একবারই)। ──
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun QuestionPaperImagesPanel(
+    urls: List<String>,
+    modifier: Modifier = Modifier,
+    isAdmin: Boolean = false,
+    isUploading: Boolean = false,
+    errorMsg: String? = null,
+    onAddImage: (() -> Unit)? = null
+) {
+    Column(modifier.fillMaxWidth()) {
+        if (isAdmin && onAddImage != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isUploading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(6.dp).size(16.dp),
+                        strokeWidth = 2.dp, color = Indigo600
+                    )
+                } else {
+                    TextButton(onClick = onAddImage) {
+                        Icon(Icons.Default.Add, null, tint = Indigo600, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("ছবি যোগ করুন", fontFamily = NotoSansBengali, fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold, color = Indigo600)
+                    }
+                }
+            }
+            errorMsg?.let {
+                Text(it, fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
+            }
+        }
+        urls.forEach { url -> ZoomableImage(url = url) }
     }
 }
 
