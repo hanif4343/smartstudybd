@@ -213,6 +213,9 @@ fun QuestionListScreen(
     totalQuestions: Int,   // Room থেকে মোট প্রশ্ন সংখ্যা (questions.size নয়)
     onBack      : () -> Unit,
     onSubmit    : () -> Unit,
+    // QBank প্রশ্নপত্র হেডার: qbankTitle = পদবী (ওপরে), qbankInstitution = প্রতিষ্ঠান (নিচে, শুধু ১৬-২০ গ্রেডে)
+    qbankTitle       : String? = null,
+    qbankInstitution : String? = null,
     currentUser : com.hanif.smartstudy.data.model.User? = null,
     highlightQuestionId : String? = null,
     onHighlightConsumed : () -> Unit = {},
@@ -474,10 +477,12 @@ fun QuestionListScreen(
                     mode     = mode,
                     subject  = subject,
                     subTopic = subTopic,
+                    qbankTitle = qbankTitle,
+                    qbankInstitution = qbankInstitution,
                     answered = answered,
                     total    = questions.size,
                     onBack   = onBack,
-                    onSubmit = if (mode != StudyMode.STUDY) {{ showSubmitDialog = true }} else null,
+                    onSubmit = if (mode != StudyMode.STUDY && mode != StudyMode.QBANK) {{ showSubmitDialog = true }} else null,
                     studyRevealMode = studyRevealMode,
                     onToggleStudyRevealMode = onToggleStudyRevealMode,
                     studyRecallMode = studyRecallMode,
@@ -528,6 +533,21 @@ fun QuestionListScreen(
 
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
+
+                // ── QBank: "মূল প্রশ্ন দেখুন" — পুরো প্রশ্নপত্রে একবারই, একদম ওপরে।
+                // প্রশ্নগুলোর কোনোটায় মূল-প্রশ্নের ছবির লিংক থাকলেই বাটন আসবে;
+                // কোনো লিংক না থাকলে বাটন পুরোপুরি অদৃশ্য (প্রতিটা প্রশ্নে আর আলাদা বাটন নেই)। ──
+                if (mode == StudyMode.QBANK) {
+                    val paperImages = remember(questions) {
+                        questions.flatMap { it.questionPaperImageList() }.distinct()
+                    }
+                    if (paperImages.isNotEmpty()) {
+                        com.hanif.smartstudy.ui.shared.QuestionPaperGallery(
+                            urls     = paperImages,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
 
                 // ── Study Nav Phase 4: 🎯 Exam Focus / ⚡ Quick Notes / 📝 Practice / 🔴 Wrong Review /
                 // 🗓 Routine / ⏱ Focus — শুধু Study মোডে, LazyColumn-এর বাইরে (তাই আইটেম-ইনডেক্স-ভিত্তিক
@@ -1785,6 +1805,8 @@ private fun QuestionTopBar(
     total    : Int,
     onBack   : () -> Unit,
     onSubmit : (() -> Unit)?,
+    qbankTitle       : String? = null,
+    qbankInstitution : String? = null,
     studyRevealMode         : Boolean = false,
     onToggleStudyRevealMode : (() -> Unit)? = null,
     studyRecallMode         : Boolean = false,
@@ -1809,6 +1831,21 @@ private fun QuestionTopBar(
         (mode == StudyMode.QBANK && hasWrittenQuestions)
     TopAppBar(
         title = {
+            if (mode == StudyMode.QBANK && !qbankTitle.isNullOrBlank()) {
+                // ── QBank প্রশ্নপত্র: ওপরে পদবী, তার নিচে সুন্দর করে প্রতিষ্ঠান (শুধু ১৬-২০ গ্রেডে) ──
+                Column {
+                    Text(qbankTitle, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (!qbankInstitution.isNullOrBlank()) {
+                        Text("🏛 $qbankInstitution", fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0891B2), fontFamily = NotoSansBengali,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                    Text("${answered}/${total} উত্তর", fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                }
+            } else
             Column {
                 Text(subTopic.ifBlank { subject }, fontSize = 14.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -1831,7 +1868,7 @@ private fun QuestionTopBar(
             // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে, জায়গা নষ্ট হচ্ছে"): এই
             // একটা 🔧 টগল দিয়ে সব কার্ডের move-row/edit-pill-row একসাথে দেখানো/লুকানো
             // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
-            if (isAdmin && onToggleAdminControls != null) {
+            if (isAdmin && onToggleAdminControls != null && mode != StudyMode.QBANK) {
                 IconButton(onClick = onToggleAdminControls) {
                     Icon(
                         Icons.Default.Build,
@@ -1854,7 +1891,7 @@ private fun QuestionTopBar(
             }
             // ── Admin "Move" সিলেক্ট-মোড টগল — চালু থাকলে প্রতিটা কার্ডের পাশে চেকবক্স
             // দেখা যায়, এক/একাধিক প্রশ্ন সিলেক্ট করে নিচের floating bar দিয়ে move করা যায় ──
-            if (isAdmin && onToggleSelectMode != null) {
+            if (isAdmin && onToggleSelectMode != null && mode != StudyMode.QBANK) {
                 IconButton(onClick = onToggleSelectMode) {
                     Icon(
                         if (isSelectMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
