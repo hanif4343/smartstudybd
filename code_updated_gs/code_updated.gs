@@ -2083,60 +2083,6 @@ function doGet(e) {
     });
   }
 
-  // ── setReferenceOrder — QBank পদবী (Posts) / প্রতিষ্ঠান (Institutions) সিরিয়াল:
-  // ওই ট্যাবের "sort_order" কলামে (না থাকলে হেডারের শেষে নিজে যোগ হয়)। setTopicOrder-এর
-  // মতোই — order = "id:সংখ্যা,id:সংখ্যা,..."; ১টা batch-write। CDN publish-স্ক্রিপ্ট যেন
-  // reference/*.json নতুন করে commit করে তাই (যেকোনো) ১টা টপিক dirty মার্ক করা হয়। ──
-  if (action==="setReferenceOrder") {
-    return withWriteLock(function(){
-    var sroType=(e.parameter.refType||"").toString().toLowerCase();
-    if (sroType!=="posts" && sroType!=="institutions") return json({status:"error",result:"error",message:"refType শুধু posts/institutions"});
-    var sroCfg=REF_TABS[sroType];
-    var sroRaw=(e.parameter.order||"").toString().trim();
-    if (!sroRaw) return json({status:"error",result:"error",message:"order প্রয়োজন"});
-    var sroMap={}, sroAny=false;
-    sroRaw.split(",").forEach(function(pair){
-      var ix=pair.lastIndexOf(":");
-      if (ix<=0) return;
-      var id=pair.substring(0,ix).trim(), n=parseInt(pair.substring(ix+1),10);
-      if (id && !isNaN(n)) { sroMap[id]=n; sroAny=true; }
-    });
-    if (!sroAny) return json({status:"error",result:"error",message:"order পার্স করা যায়নি"});
-    var sroSs=SpreadsheetApp.getActiveSpreadsheet(), sroSh=sroSs.getSheetByName(sroCfg.sheet);
-    if (!sroSh) return json({status:"error",result:"error",message:"Sheet not found: "+sroCfg.sheet});
-    var sroData=sroSh.getDataRange().getValues(), sroHdr=sroData[0];
-    var sroIdCol=-1, sroOrdCol=-1;
-    for (var sc=0;sc<sroHdr.length;sc++){
-      var scName=sroHdr[sc].toString().trim();
-      if (scName===sroCfg.idCol) sroIdCol=sc;
-      if (scName==="sort_order") sroOrdCol=sc;
-    }
-    if (sroIdCol<0) return json({status:"error",result:"error",message:sroCfg.idCol+" কলাম পাওয়া যায়নি"});
-    if (sroOrdCol<0) { sroOrdCol=sroHdr.length; sroSh.getRange(1,sroOrdCol+1).setValue("sort_order"); }
-    var sroVals=[], sroChanged=0;
-    for (var sr=1;sr<sroData.length;sr++){
-      var sroCur=(sroOrdCol<sroData[sr].length)?sroData[sr][sroOrdCol]:"";
-      var sroId=(sroData[sr][sroIdCol]||"").toString().trim();
-      if (sroId && sroMap.hasOwnProperty(sroId)) {
-        if (String(sroCur)!==String(sroMap[sroId])) sroChanged++;
-        sroVals.push([sroMap[sroId]]);
-      } else {
-        sroVals.push([sroCur===undefined?"":sroCur]);
-      }
-    }
-    if (sroVals.length) sroSh.getRange(2,sroOrdCol+1,sroVals.length,1).setValues(sroVals);
-    if (sroChanged>0) {
-      var sroTopicsSh=sroSs.getSheetByName("Topics");
-      if (sroTopicsSh && sroTopicsSh.getLastRow()>=2) {
-        var sroTHdr=sroTopicsSh.getRange(1,1,1,sroTopicsSh.getLastColumn()).getValues()[0].map(function(h){return h.toString().trim();});
-        var sroTIdCol=sroTHdr.indexOf("topic_id");
-        if (sroTIdCol>=0) markTopicDirty((sroTopicsSh.getRange(2,sroTIdCol+1).getValue()||"").toString());
-      }
-    }
-    return json({status:"success",result:"success",updated:sroChanged,total:Object.keys(sroMap).length});
-    });
-  }
-
   // ── addReferenceItem — Subjects/Topics/Tags/Posts/Institutions-এ
   // নতুন এন্ট্রি যোগ করে, id নিজে থেকে জেনারেট করে (parent-scoped prefix সহ)।
   // Manager UI থেকে "নতুন যোগ করো" বাটনে ব্যবহার হয়। ──
