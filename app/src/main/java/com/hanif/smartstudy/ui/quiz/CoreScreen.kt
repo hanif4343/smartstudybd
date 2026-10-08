@@ -289,11 +289,13 @@ fun CoreScreen(
             }
             val postOrDesignation = when (state.qbankFilterMode) {
                 QBankFilterMode.INSTITUTION -> state.navPath.subTopic ?: ""
-                else -> state.qbankSelectedPost ?: ""
+                else -> state.qbankSelectedPost ?: state.qbankDirectPost ?: ""
             }
             QBankExamPaperScreen(
                 institutionName = institutionOrSubject,
                 postName        = postOrDesignation,
+                // প্রতিষ্ঠানের নাম শুধু ১৬-২০ গ্রেডে দেখাবে (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংকে শুধু পদবী)
+                showInstitution = com.hanif.smartstudy.util.QBankCategory.selected == com.hanif.smartstudy.util.QBankCategory.GRADE,
                 // ── শুধু written অংশ — এই institution-এ MCQ+written মিশে থাকলেও
                 // MCQ গুলো এই এক্সাম-পেপার ভিউতে দেখাবে না (কুইজ-স্ক্রিনে আলাদা দেখা যাবে না
                 // এখানে যেহেতু একটাই স্ক্রিন-স্লট — বর্তমানে প্রতি institution সাধারণত
@@ -343,6 +345,19 @@ fun CoreScreen(
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 },
                 onSubmit            = { viewModel.submitQuiz() },
+                // ── QBank প্রশ্নপত্র হেডার: ওপরে পদবী, নিচে প্রতিষ্ঠান (শুধু ১৬-২০ গ্রেডে) ──
+                qbankTitle          = if (mode == StudyMode.QBANK) when (state.qbankFilterMode) {
+                    QBankFilterMode.INSTITUTION -> state.navPath.subTopic
+                    QBankFilterMode.POST, QBankFilterMode.DESIGNATION ->
+                        state.qbankSelectedPost ?: state.qbankDirectPost
+                    else -> null
+                }?.takeIf { it.isNotBlank() } else null,
+                qbankInstitution    = if (mode == StudyMode.QBANK &&
+                    com.hanif.smartstudy.util.QBankCategory.selected == com.hanif.smartstudy.util.QBankCategory.GRADE) when (state.qbankFilterMode) {
+                    QBankFilterMode.INSTITUTION -> state.navPath.subject
+                    QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> state.navPath.subTopic
+                    else -> null
+                }?.takeIf { it.isNotBlank() } else null,
                 currentUser         = currentUser,
                 highlightQuestionId = state.highlightQuestionId,
                 onHighlightConsumed = { viewModel.consumeHighlight() },
