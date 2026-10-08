@@ -660,6 +660,9 @@ fun CoreScreen(
                 onQBankSearchQueryChange = { viewModel.setQBankSearchQuery(it) },
                 isRefreshing = state.isRefreshing,
                 onRefresh    = { viewModel.refreshCurrentMode() },
+                // ── Quiz: গ্রিডের শেষে "+ Set Own Subject" (SSC/HSC/বিষয় বাছাই) ──
+                ownPick         = state.ownPick,
+                onOwnPickChange = if (mode == StudyMode.QUIZ) { { viewModel.setOwnPick(it) } } else null,
                 // ── Study Nav Phase 1: শুধু Study ট্যাবে "আমার পড়াশোনা" ──
                 headerSlot   = if (mode == StudyMode.STUDY) {
                     @Composable {
