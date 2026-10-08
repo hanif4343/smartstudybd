@@ -21,7 +21,13 @@ interface ReferenceDao {
     @Query("SELECT * FROM subjects ORDER BY name")
     suspend fun getAllSubjects(): List<SubjectEntity>
 
-    @Query("SELECT * FROM subjects WHERE sheet = :sheet ORDER BY name")
+    // 🆕 Unified Subject (S01...): একটা subject এখন একাধিক sheet-এ থাকতে পারে, তাই `sheet`
+    // কলামে "Quiz,QBank,Study" / "Quiz,Study" ধরনের কমা-সেপারেটেড মান আসে। আগের `sheet = :sheet`
+    // (exact match) শুধু ঠিক "Quiz" লেখা subject-ই ধরত — বাকি সব subject লিস্ট থেকে হারিয়ে
+    // যেত (Quiz-এ মাত্র ৩টা subject দেখানোর আসল কারণ এটাই)। এখন কমা-লিস্টের যেকোনো একটা
+    // মিললেই ধরা হয় (পুরনো একক মান "Quiz" ইত্যাদিও আগের মতোই কাজ করে)। LIKE ASCII-তে
+    // case-insensitive, তাই "Quiz"/"QUIZ" দুটোতেই মেলে।
+    @Query("SELECT * FROM subjects WHERE (',' || REPLACE(sheet, ' ', '') || ',') LIKE ('%,' || :sheet || ',%') ORDER BY name")
     suspend fun getSubjectsBySheet(sheet: String): List<SubjectEntity>
 
     // ── FIX ("যেই টপিক/সাবজেক্ট ফাঁকা সেটা দেখানোর দরকার কী?"): আগে "০ প্রশ্ন" নিয়েই
@@ -55,7 +61,8 @@ interface ReferenceDao {
 
     // ── Admin Subject/Topic ডিলিট ইনস্ট্যান্ট দেখানোর জন্য — নাম দিয়ে subjectId
     // রিজলভ করতে হয় (deleteByIds/deleteReferenceId-এর id-ভিত্তিক API নাম নেয় না) ──
-    @Query("SELECT * FROM subjects WHERE sheet = :sheet AND name = :name LIMIT 1")
+    // 🆕 Unified: sheet কমা-লিস্ট হতে পারে — getSubjectsBySheet()-এর মতোই contains-match
+    @Query("SELECT * FROM subjects WHERE (',' || REPLACE(sheet, ' ', '') || ',') LIKE ('%,' || :sheet || ',%') AND name = :name LIMIT 1")
     suspend fun getSubjectByName(sheet: String, name: String): SubjectEntity?
 
     @Query("DELETE FROM subjects")
