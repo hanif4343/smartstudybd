@@ -132,6 +132,8 @@ object FirebaseDataService {
                         "$userName একটি প্রশ্নে সমস্যা রিপোর্ট করেছে।" + (if (extra.isNotBlank()) " ($extra)" else "")
                     "technique" -> "💡 নতুন টেকনিক" to
                         "$userName একটি নতুন টেকনিক জমা দিয়েছে, অনুমোদনের অপেক্ষায়।" + (if (extra.isNotBlank()) " \"$extra\"" else "")
+                    "support"   -> "📩 নতুন সাপোর্ট মেসেজ" to
+                        "$userName সাপোর্টে মেসেজ পাঠিয়েছে।" + (if (extra.isNotBlank()) " ($extra)" else "")
                     else        -> "🔔 Smart Study" to "$userName থেকে নতুন একটিভিটি: $event"
                 }
                 val data = mapOf(
@@ -181,6 +183,40 @@ object FirebaseDataService {
             } catch (e: Exception) {
                 Log.e("FirebaseData", "notifyAdmin: ${e.message}")
             }
+        }
+    }
+
+    /** Support Center: Feature Suggestion / Sync / Account / Contact Admin — Firebase "SupportMessages"-এ সেভ + অ্যাডমিন নোটিফিকেশন */
+    suspend fun submitSupportMessage(
+        category : String,
+        message  : String,
+        userName : String,
+        userPhone: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val obj = JsonObject().apply {
+                addProperty("category",  category)
+                addProperty("message",   message.take(2000))
+                addProperty("userName",  userName)
+                addProperty("userPhone", userPhone)
+                addProperty("timestamp", System.currentTimeMillis())
+                addProperty("status",    "open")
+            }
+            val resp = client.newCall(
+                Request.Builder().url("$base/SupportMessages.json$auth")
+                    .post(obj.toString().toRequestBody("application/json".toMediaType())).build()
+            ).execute()
+            val ok = resp.isSuccessful
+            resp.close()
+            if (ok && userName.isNotBlank() && userPhone.isNotBlank()) {
+                notifyAdmin(event = "support", userName = userName, userPhone = userPhone, extra = category)
+            }
+            ok
+        } catch (e: Exception) {
+            Log.e("FirebaseData", "submitSupportMessage: ${e.message}")
+            false
         }
     }
 
