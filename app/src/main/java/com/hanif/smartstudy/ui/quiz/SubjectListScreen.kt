@@ -214,6 +214,44 @@ private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolea
     )
 
 @Composable
+private fun QBankSortRow(
+    current : com.hanif.smartstudy.util.QBankSort,
+    onSelect: (com.hanif.smartstudy.util.QBankSort) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    val active = current != com.hanif.smartstudy.util.QBankSort.DEFAULT
+    Box(Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(18.dp))
+                .background(if (active) Color(0xFF3157D5).copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface)
+                .border(1.dp, if (active) Color(0xFF3157D5) else Color(0xFFE0E4ED), RoundedCornerShape(18.dp))
+                .clickable { open = true }
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("↕", fontSize = 14.sp, color = Color(0xFF3157D5), fontWeight = FontWeight.ExtraBold)
+            Text("সাজানো: ${current.label}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
+            Text("▾", fontSize = 11.sp, color = Color(0xFF64748B))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
+                DropdownMenuItem(
+                    text = {
+                        Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
+                            fontFamily = NotoSansBengali,
+                            fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
+                    },
+                    onClick = { open = false; onSelect(opt) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExamCategoryChipsRow(
     selected: String,
     onSelect: (String) -> Unit
@@ -354,12 +392,27 @@ fun SubjectListScreen(
     // ▲▼ ও সিরিয়াল-ম্যানেজার নিচে গ্লোবাল লিস্টের সাথে ম্যাপ করা হয়, তাই অন্য ক্যাটাগরির ক্রম নষ্ট হয় না ──
     val categorySubjects = if (showQBankFilterBar)
         subjects.filter { examCategoryMatches(it, selectedExamCategory) } else subjects
+    // ── সাজানো (sort): প্রতিটা ক্যাটাগরির পছন্দ আলাদা ও স্থায়ী (QBankSortStore)। ১৬-২০ গ্রেডে
+    // পদবী/প্রতিষ্ঠান/সাল মোডেরও আলাদা পছন্দ। অ্যাডমিন ক্রম-ঠিক-করার মোডে সবসময় আসল ক্রম ──
+    val sortCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankSortStore.init(sortCtx) }
+    val sortScope = if (selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE)
+        "$selectedExamCategory:${qbankFilterMode.name}" else selectedExamCategory
+    var sortChoice by remember(sortScope) {
+        com.hanif.smartstudy.util.QBankSortStore.init(sortCtx)
+        mutableStateOf(com.hanif.smartstudy.util.QBankSortStore.get(sortScope))
+    }
     val displaySubjects = run {
         var list = categorySubjects
         if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
             if (qbankSearchQuery.isNotBlank() && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
                 list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
             }
+            list = com.hanif.smartstudy.util.QBankSortStore.apply(
+                list, sortChoice,
+                name = { it.name }, subNames = { e -> e.subTopics.map { st -> st.name } },
+                totalQ = { it.totalQ }, progressPct = { it.progressPct }
+            )
         }
         list
     }
@@ -444,6 +497,19 @@ fun SubjectListScreen(
                             qbankFilterMode != QBankFilterMode.DESIGNATION) {
                             onQBankFilterModeChange(QBankFilterMode.DESIGNATION)
                         }
+                    }
+                )
+            }
+        }
+
+        // ── সাজানোর বাটন (শুধু QBank; ক্যাটাগরি-ভিত্তিক, স্থায়ী) ──
+        if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
+            item {
+                QBankSortRow(
+                    current  = sortChoice,
+                    onSelect = {
+                        sortChoice = it
+                        com.hanif.smartstudy.util.QBankSortStore.set(sortScope, it)
                     }
                 )
             }
@@ -545,6 +611,16 @@ fun SubjectListScreen(
                                 emojiEditTargetId = subject.subjectId
                                 emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
                             },
+                            // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান" — প্রতিষ্ঠানের নামও কার্ডে দেখায়
+                            titleOverride = if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
+                                val insts = subject.subTopics.map { it.name.trim() }
+                                    .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) }.distinct()
+                                when {
+                                    insts.isEmpty() -> null
+                                    insts.size <= 2 -> subject.name + ", " + insts.joinToString(", ")
+                                    else            -> subject.name + ", " + insts.first() + " +${insts.size - 1}"
+                                }
+                            } else null,
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
                                 QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
@@ -1369,7 +1445,8 @@ private fun QBankSubjectCard(
     // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন ──
     emojiOverride : String? = null,
     isAdmin       : Boolean = false,
-    onEmojiClick  : () -> Unit = {}
+    onEmojiClick  : () -> Unit = {},
+    titleOverride : String? = null      // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান"
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -1403,8 +1480,8 @@ private fun QBankSubjectCard(
                 }
             }
 
-            Text(subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-                color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
+            Text(titleOverride ?: subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                color = textColor, fontFamily = NotoSansBengali, maxLines = if (titleOverride != null) 4 else 2)
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("📂", fontSize = 10.sp)
