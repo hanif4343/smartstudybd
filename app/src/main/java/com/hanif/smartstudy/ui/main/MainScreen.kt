@@ -130,6 +130,9 @@ fun MainScreen(
             showExamTyping                -> showExamTyping = false
             showTypingRace                -> showTypingRace = false
             showFocusModeInfo             -> showFocusModeInfo = false
+            // Support (AI Chat টাইল) ও Viva স্ক্রিনে সিস্টেম Back = স্ক্রিন বন্ধ, exit dialog নয়
+            showAiChat                    -> showAiChat = false
+            showViva                      -> showViva = false
             currentTab != BottomTab.HOME  -> currentTab = BottomTab.HOME
             else                          -> showExitDialog = true
         }
