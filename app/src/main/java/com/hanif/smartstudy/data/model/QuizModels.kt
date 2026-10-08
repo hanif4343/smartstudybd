@@ -323,12 +323,15 @@ data class QuizResult(
 
 /** status: "correct" | "wrong" | "skipped" | "recorded" */
 data class ResultReviewItem(
-    val number       : Int,
-    val question     : String,
-    val yourAnswer   : String,
-    val correctAnswer: String,
-    val status       : String,
-    val subject      : String = ""
+    val number       : Int = 0,
+    val question     : String = "",
+    val yourAnswer   : String = "",
+    val correctAnswer: String = "",
+    val status       : String = "",
+    val subject      : String = "",
+    // ── History-তে মক টেস্টের প্রশ্ন লোকালি সংরক্ষণের জন্য (পুরনো সেভ-করা ডেটায় ফাঁকা থাকবে) ──
+    val options      : List<String> = emptyList(),   // [A, B, C, D] — MCQ হলে
+    val explanation  : String = ""
 )
 
 data class SubjectScore(
