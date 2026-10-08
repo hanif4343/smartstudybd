@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Keyboard
@@ -46,6 +49,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import kotlin.math.roundToInt
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
@@ -217,12 +227,15 @@ fun QuestionListScreen(
     // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
     // করতে হবে না — এমনিতেই কাজ করবে। ইচ্ছা করলে override করাও যায় ──
     onRegenerateOptions: (suspend (String) -> com.hanif.smartstudy.data.remote.RegeneratedMcq?)? =
-        { q -> viewModel.regenerateMcqOptions(q) }
+        { q -> viewModel.regenerateMcqOptions(q) },
+    // ── Study Nav Phase 4: Study টুলবার থেকে অন্য ট্যাবে যাওয়া (Practice/Wrong Review) ──
+    onStudyAction: ((StudyAction) -> Unit)? = null
 ) {
-    val pageSize = QuizViewModel.PAGE_SIZE
+    // QBank-এ পেজিনেশন নেই — সব প্রশ্ন এক পেজে (pageSize বিশাল ধরা হয়)
+    val pageSize = if (mode == StudyMode.QBANK) Int.MAX_VALUE else QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
     val effectiveTotal = if (totalQuestions > 0) totalQuestions else questions.size
-    val totalPages = (effectiveTotal + pageSize - 1) / pageSize
+    val totalPages = if (mode == StudyMode.QBANK) 1 else (effectiveTotal + pageSize - 1) / pageSize
     val safeCurrentPage = currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
     val pageOffset = safeCurrentPage * pageSize
     // questions এখন শুধু current page এর data (Room থেকে loaded)
@@ -397,10 +410,64 @@ fun QuestionListScreen(
     val readingIdx by remember { derivedStateOf { pageOffset + listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
 
+    // ── এক্সটার্নাল কিবোর্ড (Quiz/QBank): 1-4 = অপশন বাছা, ←/→ (বা ↑/↓) = আগের/পরের প্রশ্ন।
+    // মাউস/টাচ ছাড়াই চলে; টাচ-ইউজারের কিছু বদলায় না (প্রথম কী চাপার আগে কোনো হাইলাইট নেই)। ──
+    val kbFocus = remember { FocusRequester() }
+    var kbIdx by remember { mutableStateOf(0) }
+    var kbActive by remember { mutableStateOf(false) }
+    var kbScrolling by remember { mutableStateOf(false) }
+    LaunchedEffect(listState.firstVisibleItemIndex) {
+        // হাতে স্ক্রল করলে কিবোর্ডের "বর্তমান প্রশ্ন" ও সেখানে সরে আসে
+        if (!kbScrolling) kbIdx = listState.firstVisibleItemIndex
+    }
+    LaunchedEffect(showSubmitDialog, reportIdx) {
+        // ডায়ালগ বন্ধ হলে ফোকাস ফিরিয়ে আনা, নইলে কী-ইভেন্ট আর আসে না
+        if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0) runCatching { kbFocus.requestFocus() }
+    }
+    val kbKeyHandler: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ ev ->
+        if (mode == StudyMode.STUDY || ev.type != KeyEventType.KeyDown || pagedQuestions.isEmpty()) return@handler false
+        fun goTo(target: Int) {
+            val t = target.coerceIn(0, pagedQuestions.lastIndex)
+            kbActive = true
+            kbIdx = t
+            scrollScope.launch {
+                kbScrolling = true
+                listState.animateScrollToItem(t)
+                kbScrolling = false
+            }
+        }
+        val opt = when (ev.key) {
+            Key.One, Key.NumPad1 -> 1
+            Key.Two, Key.NumPad2 -> 2
+            Key.Three, Key.NumPad3 -> 3
+            Key.Four, Key.NumPad4 -> 4
+            else -> 0
+        }
+        when {
+            ev.key == Key.DirectionRight || ev.key == Key.DirectionDown -> { goTo(kbIdx + 1); true }
+            ev.key == Key.DirectionLeft  || ev.key == Key.DirectionUp   -> { goTo(kbIdx - 1); true }
+            opt > 0 -> {
+                kbActive = true
+                val q = pagedQuestions.getOrNull(kbIdx)
+                val optionText = when (opt) { 1 -> q?.optionA; 2 -> q?.optionB; 3 -> q?.optionC; else -> q?.optionD }
+                if (q != null && q.isMcq() && !optionText.isNullOrBlank()) {
+                    viewModel.answerMcq(pageOffset + kbIdx, opt)
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
     // ── Back button = Android system back ──
     BackHandler { onBack() }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        Modifier.fillMaxSize()
+            .focusRequester(kbFocus)
+            .onKeyEvent(kbKeyHandler)
+            .focusable()
+    ) {
         Scaffold(
             topBar = {
                 QuestionTopBar(
@@ -461,6 +528,19 @@ fun QuestionListScreen(
 
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
+
+                // ── Study Nav Phase 4: 🎯 Exam Focus / ⚡ Quick Notes / 📝 Practice / 🔴 Wrong Review /
+                // 🗓 Routine / ⏱ Focus — শুধু Study মোডে, LazyColumn-এর বাইরে (তাই আইটেম-ইনডেক্স-ভিত্তিক
+                // স্ক্রলিং/হাইলাইট লজিক অপরিবর্তিত থাকে) ──
+                if (mode == StudyMode.STUDY && subTopic.isNotBlank()) {
+                    StudyTopicToolbar(
+                        viewModel     = viewModel,
+                        subject       = subject,
+                        topic         = subTopic,
+                        questions     = pagedQuestions,
+                        onStudyAction = onStudyAction
+                    )
+                }
 
                 // ⚠️ BUG FIX ("টপিকে ক্লিক করলে প্রশ্ন দেখা যাচ্ছে না — সম্পূর্ণ ফাঁকা
                 // স্ক্রিন"): আগে pagedQuestions খালি থাকলে LazyColumn-ও খালি থাকত —
@@ -564,6 +644,11 @@ fun QuestionListScreen(
                         Column(
                             modifier = Modifier.animateItemPlacement(
                                 animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                            ).then(
+                                // কিবোর্ডে বর্তমান প্রশ্নের হালকা বর্ডার (শুধু কিবোর্ড ব্যবহার করলে)
+                                if (kbActive && mode != StudyMode.STUDY && localIdx == kbIdx)
+                                    Modifier.border(2.dp, Indigo600.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                                else Modifier
                             )
                         ) {
                         // ── Review System (Admin-only) — বড় ✓ বাটন, টাচ করলেই reviewed
@@ -571,7 +656,7 @@ fun QuestionListScreen(
                         // পরের প্রশ্ন কার্ডটা স্মুথলি স্ক্রল হয়ে ওপরে উঠে আসে — ঠিক Study
                         // mode-এর "পড়া হয়েছে" টিকের মতোই আচরণ (কার্ড হাইড হয় না)। student-
                         // দের কাছে সম্পূর্ণ অদৃশ্য (isReviewMode শুধু admin-এর জন্যই true হয়)।
-                        if (vmState.isReviewMode) {
+                        if (vmState.isReviewMode && mode != StudyMode.QBANK) {
                             ReviewTickButton(
                                 reviewed = q.reviewed,
                                 onClick = {
@@ -687,8 +772,8 @@ fun QuestionListScreen(
                                         viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                                     },
                                     onAskAi = { voiceAiIdx = localIdx },
-                                    onRequestAiExplanation = { question, answer, subjectTopic ->
-                                        viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                                    onRequestAiExplanation = { question, answer, subjectTopic, options ->
+                                        viewModel.explainQuestionWithAi(question, answer, subjectTopic, options)
                                     }
                                 )
                             }
@@ -730,8 +815,8 @@ fun QuestionListScreen(
                                 viewModel.gradeWrittenWithAi(question, correctAnswer, userAnswer)
                             },
                             onAskAi = { voiceAiIdx = localIdx },
-                            onRequestAiExplanation = { question, answer, subjectTopic ->
-                                viewModel.explainQuestionWithAi(question, answer, subjectTopic)
+                            onRequestAiExplanation = { question, answer, subjectTopic, options ->
+                                viewModel.explainQuestionWithAi(question, answer, subjectTopic, options)
                             }
                         )
                         }
@@ -783,12 +868,12 @@ fun QuestionListScreen(
                     if (mode != StudyMode.STUDY) {
                         Row(
                             Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = if (mode == StudyMode.QBANK) Arrangement.Center else Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // ── Prev ──
+                            // ── Prev ── (QBank-এ পেজিনেশন নেই, তাই Prev/Next লুকানো)
                             val prevEnabled = safeCurrentPage > 0
-                            Button(
+                            if (mode != StudyMode.QBANK) Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage - 1) },
                                 enabled = prevEnabled,
                                 shape   = RoundedCornerShape(16.dp),
@@ -830,7 +915,7 @@ fun QuestionListScreen(
                             // ── Next — শেষ পেজে disabled (হাইড না করে dim, বাটন
                             // এদিক-ওদিক লাফায় না) ──
                             val nextEnabled = !isLastPage
-                            Button(
+                            if (mode != StudyMode.QBANK) Button(
                                 onClick = { viewModel.goToPage(safeCurrentPage + 1) },
                                 enabled = nextEnabled,
                                 shape   = RoundedCornerShape(16.dp),
@@ -1048,6 +1133,7 @@ fun QuestionListScreen(
     if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
         AdminMoveQuestionsPickerDialog(
             subjects        = vmState.subjects.map { it.name },
+            onLoadSubjects  = { viewModel.adminSubjectsForMove(moveSheetKey) },
             selectedCount   = moveTargetIds.size,
             currentSubject  = subject,
             currentSubTopic = subTopic,
@@ -1324,6 +1410,8 @@ fun QuestionListScreen(
 @Composable
 private fun AdminMoveQuestionsPickerDialog(
     subjects        : List<String>,
+    // এই মোডের সব Subject (খালি/নতুনসহ) — লোড হলে `subjects`-এর জায়গা নেয়; ব্যর্থ/খালি হলে আগেরটাই
+    onLoadSubjects  : suspend () -> List<String> = { emptyList() },
     selectedCount   : Int,
     currentSubject  : String,
     currentSubTopic : String,
@@ -1339,6 +1427,9 @@ private fun AdminMoveQuestionsPickerDialog(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
 
+    var allSubjects by remember { mutableStateOf(subjects) }
+    var addingNewSubject by remember { mutableStateOf(false) }
+    var newSubjectText by remember { mutableStateOf("") }
     var pickedSubject by remember { mutableStateOf(currentSubject) }
     var pickedTopic by remember { mutableStateOf<String?>(null) }
     var topicsLoading by remember { mutableStateOf(false) }
@@ -1372,6 +1463,8 @@ private fun AdminMoveQuestionsPickerDialog(
     // auto-open হয়ে যায়, এক ট্যাপেই কাজ হয়ে যায়। Subject সেগমেন্ট থেকে খোলা
     // হলে (openTopicFirst == false) বদলে Subject dropdown-টাই সরাসরি auto-open হয়। ──
     LaunchedEffect(Unit) {
+        val loaded = try { onLoadSubjects() } catch (e: Exception) { emptyList() }
+        if (loaded.isNotEmpty()) allSubjects = loaded
         loadTopicsFor(currentSubject, autoOpenTopicMenu = openTopicFirst)
         if (!openTopicFirst) subjectMenuExpanded = true
     }
@@ -1392,7 +1485,7 @@ private fun AdminMoveQuestionsPickerDialog(
                     "Subject আর Topic বেছে নিলেই সাথে সাথে Move হয়ে যাবে",
                     fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
                 )
-                if (subjects.isEmpty()) {
+                if (allSubjects.isEmpty()) {
                     Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
 
@@ -1414,7 +1507,7 @@ private fun AdminMoveQuestionsPickerDialog(
                         expanded = subjectMenuExpanded,
                         onDismissRequest = { subjectMenuExpanded = false }
                     ) {
-                        subjects.forEach { subj ->
+                        allSubjects.forEach { subj ->
                             DropdownMenuItem(
                                 text = { Text(subj, fontFamily = NotoSansBengali, fontSize = 13.sp) },
                                 onClick = {
@@ -1429,6 +1522,51 @@ private fun AdminMoveQuestionsPickerDialog(
                                     }
                                 }
                             )
+                        }
+                        Divider()
+                        // ── এই মোডে নতুন Subject (অন্য মোডে দেখা যাবে না) ──
+                        DropdownMenuItem(
+                            text = {
+                                Text("🆕 নতুন Subject যোগ করুন", fontFamily = NotoSansBengali, fontSize = 13.sp,
+                                    color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
+                            },
+                            onClick = {
+                                subjectMenuExpanded = false
+                                addingNewSubject = true
+                                newSubjectText = ""
+                            }
+                        )
+                    }
+                }
+
+                // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সিলেক্ট হয়, তারপর Topic (নতুন) লিখে move ──
+                if (addingNewSubject) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = newSubjectText,
+                            onValueChange = { newSubjectText = it },
+                            label = { Text("নতুন Subject-এর নাম", fontFamily = NotoSansBengali) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                val name = newSubjectText.trim()
+                                if (name.isNotBlank()) {
+                                    if (name !in allSubjects) allSubjects = allSubjects + name
+                                    pickedSubject = name
+                                    pickedTopic = null
+                                    topicsCache[name] = topicsCache[name] ?: emptyList()
+                                    addingNewSubject = false
+                                    // নতুন Subject-এ Topic নেই — সরাসরি নতুন-Topic ফিল্ড
+                                    addingNewTopic = true
+                                    newTopicText = ""
+                                }
+                            },
+                            enabled = newSubjectText.isNotBlank()
+                        ) {
+                            Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                                color = if (newSubjectText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
                         }
                     }
                 }
@@ -1695,16 +1833,17 @@ private fun QuestionTopBar(
             // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
             if (isAdmin && onToggleAdminControls != null) {
                 IconButton(onClick = onToggleAdminControls) {
-                    Text(
-                        "🔧",
-                        fontSize = 16.sp,
-                        color = if (isAdminControlsExpanded) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    Icon(
+                        Icons.Default.Build,
+                        contentDescription = "Admin Tools",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (isAdminControlsExpanded) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
             // ── Review System (Admin-only) — শুধু Admin দেখে, student-দের কাছে অদৃশ্য।
             // ইতিমধ্যে থাকা 👁️/⌨️ আইকনের পাশেই বসে, একই স্টাইলে ──
-            if (isAdmin && onToggleReviewMode != null) {
+            if (isAdmin && onToggleReviewMode != null && mode != StudyMode.QBANK) {
                 IconButton(onClick = onToggleReviewMode) {
                     Icon(
                         Icons.Default.FactCheck,
@@ -1717,10 +1856,10 @@ private fun QuestionTopBar(
             // দেখা যায়, এক/একাধিক প্রশ্ন সিলেক্ট করে নিচের floating bar দিয়ে move করা যায় ──
             if (isAdmin && onToggleSelectMode != null) {
                 IconButton(onClick = onToggleSelectMode) {
-                    Text(
-                        if (isSelectMode) "☑️" else "⬜",
-                        fontSize = 16.sp,
-                        color = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    Icon(
+                        if (isSelectMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                        contentDescription = if (isSelectMode) "সিলেক্ট মোড: চালু" else "সিলেক্ট মোড: বন্ধ",
+                        tint = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1732,6 +1871,24 @@ private fun QuestionTopBar(
             }
             // ── Study/QBank: "শুধু প্রশ্ন দেখ" টগল — QBank-এ শুধু Written প্রশ্ন
             //    থাকলেই দেখা যায় (MCQ-তে উত্তর এমনিতেই সিলেক্ট করার আগ পর্যন্ত হাইড থাকে) ──
+            // ── Study Nav Phase 2: "Aa" পড়ার সেটিংস (ফন্ট/লাইন স্পেসিং/উইডথ/থিম/ফুলস্ক্রিন) ──
+            if (mode == StudyMode.STUDY) {
+                var showReaderSettings by remember { mutableStateOf(false) }
+                StudyFullscreenEffect(StudyReaderStore.settings.fullscreen)
+                StudyFocusTicker()
+                IconButton(onClick = { showReaderSettings = true }) {
+                    Text(
+                        "Aa",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali
+                    )
+                }
+                if (showReaderSettings) {
+                    StudyReaderSettingsSheet(onDismiss = { showReaderSettings = false })
+                }
+            }
             if (showRevealRecallIcons && onToggleStudyRevealMode != null) {
                 IconButton(onClick = onToggleStudyRevealMode) {
                     Icon(
