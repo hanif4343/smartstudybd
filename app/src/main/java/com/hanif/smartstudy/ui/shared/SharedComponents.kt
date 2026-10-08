@@ -2920,6 +2920,58 @@ fun QuestionPaperGallery(
     }
 }
 
+// ────────────────────────────────────────────────────────────────
+// QBank — কমপ্যাক্ট "মূল প্রশ্ন দেখুন" বাটন (বাঁয়ে) + পাশে trailing স্লট (ডানে — Sorting
+// আইকন)। ছবির লিংক থাকলে বাটন সক্রিয় (ট্যাপে ছবি খোলে/বন্ধ হয়); লিংক না থাকলে বাটনটা
+// হালকা রঙে থাকে ও ক্লিক কাজ করে না। ──
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun QuestionPaperButtonRow(
+    urls: List<String>,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    val enabled = urls.isNotEmpty()
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                onClick = { expanded = !expanded },
+                enabled = enabled,
+                shape   = RoundedCornerShape(10.dp),
+                color   = Indigo600.copy(alpha = if (enabled) 0.10f else 0.04f),
+                border  = BorderStroke(1.dp, Indigo600.copy(alpha = if (enabled) 0.30f else 0.12f))
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val tint = Indigo600.copy(alpha = if (enabled) 1f else 0.35f)
+                    Icon(Icons.Default.Image, null, tint = tint, modifier = Modifier.size(16.dp))
+                    Text(
+                        "মূল প্রশ্ন দেখুন", fontFamily = NotoSansBengali,
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = tint
+                    )
+                    if (enabled) {
+                        Icon(
+                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            null, tint = tint, modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            trailing?.invoke()
+        }
+        AnimatedVisibility(visible = expanded && enabled) {
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                urls.forEach { url -> ZoomableImage(url = url) }
+            }
+        }
+    }
+}
+
 @Composable
 fun ReportDialog(
     questionId   : String = "",
