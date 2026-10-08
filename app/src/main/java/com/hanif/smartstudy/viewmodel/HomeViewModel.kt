@@ -3,6 +3,7 @@ package com.hanif.smartstudy.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hanif.smartstudy.data.local.TestHistoryCache
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.repository.ContentRepository
 import com.hanif.smartstudy.util.SessionManager
@@ -24,6 +25,8 @@ data class HomeUiState(
     val goalProgress    : GoalProgress       = GoalProgress(),
     val studyStats      : StudyStats         = StudyStats(),
     val examCountdown   : ExamCountdown      = ExamCountdown(),
+    val overview        : HomeOverview       = HomeOverview(),
+    val recentActivity  : List<RecentActivityItem> = emptyList(),
     val dailyQuote      : MotivationalQuote  = MotivationalQuote.ofDay(),
     val content         : AppContent         = AppContent(),
     val isOffline       : Boolean            = false,
@@ -92,6 +95,30 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             val goalProgress = goalProgressDeferred.await()
             val studyStats   = studyStatsDeferred.await()
             val examCd       = examCdDeferred.await()
+            // ── নতুন Home: TestHistory থেকে আজকের Model Test + সাম্প্রতিক কার্যক্রম ──
+            val history = try { TestHistoryCache(getApplication()).getHistory() } catch (e: Exception) { emptyList() }
+            val dayStart = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val modelToday = history.count { it.isModelTest && it.timestamp >= dayStart }
+            val overview   = repo.getHomeOverview(modelToday)
+            val recent     = history.take(3).map { h ->
+                val first = h.topics.firstOrNull().orEmpty()
+                val parts = first.split(" - ", limit = 2)
+                val title = when {
+                    h.isModelTest       -> "মডেল টেস্ট"
+                    h.mode == "STUDY"   -> parts.firstOrNull().orEmpty().ifBlank { "পড়াশোনা" }
+                    parts.isNotEmpty() && parts[0].isNotBlank() -> "${parts[0]} ${h.modeLabel}"
+                    else                -> h.modeLabel
+                }
+                val sub = when {
+                    h.mode == "STUDY" && parts.size > 1 -> parts[1]
+                    h.total > 0 -> "${h.total} প্রশ্ন"
+                    else        -> h.modeLabel
+                }
+                RecentActivityItem(h.mode, title, sub, h.timestamp, h.isModelTest)
+            }
             val quote        = MotivationalQuote.ofDay()
             val isOffline    = !repo.isOnline()
 
@@ -104,6 +131,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 goalProgress  = goalProgress,
                 studyStats    = studyStats,
                 examCountdown = examCd,
+                overview      = overview,
+                recentActivity = recent,
                 dailyQuote    = quote,
                 isOffline     = isOffline,
                 // notifications পুরনো state থেকেই রাখা হলো — নইলে প্রতিবার
