@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -218,6 +219,8 @@ fun QBankExamPaperScreen(
     }
 
     var reportTarget by remember { mutableStateOf<QuestionItem?>(null) }
+    var sortReversed by remember { mutableStateOf(false) }
+    val shownSerials = remember(serials, sortReversed) { if (sortReversed) serials.reversed() else serials }
 
     Column(Modifier.fillMaxSize().background(PaperBg)) {
         // ── হেডার: প্রতিষ্ঠান (eyebrow) + পদবী (title) + মোট প্রশ্ন — অ্যাপের QBank
@@ -260,13 +263,26 @@ fun QBankExamPaperScreen(
         }
 
         // ── "মূল প্রশ্ন দেখুন" — প্রশ্নপত্রে একবারই, লিংক থাকলেই (না থাকলে কিছুই না) ──
+        // বাটন সবসময় দেখায়: লিংক থাকলে সক্রিয়, না থাকলে হালকা রঙে (ক্লিক কাজ করে না)।
+        // ডান পাশে ↕ Sorting আইকন — ট্যাপে সিরিয়াল ক্রম উল্টে যায় (১→শেষ ⇄ শেষ→১)।
         val paperImages = remember(questions) { questions.flatMap { it.questionPaperImageList() }.distinct() }
-        if (paperImages.isNotEmpty()) {
-            com.hanif.smartstudy.ui.shared.QuestionPaperGallery(
-                urls     = paperImages,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-            )
-        }
+        com.hanif.smartstudy.ui.shared.QuestionPaperButtonRow(
+            urls     = paperImages,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            trailing = {
+                Box(
+                    Modifier.size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (sortReversed) HeaderBg.copy(alpha = 0.12f) else Color.Transparent)
+                        .border(1.dp, if (sortReversed) HeaderBg else TabBorder, RoundedCornerShape(12.dp))
+                        .clickable { sortReversed = !sortReversed },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.SwapVert, contentDescription = "সাজান",
+                        tint = if (sortReversed) HeaderBg else TextMuted, modifier = Modifier.size(22.dp))
+                }
+            }
+        )
 
         // ── সাবজেক্ট ট্যাব — টপিক এখানে দেখানো হয় না, শুধু সাবজেক্ট ──
         Row(
@@ -314,9 +330,9 @@ fun QBankExamPaperScreen(
         Divider(color = GoldAccent, thickness = 1.dp)
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            itemsIndexed(serials, key = { _, s -> s.key }) { idx, serial ->
+            itemsIndexed(shownSerials, key = { _, s -> s.key }) { idx, serial ->
                 ExamSerialCard(
-                    serialNo     = idx + 1,
+                    serialNo     = if (sortReversed) serials.size - idx else idx + 1,
                     serial       = serial.items,
                     isAdmin      = isAdmin,
                     onBookmark   = onBookmark,
