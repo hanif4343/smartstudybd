@@ -22,6 +22,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.hanif.smartstudy.ui.menu.StudyBuddyQuickButton
 import androidx.compose.runtime.*
+import com.hanif.smartstudy.viewmodel.RoutineViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,31 +136,49 @@ fun HomeScreen(
     viewModel      : HomeViewModel = viewModel(),
     isAdmin        : Boolean = false,
     onSearchClick  : () -> Unit = {},
-    onOpenMenu     : () -> Unit = {},                    // ☰ hamburger → Menu ট্যাব
-    onOpenMenuPage : (String) -> Unit = {},               // gridকার্ড → Menu ট্যাব + নির্দিষ্ট sub-page
+    onOpenMenu     : () -> Unit = {},                    // Menu ট্যাব
+    onOpenMenuPage : (String) -> Unit = {},               // Menu ট্যাব + নির্দিষ্ট sub-page
     onOpenQuizTab  : () -> Unit = {},
     onOpenQBankTab : () -> Unit = {},
     onOpenStudyTab : () -> Unit = {},
     onOpenTyping   : () -> Unit = {},
     onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
     onOpenFocusMode: () -> Unit = {},
-    onOpenAiChat   : () -> Unit = {},           // "AI Chat" কুইক-টাইল → নতুন AI ডাউট সলভার চ্যাট স্ক্রিন
-    onOpenViva     : () -> Unit = {},           // "Viva Mode" কুইক-টাইল → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
+    onOpenAiChat   : () -> Unit = {},           // "Support"/Help → AI ডাউট সলভার চ্যাট স্ক্রিন
+    onOpenViva     : () -> Unit = {},           // Viva Mode → ভয়েস মৌখিক পরীক্ষা স্ক্রিন
     challengesEnabled : Boolean = false,       // Settings-এর "লাইভ ফিচার" টগল (ডিফল্ট বন্ধ)
     buddyEnabled      : Boolean = false,
     onOpenChallenge   : () -> Unit = {},       // Challenge ট্যাব খোলা
     onSetChallengesEnabled : (Boolean) -> Unit = {},
     onSetBuddyEnabled      : (Boolean) -> Unit = {},
-    onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {}
+    onNotificationClick: (com.hanif.smartstudy.data.model.AppNotification) -> Unit = {},
+    onOpenBuddyTab : () -> Unit = {},           // নিচের Buddy ট্যাব
+    onSetDarkMode  : (Boolean) -> Unit = {}     // ⋮ মেনুর Dark Mode টগল (সেশনে সেভ করতে)
 ) {
     val state by viewModel.uiState.collectAsState()
+    // আজকের রুটিন/লক্ষ্য কার্ডের ডেটা — একই RoutineViewModel (Menu → Routine-এর সাথে শেয়ার্ড)
+    val routineVm: RoutineViewModel = viewModel()
+    val routine by routineVm.state.collectAsState()
+    val routineGoal by routineVm.goal.collectAsState()
+
     var showNotifSheet by remember { mutableStateOf(false) }
+    var showMockTestPicker by remember { mutableStateOf(false) }
+    // বন্ধ থাকা ফিচারে ট্যাপ করলে "চালু করবেন?" ডায়ালগ: "challenge" | "buddy" | null
+    var askEnable by remember { mutableStateOf<String?>(null) }
+    var showAbout by remember { mutableStateOf(false) }
+    var showHelp  by remember { mutableStateOf(false) }
+    val darkMode = LocalDarkMode.current
+    val ctx = LocalContext.current
+    val versionName = remember {
+        try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
+    }
 
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refresh()
+                routineVm.load()
             }
         }
         lifecycle.addObserver(observer)
@@ -171,15 +190,23 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 72.dp)
+            .padding(bottom = 24.dp)
     ) {
-        HomeHeaderBar(
-            state         = state,
-            isAdmin       = isAdmin,
-            onOpenMenu    = onOpenMenu,
-            onSearchClick = onSearchClick,
-            onBellClick   = { showNotifSheet = true; viewModel.loadNotifications() },
-            onForceResyncClick = { viewModel.forceFullResync() }
+        HomeSkyHeader(
+            state          = state,
+            isAdmin        = isAdmin,
+            onBellClick    = { showNotifSheet = true; viewModel.loadNotifications() },
+            onSearchClick  = onSearchClick,
+            onOpenBuddy    = onOpenBuddyTab,
+            onOpenSettings = { onOpenMenuPage("settings") },
+            onToggleDark   = {
+                val on = !darkMode.value
+                darkMode.value = on
+                onSetDarkMode(on)
+            },
+            onAbout        = { showAbout = true },
+            onHelp         = { showHelp = true },
+            onForceResync  = { viewModel.forceFullResync() }
         )
 
         // ── Force-resync ফিডব্যাক ব্যানার — ৩ সেকেন্ড পর অথবা ট্যাপে বন্ধ হয়ে যায় ──
@@ -202,49 +229,70 @@ fun HomeScreen(
             }
         }
 
-        // Home-এর নিজস্ব অফলাইন ব্যানার সরানো হলো — ওপরের লাল পট্টিই একমাত্র বার্তা
-
         Column(
-            modifier            = Modifier.padding(horizontal = 12.dp),
+            modifier            = Modifier.padding(horizontal = 12.dp).offset(y = (-14).dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Spacer(Modifier.height(2.dp))
-
-            HomeStatusRow(streak = state.streakInfo, stats = state.studyStats, goal = state.goalProgress)
-
-            AdBannerPlaceholder()
-
-            // ── Study Buddy B2: Home Buddy card (বন্ধু থাকলেই দেখায়) ──
-            if (buddyEnabled) com.hanif.smartstudy.ui.menu.BuddyHomeCard(onOpen = { onOpenMenuPage("studybuddy") })
-
-            HomeQuickAccessGrid(
-                isAdmin        = isAdmin,
-                onOpenQuizTab  = onOpenQuizTab,
-                onOpenQBankTab = onOpenQBankTab,
-                onOpenStudyTab = onOpenStudyTab,
-                onOpenTyping   = onOpenTyping,
-                onOpenMenu     = onOpenMenu,
-                onOpenMenuPage = onOpenMenuPage,
-                onOpenMockTest = onOpenMockTest,
-                onOpenFocusMode = onOpenFocusMode,
-                onOpenAiChat = onOpenAiChat,
-                onOpenViva = onOpenViva,
-                challengesEnabled = challengesEnabled,
+            // Buddy + Streak
+            HomeBuddyStreakRow(
+                state        = state,
                 buddyEnabled = buddyEnabled,
-                onOpenChallenge = onOpenChallenge,
-                onSetChallengesEnabled = onSetChallengesEnabled,
-                onSetBuddyEnabled = onSetBuddyEnabled
+                onOpenBuddy  = onOpenBuddyTab,
+                onOpenStreak = { onOpenMenuPage("stats") }
             )
 
-            // ── App feature (এডমিন-অনলি "প্রশ্ন সংখ্যা CDN vs App" ড্যাশবোর্ড) —
-            // ব্যবহারকারীর সিদ্ধান্তে সম্পূর্ণ সরিয়ে দেওয়া হলো, কোনো নেটওয়ার্ক কল/
-            // স্টেট আর অবশিষ্ট নেই (দেখো HomeViewModel.kt-এর সংশ্লিষ্ট মুছে ফেলা অংশ)। ──
+            // মোট অগ্রগতি (Quiz-এর গড় সঠিক %) + পড়াশোনা / কুইজ / মডেল টেস্ট
+            HomeProgressCard(
+                overview     = state.overview,
+                studyDoneMin = state.goalProgress.doneMinutes,
+                studyGoalMin = state.goalProgress.goalMinutes,
+                onOpenStats  = { onOpenMenuPage("stats") }
+            )
 
-            // ── Archive সেকশন সম্পূর্ণ সরানো হলো (ব্যবহারকারীর সিদ্ধান্তে) — আগে এখানে
-            // Admin-only "🗄️ Archive" কার্ড ছিল (Quiz/QBank duplicate-cleanup টুলের
-            // এন্ট্রি পয়েন্ট)। পুরো ফিচার (ui/archive/*, ArchiveViewModel.kt,
-            // ArchiveGasService.kt, ArchiveModels.kt, MainScreen.kt-এর নেভিগেশন) মুছে
-            // ফেলা হয়েছে — আর কোনো নেটওয়ার্ক কল/স্টেট অবশিষ্ট নেই। ──
+            // Study / Quiz / QBank / Model Test / Viva
+            HomeMainTilesRow(
+                onStudy     = onOpenStudyTab,
+                onQuiz      = onOpenQuizTab,
+                onQBank     = onOpenQBankTab,
+                onModelTest = { showMockTestPicker = true },
+                onViva      = onOpenViva
+            )
+
+            // আজকের রুটিন + আজকের লক্ষ্য
+            HomeRoutineGoalRow(
+                routine       = routine,
+                goal          = routineGoal,
+                studyDoneMin  = state.goalProgress.doneMinutes,
+                onOpenRoutine = { onOpenMenuPage("routine") }
+            )
+
+            // দ্রুত প্রবেশ (আগের Home-এর সব এন্ট্রি এখানে স্ক্রল করে পাওয়া যায়) + সাম্প্রতিক কার্যক্রম
+            val entries = buildList {
+                add(HdQuickEntry("Study", Icons.AutoMirrored.Filled.MenuBook, Color(0xFF34D399), Color(0xFF059669), onOpenStudyTab))
+                add(HdQuickEntry("Quiz", Icons.Default.TrackChanges, Color(0xFFFB7185), Color(0xFFEF4444), onOpenQuizTab))
+                add(HdQuickEntry("QBank", Icons.Default.Layers, Color(0xFF60A5FA), Color(0xFF2563EB), onOpenQBankTab))
+                add(HdQuickEntry("Model", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
+                add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
+                add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
+                add(HdQuickEntry("Review", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
+                add(HdQuickEntry("Focus", Icons.Default.CenterFocusStrong, Color(0xFF2DD4BF), Color(0xFF0D9488), onOpenFocusMode))
+                add(HdQuickEntry("Routine", Icons.Default.CalendarMonth, Color(0xFFFB923C), Color(0xFFEA580C)) { onOpenMenuPage("routine") })
+                add(HdQuickEntry("Support", Icons.Default.SupportAgent, Color(0xFF818CF8), Color(0xFF4F46E5), onOpenAiChat))
+                add(HdQuickEntry("Challenge", Icons.Default.EmojiEvents, Color(0xFFFCD34D), Color(0xFFD97706)) {
+                    if (challengesEnabled) onOpenChallenge() else askEnable = "challenge"
+                })
+                if (isAdmin) add(HdQuickEntry("Admin", Icons.Default.AdminPanelSettings, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("admin") })
+            }
+            HomeQuickEntryRecentRow(
+                entries       = entries,
+                recent        = state.recentActivity,
+                onOpenHistory = { onOpenMenuPage("testhistory") }
+            )
+
+            // অনুপ্রেরণার ব্যানার
+            HomeMotivationBanner(quote = state.dailyQuote.text, streakDays = state.streakInfo.streakDays)
+
+            AdBannerPlaceholder()
 
             if (state.isLoading) {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -268,6 +316,69 @@ fun HomeScreen(
                 onNotificationClick(notif)
             },
             onMarkAllRead = { viewModel.markAllNotificationsRead() }
+        )
+    }
+
+    // বন্ধ থাকা ফিচারে ট্যাপ → "চালু করবেন?" (চালু করলে সাথে সাথে খুলে যায়)
+    askEnable?.let { which ->
+        val isChallenge = which == "challenge"
+        AlertDialog(
+            onDismissRequest = { askEnable = null },
+            title = { Text(if (isChallenge) "Challenge" else "Study Buddy",
+                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
+            text = { Text("এই ফিচারটা এখন বন্ধ আছে। চালু করবেন? (Settings → লাইভ ফিচার থেকে যেকোনো সময় বন্ধ করা যায়)",
+                fontFamily = NotoSansBengali, fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(onClick = {
+                    askEnable = null
+                    if (isChallenge) onSetChallengesEnabled(true)
+                    else { onSetBuddyEnabled(true); onOpenBuddyTab() }
+                }) { Text("চালু করুন", fontFamily = NotoSansBengali) }
+            },
+            dismissButton = { TextButton(onClick = { askEnable = null }) { Text("এখন না", fontFamily = NotoSansBengali) } }
+        )
+    }
+
+    if (showMockTestPicker) {
+        MockTestModePickerDialog(
+            onPick = { isQBank ->
+                showMockTestPicker = false
+                onOpenMockTest(isQBank)
+            },
+            onDismiss = { showMockTestPicker = false }
+        )
+    }
+
+    if (showAbout) {
+        AlertDialog(
+            onDismissRequest = { showAbout = false },
+            title = { Text("SmartStudyBD", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Text(
+                    "পড়াশোনা, কুইজ, প্রশ্নব্যাংক, মডেল টেস্ট আর ভাইভা — সব এক অ্যাপে।" +
+                        (if (versionName.isNotBlank()) "\n\nভার্সন: $versionName" else ""),
+                    fontFamily = NotoSansBengali, fontSize = 13.sp
+                )
+            },
+            confirmButton = { TextButton(onClick = { showAbout = false }) { Text("ঠিক আছে", fontFamily = NotoSansBengali) } }
+        )
+    }
+
+    if (showHelp) {
+        AlertDialog(
+            onDismissRequest = { showHelp = false },
+            title = { Text("সাহায্য", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Text("কোনো সমস্যা বা প্রশ্ন থাকলে AI সাপোর্টে জিজ্ঞেস করতে পারো।",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp)
+            },
+            confirmButton = {
+                TextButton(onClick = { showHelp = false; onOpenAiChat() }) {
+                    Text("AI সাপোর্ট খুলুন", fontFamily = NotoSansBengali)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showHelp = false }) { Text("বন্ধ", fontFamily = NotoSansBengali) } }
         )
     }
 }
@@ -526,7 +637,7 @@ private fun HomeQuickAccessGrid(
 // ফুল Mock Test ফ্লো (subject/topic select → limit → শুরু) ওপেন হয়।
 // ═══════════════════════════════════════════════════════════
 @Composable
-private fun MockTestModePickerDialog(onPick: (Boolean) -> Unit, onDismiss: () -> Unit) {
+internal fun MockTestModePickerDialog(onPick: (Boolean) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Mock Test", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
