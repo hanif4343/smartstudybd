@@ -3,14 +3,6 @@ package com.hanif.smartstudy.ui.main
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.TrackChanges
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import com.hanif.smartstudy.ui.menu.StudyBuddyScreen
 import androidx.compose.ui.platform.LocalContext
 import com.hanif.smartstudy.ui.shared.OfflineBanner
 import com.hanif.smartstudy.util.ConnectivityObserver
@@ -43,23 +35,12 @@ import kotlinx.coroutines.launch
 
 enum class BottomTab(val icon: String, val label: String) {
     HOME(      "🏠", "Home"),
-    STUDY(     "📖", "Study"),
     QUIZ(      "🎯", "Quiz"),
     QBANK(     "📚", "QBank"),
-    BUDDY(     "🤝", "Buddy"),
+    STUDY(     "📖", "Study"),
+    HISTORY(   "🕘", "History"),
     CHALLENGE( "⚔️", "চ্যালেঞ্জ"),
     MENU(      "👤", "Menu")
-}
-
-// নিচের নেভিগেশন বারের Material আইকন (রেফারেন্স ডিজাইনের মতো)
-private fun BottomTab.vector(): androidx.compose.ui.graphics.vector.ImageVector = when (this) {
-    BottomTab.HOME      -> Icons.Filled.Home
-    BottomTab.STUDY     -> Icons.AutoMirrored.Filled.MenuBook
-    BottomTab.QUIZ      -> Icons.Filled.TrackChanges
-    BottomTab.QBANK     -> Icons.Filled.Layers
-    BottomTab.BUDDY     -> Icons.Filled.Groups
-    BottomTab.CHALLENGE -> Icons.Filled.EmojiEvents
-    BottomTab.MENU      -> Icons.Filled.Menu
 }
 
 @Composable
@@ -457,7 +438,7 @@ fun MainScreen(
                                 if (tab == BottomTab.CHALLENGE && pendingInvites > 0) {
                                     Badge { Text(pendingInvites.toString()) }
                                 }
-                            }) { Icon(tab.vector(), contentDescription = tab.label, modifier = Modifier.size(24.dp)) }
+                            }) { Text(tab.icon, fontSize = 22.sp) }
                         },
                         label    = {
                             Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
@@ -502,7 +483,7 @@ fun MainScreen(
                     },
                     onSetBuddyEnabled = { on -> menuViewModel.setBuddyEnabled(on) },
                     onNotificationClick = { notif -> applyDeepLink(notif.toDeepLinkAction()) },
-                    onOpenBuddyTab = { currentTab = BottomTab.BUDDY },
+                    onOpenBuddyTab = { menuInitialPage = "studybuddy"; currentTab = BottomTab.MENU },
                     onSetDarkMode  = { on -> menuViewModel.setDarkMode(on) }
                 )
                 BottomTab.QUIZ  -> CoreScreen(
@@ -630,33 +611,10 @@ fun MainScreen(
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
-                BottomTab.BUDDY -> {
-                    if (menuState.buddyEnabled) {
-                        StudyBuddyScreen(onBack = { currentTab = BottomTab.HOME })
-                    } else {
-                        // Study Buddy বন্ধ থাকলে (Settings → লাইভ ফিচার) — এখান থেকেই চালু করার সুযোগ
-                        Column(
-                            Modifier.fillMaxSize().padding(24.dp),
-                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text("🤝", fontSize = 56.sp)
-                            Spacer(Modifier.height(12.dp))
-                            Text("Study Buddy", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                "বন্ধুর সাথে একসাথে পড়ো, একে অপরকে তাগাদা দাও। ফিচারটা এখন বন্ধ আছে।",
-                                fontSize = 13.sp, fontFamily = NotoSansBengali,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            Button(onClick = { menuViewModel.setBuddyEnabled(true) }) {
-                                Text("চালু করুন", fontFamily = NotoSansBengali)
-                            }
-                        }
-                    }
-                }
+                BottomTab.HISTORY -> com.hanif.smartstudy.ui.history.HistoryScreen(
+                    quizViewModel  = quizViewModel,
+                    onOpenMenuPage = { page -> menuInitialPage = page; currentTab = BottomTab.MENU }
+                )
                 BottomTab.CHALLENGE -> ChallengeZone(vm = challengeViewModel, battleVm = battleViewModel)
                 BottomTab.MENU  -> MenuScreen(
                     vm                   = menuViewModel,
