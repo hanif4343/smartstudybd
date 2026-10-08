@@ -307,9 +307,10 @@ private fun ChallengeQuestionCard(
                 }
                 Text(question.subTopic, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
             }
-            Text(question.question.replace(Regex("<[^>]+>"), ""),
+            com.hanif.smartstudy.ui.shared.MathText(
+                question.question.replace(Regex("<[^>]+>"), ""),
                 fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, lineHeight = 20.sp)
+                color = MaterialTheme.colorScheme.onSurface, lineHeight = 21.sp)
 
             listOf(question.optionA, question.optionB, question.optionC, question.optionD)
                 .filterIndexed { i, opt -> opt.isNotBlank() }
@@ -353,9 +354,10 @@ private fun ChallengeQuestionCard(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(opt, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                            com.hanif.smartstudy.ui.shared.MathText(opt, fontSize = 13.sp,
                                 color = if (isSelected) Color(0xFF1E1B4B) else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                lineHeight = 20.sp,
                                 modifier = Modifier.weight(1f))
                         }
                     }
