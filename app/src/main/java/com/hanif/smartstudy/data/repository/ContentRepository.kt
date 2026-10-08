@@ -1191,6 +1191,34 @@ class ContentRepository(private val context: Context) {
         } catch (e: Exception) { HomeOverview(todayModelTests = modelTestsToday) }
     }
 
+    // ── History: "প্রায় শেষ টপিক" — ৫০%+ প্রশ্নে উত্তর দেওয়া কিন্তু এখনো শেষ হয়নি এমন টপিক ──
+    suspend fun getAlmostCompletedTopics(limit: Int = 10): List<com.hanif.smartstudy.data.model.AlmostTopic> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyList()
+        return try {
+            val topics = refDao.getAllTopics().associateBy { it.topicId }
+            val out = ArrayList<com.hanif.smartstudy.data.model.AlmostTopic>()
+            for (mode in listOf("QUIZ", "QBANK", "STUDY")) {
+                for (st in progressDao.allTopicStats(userId, mode)) {
+                    val t = topics[st.topicId] ?: continue
+                    val total = when (mode) {
+                        "QUIZ"  -> t.rowCountQuiz
+                        "QBANK" -> t.rowCountQbank
+                        else    -> t.rowCountStudy
+                    }.let { if (it > 0) it else t.rowCount }
+                    if (total <= 0 || st.attempted <= 0 || st.attempted >= total) continue
+                    if (st.attempted * 100 / total < 50) continue
+                    out.add(
+                        com.hanif.smartstudy.data.model.AlmostTopic(
+                            name = t.name, mode = mode, attempted = st.attempted, total = total,
+                            accuracyPct = if (st.attempted > 0) st.correct * 100 / st.attempted else 0
+                        )
+                    )
+                }
+            }
+            out.sortedByDescending { it.progressPct }.take(limit)
+        } catch (e: Exception) { emptyList() }
+    }
+
     suspend fun getStudyStats(): StudyStats {
         val (today, week, total) = cache.getStudyStats()
         val correct = cache.getCorrectCount()
