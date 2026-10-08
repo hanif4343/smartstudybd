@@ -102,16 +102,19 @@ object AudienceFilter {
         user            : User?,
         adminOverrideTag: String = ""
     ): Boolean {
-        val tid = subjectTagId?.trim().orEmpty()
-        if (tid.isBlank()) return true   // tag_id সেট করা নেই — সব audience-এর জন্য visible
+        // 🆕 Unified: tag_id এখন কমা-সেপারেটেড একাধিক হতে পারে (যেমন "TAG01,TAG02") —
+        // একটা subject Job ও Masters 1 দুই audience-এই দেখাতে পারে। যেকোনো একটা tag
+        // ইউজারের group-এর সাথে মিললেই visible।
+        val tids = subjectTagId.orEmpty().split(',', ';', '|').map { it.trim() }.filter { it.isNotBlank() }
+        if (tids.isEmpty()) return true   // tag_id সেট করা নেই — সব audience-এর জন্য visible
 
-        val tagName = tagsById[tid]?.trim().orEmpty()
-        if (tagName.isBlank()) return true   // অজানা/মুছে-ফেলা tag_id — নিরাপদে দেখিয়ে দাও, লুকিয়ে ফেলো না
+        val tagNames = tids.mapNotNull { tagsById[it]?.trim()?.takeIf { n -> n.isNotBlank() } }
+        if (tagNames.isEmpty()) return true   // অজানা/মুছে-ফেলা tag_id — নিরাপদে দেখিয়ে দাও, লুকিয়ে ফেলো না
 
         val effectiveGroup = audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminOverrideTag.isNotBlank()) adminOverrideTag else it }
 
-        return tagName.equals(effectiveGroup, ignoreCase = true)
+        return tagNames.any { it.equals(effectiveGroup, ignoreCase = true) }
     }
 
     // ── Challenge opponent compatibility ─────────────────────
