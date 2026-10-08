@@ -250,6 +250,11 @@ class SessionManager(private val context: Context) {
         // Admin: audience tag switch
         val KEY_ADMIN_AUDIENCE_TAG = stringPreferencesKey("admin_audience_tag")
 
+        // Quiz "Set Own Subject" — ইউজারের নিজের বাছাই (SSC / HSC / একটা বিষয়) আর তা থেকে
+        // বের করা audience tag (যেমন "Class 10") — দেখো util/QuizOwnPick.kt
+        val KEY_QUIZ_OWN_PICK     = stringPreferencesKey("quiz_own_pick")
+        val KEY_QUIZ_OWN_AUDIENCE = stringPreferencesKey("quiz_own_audience")
+
         // App-open এ Settings-redirect শুধু একবারই দেখানোর জন্য — বারবার app
         // খুললেই exact-alarm/battery-optimization এর Settings পেজে চলে যাওয়া
         // "app opening slow" মনে হওয়ার একটা বড় কারণ ছিল।
@@ -974,6 +979,16 @@ class SessionManager(private val context: Context) {
     }
     suspend fun setAdminAudienceTag(tag: String) {
         context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
+    }
+
+    // ── Quiz "Set Own Subject" ────────────────────────────────
+    fun getQuizOwnPick(): String = runBlocking { cachedPrefs()[KEY_QUIZ_OWN_PICK] ?: "" }
+    fun getQuizOwnAudience(): String = runBlocking { cachedPrefs()[KEY_QUIZ_OWN_AUDIENCE] ?: "" }
+    suspend fun setQuizOwnPick(pick: String, audience: String) {
+        context.dataStore.edit {
+            it[KEY_QUIZ_OWN_PICK] = pick
+            it[KEY_QUIZ_OWN_AUDIENCE] = audience
+        }
     }
 
     // ── Phase 6 (db-migration-v2): পুরনো content-ID cache ক্লিয়ার ──
