@@ -166,6 +166,7 @@ fun HomeScreen(
     // বন্ধ থাকা ফিচারে ট্যাপ করলে "চালু করবেন?" ডায়ালগ: "challenge" | "buddy" | null
     var askEnable by remember { mutableStateOf<String?>(null) }
     var showAbout by remember { mutableStateOf(false) }
+    var showTools by remember { mutableStateOf(false) }
     var showHelp  by remember { mutableStateOf(false) }
     val darkMode = LocalDarkMode.current
     val ctx = LocalContext.current
@@ -231,7 +232,7 @@ fun HomeScreen(
 
         Column(
             modifier            = Modifier.padding(horizontal = 12.dp).offset(y = (-14).dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Buddy + Streak
             HomeBuddyStreakRow(
@@ -249,15 +250,6 @@ fun HomeScreen(
                 onOpenStats  = { onOpenMenuPage("stats") }
             )
 
-            // Study / Quiz / QBank / Model Test / Viva
-            HomeMainTilesRow(
-                onStudy     = onOpenStudyTab,
-                onQuiz      = onOpenQuizTab,
-                onQBank     = onOpenQBankTab,
-                onModelTest = { showMockTestPicker = true },
-                onViva      = onOpenViva
-            )
-
             // আজকের রুটিন + আজকের লক্ষ্য
             HomeRoutineGoalRow(
                 routine       = routine,
@@ -266,31 +258,15 @@ fun HomeScreen(
                 onOpenRoutine = { onOpenMenuPage("routine") }
             )
 
-            // দ্রুত প্রবেশ (আগের Home-এর সব এন্ট্রি এখানে স্ক্রল করে পাওয়া যায়) + সাম্প্রতিক কার্যক্রম
-            val entries = buildList {
-                add(HdQuickEntry("Study", Icons.AutoMirrored.Filled.MenuBook, Color(0xFF34D399), Color(0xFF059669), onOpenStudyTab))
-                add(HdQuickEntry("Quiz", Icons.Default.TrackChanges, Color(0xFFFB7185), Color(0xFFEF4444), onOpenQuizTab))
-                add(HdQuickEntry("QBank", Icons.Default.Layers, Color(0xFF60A5FA), Color(0xFF2563EB), onOpenQBankTab))
-                add(HdQuickEntry("Model", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
-                add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
-                add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
-                add(HdQuickEntry("Review", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
-                add(HdQuickEntry("Focus", Icons.Default.CenterFocusStrong, Color(0xFF2DD4BF), Color(0xFF0D9488), onOpenFocusMode))
-                add(HdQuickEntry("Routine", Icons.Default.CalendarMonth, Color(0xFFFB923C), Color(0xFFEA580C)) { onOpenMenuPage("routine") })
-                add(HdQuickEntry("Support", Icons.Default.SupportAgent, Color(0xFF818CF8), Color(0xFF4F46E5), onOpenAiChat))
-                add(HdQuickEntry("Challenge", Icons.Default.EmojiEvents, Color(0xFFFCD34D), Color(0xFFD97706)) {
-                    if (challengesEnabled) onOpenChallenge() else askEnable = "challenge"
-                })
-                if (isAdmin) add(HdQuickEntry("Admin", Icons.Default.AdminPanelSettings, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("admin") })
-            }
-            HomeQuickEntryRecentRow(
-                entries       = entries,
-                recent        = state.recentActivity,
-                onOpenHistory = { onOpenMenuPage("testhistory") }
-            )
+            // সাম্প্রতিক কার্যক্রম
+            HomeRecentCard(recent = state.recentActivity, onOpenHistory = { onOpenMenuPage("testhistory") })
 
-            // অনুপ্রেরণার ব্যানার
-            HomeMotivationBanner(quote = state.dailyQuote.text, streakDays = state.streakInfo.streakDays)
+            // Leaderboard · Support · Tools
+            HomeBottomTilesRow(
+                onLeaderboard = { onOpenMenuPage("leaderboard") },
+                onSupport     = onOpenAiChat,
+                onTools       = { showTools = true }
+            )
 
             AdBannerPlaceholder()
 
@@ -303,6 +279,29 @@ fun HomeScreen(
 
             Spacer(Modifier.height(4.dp))
         }
+    }
+
+    if (showTools) {
+        val toolEntries = buildList {
+            add(HdQuickEntry("Study", Icons.AutoMirrored.Filled.MenuBook, Color(0xFF34D399), Color(0xFF059669), onOpenStudyTab))
+            add(HdQuickEntry("Quiz", Icons.Default.TrackChanges, Color(0xFFFB7185), Color(0xFFEF4444), onOpenQuizTab))
+            add(HdQuickEntry("QBank", Icons.Default.Layers, Color(0xFF60A5FA), Color(0xFF2563EB), onOpenQBankTab))
+            add(HdQuickEntry("Model Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
+            add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
+            add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
+            add(HdQuickEntry("Wrong Review", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
+            add(HdQuickEntry("Focus", Icons.Default.CenterFocusStrong, Color(0xFF2DD4BF), Color(0xFF0D9488), onOpenFocusMode))
+            add(HdQuickEntry("Routine", Icons.Default.CalendarMonth, Color(0xFFFB923C), Color(0xFFEA580C)) { onOpenMenuPage("routine") })
+            add(HdQuickEntry("Search", Icons.Default.Search, Color(0xFF93C5FD), Color(0xFF3B82F6), onSearchClick))
+            add(HdQuickEntry("Saved", Icons.Default.Bookmark, Color(0xFFFDE047), Color(0xFFCA8A04)) { onOpenMenuPage("bookmarks") })
+            add(HdQuickEntry("Stats", Icons.Default.BarChart, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("stats") })
+            add(HdQuickEntry("Buddy", Icons.Default.Groups, Color(0xFF5EEAD4), Color(0xFF0D9488), onOpenBuddyTab))
+            add(HdQuickEntry("Challenge", Icons.Default.EmojiEvents, Color(0xFFFCD34D), Color(0xFFD97706)) {
+                if (challengesEnabled) onOpenChallenge() else askEnable = "challenge"
+            })
+            if (isAdmin) add(HdQuickEntry("Admin", Icons.Default.AdminPanelSettings, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("admin") })
+        }
+        HomeToolsSheet(entries = toolEntries, onDismiss = { showTools = false })
     }
 
     if (showNotifSheet) {
