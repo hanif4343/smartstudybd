@@ -476,7 +476,7 @@ private fun HomeQuickAccessGrid(
                     { if (challengesEnabled) onOpenChallenge() else askEnable = "challenge" }),
                 GridTileData(vecIcon(Icons.Default.Diversity1),  "Study Buddy", Color(0xFF0D9488),
                     { if (buddyEnabled) onOpenMenuPage("studybuddy") else askEnable = "buddy" }),
-                GridTileData(vecIcon(Icons.Default.SmartToy),    "AI Chat",     Color(0xFF4F46E5), onOpenAiChat)
+                GridTileData(vecIcon(Icons.Default.SupportAgent), "Support",     Color(0xFF4F46E5), onOpenAiChat)
             )
         )
 
