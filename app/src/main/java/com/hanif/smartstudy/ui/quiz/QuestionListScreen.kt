@@ -46,6 +46,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import kotlin.math.roundToInt
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.ads.QuizBannerEvery10
@@ -400,10 +408,64 @@ fun QuestionListScreen(
     val readingIdx by remember { derivedStateOf { pageOffset + listState.firstVisibleItemIndex } }
     LaunchedEffect(readingIdx) { viewModel.updateReadingIndex(readingIdx) }
 
+    // ── এক্সটার্নাল কিবোর্ড (Quiz/QBank): 1-4 = অপশন বাছা, ←/→ (বা ↑/↓) = আগের/পরের প্রশ্ন।
+    // মাউস/টাচ ছাড়াই চলে; টাচ-ইউজারের কিছু বদলায় না (প্রথম কী চাপার আগে কোনো হাইলাইট নেই)। ──
+    val kbFocus = remember { FocusRequester() }
+    var kbIdx by remember { mutableStateOf(0) }
+    var kbActive by remember { mutableStateOf(false) }
+    var kbScrolling by remember { mutableStateOf(false) }
+    LaunchedEffect(listState.firstVisibleItemIndex) {
+        // হাতে স্ক্রল করলে কিবোর্ডের "বর্তমান প্রশ্ন" ও সেখানে সরে আসে
+        if (!kbScrolling) kbIdx = listState.firstVisibleItemIndex
+    }
+    LaunchedEffect(showSubmitDialog, reportIdx) {
+        // ডায়ালগ বন্ধ হলে ফোকাস ফিরিয়ে আনা, নইলে কী-ইভেন্ট আর আসে না
+        if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0) runCatching { kbFocus.requestFocus() }
+    }
+    val kbKeyHandler: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ ev ->
+        if (mode == StudyMode.STUDY || ev.type != KeyEventType.KeyDown || pagedQuestions.isEmpty()) return@handler false
+        fun goTo(target: Int) {
+            val t = target.coerceIn(0, pagedQuestions.lastIndex)
+            kbActive = true
+            kbIdx = t
+            scrollScope.launch {
+                kbScrolling = true
+                listState.animateScrollToItem(t)
+                kbScrolling = false
+            }
+        }
+        val opt = when (ev.key) {
+            Key.One, Key.NumPad1 -> 1
+            Key.Two, Key.NumPad2 -> 2
+            Key.Three, Key.NumPad3 -> 3
+            Key.Four, Key.NumPad4 -> 4
+            else -> 0
+        }
+        when {
+            ev.key == Key.DirectionRight || ev.key == Key.DirectionDown -> { goTo(kbIdx + 1); true }
+            ev.key == Key.DirectionLeft  || ev.key == Key.DirectionUp   -> { goTo(kbIdx - 1); true }
+            opt > 0 -> {
+                kbActive = true
+                val q = pagedQuestions.getOrNull(kbIdx)
+                val optionText = when (opt) { 1 -> q?.optionA; 2 -> q?.optionB; 3 -> q?.optionC; else -> q?.optionD }
+                if (q != null && q.isMcq() && !optionText.isNullOrBlank()) {
+                    viewModel.answerMcq(pageOffset + kbIdx, opt)
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
     // ── Back button = Android system back ──
     BackHandler { onBack() }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        Modifier.fillMaxSize()
+            .focusRequester(kbFocus)
+            .onKeyEvent(kbKeyHandler)
+            .focusable()
+    ) {
         Scaffold(
             topBar = {
                 QuestionTopBar(
@@ -580,6 +642,11 @@ fun QuestionListScreen(
                         Column(
                             modifier = Modifier.animateItemPlacement(
                                 animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                            ).then(
+                                // কিবোর্ডে বর্তমান প্রশ্নের হালকা বর্ডার (শুধু কিবোর্ড ব্যবহার করলে)
+                                if (kbActive && mode != StudyMode.STUDY && localIdx == kbIdx)
+                                    Modifier.border(2.dp, Indigo600.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                                else Modifier
                             )
                         ) {
                         // ── Review System (Admin-only) — বড় ✓ বাটন, টাচ করলেই reviewed
