@@ -425,7 +425,7 @@ private fun ExamQAItem(
         when {
             inlineFillBlank != null -> Text(text = inlineFillBlank, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
             q.formatStyle == "highlight" -> Text(text = buildHighlightedText(q.question), fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
-            else -> Text(text = q.question, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
+            else -> com.hanif.smartstudy.ui.shared.MathText(text = q.question, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
         }
         Spacer(Modifier.height(4.dp))
         // ── উত্তর — সরাসরি সঠিক উত্তরের টেক্সট (MCQ হলে answer ফিল্ডে টেক্সট থাকে,
