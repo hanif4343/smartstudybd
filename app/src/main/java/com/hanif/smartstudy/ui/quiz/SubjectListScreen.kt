@@ -350,17 +350,22 @@ fun SubjectListScreen(
     // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
     // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
     val selectedExamCategory = com.hanif.smartstudy.util.QBankCategory.selected
+    // ── ক্যাটাগরি-ফিল্টার ক্রম-সাজানোর সময়ও প্রযোজ্য (শুধু সিলেক্টেড ক্যাটাগরির কার্ড দেখা যায়);
+    // ▲▼ ও সিরিয়াল-ম্যানেজার নিচে গ্লোবাল লিস্টের সাথে ম্যাপ করা হয়, তাই অন্য ক্যাটাগরির ক্রম নষ্ট হয় না ──
+    val categorySubjects = if (showQBankFilterBar)
+        subjects.filter { examCategoryMatches(it, selectedExamCategory) } else subjects
     val displaySubjects = run {
-        var list = subjects
-        // সাজানোর মোডে ফিল্টার/সার্চ বন্ধ — নাহলে দেখানো লিস্টের index আর আসল লিস্টের index মিলত না
+        var list = categorySubjects
         if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
-            list = list.filter { examCategoryMatches(it, selectedExamCategory) }
             if (qbankSearchQuery.isNotBlank() && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
                 list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
             }
         }
         list
     }
+    // displaySubjects-এর index → পূর্ণ `subjects` লিস্টের index (নাম দিয়ে)
+    fun globalIdx(displayIdx: Int): Int =
+        subjects.indexOfFirst { it.name == displaySubjects.getOrNull(displayIdx)?.name }
 
     // ── Admin মেনু (ক্রম ঠিক করুন / Rename / Delete) — সবগুলোই বর্তমান sheet
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
@@ -531,8 +536,8 @@ fun SubjectListScreen(
                             reorderEnabled = isAdmin && isReorderMode,
                             isFirst = idx == 0,
                             isLast  = idx == displaySubjects.lastIndex,
-                            onMoveUp   = { onMoveSubject(idx, idx - 1) },
-                            onMoveDown = { onMoveSubject(idx, idx + 1) },
+                            onMoveUp   = { onMoveSubject(globalIdx(idx), globalIdx(idx - 1)) },
+                            onMoveDown = { onMoveSubject(globalIdx(idx), globalIdx(idx + 1)) },
                             reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
                             emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
                             isAdmin = isAdmin && !isReorderMode,
@@ -560,8 +565,8 @@ fun SubjectListScreen(
                     reorderEnabled = isAdmin && isReorderMode,
                     isFirst = idx == 0,
                     isLast  = idx == displaySubjects.lastIndex,
-                    onMoveUp   = { onMoveSubject(idx, idx - 1) },
-                    onMoveDown = { onMoveSubject(idx, idx + 1) },
+                    onMoveUp   = { onMoveSubject(globalIdx(idx), globalIdx(idx - 1)) },
+                    onMoveDown = { onMoveSubject(globalIdx(idx), globalIdx(idx + 1)) },
                     reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
                     emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
                     isAdmin = false,
@@ -688,9 +693,18 @@ fun SubjectListScreen(
     if (isAdmin && showSerialManager) {
         SerialManagerDialog(
             title     = "$modeLabel — বিষয়ের ক্রম",
-            entries   = subjects.mapIndexed { idx, s -> s.name to (idx + 1) },
+            // শুধু সিলেক্টেড ক্যাটাগরির আইটেম; সেভের সময় গ্লোবাল লিস্টের ওই আইটেমগুলোর "স্লটে"
+            // নতুন ক্রম বসে, বাকি ক্যাটাগরির আপেক্ষিক ক্রম অক্ষুণ্ণ থাকে
+            entries   = categorySubjects.mapIndexed { idx, s -> s.name to (idx + 1) },
             onDismiss = { showSerialManager = false },
-            onSave    = { orderedNames -> onSaveSerialOrder(orderedNames) }
+            onSave    = { orderedNames ->
+                val catNames = categorySubjects.map { it.name }.toSet()
+                val queue = orderedNames.filter { it in catNames }.iterator()
+                val merged = subjects.map { it.name }.map { n ->
+                    if (n in catNames && queue.hasNext()) queue.next() else n
+                }
+                onSaveSerialOrder(merged)
+            }
         )
     }
     // ── App feature request ৪: এডমিন ইমুজি এডিট ডায়ালগ — আইকনে ট্যাপ করলে খোলে ──
