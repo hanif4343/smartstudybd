@@ -2425,9 +2425,33 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
             .let { l -> com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.subjectId } }
+            // ── শিক্ষক নিবন্ধন: একই পদবী (যেমন "১০ম শিক্ষক নিবন্ধন") কিন্তু প্রতিষ্ঠান আলাদা
+            // (কলেজ পর্যায় / স্কুল পর্যায়) হলে প্রশ্নপত্র মার্জ না হয়ে আলাদা কার্ড হবে:
+            // "১০ম শিক্ষক নিবন্ধন, কলেজ পর্যায়" ও "১০ম শিক্ষক নিবন্ধন, স্কুল পর্যায়"।
+            // সিরিয়াল apply হয়ে যাওয়ার পরে ভাঙা হয়, তাই আগের ক্রম অক্ষুণ্ণ থাকে ──
+            .flatMap { e -> splitNibondhonByInstitution(e) }
 
         Log.d("QuizVM", "rebuildQBankPosts: ${entries.size}")
         _state.update { it.copy(qbankPosts = entries, isLoading = false) }
+    }
+
+    /** নিবন্ধন ক্যাটাগরির পদবীকে প্রতিষ্ঠান ধরে আলাদা SubjectEntry-তে ভাঙে (নাম = "পদবী, প্রতিষ্ঠান")।
+     *  subjectId = আসল postId-ই থাকে, যাতে Admin Rename/Delete/Move আগের মতোই পদবীর ওপর কাজ করে। */
+    private fun splitNibondhonByInstitution(e: SubjectEntry): List<SubjectEntry> {
+        val isNibondhon = com.hanif.smartstudy.util.QBankCategory.matches(
+            listOf(e.name) + e.subTopics.map { it.name }, "নিবন্ধন"
+        )
+        if (!isNibondhon || e.subTopics.isEmpty()) return listOf(e)
+        return e.subTopics.map { st ->
+            val sameName = st.name.trim().equals(e.name.trim(), ignoreCase = true)
+            SubjectEntry(
+                name      = if (sameName) e.name else e.name + ", " + st.name,
+                totalQ    = st.totalQ,
+                doneQ     = st.doneQ,
+                subTopics = listOf(st),
+                subjectId = e.subjectId
+            )
+        }
     }
 
     /** পদ-মোডের depth0 → একটা পদ বাছাই — নেস্টেড ডেটা আগে থেকেই qbankPosts-এ আছে,
