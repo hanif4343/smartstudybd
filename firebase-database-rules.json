@@ -19,6 +19,15 @@
       ".indexOn": ["updatedAt"]
     },
 
+    "TopicPlan": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "TopicTodayPick": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+
     "SubjectOrder": {
       ".read": "auth != null",
       "$mode": {
@@ -127,7 +136,12 @@
     },
     "WeekendBattles": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null",
+      "$battleId": {
+        "entries": {
+          ".indexOn": ["score"]
+        }
+      }
     },
 
     "Buddies": {
@@ -172,7 +186,8 @@
       ".read": "auth != null",
       ".write": "auth != null",
       "$phone": {
-        ".read": "auth != null"
+        ".read": "auth != null",
+        ".indexOn": ["read"]
       }
     },
 
