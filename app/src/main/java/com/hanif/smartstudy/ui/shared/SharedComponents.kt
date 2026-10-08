@@ -1420,15 +1420,26 @@ fun QuestionText(
             else -> null
         }
     }
-    val hasLatex = remember(text) { text.contains("\\") || text.contains("\$") || text.contains("frac") }
-    if (richFormatted != null) {
+    // ── গণিত রেন্ডার ফিক্স: a^3, x^2, x_1, sqrt(x), \frac{a}{b}, $...$ এখন নেটিভ MathText-এ
+    // (অফলাইন, সুপারস্ক্রিপ্টসহ)। শুধু জটিল LaTeX (\int, \sum, matrix...) MathWebView-তে যায়। ──
+    val hasMath = remember(text) { hasMathMarkup(text) }
+    val heavyLatex = remember(text) { needsHeavyMath(text) }
+    if (heavyLatex) {
+        MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 400.dp))
+    } else if (hasMath && formatStyle != "fillblank" && formatStyle != "highlight") {
+        MathText(
+            text       = text,
+            modifier   = modifier,
+            fontSize   = (14f * fontScale).sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = (22f * fontScale).sp,
+            selectable = true
+        )
+    } else if (richFormatted != null) {
         // highlight/fillblank/জেনেরিক-মার্কডাউন পার্স হয়ে গেছে — সরাসরি সেটাই
         // দেখাও (LaTeX/TTS এখানে প্রযোজ্য না, এই কেসগুলো সবসময় সাধারণ টেক্সট
         // নিয়েই কাজ করে)
         Text(text = richFormatted, fontSize = (14f * fontScale).sp, modifier = modifier)
-    } else if (hasLatex) {
-        // LaTeX/গণিত সূত্র থাকলে MathWebView দিয়ে render হয় — word-highlight ও selection এখানে প্রযোজ্য নয়
-        MathWebView(latex = text, modifier = modifier.fillMaxWidth().heightIn(min = 40.dp, max = 300.dp))
     } else if (ttsKey != null) {
         HighlightedSpeakingText(text = text, ttsKey = ttsKey, modifier = modifier, fontSize = (14f * fontScale).toInt(), spokenOffset = ttsOffset)
     } else {
@@ -1451,6 +1462,7 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
     val html = """
         <!DOCTYPE html><html><head>
         <meta name="viewport" content="width=device-width,initial-scale=1">
+        <script>window.MathJax = { tex: { inlineMath: [['$','$'], ['\\(','\\)']], displayMath: [['$$','$$'], ['\\[','\\]']] } };</script>
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
         <style>
           body { font-family: 'Noto Sans Bengali', sans-serif; font-size: 15px;
@@ -1541,9 +1553,15 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
                     Text(icon, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = border)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    color = textColor, fontFamily = NotoSansBengali, lineHeight = 17.sp,
-                    modifier = Modifier.weight(1f))
+                if (hasMathMarkup(text)) {
+                    MathText(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        color = textColor, lineHeight = 20.sp,
+                        modifier = Modifier.weight(1f))
+                } else {
+                    Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        color = textColor, fontFamily = NotoSansBengali, lineHeight = 17.sp,
+                        modifier = Modifier.weight(1f))
+                }
             }
         }
     }
