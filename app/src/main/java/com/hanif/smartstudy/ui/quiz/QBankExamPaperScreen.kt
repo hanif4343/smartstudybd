@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -220,6 +221,9 @@ fun QBankExamPaperScreen(
 
     var reportTarget by remember { mutableStateOf<QuestionItem?>(null) }
     var sortReversed by remember { mutableStateOf(false) }
+    // ── "মূল প্রশ্নপত্র" — হেডারে বাটন, চাপলে হেডারের নিচে ছবি খোলে ──
+    var paperExpanded by remember { mutableStateOf(false) }
+    val paperImages = remember(questions) { questions.flatMap { it.questionPaperImageList() }.distinct() }
     val shownSerials = remember(serials, sortReversed) { if (sortReversed) serials.reversed() else serials }
 
     Column(Modifier.fillMaxSize().background(PaperBg)) {
@@ -259,30 +263,38 @@ fun QBankExamPaperScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(text = "প্রশ্নব্যাংক · ${questions.size} প্রশ্ন", color = HeaderSub, fontSize = 12.sp)
                 }
-            }
-        }
-
-        // ── "মূল প্রশ্ন দেখুন" — প্রশ্নপত্রে একবারই, লিংক থাকলেই (না থাকলে কিছুই না) ──
-        // বাটন সবসময় দেখায়: লিংক থাকলে সক্রিয়, না থাকলে হালকা রঙে (ক্লিক কাজ করে না)।
-        // ডান পাশে ↕ Sorting আইকন — ট্যাপে সিরিয়াল ক্রম উল্টে যায় (১→শেষ ⇄ শেষ→১)।
-        val paperImages = remember(questions) { questions.flatMap { it.questionPaperImageList() }.distinct() }
-        com.hanif.smartstudy.ui.shared.QuestionPaperButtonRow(
-            urls     = paperImages,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            trailing = {
+                Spacer(Modifier.weight(1f))
+                // ── হেডারের ডানে: "মূল প্রশ্নপত্র" বাটন + ↕ সাজান (ট্যাপে সিরিয়াল ক্রম উল্টে যায়) ──
+                com.hanif.smartstudy.ui.shared.QuestionPaperHeaderButton(
+                    enabled  = paperImages.isNotEmpty(),
+                    expanded = paperExpanded,
+                    onClick  = { paperExpanded = !paperExpanded },
+                    onDark   = true
+                )
+                Spacer(Modifier.width(8.dp))
                 Box(
-                    Modifier.size(38.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (sortReversed) HeaderBg.copy(alpha = 0.12f) else Color.Transparent)
-                        .border(1.dp, if (sortReversed) HeaderBg else TabBorder, RoundedCornerShape(12.dp))
+                    Modifier.size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = if (sortReversed) 0.28f else 0.12f))
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                         .clickable { sortReversed = !sortReversed },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Filled.SwapVert, contentDescription = "সাজান",
-                        tint = if (sortReversed) HeaderBg else TextMuted, modifier = Modifier.size(22.dp))
+                        tint = HeaderCream, modifier = Modifier.size(20.dp))
                 }
             }
-        )
+        }
+
+        // ── "মূল প্রশ্নপত্র" বাটন হেডারে সরানো হয়েছে (ওপরে)। চাপলে ছবিগুলো এখানে খোলে। ──
+        if (paperExpanded && paperImages.isNotEmpty()) {
+            Box(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                com.hanif.smartstudy.ui.shared.QuestionPaperImagesPanel(
+                    urls     = paperImages,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
 
         // ── সাবজেক্ট ট্যাব — টপিক এখানে দেখানো হয় না, শুধু সাবজেক্ট ──
         Row(
