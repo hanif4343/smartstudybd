@@ -172,6 +172,7 @@ private fun subjectLabelOf(q: QuestionItem): String =
 fun QBankExamPaperScreen(
     institutionName : String,
     postName        : String,
+    showInstitution : Boolean = true,   // false হলে (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক) শুধু পদবী
     questions       : List<QuestionItem>,
     isAdmin         : Boolean = false,
     onBack          : () -> Unit,
@@ -231,19 +232,40 @@ fun QBankExamPaperScreen(
                     Icon(Icons.Filled.ArrowBack, contentDescription = "ব্যাক", tint = HeaderCream)
                 }
                 Column {
+                    // ── ওপরে পদবী (মূল শিরোনাম); পদবী না থাকলে প্রতিষ্ঠানই শিরোনাম ──
                     Text(
-                        text = institutionName,
-                        color = Color(0xFFFFE9A8),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 1.2.sp
+                        text = postName.ifBlank { institutionName },
+                        color = HeaderCream, fontSize = 19.sp, fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.height(2.dp))
-                    Text(text = postName, color = HeaderCream, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(2.dp))
+                    // ── তার নিচে সুন্দর করে প্রতিষ্ঠান (pill) — শুধু ১৬-২০ গ্রেডে ──
+                    if (showInstitution && postName.isNotBlank() && institutionName.isNotBlank()) {
+                        Spacer(Modifier.height(5.dp))
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .border(1.dp, Color(0xFFFFE9A8).copy(alpha = 0.55f), RoundedCornerShape(50))
+                                .padding(horizontal = 10.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "🏛 $institutionName",
+                                color = Color(0xFFFFE9A8), fontSize = 12.sp, fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
                     Text(text = "প্রশ্নব্যাংক · ${questions.size} প্রশ্ন", color = HeaderSub, fontSize = 12.sp)
                 }
             }
+        }
+
+        // ── "মূল প্রশ্ন দেখুন" — প্রশ্নপত্রে একবারই, লিংক থাকলেই (না থাকলে কিছুই না) ──
+        val paperImages = remember(questions) { questions.flatMap { it.questionPaperImageList() }.distinct() }
+        if (paperImages.isNotEmpty()) {
+            com.hanif.smartstudy.ui.shared.QuestionPaperGallery(
+                urls     = paperImages,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
 
         // ── সাবজেক্ট ট্যাব — টপিক এখানে দেখানো হয় না, শুধু সাবজেক্ট ──
