@@ -462,17 +462,34 @@ fun QuestionCard(
                         qpUploading = false
                     }
                 }
-                if (qpImages.isNotEmpty() || isAdminUser) {
-                    QuestionPaperGallery(
-                        urls        = qpImages,
-                        isAdmin     = isAdminUser,
-                        isUploading = qpUploading,
-                        onAddImage  = { qpLauncher.launch("image/*") }
-                    )
+                // ── "মূল প্রশ্ন দেখুন" বাটন আর প্রতিটা প্রশ্নে নেই — প্রশ্নপত্রের একদম ওপরে
+                // একবারই দেখায় (QuestionListScreen), আর শুধু লিংক থাকলে। এখানে শুধু Admin-এর
+                // জন্য ছোট একটা "+" আইকন থাকে মূল-প্রশ্নের ছবি আপলোডের জন্য (Student-এ কিছুই না)। ──
+                if (isAdminUser) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (qpExtra.isNotEmpty()) {
+                            Text("✓ মূল প্রশ্নের ছবি যোগ হয়েছে", fontSize = 10.sp,
+                                color = Color(0xFF059669), fontFamily = NotoSansBengali)
+                        }
+                        if (qpUploading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(6.dp).size(16.dp),
+                                strokeWidth = 2.dp, color = Indigo600
+                            )
+                        } else {
+                            IconButton(onClick = { qpLauncher.launch("image/*") }, modifier = Modifier.size(30.dp)) {
+                                Icon(Icons.Default.Image, contentDescription = "মূল প্রশ্নের ছবি যোগ করুন",
+                                    tint = Indigo600.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
                     qpError?.let {
                         Text(it, fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
                     }
-                    Spacer(Modifier.height(6.dp))
                 }
             }
 
