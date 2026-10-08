@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.update
 
 data class QuizUiState(
     val mode          : StudyMode        = StudyMode.QUIZ,
+    // ── Quiz "Set Own Subject" — SSC / HSC / একটা বিষয়ের key (QuizOwnPick.Option.key), null = সব ──
+    val ownPick       : String?          = null,
     val navPath       : NavPath          = NavPath(),
     val subjects      : List<SubjectEntry>   = emptyList(),
     val subTopics     : List<SubTopicEntry>  = emptyList(),
@@ -155,6 +157,77 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val repo    = ContentRepository(app)
     private val cache   = ContentCache(app)
     private val session = SessionManager(app)
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Quiz "Set Own Subject" (SSC / HSC / একটা বিষয়)
+    //  ইউজারের বাছাই করা audience শুধু QUIZ মোডে কার্যকর — QBank/Study অপরিবর্তিত।
+    //  এক জায়গা থেকেই (এই দুটো ফাংশন) সব audience-ফিল্টারে ঢোকে, তাই subject-লিস্ট,
+    //  টপিক-লিস্ট আর প্রশ্ন — সব একই বাছাই মেনে চলে।
+    // ═══════════════════════════════════════════════════════════════════════
+    // DataStore-এর snapshot async আপডেট হয়, তাই বাছাই বদলানোর সাথে সাথেই সঠিক মান পেতে
+    // মেমরিতেও রাখা হয়
+    @Volatile private var quizOwnAudienceMem: String? = null
+    @Volatile private var quizOwnPickMem: String? = null
+    private fun quizOwnAudience(mode: StudyMode = _state.value.mode): String {
+        if (mode != StudyMode.QUIZ) return ""
+        return quizOwnAudienceMem ?: session.getQuizOwnAudience().also { quizOwnAudienceMem = it }
+    }
+    private fun quizOwnPickKey(): String =
+        quizOwnPickMem ?: session.getQuizOwnPick().also { quizOwnPickMem = it }
+
+    /** নন-অ্যাডমিন ইউজারের জন্য audience-ফিল্টারে ব্যবহারের "effective" ইউজার (প্রোফাইল সেভ হয় না) */
+    private fun User?.withQuizOwnAudience(mode: StudyMode = _state.value.mode): User? {
+        val tag = quizOwnAudience(mode)
+        if (this == null || tag.isBlank() || isAdmin()) return this
+        return if (tag.equals("Job", ignoreCase = true)) copy(classLevel = "", userType = "Job")
+        else copy(classLevel = tag, userType = "Student")
+    }
+
+    /** অ্যাডমিনের ক্ষেত্রে audience override — নিজের বাছাই থাকলে সেটা, নাহলে আগের মতো Admin-tag */
+    private fun quizAdminTag(user: User?, mode: StudyMode = _state.value.mode): String {
+        if (user?.isAdmin() != true) return ""
+        val own = quizOwnAudience(mode)
+        return if (own.isNotBlank()) own else session.getAdminAudienceTag()
+    }
+
+    /** "Set Own Subject" ড্রপডাউন থেকে বাছাই (null = রিসেট, সব বিষয়) */
+    fun setOwnPick(key: String?) {
+        val opt = com.hanif.smartstudy.util.QuizOwnPick.find(key)
+        viewModelScope.launch {
+            var audience = ""
+            if (opt != null) {
+                if (opt.audienceTag != null) {
+                    audience = opt.audienceTag
+                } else {
+                    // বিষয়: শিটে নামে-মেলা Subject-গুলোর tag_id থেকে audience বের করো
+                    // (ইউজারের নিজের group থাকলে সেটাই, নাহলে প্রথমটা)
+                    try {
+                        val tagsById = repo.getRoomTags().associateBy({ it.tagId }, { it.name })
+                        val tagNames = repo.getRoomSubjectsRefBySheet("Quiz")
+                            .filter { com.hanif.smartstudy.util.QuizOwnPick.matches(opt, it.name) }
+                            .flatMap { it.tagId.orEmpty().split(',', ';', '|') }
+                            .map { it.trim() }.filter { it.isNotBlank() }
+                            .mapNotNull { tagsById[it]?.trim()?.takeIf { n -> n.isNotBlank() } }
+                            .distinct()
+                        val mine = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(session.getCurrentUser())
+                        audience = tagNames.firstOrNull { it.equals(mine, ignoreCase = true) } ?: tagNames.firstOrNull().orEmpty()
+                    } catch (e: Exception) {
+                        Log.w("QuizVM", "setOwnPick audience lookup failed: ${e.message}")
+                    }
+                }
+            }
+            quizOwnPickMem = key.orEmpty()
+            quizOwnAudienceMem = audience
+            session.setQuizOwnPick(key.orEmpty(), audience)
+            _state.update { it.copy(ownPick = key?.takeIf { k -> k.isNotBlank() }, isLoading = true, error = null) }
+            if (_state.value.mode == StudyMode.QUIZ) {
+                try { rebuildSubjectsLazy(StudyMode.QUIZ) } catch (e: Exception) {
+                    Log.w("QuizVM", "setOwnPick rebuild failed: ${e.message}")
+                }
+            }
+            _state.update { it.copy(isLoading = false) }
+        }
+    }
     private val historyCache = TestHistoryCache(app)
     private val localModelTestStore = LocalModelTestStore(app)
     private val emojiStore = com.hanif.smartstudy.data.local.EmojiOverrideStore(app)
@@ -290,7 +363,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val isAdmin    = session.getCurrentUser()?.isAdmin() == true
             // ── App feature request ৪: এডমিন ইমুজি-ওভাররাইড লোকাল স্টোর থেকে লোড ──
             val emojiOverrides = emojiStore.getAll()
-            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin, emojiOverrides = emojiOverrides) }
+            _state.update { it.copy(bookmarkedIds = bookmarks, weakTopics = weakTopics, isAdmin = isAdmin, emojiOverrides = emojiOverrides,
+                ownPick = quizOwnPickKey().takeIf { k -> k.isNotBlank() }) }
 
             // ── Phase 6 লেজি-লোডিং ফিক্স (db-migration-v2) ────────────────────
             // আগে এখানে repo.getContent() দিয়ে পুরো ~১৪,০০০ row Quiz+QBank+Study
@@ -394,8 +468,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // audience-এর সাথে না মেলা tag_id-ওয়ালা সাবজেক্ট শুরুতেই বাদ পড়বে (এবং তার
         // আন্ডারের টপিকও, যেহেতু সাবজেক্টই "মাদার")। tag_id ফাঁকা থাকা সাবজেক্ট
         // (পুরনো/আনরেস্ট্রিক্টেড) সবার জন্যই দেখাবে, ব্যাকওয়ার্ড-কম্প্যাটিবল। ──
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience(mode)
+        val adminTag = quizAdminTag(user, mode)
+        // ── Set Own Subject: একটা নির্দিষ্ট বিষয় বাছা থাকলে (SSC/HSC না) শুধু নামে-মেলা Subject ──
+        val ownSubjectOpt = if (mode == StudyMode.QUIZ)
+            com.hanif.smartstudy.util.QuizOwnPick.find(quizOwnPickKey())?.takeIf { it.audienceTag == null } else null
         val tagsById = repo.getRoomTags().associateBy({ it.tagId }, { it.name })
         // ── FIX ("যেই সাবজেক্ট ফাঁকা সেটা দেখানোর দরকার কী?"): এই sheet-এ অন্তত একটা
         // topic-এ সত্যিই প্রশ্ন আছে এমন subjectId গুলোর সেট — দেখো ContentRepository.
@@ -410,6 +487,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 .filter { s ->
                     com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(s.tagId, tagsById, user, adminTag)
                         && subjectIdsWithContent.contains(s.subjectId)
+                        && (ownSubjectOpt == null || com.hanif.smartstudy.util.QuizOwnPick.matches(ownSubjectOpt, s.name))
                 }
                 .map { s ->
                     // totalQ/doneQ এখানে ইচ্ছাকৃতভাবে ০ — গণনা করতে হলে প্রশ্ন ডাউনলোড
@@ -692,8 +770,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
 
@@ -857,8 +935,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             // Room-এ data আছে কিনা চেক করো
             val sheet = _state.value.mode.name
-            val user  = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user  = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
 
@@ -1058,8 +1136,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * শুধু matching নাম দিয়ে না, topicId দিয়ে — তাই QBank-সহ সব মোডেই নির্ভরযোগ্য।
      */
     private suspend fun refreshQuestionsInPlaceFromRoom(sheet: String, topicId: String) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
         val fresh = repo.getRoomQuestionsForTopic(sheet, topicId, tag).associateBy { it.id }
@@ -1085,8 +1163,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * দেওয়া প্রশ্নগুলো আনআনসারড হয়ে যায় না।
      */
     private suspend fun refreshQuestionsInPlace(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val filtered = content.forUser(user, adminTag)
         val fresh = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
@@ -1275,8 +1353,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(isGeneratingModelTest = true, modelTestGenWarning = null) }
         viewModelScope.launch {
             val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val filtered = content.forUser(user, adminTag)
 
             val quizItems = if (subjectKey == LocalModelTestStore.JOB_ALL_KEY)
@@ -1337,8 +1415,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun startModelTest(test: ModelTestMeta, chosenType: String) {
         viewModelScope.launch {
             val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val filtered = content.forUser(user, adminTag)
 
             val quizPool = filtered.quiz.map { QuestionItem.fromQuizItem(it) }.associateBy { it.sourceKey() }
@@ -1390,8 +1468,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             val sheet = _state.value.mode.name
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             var topicId = _state.value.subTopics.find { it.name == subTopic }?.topicId.orEmpty()
@@ -1976,8 +2054,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val autoFixedSubTopicOrderKeys = mutableSetOf<String>()
 
     private suspend fun rebuildSubjects(content: AppContent, mode: StudyMode, forMock: Boolean = false) {
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val filtered = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.map  { QuestionItem.fromQuizItem(it)  }
@@ -2055,8 +2133,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val filtered = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject }.map { QuestionItem.fromQuizItem(it)  }
@@ -2239,8 +2317,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             val bookmarks = _state.value.bookmarkedIds
@@ -2334,8 +2412,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             val bookmarks = _state.value.bookmarkedIds
@@ -2509,8 +2587,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val user     = session.getCurrentUser()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
             val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
                 .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
             val bookmarks = _state.value.bookmarkedIds
@@ -2852,8 +2930,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun persistSubjectOrder(orderedNames: List<String>) {
         val mode = _state.value.mode
-        val user = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
         // ── Phase 3 (audience tag audit): reorder সবসময় mode+tag ভিত্তিক আলাদা ক্রম
@@ -3129,8 +3207,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val subject  = navPath.subject ?: return
         val subTopic = navPath.subTopic ?: return
         val sheet    = _state.value.mode.name
-        val user     = session.getCurrentUser()
-        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user     = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag = quizAdminTag(user)
         val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
             .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
 
@@ -3269,8 +3347,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadQuestions(content: AppContent, subject: String, subTopic: String, mode: StudyMode) {
         val bookmarks = _state.value.bookmarkedIds
-        val user      = session.getCurrentUser()
-        val adminTag  = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        val user      = session.getCurrentUser().withQuizOwnAudience()
+        val adminTag  = quizAdminTag(user)
         val filtered  = content.forUser(user, adminTag)
         val items = when (mode) {
             StudyMode.QUIZ  -> filtered.quiz.filter  { it.subject == subject && it.subTopic == subTopic }.map { QuestionItem.fromQuizItem(it)  }
