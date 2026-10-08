@@ -71,11 +71,19 @@ object CdnService {
 
     fun isConfigured(): Boolean = WORKER_URL.isNotBlank() && APP_SECRET.isNotBlank()
 
+    /** 🆕 Unified topic: একই topic_id Quiz/QBank/Study তিন sheet-এই থাকতে পারে — manifest-এ
+     *  `sheets{quiz,qbank,study}` আলাদা count/hash থাকে (পুরনো ফরম্যাটে এই ফিল্ড থাকে না → null)। */
+    data class SheetManifestEntry(
+        val count : Int = 0,
+        val hash  : String? = null
+    )
+
     data class TopicManifestEntry(
         val subject  : String? = null,
         val subTopic : String? = null,
-        val count    : Int = 0,
-        val hash     : String? = null
+        val count    : Int = 0,     // সব sheet-এর যোগফল (পুরনো ক্লায়েন্টের জন্য)
+        val hash     : String? = null, // সব sheet-এর সমন্বিত hash
+        val sheets   : Map<String, SheetManifestEntry>? = null
     )
 
     data class Manifest(
