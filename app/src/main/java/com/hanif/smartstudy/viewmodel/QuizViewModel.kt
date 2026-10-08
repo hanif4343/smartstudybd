@@ -1761,7 +1761,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     yourAnswer    = yourText,
                     correctAnswer = resolveCorrectText(q),
                     status        = statusKey,
-                    subject       = q.subject
+                    subject       = q.subject,
+                    options       = listOf(q.optionA, q.optionB, q.optionC, q.optionD).let { o ->
+                        if (o.all { it.isBlank() }) emptyList() else o
+                    },
+                    explanation   = q.explanation
                 )
             )
             when (val a = q.answerState) {
@@ -1794,7 +1798,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         if (!sub.isNullOrBlank()) "$subj - $sub" else subj
                     }
                 }
-                historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels))
+                historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels, source = "mock_test"), result.reviewItems)
             }
         }
 
@@ -1807,7 +1811,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         mode   = _state.value.mode.name,
                         topics = listOf("${mt.subject} — ${mt.displayTitle()}"),
                         source = "model_test"
-                    )
+                    ),
+                    result.reviewItems
                 )
             }
         }
