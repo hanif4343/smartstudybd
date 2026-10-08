@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Keyboard
@@ -48,7 +51,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusable
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -1831,10 +1833,11 @@ private fun QuestionTopBar(
             // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
             if (isAdmin && onToggleAdminControls != null) {
                 IconButton(onClick = onToggleAdminControls) {
-                    Text(
-                        "🔧",
-                        fontSize = 16.sp,
-                        color = if (isAdminControlsExpanded) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    Icon(
+                        Icons.Default.Build,
+                        contentDescription = "Admin Tools",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (isAdminControlsExpanded) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1853,10 +1856,10 @@ private fun QuestionTopBar(
             // দেখা যায়, এক/একাধিক প্রশ্ন সিলেক্ট করে নিচের floating bar দিয়ে move করা যায় ──
             if (isAdmin && onToggleSelectMode != null) {
                 IconButton(onClick = onToggleSelectMode) {
-                    Text(
-                        if (isSelectMode) "☑️" else "⬜",
-                        fontSize = 16.sp,
-                        color = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                    Icon(
+                        if (isSelectMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                        contentDescription = if (isSelectMode) "সিলেক্ট মোড: চালু" else "সিলেক্ট মোড: বন্ধ",
+                        tint = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
