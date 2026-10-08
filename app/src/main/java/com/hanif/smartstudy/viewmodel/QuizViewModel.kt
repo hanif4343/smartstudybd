@@ -54,6 +54,14 @@ data class QuizUiState(
     // ট্যাপ করলে প্রথমে subject picker, তারপর সেই subject-এর test list
     val isModelTestSubjectPicker : Boolean              = false,
     val modelTestSubjectList     : List<Pair<String,Int>> = emptyList(),  // subject -> কতগুলো টেস্ট আছে
+    // ── QBank Model Test (পরীক্ষা-ক্যাটাগরি → প্রশ্ন সংখ্যা → preview → শুরু) ──
+    val isQBankMtZone        : Boolean            = false,
+    val qbmtCategory         : String             = "",
+    val qbmtCount            : Int                = 100,
+    val qbmtLoading          : Boolean            = false,
+    val qbmtPlan             : com.hanif.smartstudy.util.QBankModelTestEngine.Plan? = null,
+    val qbmtError            : String?            = null,
+    val activeQBankMt        : com.hanif.smartstudy.util.QBankModelTestEngine.Active? = null,
     val isModelTestZone      : Boolean            = false,   // Model Test list (test 1,2,3...) দেখানো হচ্ছে
     val modelTestSubject     : String             = "",
     val modelTests           : List<ModelTestMeta> = emptyList(),
@@ -230,6 +238,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val historyCache = TestHistoryCache(app)
     private val localModelTestStore = LocalModelTestStore(app)
+    private val qbankMtStore = com.hanif.smartstudy.data.local.QBankModelTestStore(app)
+    // ক্যাটাগরি → পুল (মেমরি ক্যাশ), যাতে প্রশ্ন সংখ্যা বদলালে আবার ডাউনলোড/স্ক্যান না লাগে
+    private val qbmtPoolCache = HashMap<String, List<QuestionItem>>()
     private val emojiStore = com.hanif.smartstudy.data.local.EmojiOverrideStore(app)
     // QBank পদবী/প্রতিষ্ঠান/সাল সিরিয়াল (স্থায়ী) — দেখো util/QBankOrderStore
     init { com.hanif.smartstudy.util.QBankOrderStore.init(app) }
@@ -1198,6 +1209,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         subTopicLoadJob?.cancel()
         subTopicLoadToken++
         when {
+            // ── QBank Model Test: চলমান টেস্ট/রেজাল্ট থেকে back → আবার সেটআপ স্ক্রিনে (প্ল্যান আগের মতোই) ──
+            _state.value.activeQBankMt != null -> {
+                timerJob?.cancel()
+                _state.update {
+                    it.copy(showResult = false, isQuizActive = false, result = null, questions = emptyList(),
+                            navPath = NavPath(), timerSec = 0, activeQBankMt = null, isQBankMtZone = true)
+                }
+            }
+            // QBank Model Test সেটআপ স্ক্রিন → বন্ধ, QBank লিস্টে ফিরে যাও
+            _state.value.isQBankMtZone -> _state.update {
+                it.copy(isQBankMtZone = false, qbmtLoading = false, qbmtError = null)
+            }
             // Model Test list খোলা ছিল (এখনো কোনো টেস্ট শুরু হয়নি) → subject picker এ ফিরে যাও
             // (Job ইউজারের ক্ষেত্রে subject picker ছিলই না — সরাসরি বন্ধ করে বেস লিস্টে ফিরে যাও)
             _state.value.isModelTestZone -> _state.update {
@@ -1288,6 +1311,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *   - Student     → নিজের classLevel-এ Quiz-এ যেসব সাবজেক্ট আছে তার একটা বাছাই করতে হয়
      */
     fun openModelTestPicker() {
+        // QBank-এর "🏆 মডেল টেস্ট" → নতুন QBank Model Test (ক্যাটাগরি → প্রশ্ন সংখ্যা)
+        if (_state.value.mode == StudyMode.QBANK) { openQBankModelTest(); return }
         viewModelScope.launch {
             val user = session.getCurrentUser()
             val isJob = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
@@ -1482,6 +1507,110 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             if (topicId.isNotBlank()) loadQuestionsFromRoomByTopic(sheet, topicId, tag, 0)
             else loadQuestionsFromRoom(sheet, subject, subTopic, tag, 0)
         }
+    }
+
+    // ═════════════════════════════════════════════════════════
+    // QBank Model Test — দেখো util/QBankModelTestEngine.kt
+    // ═════════════════════════════════════════════════════════
+
+    fun openQBankModelTest() {
+        val cat = com.hanif.smartstudy.util.QBankCategory.selected
+        _state.update {
+            it.copy(isQBankMtZone = true, qbmtCategory = cat, qbmtPlan = null, qbmtError = null, qbmtLoading = true)
+        }
+        rebuildQBankMtPlan()
+    }
+
+    fun setQBankMtCategory(cat: String) {
+        if (cat == _state.value.qbmtCategory) return
+        _state.update { it.copy(qbmtCategory = cat, qbmtPlan = null, qbmtError = null, qbmtLoading = true) }
+        rebuildQBankMtPlan()
+    }
+
+    fun setQBankMtCount(n: Int) {
+        if (n == _state.value.qbmtCount) return
+        _state.update { it.copy(qbmtCount = n, qbmtPlan = null, qbmtError = null, qbmtLoading = true) }
+        rebuildQBankMtPlan()
+    }
+
+    /** "🔄 আবার বানান" — একই ক্যাটাগরি/সংখ্যায় নতুন র‍্যান্ডম সেট */
+    fun regenerateQBankMt() {
+        _state.update { it.copy(qbmtPlan = null, qbmtError = null, qbmtLoading = true) }
+        rebuildQBankMtPlan()
+    }
+
+    private var qbmtJob: Job? = null
+
+    private fun rebuildQBankMtPlan() {
+        qbmtJob?.cancel()
+        qbmtJob = viewModelScope.launch {
+            try {
+                val cat   = _state.value.qbmtCategory
+                val count = _state.value.qbmtCount
+                val pool  = loadQBankMtPool(cat)
+                val attempted = repo.getAttemptedQuestionIds(StudyMode.QBANK.name)
+                val wrong     = repo.getWrongQuestionIds(StudyMode.QBANK.name)
+                val recent    = qbankMtStore.recentIds(cat)
+                val plan = com.hanif.smartstudy.util.QBankModelTestEngine.generate(
+                    category = cat, pool = pool, count = count,
+                    attempted = attempted, wrong = wrong, recent = recent
+                )
+                _state.update { it.copy(qbmtPlan = plan, qbmtLoading = false, qbmtError = null) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("QuizVM", "rebuildQBankMtPlan failed: ${e.message}")
+                _state.update { it.copy(qbmtLoading = false, qbmtError = "প্রশ্ন লোড করা যায়নি — ইন্টারনেট চেক করে আবার চেষ্টা করুন") }
+            }
+        }
+    }
+
+    /** ক্যাটাগরির (বিসিএস/প্রাথমিক/...) সব পদবী-প্রতিষ্ঠানের linked প্রশ্ন একসাথে — Room-এ না থাকলে টার্গেটেড fetch */
+    private suspend fun loadQBankMtPool(category: String): List<QuestionItem> {
+        qbmtPoolCache[category]?.let { return it }
+        if (_state.value.qbankPosts.isEmpty()) rebuildQBankPosts()
+        val ids = _state.value.qbankPosts
+            .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name) + it.subTopics.map { st -> st.name }, category) }
+            .flatMap { e -> e.subTopics.flatMap { it.linkedQuestionIds } }
+            .distinct()
+        if (ids.isEmpty()) return emptyList()
+        repo.ensureRoomQuestionsByIds(StudyMode.QBANK.name, ids)
+        val user = session.getCurrentUser().withQuizOwnAudience(StudyMode.QBANK)
+        val tag  = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { t -> if (user?.isAdmin() == true) quizAdminTag(user, StudyMode.QBANK).ifBlank { t } else t }
+        val items = repo.getRoomQuestionsByIds(StudyMode.QBANK.name, ids, tag)
+        qbmtPoolCache[category] = items
+        return items
+    }
+
+    /** "▶ শুরু করুন" — preview-তে দেখানো ঠিক সেই প্রশ্ন-সেট দিয়েই টেস্ট শুরু */
+    fun startQBankMt() {
+        val plan = _state.value.qbmtPlan ?: return
+        if (plan.questions.isEmpty()) return
+        val bookmarks = _state.value.bookmarkedIds
+        val qs = plan.questions.map {
+            it.copy(answerState = AnswerState.Unanswered, isBookmarked = bookmarks.contains(it.id), isWeakTopic = isWeak(it.subTopic))
+        }
+        val title = "মডেল টেস্ট — ${plan.category} (${qs.size} প্রশ্ন)"
+        _state.update {
+            it.copy(
+                isQBankMtZone = false, mode = StudyMode.QBANK,
+                questions = qs, totalQuestions = 0, currentPage = 0,
+                isQuizActive = true, showResult = false, result = null, answeredCount = 0,
+                navPath = NavPath("Model Test", "${plan.category} · ${qs.size}"),
+                activeQBankMt = com.hanif.smartstudy.util.QBankModelTestEngine.Active(
+                    category = plan.category, requested = plan.requested, title = title, questionIds = qs.map { q -> q.id }
+                )
+            )
+        }
+        startTimer(qs.size)
+    }
+
+    /** রেজাল্ট থেকে "আবার চেষ্টা" — একই প্রশ্ন-সেট আবার (উত্তর রিসেট) */
+    fun retryQBankMt() {
+        if (_state.value.qbmtPlan == null) return
+        _state.update { it.copy(showResult = false, result = null, activeQBankMt = null) }
+        startQBankMt()
     }
 
     /** ResultModal-এর "আবার চেষ্টা" — Model Test হলে একই টেস্ট আবার শুরু করে */
@@ -1895,6 +2024,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     ),
                     result.reviewItems
                 )
+            }
+        }
+
+        // ── QBank Model Test রেজাল্ট হিস্ট্রিতে (রিভিউসহ) + সাম্প্রতিক-প্রশ্ন তালিকায় ──
+        val qmt = _state.value.activeQBankMt
+        if (qmt != null && result.total > 0) {
+            viewModelScope.launch {
+                historyCache.addEntry(
+                    result.toHistoryEntry(
+                        mode   = StudyMode.QBANK.name,
+                        topics = listOf(qmt.title),
+                        source = "model_test"
+                    ),
+                    result.reviewItems
+                )
+                qbankMtStore.addRecent(qmt.category, qmt.questionIds)
             }
         }
 
