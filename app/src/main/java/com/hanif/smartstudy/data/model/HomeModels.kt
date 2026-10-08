@@ -102,3 +102,24 @@ data class MotivationalQuote(
             .get(java.util.Calendar.DAY_OF_YEAR) % QUOTES.size]
     }
 }
+
+// ── নতুন Home ড্যাশবোর্ডের "মোট অগ্রগতি" কার্ড ──
+// quizAccuracyPct = Quiz মোডে এখন পর্যন্ত দেওয়া সব উত্তরের গড় সঠিক % (correct ÷ attempted)
+data class HomeOverview(
+    val quizAccuracyPct   : Int = 0,
+    val quizAttempted     : Int = 0,
+    val quizCorrect       : Int = 0,
+    val todayQuizAnswered : Int = 0,     // আজ কতগুলো Quiz প্রশ্নের উত্তর দিয়েছে
+    val quizDailyTarget   : Int = 30,    // আজকের Quiz লক্ষ্য (প্রশ্ন)
+    val todayModelTests   : Int = 0,     // আজ কয়টা Model Test দিয়েছে
+    val modelTestTarget   : Int = 1
+)
+
+// ── "সাম্প্রতিক কার্যক্রম" — TestHistory থেকে ──
+data class RecentActivityItem(
+    val mode      : String,       // QUIZ | QBANK | STUDY | VIVA
+    val title     : String,
+    val subtitle  : String,
+    val timestamp : Long,
+    val isModelTest: Boolean = false
+)
