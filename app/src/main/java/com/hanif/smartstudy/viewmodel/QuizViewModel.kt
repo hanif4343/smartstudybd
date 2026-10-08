@@ -119,6 +119,9 @@ data class QuizUiState(
     // appearance-linked questionId দিয়ে সরাসরি Room থেকে (দেখো SubTopicEntry.linkedQuestionIds)।
     val qbankPosts : List<SubjectEntry> = emptyList(),
     val qbankSelectedPost : String? = null,
+    // পদবী কার্ড থেকে সরাসরি প্রশ্নপত্র খুললে (selectQBankPostDirect) qbankSelectedPost ইচ্ছা করেই
+    // null থাকে (back-লজিকের জন্য) — তাই প্রশ্নপত্রের হেডারে পদবীর নাম দেখানোর জন্য এটা আলাদা রাখা ──
+    val qbankDirectPost : String? = null,
     val qbankInstitutionsUnderPost : List<SubTopicEntry> = emptyList(),
     // ── Review System (Admin-only) — student-দের কাছে সম্পূর্ণ অদৃশ্য, isAdmin==true
     // ছাড়া toggleReviewMode()/markReviewed() কিছুই করে না। ──
@@ -2451,7 +2454,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             selectQBankPost(postName)
             return
         }
-        _state.update { it.copy(qbankInstitutionsUnderPost = entry.subTopics) }
+        _state.update { it.copy(qbankInstitutionsUnderPost = entry.subTopics, qbankDirectPost = postName) }
         selectQBankInstitutionUnderPost(only.name)
     }
 
