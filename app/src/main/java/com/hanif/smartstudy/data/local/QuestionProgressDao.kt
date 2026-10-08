@@ -36,6 +36,19 @@ interface QuestionProgressDao {
     """)
     suspend fun statsForSubjects(userId: String, mode: String, subjectIds: List<String>): List<SubjectProgressStat>
 
+    // ── Home: একটা মোডের (যেমন QUIZ) সব উত্তর মিলিয়ে মোট attempted + correct ──
+    @Query("""
+        SELECT COUNT(*) AS attempted,
+               COALESCE(SUM(CASE WHEN isCorrect = 1 THEN 1 ELSE 0 END), 0) AS correct
+        FROM question_progress
+        WHERE userId = :userId AND mode = :mode
+    """)
+    suspend fun overall(userId: String, mode: String): OverallProgressStat
+
+    // ── Home: আজ (since = আজ মধ্যরাতের millis) যতগুলো প্রশ্নের উত্তর দেওয়া হয়েছে ──
+    @Query("SELECT COUNT(*) FROM question_progress WHERE userId = :userId AND mode = :mode AND updatedAt >= :since")
+    suspend fun countSince(userId: String, mode: String, since: Long): Int
+
     @Query("SELECT questionId FROM question_progress WHERE userId = :userId AND mode = :mode AND isCorrect = 0")
     suspend fun wrongQuestionIds(userId: String, mode: String): List<String>
 
