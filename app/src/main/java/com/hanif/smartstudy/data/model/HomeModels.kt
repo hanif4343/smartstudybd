@@ -123,3 +123,15 @@ data class RecentActivityItem(
     val timestamp : Long,
     val isModelTest: Boolean = false
 )
+
+// ── History "প্রায় শেষ টপিক" ──
+data class AlmostTopic(
+    val name      : String,
+    val mode      : String,   // QUIZ | QBANK | STUDY
+    val attempted : Int,
+    val total     : Int,
+    val accuracyPct: Int
+) {
+    val progressPct: Int get() = if (total > 0) (attempted * 100) / total else 0
+    val remaining  : Int get() = (total - attempted).coerceAtLeast(0)
+}
