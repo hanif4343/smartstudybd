@@ -18,6 +18,7 @@ import com.hanif.smartstudy.data.local.toStudyItem
 import com.hanif.smartstudy.data.model.AppContent
 import com.hanif.smartstudy.data.model.ExamCountdown
 import com.hanif.smartstudy.data.model.GoalProgress
+import com.hanif.smartstudy.data.model.HomeOverview
 import com.hanif.smartstudy.data.model.StreakDay
 import com.hanif.smartstudy.data.model.StreakInfo
 import com.hanif.smartstudy.data.model.StudyStats
@@ -1115,6 +1116,29 @@ class ContentRepository(private val context: Context) {
         val doneMin = cache.getTodayStudyMinutes()
         val pct     = if (goalMin > 0) minOf(100f, doneMin * 100f / goalMin) else 0f
         return GoalProgress(goalMin, doneMin, pct)
+    }
+
+    // ── নতুন Home: "মোট অগ্রগতি" = Quiz মোডের সব উত্তরের গড় সঠিক %; কুইজ/মডেল-টেস্টের আজকের গণনা ──
+    suspend fun getHomeOverview(modelTestsToday: Int): HomeOverview {
+        val userId = session.getCurrentUser()?.phone ?: return HomeOverview(todayModelTests = modelTestsToday)
+        return try {
+            val all = progressDao.overall(userId, "QUIZ")
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val today = progressDao.countSince(userId, "QUIZ", cal.timeInMillis)
+            val prefs = context.getSharedPreferences("home_prefs", Context.MODE_PRIVATE)
+            HomeOverview(
+                quizAccuracyPct   = if (all.attempted > 0) (all.correct * 100) / all.attempted else 0,
+                quizAttempted     = all.attempted,
+                quizCorrect       = all.correct,
+                todayQuizAnswered = today,
+                quizDailyTarget   = prefs.getInt("quiz_daily_target", 30).coerceIn(5, 500),
+                todayModelTests   = modelTestsToday,
+                modelTestTarget   = prefs.getInt("model_test_target", 1).coerceIn(1, 20)
+            )
+        } catch (e: Exception) { HomeOverview(todayModelTests = modelTestsToday) }
     }
 
     suspend fun getStudyStats(): StudyStats {
