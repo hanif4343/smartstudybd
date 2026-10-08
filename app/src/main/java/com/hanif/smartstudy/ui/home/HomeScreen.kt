@@ -283,9 +283,6 @@ fun HomeScreen(
 
     if (showTools) {
         val toolEntries = buildList {
-            add(HdQuickEntry("Study", Icons.AutoMirrored.Filled.MenuBook, Color(0xFF34D399), Color(0xFF059669), onOpenStudyTab))
-            add(HdQuickEntry("Quiz", Icons.Default.TrackChanges, Color(0xFFFB7185), Color(0xFFEF4444), onOpenQuizTab))
-            add(HdQuickEntry("QBank", Icons.Default.Layers, Color(0xFF60A5FA), Color(0xFF2563EB), onOpenQBankTab))
             add(HdQuickEntry("Model Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
             add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
             add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
