@@ -465,6 +465,41 @@ fun QuestionListScreen(
     // ── Back button = Android system back ──
     BackHandler { onBack() }
 
+    // ── QBank "মূল প্রশ্নপত্র": হেডারের বাটন দিয়ে খোলে/বন্ধ হয়; ছবিগুলো রিডিং-প্রগ্রেস বারের নিচে দেখায়।
+    // Admin-এর ছবি-আপলোডও এখন এখানেই (আগে প্রতিটা প্রশ্নের এডিট-বাটনের নিচে ছিল) ──
+    var paperExpanded by remember { mutableStateOf(false) }
+    val paperCtx   = androidx.compose.ui.platform.LocalContext.current
+    val paperScope = rememberCoroutineScope()
+    var paperUploading by remember { mutableStateOf(false) }
+    var paperError     by remember { mutableStateOf<String?>(null) }
+    var paperExtra     by remember { mutableStateOf(listOf<String>()) }
+    val paperImages = remember(questions, paperExtra) {
+        if (mode == StudyMode.QBANK)
+            (questions.flatMap { it.questionPaperImageList() } + paperExtra).distinct()
+        else emptyList()
+    }
+    val paperLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        val target = questions.firstOrNull() ?: return@rememberLauncherForActivityResult
+        paperScope.launch {
+            paperUploading = true; paperError = null
+            when (val r = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(paperCtx, uri, "question-paper", "qp")) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    val all = (paperImages + r.data).distinct()
+                    paperExtra = paperExtra + r.data
+                    val sheetKey = target.sourceSheet.ifBlank { "QBank" }
+                    try {
+                        onAdminEdit?.invoke(sheetKey, target.id, mapOf("QuestionPaper" to all.joinToString(",")), target.question.take(60))
+                    } catch (_: Exception) { }
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> paperError = r.message
+            }
+            paperUploading = false
+        }
+    }
+
     BoxWithConstraints(
         Modifier.fillMaxSize()
             .focusRequester(kbFocus)
@@ -499,7 +534,11 @@ fun QuestionListScreen(
                         }
                     } else null,
                     isAdminControlsExpanded = vmState.isAdminControlsExpanded,
-                    onToggleAdminControls = { viewModel.toggleAdminControlsExpanded() }
+                    onToggleAdminControls = { viewModel.toggleAdminControlsExpanded() },
+                    // ── QBank: "মূল প্রশ্নপত্র" বাটন এখন হেডারে ──
+                    onToggleQbankPaper = if (mode == StudyMode.QBANK) { { paperExpanded = !paperExpanded } } else null,
+                    qbankPaperEnabled  = paperImages.isNotEmpty() || vmState.isAdmin,
+                    qbankPaperExpanded = paperExpanded
                 )
             },
             snackbarHost = { SnackbarHost(moveSnackbarHostState) }
@@ -534,18 +573,19 @@ fun QuestionListScreen(
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
 
-                // ── QBank: "মূল প্রশ্ন দেখুন" — পুরো প্রশ্নপত্রে একবারই, একদম ওপরে।
-                // প্রশ্নগুলোর কোনোটায় মূল-প্রশ্নের ছবির লিংক থাকলেই বাটন আসবে;
-                // কোনো লিংক না থাকলে বাটন পুরোপুরি অদৃশ্য (প্রতিটা প্রশ্নে আর আলাদা বাটন নেই)। ──
-                if (mode == StudyMode.QBANK) {
-                    val paperImages = remember(questions) {
-                        questions.flatMap { it.questionPaperImageList() }.distinct()
+                // ── QBank: "মূল প্রশ্নপত্র" বাটন হেডারে সরানো হয়েছে (QuestionTopBar)।
+                // বাটন চাপলে এখানে ছবিগুলো খোলে। ──
+                if (mode == StudyMode.QBANK && paperExpanded && (paperImages.isNotEmpty() || vmState.isAdmin)) {
+                    Box(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                        com.hanif.smartstudy.ui.shared.QuestionPaperImagesPanel(
+                            urls        = paperImages,
+                            modifier    = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            isAdmin     = vmState.isAdmin && onAdminEdit != null,
+                            isUploading = paperUploading,
+                            errorMsg    = paperError,
+                            onAddImage  = { paperLauncher.launch("image/*") }
+                        )
                     }
-                    // বাটন সবসময় থাকে — লিংক না থাকলে হালকা রঙে, ক্লিক কাজ করে না
-                    com.hanif.smartstudy.ui.shared.QuestionPaperButtonRow(
-                        urls     = paperImages,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
                 }
 
                 // ── Study Nav Phase 4: 🎯 Exam Focus / ⚡ Quick Notes / 📝 Practice / 🔴 Wrong Review /
@@ -1823,7 +1863,11 @@ private fun QuestionTopBar(
     // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে"): এই টগল অন করলেই সব কার্ডে
     // একসাথে Subject/Topic move-row + এডিট-পিল রো দেখা যাবে, ডিফল্ট বন্ধ (হাইড) ──
     isAdminControlsExpanded : Boolean = false,
-    onToggleAdminControls   : (() -> Unit)? = null
+    onToggleAdminControls   : (() -> Unit)? = null,
+    // ── QBank "মূল প্রশ্নপত্র" হেডার-বাটন ──
+    onToggleQbankPaper      : (() -> Unit)? = null,
+    qbankPaperEnabled       : Boolean = false,
+    qbankPaperExpanded      : Boolean = false
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -1864,6 +1908,15 @@ private fun QuestionTopBar(
             }
         },
         actions = {
+            // ── QBank: "মূল প্রশ্নপত্র" বাটন — হেডারের ডান পাশে ──
+            if (mode == StudyMode.QBANK && onToggleQbankPaper != null) {
+                QuestionPaperHeaderButton(
+                    enabled  = qbankPaperEnabled,
+                    expanded = qbankPaperExpanded,
+                    onClick  = onToggleQbankPaper,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
             // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে, জায়গা নষ্ট হচ্ছে"): এই
             // একটা 🔧 টগল দিয়ে সব কার্ডের move-row/edit-pill-row একসাথে দেখানো/লুকানো
             // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
