@@ -189,7 +189,7 @@ internal fun HomeSkyHeader(
     val motto = remember { HdMottos[java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR) % HdMottos.size] }
     val name = state.user?.displayName() ?: "বন্ধু"
 
-    Box(Modifier.fillMaxWidth().height(158.dp)) {
+    Box(Modifier.fillMaxWidth().height(128.dp)) {
         Canvas(Modifier.matchParentSize()) {
             val w = size.width; val h = size.height
             drawRect(Brush.verticalGradient(listOf(skyTop, skyMid, skyBot)))
@@ -218,7 +218,7 @@ internal fun HomeSkyHeader(
         }
 
         Row(
-            Modifier.fillMaxSize().padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 22.dp),
+            Modifier.fillMaxSize().padding(start = 14.dp, end = 12.dp, top = 10.dp, bottom = 16.dp),
             verticalAlignment = Alignment.Top
         ) {
             // avatar + অনলাইন ডট
@@ -319,7 +319,7 @@ internal fun HomeBuddyStreakRow(
     onOpenBuddy: () -> Unit,
     onOpenStreak: () -> Unit
 ) {
-    Row(Modifier.fillMaxWidth().height(78.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(Modifier.fillMaxWidth().height(70.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         val buddyBg = Brush.horizontalGradient(listOf(Color(0xFFE0E7FF), Color(0xFFF3E8FF)))
         Box(
             Modifier.weight(1f).fillMaxHeight()
@@ -415,12 +415,12 @@ internal fun HomeProgressCard(
 ) {
     HdCard(Modifier.fillMaxWidth(), radius = 24.dp, onClick = onOpenStats) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             HdRing(
                 fraction = overview.quizAccuracyPct / 100f,
-                size = 92.dp, stroke = 11.dp, color = HdGreen,
+                size = 84.dp, stroke = 10.dp, color = HdGreen,
                 track = HdGreen.copy(alpha = 0.16f)
             ) {
                 Text("${overview.quizAccuracyPct}%", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
@@ -496,51 +496,6 @@ private fun HdMiniStat(
             fontFamily = NotoSansBengali, maxLines = 1, softWrap = false)
         Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(barColor.copy(alpha = 0.18f))) {
             Box(Modifier.fillMaxWidth(anim).fillMaxHeight().clip(CircleShape).background(barColor))
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-// ৪) প্রধান ৫টা এন্ট্রি: Study / Quiz / QBank / Model Test / Viva
-// ═══════════════════════════════════════════════════════════
-private data class HdTile(val label: String, val icon: ImageVector, val c1: Color, val c2: Color, val onClick: () -> Unit)
-
-@Composable
-internal fun HomeMainTilesRow(
-    onStudy: () -> Unit, onQuiz: () -> Unit, onQBank: () -> Unit,
-    onModelTest: () -> Unit, onViva: () -> Unit
-) {
-    val tiles = listOf(
-        HdTile("Study", Icons.AutoMirrored.Filled.MenuBook, Color(0xFF34D399), Color(0xFF059669), onStudy),
-        HdTile("Quiz", Icons.Default.TrackChanges, Color(0xFFFB7185), Color(0xFFEF4444), onQuiz),
-        HdTile("QBank", Icons.Default.Layers, Color(0xFF60A5FA), Color(0xFF2563EB), onQBank),
-        HdTile("Model Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B), onModelTest),
-        HdTile("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onViva)
-    )
-    HdCard(Modifier.fillMaxWidth(), radius = 24.dp) {
-        Row(
-            Modifier.fillMaxWidth().padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            tiles.forEach { t ->
-                Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(16.dp))
-                        .background(t.c2.copy(alpha = 0.10f))
-                        .border(1.dp, t.c2.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
-                        .clickable(onClick = t.onClick)
-                        .padding(horizontal = 4.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.Start,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(Modifier.fillMaxWidth()) {
-                        Box(Modifier.align(Alignment.CenterStart)) { HdGradientIcon(t.icon, t.c1, t.c2, 36.dp, 21.dp) }
-                        Box(Modifier.align(Alignment.CenterEnd)) { HdChevron(t.c2, 14.dp) }
-                    }
-                    Text(t.label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
-                        maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
-                }
-            }
         }
     }
 }
@@ -693,76 +648,39 @@ private fun HdGoalCard(
 }
 
 // ═══════════════════════════════════════════════════════════
-// ৬) দ্রুত প্রবেশ + সাম্প্রতিক কার্যক্রম
+// ৪) সাম্প্রতিক কার্যক্রম (পুরো প্রস্থ, ২টা সারি)
 // ═══════════════════════════════════════════════════════════
 internal data class HdQuickEntry(val label: String, val icon: ImageVector, val c1: Color, val c2: Color, val onClick: () -> Unit)
 
 @Composable
-internal fun HomeQuickEntryRecentRow(
-    entries: List<HdQuickEntry>,
-    recent: List<RecentActivityItem>,
-    onOpenHistory: () -> Unit
-) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        HdCard(Modifier.weight(1f).fillMaxHeight(), radius = 24.dp) {
-            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                HdSectionTitle(Icons.Default.Bolt, "দ্রুত প্রবেশ", HdAmber, null) {}
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    entries.forEach { e ->
-                        Column(
-                            Modifier.width(52.dp).clip(RoundedCornerShape(14.dp))
-                                .background(e.c2.copy(alpha = 0.10f))
-                                .border(1.dp, e.c2.copy(alpha = 0.15f), RoundedCornerShape(14.dp))
-                                .clickable(onClick = e.onClick).padding(vertical = 7.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            HdGradientIcon(e.icon, e.c1, e.c2, 32.dp, 18.dp)
-                            Text(e.label, fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurface,
-                                fontFamily = NotoSansBengali, maxLines = 1, softWrap = false,
-                                overflow = TextOverflow.Clip, textAlign = TextAlign.Center)
-                        }
-                    }
-                }
-            }
-        }
-        HdCard(Modifier.weight(1f).fillMaxHeight(), radius = 24.dp) {
-            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                HdSectionTitle(Icons.Default.Schedule, "সাম্প্রতিক কার্যক্রম", MaterialTheme.colorScheme.onSurface, "দেখুন সব", onOpenHistory)
-                if (recent.isEmpty()) {
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                            .background(HdIndigo.copy(alpha = 0.06f)).clickable(onClick = onOpenHistory).padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+internal fun HomeRecentCard(recent: List<RecentActivityItem>, onOpenHistory: () -> Unit) {
+    HdCard(Modifier.fillMaxWidth(), radius = 24.dp) {
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            HdSectionTitle(Icons.Default.Schedule, "সাম্প্রতিক কার্যক্রম", MaterialTheme.colorScheme.onSurface, "দেখুন সব", onOpenHistory)
+            if (recent.isEmpty()) {
+                Text("এখনো কোনো কার্যক্রম নেই — একটা কুইজ বা টেস্ট দিলেই এখানে দেখা যাবে",
+                    fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = NotoSansBengali, modifier = Modifier.clickable(onClick = onOpenHistory).padding(vertical = 6.dp))
+            } else {
+                recent.take(2).forEach { r ->
+                    val (icon, c1, c2) = hdActivityStyle(r)
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onOpenHistory),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("এখনো কোনো কার্যক্রম নেই", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                        Text("একটা কুইজ বা টেস্ট দিলেই এখানে দেখা যাবে", fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                    }
-                } else {
-                    recent.take(2).forEach { r ->
-                        val (icon, c1, c2) = hdActivityStyle(r)
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onOpenHistory),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            HdGradientIcon(icon, c1, c2, 38.dp, 20.dp)
-                            Spacer(Modifier.width(7.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(r.title, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(r.subtitle, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Text(hdTimeAgo(r.timestamp), fontSize = 9.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
-                                maxLines = 1, softWrap = false)
+                        HdGradientIcon(icon, c1, c2, 36.dp, 19.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(r.title, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(r.subtitle, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        Text(hdTimeAgo(r.timestamp), fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
+                            maxLines = 1, softWrap = false)
+                        HdChevron(MaterialTheme.colorScheme.onSurfaceVariant, 16.dp)
                     }
                 }
             }
@@ -779,32 +697,69 @@ private fun hdActivityStyle(r: RecentActivityItem): Triple<ImageVector, Color, C
 }
 
 // ═══════════════════════════════════════════════════════════
-// ৭) অনুপ্রেরণার ব্যানার
+// ৫) Leaderboard · Support · Tools — তিনটা গ্রেডিয়েন্ট কার্ড
 // ═══════════════════════════════════════════════════════════
 @Composable
-internal fun HomeMotivationBanner(quote: String, streakDays: Int) {
-    val dark = LocalDarkMode.current.value
-    val brush = Brush.horizontalGradient(
-        if (dark) listOf(Color(0xFF14352B), Color(0xFF1E293B)) else listOf(Color(0xFFDCFCE7), Color(0xFFFEF9C3), Color(0xFFE0F2FE))
-    )
+internal fun HomeBottomTilesRow(onLeaderboard: () -> Unit, onSupport: () -> Unit, onTools: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        HdBigTile("Leaderboard", "শীর্ষ শিক্ষার্থী", Icons.Default.EmojiEvents, Color(0xFFFBBF24), Color(0xFFF97316), onLeaderboard, Modifier.weight(1f))
+        HdBigTile("Support", "AI সাহায্য", Icons.Default.SupportAgent, Color(0xFF818CF8), Color(0xFF4F46E5), onSupport, Modifier.weight(1f))
+        HdBigTile("Tools", "সব টুলস", Icons.Default.Build, Color(0xFF2DD4BF), Color(0xFF0D9488), onTools, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun HdBigTile(title: String, sub: String, icon: ImageVector, c1: Color, c2: Color, onClick: () -> Unit, modifier: Modifier) {
+    val shape = RoundedCornerShape(22.dp)
     Box(
-        Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(22.dp), clip = false)
-            .clip(RoundedCornerShape(22.dp)).background(brush)
+        modifier.fillMaxHeight().shadow(3.dp, shape, clip = false).clip(shape)
+            .background(Brush.linearGradient(listOf(c1, c2)))
+            .clickable(onClick = onClick)
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🌱", fontSize = 38.sp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (streakDays >= 3) "আজও তুমি পারবে! 🔥" else "আজও তুমি পারবে!",
-                    fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
-                    color = if (dark) Color.White else Color(0xFF1E293B), fontFamily = NotoSansBengali
-                )
-                Text(quote.ifBlank { "ধাপে ধাপে এগিয়ে যাও…" }, fontSize = 12.sp,
-                    color = if (dark) Color(0xFFCBD5E1) else Color(0xFF475569), fontFamily = NotoSansBengali,
-                    maxLines = 2, lineHeight = 16.sp)
+        // হালকা সাজসজ্জার বৃত্ত
+        Box(Modifier.size(64.dp).align(Alignment.TopEnd).offset(x = 20.dp, y = (-20).dp)
+            .clip(CircleShape).background(Color.White.copy(alpha = 0.16f)))
+        Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Box(Modifier.size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.28f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
-            Text("📚", fontSize = 40.sp)
+            Column {
+                Text(title, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+                    fontFamily = NotoSansBengali, maxLines = 1, softWrap = false)
+                Text(sub, fontSize = 10.sp, color = Color.White.copy(alpha = 0.88f), fontFamily = NotoSansBengali, maxLines = 1)
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ৬) Tools শীট — আগের Home-এর সব এন্ট্রি (Typing, Focus, Wrong Review, Routine…) এখানে
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun HomeToolsSheet(entries: List<HdQuickEntry>, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("🛠 Tools", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+            entries.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { e ->
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(16.dp))
+                                .background(e.c2.copy(alpha = 0.10f))
+                                .border(1.dp, e.c2.copy(alpha = 0.16f), RoundedCornerShape(16.dp))
+                                .clickable { onDismiss(); e.onClick() }.padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            HdGradientIcon(e.icon, e.c1, e.c2, 42.dp, 23.dp)
+                            Text(e.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFamily = NotoSansBengali,
+                                maxLines = 1, softWrap = false, textAlign = TextAlign.Center)
+                        }
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
         }
     }
 }
