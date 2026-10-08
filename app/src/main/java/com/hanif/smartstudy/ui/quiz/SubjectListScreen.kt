@@ -17,6 +17,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -93,7 +98,131 @@ private fun subjectImageRes(rawName: String): Int? {
         (name.contains("বাংলাদেশ") && name.contains("বিষয়")) || n.contains("bangladesh affairs") -> R.drawable.subject_bangladesh_bishoyabali
         name.contains("আন্তর্জাতিক") -> R.drawable.subject_international_affairs
         name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> R.drawable.subject_general_knowledge
+        // ── "Set Own Subject" তালিকার বিষয়গুলো (ছবি res/drawable/subject_*.webp) ──
+        // ⚠️ "য়" এড়াতে "রসায" (রসায়ন-এর য়-এর আগ পর্যন্ত) ব্যবহার করা হয়েছে
+        name.contains("পদার্থ") || n.contains("physics") -> R.drawable.subject_physics
+        name.contains("রসায") || n.contains("chemistry") -> R.drawable.subject_chemistry
+        name.contains("গণিত") || n.contains("math") -> R.drawable.subject_math
+        name.contains("মনোবিজ্ঞান") || n.contains("psychology") -> R.drawable.subject_psychology
+        name.contains("রাষ্ট্রবিজ্ঞান") || name.contains("পৌরনীতি") || n.contains("civics") || n.contains("political") -> R.drawable.subject_civics
+        name.contains("ভূগোল") || n.contains("geography") -> R.drawable.subject_geography
+        name.contains("ইতিহাস") || n.contains("history") -> R.drawable.subject_history
+        name.contains("ইসলাম") || n.contains("islam") -> R.drawable.subject_islamic_studies
+        name.contains("অর্থনীতি") || n.contains("economics") -> R.drawable.subject_economics
+        name.contains("সমাজবিজ্ঞান") || n.contains("sociology") -> R.drawable.subject_sociology
+        name.contains("আইন") || n == "law" || n.contains(" law") -> R.drawable.subject_law
+        name.contains("পরিবেশ") || n.contains("environment") -> R.drawable.subject_environment
+        name.contains("চারুকলা") || n.contains("fine arts") -> R.drawable.subject_fine_arts
+        name.contains("দর্শন") || n.contains("philosophy") -> R.drawable.subject_philosophy
+        name.contains("পশ্চিম বিজ্ঞান") || name.contains("মহাকাশ") || n.contains("astronomy") -> R.drawable.subject_astronomy
         else -> null
+    }
+}
+
+/** ড্রপডাউন থাম্বনেইল — SSC/HSC-এর নিজস্ব ছবি, বাকিগুলো subjectImageRes()-এর ছবি */
+@DrawableRes
+private fun ownPickImageRes(opt: com.hanif.smartstudy.util.QuizOwnPick.Option): Int? = when (opt.key) {
+    "SSC" -> R.drawable.subject_ssc
+    "HSC" -> R.drawable.subject_hsc
+    else  -> subjectImageRes(opt.label)
+}
+
+/**
+ * Quiz গ্রিডের শেষ কার্ড: "+  Set Own Subject" — ট্যাপ করলে ড্রপডাউনে SSC, HSC ও ছবিসহ
+ * সব বিষয়ের তালিকা; বাছাই করলে Quiz-এ সেই অনুযায়ী ডেটা দেখায় (দেখো QuizViewModel.setOwnPick)।
+ */
+@Composable
+private fun OwnSubjectAddCard(
+    modifier : Modifier,
+    ownPick  : String?,
+    onPick   : (String?) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    val current = com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)
+    val accent = if (current != null) Color(0xFF3157D5) else Color(0xFF7C3AED)
+    Box(modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp))
+                .background(accent.copy(alpha = 0.07f))
+                .drawBehind {
+                    drawRoundRect(
+                        color = accent,
+                        style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))),
+                        cornerRadius = CornerRadius(12.dp.toPx())
+                    )
+                }
+                .clickable { open = true }
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                Modifier.size(42.dp).clip(androidx.compose.foundation.shape.CircleShape).background(accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Set Own Subject",
+                    tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Set Own Subject", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                color = accent, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2, lineHeight = 15.sp
+            )
+            if (current != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "✓ ${current.label}", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = NotoSansBengali, color = accent,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = 420.dp)
+        ) {
+            if (current != null) {
+                DropdownMenuItem(
+                    text = { Text("↺  সব বিষয় দেখান", fontSize = 13.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    onClick = { open = false; onPick(null) }
+                )
+                HorizontalDivider()
+            }
+            com.hanif.smartstudy.util.QuizOwnPick.ALL.forEach { opt ->
+                val selected = opt.key == current?.key
+                val res = ownPickImageRes(opt)
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (res != null) {
+                                Image(
+                                    painter = painterResource(res),
+                                    contentDescription = opt.label,
+                                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(accent.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center) { Text("📚", fontSize = 20.sp) }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                opt.label, fontSize = 14.sp, fontFamily = NotoSansBengali,
+                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (selected) accent else Color.Unspecified
+                            )
+                            if (selected) { Spacer(Modifier.width(8.dp)); Text("✓", color = accent, fontWeight = FontWeight.Bold) }
+                        }
+                    },
+                    onClick = { open = false; onPick(opt.key) }
+                )
+            }
+        }
     }
 }
 
@@ -365,7 +494,11 @@ fun SubjectListScreen(
     // ── Study Nav Phase 1: Subject গ্রিডের ওপরে বসানোর অপশনাল কনটেন্ট
     // (Study ট্যাবে "আমার পড়াশোনা" — Continue/Progress/Recent)। null হলে কিছুই
     // render হয় না, Quiz/QBank অপরিবর্তিত। ──
-    headerSlot    : (@Composable () -> Unit)? = null
+    headerSlot    : (@Composable () -> Unit)? = null,
+    // ── Quiz "+ Set Own Subject" কার্ড: onOwnPickChange != null হলে (শুধু Quiz মোডে পাস করা হয়)
+    // গ্রিডের শেষে কার্ড দেখায়। ownPick = QuizOwnPick.Option.key (null = সব বিষয়) ──
+    ownPick         : String? = null,
+    onOwnPickChange : ((String?) -> Unit)? = null
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -574,6 +707,8 @@ fun SubjectListScreen(
                         text = when {
                             showQBankFilterBar && qbankSearchQuery.isNotBlank() -> "🔍 কিছু পাওয়া যায়নি"
                             showQBankFilterBar -> "📭 \"$selectedExamCategory\" ক্যাটাগরিতে এখনো কোনো বিষয় যোগ করা হয়নি"
+                            mode == StudyMode.QUIZ && com.hanif.smartstudy.util.QuizOwnPick.find(ownPick) != null ->
+                                "📭 \"${com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)?.label}\"-এর কোনো ডেটা এখনো যোগ হয়নি"
                             else -> "⚠️ ডেটা আসেনি"
                         },
                         fontSize = 15.sp,
@@ -676,7 +811,11 @@ fun SubjectListScreen(
             item {
                 val orderedSubjects = remember(displaySubjects) { applyHardcodedSubjectOrder(displaySubjects) }
                 val config = LocalConfiguration.current
-                val count = orderedSubjects.size.coerceAtLeast(1)
+                // ── Quiz: শেষে "+ Set Own Subject" কার্ড (null = সেই কার্ড) ──
+                val showOwnCard = mode == StudyMode.QUIZ && onOwnPickChange != null
+                val gridItems: List<SubjectEntry?> =
+                    orderedSubjects + (if (showOwnCard) listOf<SubjectEntry?>(null) else emptyList())
+                val count = gridItems.size.coerceAtLeast(1)
 
                 // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
                 // বেশি কলাম (নাহলে row বেড়ে কার্ড অতিরিক্ত চ্যাপ্টা/সরু হয়ে যেত) ──
@@ -703,16 +842,34 @@ fun SubjectListScreen(
                 val cardWidthDp  = (config.screenWidthDp.dp - horizontalPaddingDp * 2 - spacingDp * (columns - 1)) / columns
                 val cardHeightDp = (availableHeightDp - spacingDp * (rows - 1)) / rows
 
+                if (orderedSubjects.isEmpty() && showOwnCard) {
+                    // কোনো সাবজেক্ট নেই (যেমন বাছা বিষয়ে ডেটা নেই) — কার্ডটা বিশাল না হয়ে ছোট থাকুক
+                    Box(Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp), contentAlignment = Alignment.Center) {
+                        OwnSubjectAddCard(
+                            modifier = Modifier.width(200.dp).height(150.dp),
+                            ownPick  = ownPick,
+                            onPick   = { onOwnPickChange?.invoke(it) }
+                        )
+                    }
+                } else
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp),
                     verticalArrangement = Arrangement.spacedBy(spacingDp)
                 ) {
-                    orderedSubjects.chunked(columns).forEach { rowSubjects ->
+                    gridItems.chunked(columns).forEach { rowSubjects ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(spacingDp)
                         ) {
                             rowSubjects.forEach { subject ->
+                                if (subject == null) {
+                                    OwnSubjectAddCard(
+                                        modifier = Modifier.width(cardWidthDp).height(cardHeightDp),
+                                        ownPick  = ownPick,
+                                        onPick   = { onOwnPickChange?.invoke(it) }
+                                    )
+                                    return@forEach
+                                }
                                 SubjectGridImageCard(
                                     subject = subject,
                                     onClick = { onSubject(subject.name) },
