@@ -35,3 +35,5 @@ data class QuestionProgressEntity(
 
 data class TopicProgressStat(val topicId: String, val attempted: Int, val correct: Int)
 data class SubjectProgressStat(val subjectId: String, val attempted: Int, val correct: Int)
+// Home "মোট অগ্রগতি" — একটা মোডের সব প্রশ্ন মিলিয়ে attempted/correct
+data class OverallProgressStat(val attempted: Int, val correct: Int)
