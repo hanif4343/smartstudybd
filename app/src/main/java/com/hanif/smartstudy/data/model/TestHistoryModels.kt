@@ -25,6 +25,8 @@ data class TestHistoryEntry(
     val pct: Int get() = if (total > 0) (correct * 100) / total else 0
 
     val isModelTest: Boolean get() = source == "model_test"
+    // "এখন টেস্ট দাও" (Mock Test) — প্রশ্নসহ লোকালি সংরক্ষিত হয়
+    val isMockTest : Boolean get() = source == "mock_test"
     // written model test-এ correct/wrong/pct অর্থহীন — শুধু "কতগুলো জমা হয়েছে" দেখানো হবে
     val isUngraded: Boolean get() = isModelTest && recorded > 0
 
