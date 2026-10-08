@@ -395,7 +395,8 @@ fun MainScreen(
         return
     }
     if (showAiChat) {
-        com.hanif.smartstudy.ui.aichat.AiChatScreen(
+        // Home-এর "AI Chat" টাইল এখন Support Center খোলে
+        com.hanif.smartstudy.ui.support.SupportCenterScreen(
             onBack = { showAiChat = false }
         )
         return
