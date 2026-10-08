@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -62,8 +63,10 @@ private val subjectIcons = mapOf(
     "ধর্ম"               to "☪️"
 )
 
-private fun subjectIcon(name: String): String =
-    subjectIcons.entries.firstOrNull { name.contains(it.key) }?.value ?: "📚"
+private fun subjectIcon(rawName: String): String {
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    return subjectIcons.entries.firstOrNull { name.contains(java.text.Normalizer.normalize(it.key, java.text.Normalizer.Form.NFC)) }?.value ?: "📚"
+}
 
 // ── Subject illustration ছবি ম্যাপ (Image/CDN Hosting Phase-এর মতোই "app-এর সাথে
 // hardcoded থাকা লাগবে" রিকোয়ারমেন্ট — এই ছবিগুলো res/drawable-এ বান্ডল করা,
@@ -72,7 +75,11 @@ private fun subjectIcon(name: String): String =
 // সাবজেক্ট বানালে (এই ম্যাচ কোনোটাতেই না পড়লে) null রিটার্ন হবে, তখন কলার emoji
 // ফলব্যাকে (subjectIcon() ফাংশন) চলে যাবে। ──
 @DrawableRes
-private fun subjectImageRes(name: String): Int? {
+private fun subjectImageRes(rawName: String): Int? {
+    // 🐛 FIX ("বাংলাদেশ বিষয়াবলি-র ছবি আসছে না"): শিট/CDN থেকে আসা নামে "য়" অনেক সময়
+    // একক কোডপয়েন্ট (U+09DF), আর এই ফাইলের স্ট্রিং-লিটারেলে "য"+"়" (U+09AF U+09BC) —
+    // দেখতে হুবহু এক, কিন্তু contains() মেলে না। NFC দুই রূপকেই একই (য + ়) রূপে আনে।
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
     val n = name.lowercase()
     return when {
         name.contains("বাংলা") && name.contains("সাহিত্য") -> R.drawable.subject_bangla_shahittya
@@ -83,7 +90,7 @@ private fun subjectImageRes(name: String): Int? {
         name.contains("বীজগণিত") || n.contains("algebra") -> R.drawable.subject_bijgonit
         name.contains("জ্যামিতি") || n.contains("geometry") -> R.drawable.subject_geometry
         name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> R.drawable.subject_computer
-        name.contains("বাংলাদেশ") && name.contains("বিষয়") -> R.drawable.subject_bangladesh_bishoyabali
+        (name.contains("বাংলাদেশ") && name.contains("বিষয়")) || n.contains("bangladesh affairs") -> R.drawable.subject_bangladesh_bishoyabali
         name.contains("আন্তর্জাতিক") -> R.drawable.subject_international_affairs
         name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> R.drawable.subject_general_knowledge
         else -> null
@@ -180,7 +187,7 @@ private fun subjectHardcodedPriority(name: String): Int? {
         name.contains("পাটিগণিত") || n.contains("arithmetic") -> 4
         name.contains("বীজগণিত") || n.contains("algebra") -> 5
         name.contains("জ্যামিতি") || n.contains("geometry") -> 6
-        name.contains("বাংলাদেশ") && name.contains("বিষয়") -> 7
+        (name.contains("বাংলাদেশ") && name.contains("বিষয়")) || n.contains("bangladesh affairs") -> 7
         name.contains("আন্তর্জাতিক") -> 8
         name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> 9
         name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> 10
@@ -213,39 +220,45 @@ private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolea
         listOf(subject.name) + subject.subTopics.map { it.name }, category
     )
 
+// ইংরেজি অঙ্ক → বাংলা অঙ্ক (৭০, ৮০, ৯০ …)
+private fun bnDigits(n: Int): String =
+    n.toString().map { if (it in '0'..'9') '০' + (it - '0') else it }.joinToString("")
+
+private fun totalQLabel(n: Int): String = "মোট প্রশ্ন সংখ্যা= ${bnDigits(n)}"
+
 @Composable
 private fun QBankSortRow(
     current : com.hanif.smartstudy.util.QBankSort,
     onSelect: (com.hanif.smartstudy.util.QBankSort) -> Unit
 ) {
+    // সাজানোর বাটন: শুধু উপর-নিচ দুই তীর (↕) আইকন, ডান দিকে। সক্রিয় সাজানো থাকলে নীল রঙ।
     var open by remember { mutableStateOf(false) }
     val active = current != com.hanif.smartstudy.util.QBankSort.DEFAULT
-    Box(Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(18.dp))
-                .background(if (active) Color(0xFF3157D5).copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface)
-                .border(1.dp, if (active) Color(0xFF3157D5) else Color(0xFFE0E4ED), RoundedCornerShape(18.dp))
-                .clickable { open = true }
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text("↕", fontSize = 14.sp, color = Color(0xFF3157D5), fontWeight = FontWeight.ExtraBold)
-            Text("সাজানো: ${current.label}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-            Text("▾", fontSize = 11.sp, color = Color(0xFF64748B))
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
-                DropdownMenuItem(
-                    text = {
-                        Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
-                            fontFamily = NotoSansBengali,
-                            fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
-                    },
-                    onClick = { open = false; onSelect(opt) }
-                )
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (active) Color(0xFF3157D5).copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface)
+                    .border(1.dp, if (active) Color(0xFF3157D5) else Color(0xFFE0E4ED), RoundedCornerShape(12.dp))
+                    .clickable { open = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.SwapVert, contentDescription = "সাজান",
+                    tint = if (active) Color(0xFF3157D5) else Color(0xFF64748B), modifier = Modifier.size(22.dp))
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
+                    DropdownMenuItem(
+                        text = {
+                            Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
+                                fontFamily = NotoSansBengali,
+                                fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
+                        },
+                        onClick = { open = false; onSelect(opt) }
+                    )
+                }
             }
         }
     }
@@ -622,8 +635,8 @@ fun SubjectListScreen(
                                 }
                             } else null,
                             subLabelOverride = when (qbankFilterMode) {
-                                QBankFilterMode.INSTITUTION -> "${subject.subTopics.size} টি পদবী"
-                                QBankFilterMode.YEAR        -> "${subject.totalQ} টি প্রশ্ন"
+                                QBankFilterMode.INSTITUTION -> totalQLabel(subject.totalQ)
+                                QBankFilterMode.YEAR        -> totalQLabel(subject.totalQ)
                                 QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                                 QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
                             }
@@ -1967,7 +1980,7 @@ private fun QBankTopicCard(
             Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${st.totalQ} প্রশ্ন", fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+                Text(totalQLabel(st.totalQ), fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
                 Text("·", fontSize = 10.sp, color = mutedColor)
                 Text(typeIcon, fontSize = 10.sp)
                 Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
