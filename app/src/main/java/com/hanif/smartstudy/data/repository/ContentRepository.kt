@@ -611,7 +611,21 @@ class ContentRepository(private val context: Context) {
         syncExamAppearances()
 
         val topics = refDao.getAllTopics()
+        // 🆕 Unified: subject.sheet এখন কমা-লিস্ট ("Quiz,QBank,Study")। আগে পুরো স্ট্রিংটাই
+        // cacheNextTopicBatch-এ যেত (→ "অজানা sheet" ধরে skip হতো)। এখন প্রতিটা topic-এর
+        // জন্য শুধু সেই sheet-গুলোতেই ডাউনলোড চলে যেগুলোতে ওই topic-এ সত্যিই প্রশ্ন আছে।
         val sheetBySubjectId = refDao.getAllSubjects().associate { it.subjectId to it.sheet }
+        fun sheetsForTopic(t: com.hanif.smartstudy.data.local.TopicEntity): List<String> {
+            val declared = (sheetBySubjectId[t.subjectId] ?: "").split(',', ';', '|')
+                .map { it.trim() }.filter { it == "Quiz" || it == "QBank" || it == "Study" }
+            val withContent = buildList {
+                if (t.rowCountQuiz  > 0) add("Quiz")
+                if (t.rowCountQbank > 0) add("QBank")
+                if (t.rowCountStudy > 0) add("Study")
+            }
+            // row count এখনো না বসে থাকলে (rebuildIndex চলেনি) subject-এ ঘোষিত sheet-গুলোই চেষ্টা করা হয়
+            return if (withContent.isNotEmpty()) withContent else declared
+        }
         val total = topics.size
         var done = 0
         var failed = 0
@@ -630,13 +644,15 @@ class ContentRepository(private val context: Context) {
             coroutineScope {
                 batch.map { topic ->
                     async {
-                        val sheet = sheetBySubjectId[topic.subjectId]
-                        if (sheet.isNullOrBlank()) return@async
-                        try {
-                            cacheNextTopicBatch(sheet, topic.topicId)
-                        } catch (e: Exception) {
-                            Log.w("Repo", "downloadAllContent: ${topic.topicId} failed: ${e.message}")
-                            failed++
+                        val sheets = sheetsForTopic(topic)
+                        if (sheets.isEmpty()) return@async
+                        sheets.forEach { sheet ->
+                            try {
+                                cacheNextTopicBatch(sheet, topic.topicId)
+                            } catch (e: Exception) {
+                                Log.w("Repo", "downloadAllContent: ${topic.topicId}/$sheet failed: ${e.message}")
+                                failed++
+                            }
                         }
                     }
                 }.awaitAll()
@@ -816,12 +832,22 @@ class ContentRepository(private val context: Context) {
         // topic-টা পুরনো জায়গা থেকে সরে যাচ্ছে — পুরনো CDN কনটেন্ট দিয়ে এখন রিফ্রেশ
         // করলে সেটা আবার ভরে উঠবে, তাই পুরোপুরি স্কিপ ──
         if (queue.getPendingMovedTopicIds().contains(topicId)) return@withContext false
-        val hash = entry.hash ?: ""
+        // 🆕 Unified topic (S01_T01): একই topic_id তিন sheet-এ থাকতে পারে, manifest-এ প্রতিটা
+        // sheet-এর আলাদা hash আসে (entry.sheets). sheets আছে অথচ এই sheet-এর এন্ট্রি নেই =
+        // এই sheet-এ এই topic-এ কোনো প্রশ্ন নেই → কিছু ফেচ করার নেই। sheets না থাকলে (পুরনো
+        // QZ_/QB/ST_ id-র ফরম্যাট) আগের মতো entry.hash।
+        val sheetEntry = entry.sheets?.get(sheetPath)
+        if (entry.sheets != null && sheetEntry == null) return@withContext false
+        val hash = (sheetEntry?.hash ?: entry.hash) ?: ""
+        // TopicSyncEntity.lastHash-এ topicId-প্রতি একটাই মান থাকে (Room schema বদলানো হয়নি), তাই
+        // unified topic-এর জন্য "quiz=abc;qbank=def" আকারে sheet-ভিত্তিক hash জমা রাখা হয় —
+        // নাহলে Quiz ক্যাশ হলে QBank-এর পুরনো ডেটা "hash মিলেছে" ধরে আর আপডেট হতো না।
+        val storedHash: String? = if (entry.sheets != null) sheetHashFromStored(sync?.lastHash, sheetPath) else sync?.lastHash
         // ── hash অপরিবর্তিত + Room-এ ইতিমধ্যে প্রশ্ন আছে মানে এই ভার্সন আগেই
         // cache করা — network call স্কিপ। hash ফাঁকা (পুরনো/legacy manifest) হলে
         // staleness ধরার উপায় নেই, cachedCount থাকলে বিশ্বাস করে স্কিপ করি (নাহলে
         // প্রতিবার নেটওয়ার্ক কল হতো, offline-first ডিজাইনের বিরুদ্ধে) ──
-        if (cachedCount > 0 && (hash.isBlank() || sync?.lastHash == hash)) {
+        if (cachedCount > 0 && (hash.isBlank() || storedHash == hash)) {
             if (hash.isNotBlank() && sync?.hasMore == true) topicSyncDao.upsert(sync.copy(hasMore = false))
             return@withContext false
         }
@@ -867,8 +893,32 @@ class ContentRepository(private val context: Context) {
         }
         val entities = if (protectedIds.isEmpty()) usableEntities else usableEntities.filterNot { it.fbKey in protectedIds }
         if (entities.isNotEmpty()) dao.upsertAll(entities)
-        topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, hash))
+        val newLastHash = if (entry.sheets != null) mergeSheetHash(sync?.lastHash, sheetPath, hash) else hash
+        topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, newLastHash))
         entities.isNotEmpty()
+    }
+
+    // ── unified topic-এর sheet-ভিত্তিক hash ("quiz=abc;qbank=def") পড়া/লেখা। পুরনো সরল
+    // hash (কোনো '=' নেই) → এই sheet-এর জন্য "অজানা" (null) ধরা হয়, ফলে একবার রিফ্রেশ হয়ে নতুন
+    // ফরম্যাটে চলে আসে। ──
+    private fun sheetHashFromStored(stored: String?, sheetKey: String): String? {
+        if (stored.isNullOrBlank() || !stored.contains('=')) return null
+        return stored.split(';').firstNotNullOfOrNull { part ->
+            val i = part.indexOf('=')
+            if (i > 0 && part.substring(0, i) == sheetKey) part.substring(i + 1) else null
+        }
+    }
+
+    private fun mergeSheetHash(stored: String?, sheetKey: String, hash: String): String {
+        val map = linkedMapOf<String, String>()
+        if (!stored.isNullOrBlank() && stored.contains('=')) {
+            stored.split(';').forEach { part ->
+                val i = part.indexOf('=')
+                if (i > 0) map[part.substring(0, i)] = part.substring(i + 1)
+            }
+        }
+        map[sheetKey] = hash
+        return map.entries.joinToString(";") { it.key + "=" + it.value }
     }
 
     // ── CDN manifest — ৫-মিনিট TTL in-memory cache, একাধিক topic-এর জন্য বারবার
