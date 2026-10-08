@@ -628,7 +628,7 @@ fun SubjectListScreen(
                             // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান" — প্রতিষ্ঠানের নামও কার্ডে দেখায়
                             titleOverride = if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
                                 val insts = subject.subTopics.map { it.name.trim() }
-                                    .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) }.distinct()
+                                    .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) && !subject.name.contains(it) }.distinct()
                                 when {
                                     insts.isEmpty() -> null
                                     insts.size <= 2 -> subject.name + ", " + insts.joinToString(", ")
