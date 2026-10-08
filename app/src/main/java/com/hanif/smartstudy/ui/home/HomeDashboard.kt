@@ -279,7 +279,7 @@ internal fun HomeSkyHeader(
                             if (dark) "Light Mode" else "Dark Mode"
                         ) { menuOpen = false; onToggleDark() }
                         HdMenuItem(Icons.Default.Info, "About") { menuOpen = false; onAbout() }
-                        HdMenuItem(Icons.AutoMirrored.Filled.Help, "Help") { menuOpen = false; onHelp() }
+                        HdMenuItem(Icons.Default.Help, "Help") { menuOpen = false; onHelp() }
                         if (isAdmin) {
                             HdMenuItem(Icons.Default.Refresh, "Force Full Resync") { menuOpen = false; onForceResync() }
                         }
