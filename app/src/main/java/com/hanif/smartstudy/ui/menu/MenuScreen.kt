@@ -389,7 +389,7 @@ fun MainMenuScreen(
                 }
             }
 
-            MenuGroup("🛠 Tools") {
+            MenuGroup("⋯ More") {
                 MenuRow("🔍 Global Search",   "সব প্রশ্ন একসাথে খুঁজুন", Icons.Default.Search)    { onSearchClick() }
                 MenuRow("⌨️ Typing Practice", "টাইপিং স্পিড বাড়ান",     Icons.Default.Keyboard)  { onTypingClick() }
             }
