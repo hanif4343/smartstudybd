@@ -227,38 +227,37 @@ private fun bnDigits(n: Int): String =
 private fun totalQLabel(n: Int): String = "মোট প্রশ্ন সংখ্যা= ${bnDigits(n)}"
 
 @Composable
-private fun QBankSortRow(
+private fun QBankSortButton(
     current : com.hanif.smartstudy.util.QBankSort,
     onSelect: (com.hanif.smartstudy.util.QBankSort) -> Unit
 ) {
-    // সাজানোর বাটন: শুধু উপর-নিচ দুই তীর (↕) আইকন, ডান দিকে। সক্রিয় সাজানো থাকলে নীল রঙ।
+    // সাজানোর বাটন: শুধু উপর-নিচ দুই তীর (↕) আইকন — এখন হেডারে (Admin বাটনের নিচে)।
+    // সক্রিয় সাজানো থাকলে সাদা ব্যাকগ্রাউন্ডে নীল আইকন, নাহলে হেডারের ওপর হালকা সাদা।
     var open by remember { mutableStateOf(false) }
     val active = current != com.hanif.smartstudy.util.QBankSort.DEFAULT
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
-        Box {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (active) Color(0xFF3157D5).copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface)
-                    .border(1.dp, if (active) Color(0xFF3157D5) else Color(0xFFE0E4ED), RoundedCornerShape(12.dp))
-                    .clickable { open = true },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.SwapVert, contentDescription = "সাজান",
-                    tint = if (active) Color(0xFF3157D5) else Color(0xFF64748B), modifier = Modifier.size(22.dp))
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
-                    DropdownMenuItem(
-                        text = {
-                            Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
-                                fontFamily = NotoSansBengali,
-                                fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
-                        },
-                        onClick = { open = false; onSelect(opt) }
-                    )
-                }
+    Box {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (active) Color.White else Color.White.copy(alpha = 0.18f))
+                .border(1.dp, if (active) Color.White else Color.White.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                .clickable { open = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.SwapVert, contentDescription = "সাজান",
+                tint = if (active) Color(0xFF3157D5) else Color.White, modifier = Modifier.size(22.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
+                DropdownMenuItem(
+                    text = {
+                        Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
+                            fontFamily = NotoSansBengali,
+                            fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
+                    },
+                    onClick = { open = false; onSelect(opt) }
+                )
             }
         }
     }
@@ -474,14 +473,29 @@ fun SubjectListScreen(
                                 fontFamily = NotoSansBengali)
                         }
                     }
-                    if (isAdmin) {
-                        AdminMenuButton(
-                            isReorderMode   = isReorderMode,
-                            onToggleReorder = onToggleReorder,
-                            onRenameClick   = { showRenameDialog = true },
-                            onDeleteClick   = { showDeleteDialog = true },
-                            onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
-                        )
+                    val showSortInHeader = showQBankFilterBar && !(isAdmin && isReorderMode)
+                    if (isAdmin || showSortInHeader) {
+                        // ── Admin বাটন (থাকলে) + তার ঠিক নিচে ↕ সাজান আইকন ──
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (isAdmin) {
+                                AdminMenuButton(
+                                    isReorderMode   = isReorderMode,
+                                    onToggleReorder = onToggleReorder,
+                                    onRenameClick   = { showRenameDialog = true },
+                                    onDeleteClick   = { showDeleteDialog = true },
+                                    onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
+                                )
+                            }
+                            if (showSortInHeader) {
+                                QBankSortButton(
+                                    current  = sortChoice,
+                                    onSelect = {
+                                        sortChoice = it
+                                        com.hanif.smartstudy.util.QBankSortStore.set(sortScope, it)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -510,19 +524,6 @@ fun SubjectListScreen(
                             qbankFilterMode != QBankFilterMode.DESIGNATION) {
                             onQBankFilterModeChange(QBankFilterMode.DESIGNATION)
                         }
-                    }
-                )
-            }
-        }
-
-        // ── সাজানোর বাটন (শুধু QBank; ক্যাটাগরি-ভিত্তিক, স্থায়ী) ──
-        if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
-            item {
-                QBankSortRow(
-                    current  = sortChoice,
-                    onSelect = {
-                        sortChoice = it
-                        com.hanif.smartstudy.util.QBankSortStore.set(sortScope, it)
                     }
                 )
             }
@@ -634,6 +635,8 @@ fun SubjectListScreen(
                                     else            -> subject.name + ", " + insts.first() + " +${insts.size - 1}"
                                 }
                             } else null,
+                            // ১৬-২০ গ্রেড ছাড়া বাকি ক্যাটাগরিতে "X টি প্রতিষ্ঠান" ব্যাজ নেই
+                            hideSubLabel = selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE,
                             subLabelOverride = when (qbankFilterMode) {
                                 QBankFilterMode.INSTITUTION -> totalQLabel(subject.totalQ)
                                 QBankFilterMode.YEAR        -> totalQLabel(subject.totalQ)
@@ -1459,7 +1462,8 @@ private fun QBankSubjectCard(
     emojiOverride : String? = null,
     isAdmin       : Boolean = false,
     onEmojiClick  : () -> Unit = {},
-    titleOverride : String? = null      // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান"
+    titleOverride : String? = null,     // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান"
+    hideSubLabel  : Boolean = false     // বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংকে "১ টি প্রতিষ্ঠান" ব্যাজ লুকানো → কার্ড চিকন
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor    = MaterialTheme.colorScheme.onSurface
@@ -1496,10 +1500,12 @@ private fun QBankSubjectCard(
             Text(titleOverride ?: subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = if (titleOverride != null) 4 else 2)
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("📂", fontSize = 10.sp)
-                Text(subLabelOverride ?: "${subject.subTopics.count { it.hasQuestions() }} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
-                    fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
+            if (!hideSubLabel) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("📂", fontSize = 10.sp)
+                    Text(subLabelOverride ?: "${subject.subTopics.count { it.hasQuestions() }} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
+                }
             }
 
             Box(
