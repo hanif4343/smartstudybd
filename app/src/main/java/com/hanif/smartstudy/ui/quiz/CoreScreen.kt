@@ -129,6 +129,8 @@ fun CoreScreen(
         (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
         state.qbankSelectedPost != null
     val isInsideNav = state.isMockZone ||
+                      state.isQBankMtZone ||
+                      state.activeQBankMt != null ||
                       state.isModelTestZone ||
                       state.isModelTestSubjectPicker ||
                       state.showResult ||
@@ -142,7 +144,7 @@ fun CoreScreen(
         // মতোই generic navigateBack() ব্যবহার হয়। ──
         val useQBankFilterBack = mode == StudyMode.QBANK &&
             !state.isMockZone && !state.isModelTestZone &&
-            !state.isModelTestSubjectPicker && !state.showResult
+            !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null && !state.showResult
         if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
     }
 
@@ -156,6 +158,22 @@ fun CoreScreen(
                 onSetLimit     = { viewModel.setMockLimit(it) },
                 onStart        = { viewModel.startMock() },
                 onBack         = { viewModel.navigateBack() }
+            )
+        }
+
+        // ── QBank Model Test: ক্যাটাগরি → প্রশ্ন সংখ্যা → preview → শুরু ──
+        state.isQBankMtZone -> {
+            QBankModelTestScreen(
+                category     = state.qbmtCategory,
+                count        = state.qbmtCount,
+                isLoading    = state.qbmtLoading,
+                error        = state.qbmtError,
+                plan         = state.qbmtPlan,
+                onCategory   = { viewModel.setQBankMtCategory(it) },
+                onCount      = { viewModel.setQBankMtCount(it) },
+                onRegenerate = { viewModel.regenerateQBankMt() },
+                onStart      = { viewModel.startQBankMt() },
+                onBack       = { viewModel.navigateBack() }
             )
         }
 
@@ -221,7 +239,9 @@ fun CoreScreen(
             ResultModal(
                 result  = state.result!!,
                 onRetry = {
-                    if (state.activeModelTest != null) {
+                    if (state.activeQBankMt != null) {
+                        viewModel.retryQBankMt()
+                    } else if (state.activeModelTest != null) {
                         viewModel.retryModelTest()
                     } else if (state.navPath.subject == "Mock Test") {
                         // Mock Test: navPath.subTopic আসল কোনো subTopic না (শুধু নেভিগেশন
@@ -266,7 +286,7 @@ fun CoreScreen(
                     // এখানেও চেক করে সঠিক ফাংশন কল হচ্ছে। ──
                     val useQBankFilterBack = mode == StudyMode.QBANK &&
                         !state.isMockZone && !state.isModelTestZone &&
-                        !state.isModelTestSubjectPicker
+                        !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 }
             )
@@ -303,7 +323,7 @@ fun CoreScreen(
                 questions       = state.questions.filter { it.questionType.equals("written", ignoreCase = true) },
                 isAdmin         = state.isAdmin,
                 onBack          = {
-                    val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker
+                    val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 },
                 onBookmark      = { qid -> viewModel.toggleBookmark(qid) },
@@ -341,7 +361,7 @@ fun CoreScreen(
                 onBack              = {
                     val useQBankFilterBack = mode == StudyMode.QBANK &&
                         !state.isMockZone && !state.isModelTestZone &&
-                        !state.isModelTestSubjectPicker && !state.showResult
+                        !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null && !state.showResult
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 },
                 onSubmit            = { viewModel.submitQuiz() },
