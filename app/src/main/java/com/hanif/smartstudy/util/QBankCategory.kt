@@ -30,11 +30,20 @@ object QBankCategory {
         }
     }
 
-    /** names-এর (কার্ডের নিজের নাম + নেস্টেড নাম) কোনোটা ক্যাটাগরিতে পড়ে কিনা */
+    /**
+     * names-এর (কার্ডের নিজের নাম + নেস্টেড নাম) কোনোটা ক্যাটাগরিতে পড়ে কিনা।
+     *
+     * ⚠️ নিয়ম: names[0] = কার্ডের নিজের নাম। কার্ডের নিজের নামই যদি কোনো নির্দিষ্ট ক্যাটাগরিতে
+     * (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক) মিলে যায়, তাহলে কার্ডটা শুধু সেই ক্যাটাগরিতেই যাবে।
+     * আগে নেস্টেড নামে "ব্যাংক" থাকলেই বিসিএসের কার্ডও "ব্যাংক" চিপে চলে আসত।
+     * নিজের নামে কিছু না মিললে (যেমন "সিনিয়র অফিসার") নেস্টেড নাম (প্রতিষ্ঠান) দেখে আগের মতোই মেলানো হয়।
+     */
     fun matches(names: List<String>, category: String): Boolean {
         fun hit(cat: String) = names.any { nameMatches(it, cat) }
+        val ownName = names.firstOrNull().orEmpty()
+        val ownCategory = NAMED.firstOrNull { nameMatches(ownName, it) }
         return when (category) {
-            in NAMED -> hit(category)
+            in NAMED -> if (ownCategory != null) ownCategory == category else hit(category)
             GRADE    -> NAMED.none { hit(it) }
             else     -> true
         }
