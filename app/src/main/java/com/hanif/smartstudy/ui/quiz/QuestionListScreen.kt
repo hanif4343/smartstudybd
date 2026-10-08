@@ -541,12 +541,11 @@ fun QuestionListScreen(
                     val paperImages = remember(questions) {
                         questions.flatMap { it.questionPaperImageList() }.distinct()
                     }
-                    if (paperImages.isNotEmpty()) {
-                        com.hanif.smartstudy.ui.shared.QuestionPaperGallery(
-                            urls     = paperImages,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
+                    // বাটন সবসময় থাকে — লিংক না থাকলে হালকা রঙে, ক্লিক কাজ করে না
+                    com.hanif.smartstudy.ui.shared.QuestionPaperButtonRow(
+                        urls     = paperImages,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
                 }
 
                 // ── Study Nav Phase 4: 🎯 Exam Focus / ⚡ Quick Notes / 📝 Practice / 🔴 Wrong Review /
