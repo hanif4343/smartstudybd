@@ -453,8 +453,8 @@ fun QuestionCard(
                                 qpExtra = qpExtra + r.data
                                 val sheetKey = item.sourceSheet.ifBlank { "QBank" }
                                 try {
+                                    // onAdminEdit → লোকাল ক্যাশ + Google Sheet (GAS) + CDN dirty-mark (Firebase না)
                                     onAdminEdit?.invoke(sheetKey, item.id, mapOf("QuestionPaper" to all.joinToString(",")), item.question.take(60))
-                                        ?: FirebaseDataService.adminUpdateQuestionField(sheetKey, item.id, mapOf("QuestionPaper" to all.joinToString(",")))
                                 } catch (_: Exception) { }
                             }
                             is com.hanif.smartstudy.data.remote.ApiResult.Error -> qpError = r.message
@@ -811,6 +811,21 @@ fun QuestionCard(
                         aiExplanationFailed = true
                     } else {
                         aiExplanation = result
+                        // ── Admin দেখলেই AI ব্যাখ্যা অটো DB-তে সেভ (শুধু যখন DB-তে আগে ব্যাখ্যা নেই —
+                        // বিদ্যমান ব্যাখ্যা কখনো নিজে থেকে ওভাররাইট হয় না)। ভুল হলে নিচে ✏️ এডিট বাটন ──
+                        if (isAdminUser && onAdminEdit != null && item.explanation.isBlank() && !aiSavedToDb) {
+                            val autoSheet = item.sourceSheet.ifBlank {
+                                when {
+                                    item.year.isNotBlank() || item.examName.isNotBlank() -> "QBank"
+                                    item.isStudy() -> "Study"
+                                    else           -> "Quiz"
+                                }
+                            }
+                            try {
+                                onAdminEdit(autoSheet, item.id, mapOf("explanation" to formatAiExplanation(result)), item.question.take(60))
+                                aiSavedToDb = true
+                            } catch (_: Exception) { }
+                        }
                     }
                     isLoadingAiExplanation = false
                 }
@@ -1000,9 +1015,18 @@ fun QuestionCard(
                     // সেভ হয়ে গেছে এবং DB-ব্যাখ্যা এখন উপরের ExplanationBox-এ দেখা যাচ্ছে —
                     // একই লেখা দুইবার না দেখিয়ে শুধু ছোট স্ট্যাটাস ──
                     aiSavedToDb && dbExplanationVisible -> {
-                        Text("✅ AI ব্যাখ্যা DB-তে সেভ হয়েছে — এখন থেকে সবাই এটাই দেখবে",
-                            fontSize = 11.sp, fontFamily = NotoSansBengali,
-                            fontWeight = FontWeight.Bold, color = Color(0xFF16A34A))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("✅ AI ব্যাখ্যা DB-তে সেভ হয়েছে — এখন থেকে সবাই এটাই দেখবে",
+                                fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                fontWeight = FontWeight.Bold, color = Color(0xFF16A34A),
+                                modifier = Modifier.weight(1f))
+                            if (isAdminUser) {
+                                TextButton(onClick = { activeEditField = "explanation" }) {
+                                    Text("✏️ এডিট", fontFamily = NotoSansBengali, fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold, color = Indigo600)
+                                }
+                            }
+                        }
                     }
                     aiExplanation != null -> {
                         val pretty = remember(aiExplanation) { formatAiExplanation(aiExplanation ?: "") }
@@ -1055,7 +1079,7 @@ fun QuestionCard(
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
                                     ) {
-                                        Text(if (hasDbExp) "💾 DB-তে রিপ্লেস" else "💾 DB-তে সেভ",
+                                        Text(if (aiSavedToDb) "✅ DB-তে সেভ হয়েছে" else if (hasDbExp) "💾 DB-তে রিপ্লেস" else "💾 DB-তে সেভ",
                                             fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp, color = Color.White)
                                     }
