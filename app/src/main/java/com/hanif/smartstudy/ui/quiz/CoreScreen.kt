@@ -129,6 +129,7 @@ fun CoreScreen(
         (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
         state.qbankSelectedPost != null
     val isInsideNav = state.isMockZone ||
+                      state.ownScopeActive ||
                       state.isQBankMtZone ||
                       state.activeQBankMt != null ||
                       state.isModelTestZone ||
@@ -683,6 +684,8 @@ fun CoreScreen(
                 // ── Quiz: গ্রিডের শেষে "+ Set Own Subject" (SSC/HSC/বিষয় বাছাই) ──
                 ownPick         = state.ownPick,
                 onOwnPickChange = if (mode == StudyMode.QUIZ) { { viewModel.setOwnPick(it) } } else null,
+                onOwnPickOpen   = if (mode == StudyMode.QUIZ) { { viewModel.openOwnPick() } } else null,
+                ownScopeActive  = state.ownScopeActive,
                 // ── Study Nav Phase 1: শুধু Study ট্যাবে "আমার পড়াশোনা" ──
                 headerSlot   = if (mode == StudyMode.STUDY) {
                     @Composable {
