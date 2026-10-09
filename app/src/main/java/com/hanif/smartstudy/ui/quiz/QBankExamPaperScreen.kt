@@ -269,7 +269,8 @@ fun QBankExamPaperScreen(
                     enabled  = paperImages.isNotEmpty(),
                     expanded = paperExpanded,
                     onClick  = { paperExpanded = !paperExpanded },
-                    onDark   = true
+                    onDark   = true,
+                    count    = paperImages.size
                 )
                 Spacer(Modifier.width(8.dp))
                 Box(
