@@ -472,30 +472,44 @@ fun QuestionListScreen(
     val paperScope = rememberCoroutineScope()
     var paperUploading by remember { mutableStateOf(false) }
     var paperError     by remember { mutableStateOf<String?>(null) }
+    var paperProgress  by remember { mutableStateOf<String?>(null) }   // "২/৫" — একাধিক ছবি আপলোডের সময়
     var paperExtra     by remember { mutableStateOf(listOf<String>()) }
     val paperImages = remember(questions, paperExtra) {
         if (mode == StudyMode.QBANK)
             (questions.flatMap { it.questionPaperImageList() } + paperExtra).distinct()
         else emptyList()
     }
+    // ── একসাথে একাধিক ছবি বাছা যায় (গ্যালারিতে multi-select); একটা একটা করে আপলোড হয়,
+    // শেষে সব সফল ছবির লিংক একবারেই সেভ। কিছু ফেইল করলে যেগুলো গেছে সেগুলো থেকে যায়। ──
     val paperLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri: android.net.Uri? ->
-        uri ?: return@rememberLauncherForActivityResult
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<android.net.Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
         val target = questions.firstOrNull() ?: return@rememberLauncherForActivityResult
         paperScope.launch {
             paperUploading = true; paperError = null
-            when (val r = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(paperCtx, uri, "question-paper", "qp")) {
-                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    val all = (paperImages + r.data).distinct()
-                    paperExtra = paperExtra + r.data
-                    val sheetKey = target.sourceSheet.ifBlank { "QBank" }
-                    try {
-                        onAdminEdit?.invoke(sheetKey, target.id, mapOf("QuestionPaper" to all.joinToString(",")), target.question.take(60))
-                    } catch (_: Exception) { }
+            val uploaded = mutableListOf<String>()
+            var failed = 0
+            var lastErr: String? = null
+            uris.forEachIndexed { i, uri ->
+                paperProgress = "${i + 1}/${uris.size}"
+                when (val r = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(
+                    paperCtx, uri, "question-paper", "qp", maxDim = 1600   // প্রশ্নপত্র পড়ার জন্য বেশি রেজোলিউশন
+                )) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> uploaded.add(r.data)
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error   -> { failed++; lastErr = r.message }
                 }
-                is com.hanif.smartstudy.data.remote.ApiResult.Error -> paperError = r.message
             }
+            if (uploaded.isNotEmpty()) {
+                val all = (paperImages + uploaded).distinct()
+                paperExtra = paperExtra + uploaded
+                val sheetKey = target.sourceSheet.ifBlank { "QBank" }
+                try {
+                    onAdminEdit?.invoke(sheetKey, target.id, mapOf("QuestionPaper" to all.joinToString(",")), target.question.take(60))
+                } catch (_: Exception) { }
+            }
+            if (failed > 0) paperError = "$failed টি ছবি আপলোড হয়নি" + (lastErr?.let { " — $it" } ?: "")
+            paperProgress = null
             paperUploading = false
         }
     }
@@ -537,6 +551,7 @@ fun QuestionListScreen(
                     onToggleAdminControls = { viewModel.toggleAdminControlsExpanded() },
                     // ── QBank: "মূল প্রশ্নপত্র" বাটন এখন হেডারে ──
                     onToggleQbankPaper = if (mode == StudyMode.QBANK) { { paperExpanded = !paperExpanded } } else null,
+                    qbankPaperCount    = paperImages.size,
                     qbankPaperEnabled  = paperImages.isNotEmpty() || vmState.isAdmin,
                     qbankPaperExpanded = paperExpanded
                 )
@@ -583,6 +598,7 @@ fun QuestionListScreen(
                             isAdmin     = vmState.isAdmin && onAdminEdit != null,
                             isUploading = paperUploading,
                             errorMsg    = paperError,
+                            uploadProgress = paperProgress,
                             onAddImage  = { paperLauncher.launch("image/*") }
                         )
                     }
@@ -1867,7 +1883,8 @@ private fun QuestionTopBar(
     // ── QBank "মূল প্রশ্নপত্র" হেডার-বাটন ──
     onToggleQbankPaper      : (() -> Unit)? = null,
     qbankPaperEnabled       : Boolean = false,
-    qbankPaperExpanded      : Boolean = false
+    qbankPaperExpanded      : Boolean = false,
+    qbankPaperCount         : Int = 0
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -1914,7 +1931,8 @@ private fun QuestionTopBar(
                     enabled  = qbankPaperEnabled,
                     expanded = qbankPaperExpanded,
                     onClick  = onToggleQbankPaper,
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier.padding(end = 8.dp),
+                    count    = qbankPaperCount
                 )
             }
             // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে, জায়গা নষ্ট হচ্ছে"): এই
