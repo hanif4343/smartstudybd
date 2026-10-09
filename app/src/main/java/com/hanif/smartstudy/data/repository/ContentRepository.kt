@@ -1169,26 +1169,59 @@ class ContentRepository(private val context: Context) {
     }
 
     // ── নতুন Home: "মোট অগ্রগতি" = Quiz মোডের সব উত্তরের গড় সঠিক %; কুইজ/মডেল-টেস্টের আজকের গণনা ──
-    suspend fun getHomeOverview(modelTestsToday: Int): HomeOverview {
-        val userId = session.getCurrentUser()?.phone ?: return HomeOverview(todayModelTests = modelTestsToday)
+    suspend fun getHomeOverview(modelTestsToday: Int, modelTestsWeek: Int = modelTestsToday): HomeOverview {
+        val user   = session.getCurrentUser()
+        val userId = user?.phone ?: return HomeOverview(todayModelTests = modelTestsToday, weekModelTests = modelTestsWeek)
         return try {
-            val all = progressDao.overall(userId, "QUIZ")
+            // ── Quiz + QBank মিলিয়ে আসল গণনা (Room: question_progress) ──
+            val q  = progressDao.overall(userId, "QUIZ")
+            val qb = progressDao.overall(userId, "QBANK")
+            val attempted = q.attempted + qb.attempted
+            val correct   = q.correct + qb.correct
+
             val cal = java.util.Calendar.getInstance().apply {
                 set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
                 set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
             }
-            val today = progressDao.countSince(userId, "QUIZ", cal.timeInMillis)
+            val today = progressDao.countSince(userId, "QUIZ", cal.timeInMillis) +
+                        progressDao.countSince(userId, "QBANK", cal.timeInMillis)
+
+            // ── আজকের লক্ষ্য: ইউজারের গত ৭ দিনের গড় থেকে (১.২৫ গুণ, ১০-র গুণিতকে, ন্যূনতম ২০) ──
+            val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+            val last7 = progressDao.countSince(userId, "QUIZ", weekAgo) + progressDao.countSince(userId, "QBANK", weekAgo)
+            val adaptive = (Math.ceil(maxOf(last7 / 7.0 * 1.25, 20.0) / 10.0) * 10).toInt().coerceIn(20, 300)
+            // ইউজার নিজে লক্ষ্য সেট করে থাকলে (home_prefs) সেটাই
             val prefs = context.getSharedPreferences("home_prefs", Context.MODE_PRIVATE)
+            val quizTarget  = if (prefs.contains("quiz_daily_target")) prefs.getInt("quiz_daily_target", adaptive).coerceIn(5, 500) else adaptive
+            val modelTarget = prefs.getInt("model_test_target", 1).coerceIn(1, 20)
+
+            // ── মোট প্রশ্ন: ইউজারের audience-এর দেখার যোগ্য সব বিষয়ের (Topics টেবিলের row-count যোগফল) ──
+            val total = visibleQuestionTotal("Quiz", user) + visibleQuestionTotal("QBank", user)
+            val progress = if (total > 0) ((attempted * 100L) / total).toInt().coerceIn(0, 100) else 0
+
             HomeOverview(
-                quizAccuracyPct   = if (all.attempted > 0) (all.correct * 100) / all.attempted else 0,
-                quizAttempted     = all.attempted,
-                quizCorrect       = all.correct,
+                progressPct       = progress,
+                totalQuestions    = total,
+                quizAccuracyPct   = if (attempted > 0) (correct * 100) / attempted else 0,
+                quizAttempted     = attempted,
+                quizCorrect       = correct,
                 todayQuizAnswered = today,
-                quizDailyTarget   = prefs.getInt("quiz_daily_target", 30).coerceIn(5, 500),
+                quizDailyTarget   = quizTarget,
                 todayModelTests   = modelTestsToday,
-                modelTestTarget   = prefs.getInt("model_test_target", 1).coerceIn(1, 20)
+                weekModelTests    = modelTestsWeek,
+                modelTestTarget   = modelTarget
             )
-        } catch (e: Exception) { HomeOverview(todayModelTests = modelTestsToday) }
+        } catch (e: Exception) { HomeOverview(todayModelTests = modelTestsToday, weekModelTests = modelTestsWeek) }
+    }
+
+    /** একটা sheet-এ (Quiz/QBank) ইউজারের audience-এ দেখার যোগ্য সব বিষয়ের মোট প্রশ্ন */
+    private suspend fun visibleQuestionTotal(sheet: String, user: com.hanif.smartstudy.data.model.User?): Int {
+        val tagsById = refDao.getAllTags().associateBy({ it.tagId }, { it.name })
+        val counts   = getRoomSubjectQuestionCounts(sheet)
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        return refDao.getSubjectsBySheet(sheet)
+            .filter { com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(it.tagId, tagsById, user, adminTag) }
+            .sumOf { counts[it.subjectId] ?: 0 }
     }
 
     // ── History: "প্রায় শেষ টপিক" — ৫০%+ প্রশ্নে উত্তর দেওয়া কিন্তু এখনো শেষ হয়নি এমন টপিক ──
