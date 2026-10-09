@@ -127,6 +127,35 @@ private fun ownPickImageRes(opt: com.hanif.smartstudy.util.QuizOwnPick.Option): 
     else  -> subjectImageRes(opt.label)
 }
 
+/** বাছা বিষয়ের কার্ড (ছবিসহ) — ট্যাপ করলে শুধু সেই বিষয়ের ডেটা খোলে */
+@Composable
+private fun OwnPickCard(
+    modifier : Modifier,
+    opt      : com.hanif.smartstudy.util.QuizOwnPick.Option,
+    onClick  : () -> Unit
+) {
+    val res = ownPickImageRes(opt)
+    Box(modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
+        if (res != null) {
+            Image(
+                painter = painterResource(res), contentDescription = opt.label,
+                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(Modifier.fillMaxSize().background(Color(0xFF3157D5).copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                Text(opt.label, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        // ছোট ব্যাজ — এটা ইউজারের নিজের বাছা বিষয়
+        Box(
+            Modifier.align(Alignment.TopStart).padding(6.dp)
+                .clip(RoundedCornerShape(8.dp)).background(Color(0xFF3157D5))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) { Text("📌 আমার", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = NotoSansBengali) }
+    }
+}
+
 /**
  * Quiz গ্রিডের শেষ কার্ড: "+  Set Own Subject" — ট্যাপ করলে ড্রপডাউনে SSC, HSC ও ছবিসহ
  * সব বিষয়ের তালিকা; বাছাই করলে Quiz-এ সেই অনুযায়ী ডেটা দেখায় (দেখো QuizViewModel.setOwnPick)।
@@ -498,7 +527,11 @@ fun SubjectListScreen(
     // ── Quiz "+ Set Own Subject" কার্ড: onOwnPickChange != null হলে (শুধু Quiz মোডে পাস করা হয়)
     // গ্রিডের শেষে কার্ড দেখায়। ownPick = QuizOwnPick.Option.key (null = সব বিষয়) ──
     ownPick         : String? = null,
-    onOwnPickChange : ((String?) -> Unit)? = null
+    onOwnPickChange : ((String?) -> Unit)? = null,
+    // বাছা বিষয়ের কার্ডে ট্যাপ → সেই বিষয়ের ডেটা খোলে (শুধু ওই বিষয়, মূল Quiz grid অপরিবর্তিত)
+    onOwnPickOpen   : (() -> Unit)? = null,
+    // true = এখন "নিজের বিষয়" স্কোপের ভেতরে আছি (ব্যাক করলে মূল Quiz-এ ফেরে)
+    ownScopeActive  : Boolean = false
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -707,7 +740,7 @@ fun SubjectListScreen(
                         text = when {
                             showQBankFilterBar && qbankSearchQuery.isNotBlank() -> "🔍 কিছু পাওয়া যায়নি"
                             showQBankFilterBar -> "📭 \"$selectedExamCategory\" ক্যাটাগরিতে এখনো কোনো বিষয় যোগ করা হয়নি"
-                            mode == StudyMode.QUIZ && com.hanif.smartstudy.util.QuizOwnPick.find(ownPick) != null ->
+                            mode == StudyMode.QUIZ && ownScopeActive && com.hanif.smartstudy.util.QuizOwnPick.find(ownPick) != null ->
                                 "📭 \"${com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)?.label}\"-এর কোনো ডেটা এখনো যোগ হয়নি"
                             else -> "⚠️ ডেটা আসেনি"
                         },
@@ -812,9 +845,14 @@ fun SubjectListScreen(
                 val orderedSubjects = remember(displaySubjects) { applyHardcodedSubjectOrder(displaySubjects) }
                 val config = LocalConfiguration.current
                 // ── Quiz: শেষে "+ Set Own Subject" কার্ড (null = সেই কার্ড) ──
-                val showOwnCard = mode == StudyMode.QUIZ && onOwnPickChange != null
+                // মূল Quiz-এর সব বিষয় আগের মতোই থাকে; শেষে (১) বাছা বিষয়ের কার্ড (থাকলে), (২) "+ Set Own Subject"
+                val showOwnCard = mode == StudyMode.QUIZ && onOwnPickChange != null && !ownScopeActive
+                val pickedOpt   = com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)
+                val ownPickEntry = remember { SubjectEntry(name = "__own_pick__", totalQ = 0, doneQ = 0) }
                 val gridItems: List<SubjectEntry?> =
-                    orderedSubjects + (if (showOwnCard) listOf<SubjectEntry?>(null) else emptyList())
+                    orderedSubjects +
+                    (if (showOwnCard && pickedOpt != null) listOf<SubjectEntry?>(ownPickEntry) else emptyList()) +
+                    (if (showOwnCard) listOf<SubjectEntry?>(null) else emptyList())
                 val count = gridItems.size.coerceAtLeast(1)
 
                 // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
@@ -845,11 +883,16 @@ fun SubjectListScreen(
                 if (orderedSubjects.isEmpty() && showOwnCard) {
                     // কোনো সাবজেক্ট নেই (যেমন বাছা বিষয়ে ডেটা নেই) — কার্ডটা বিশাল না হয়ে ছোট থাকুক
                     Box(Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp), contentAlignment = Alignment.Center) {
-                        OwnSubjectAddCard(
-                            modifier = Modifier.width(200.dp).height(150.dp),
-                            ownPick  = ownPick,
-                            onPick   = { onOwnPickChange?.invoke(it) }
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(spacingDp)) {
+                            if (pickedOpt != null) {
+                                OwnPickCard(Modifier.width(150.dp).height(170.dp), pickedOpt) { onOwnPickOpen?.invoke() }
+                            }
+                            OwnSubjectAddCard(
+                                modifier = Modifier.width(150.dp).height(170.dp),
+                                ownPick  = ownPick,
+                                onPick   = { onOwnPickChange?.invoke(it) }
+                            )
+                        }
                     }
                 } else
                 Column(
@@ -868,6 +911,12 @@ fun SubjectListScreen(
                                         ownPick  = ownPick,
                                         onPick   = { onOwnPickChange?.invoke(it) }
                                     )
+                                    return@forEach
+                                }
+                                if (subject === ownPickEntry && pickedOpt != null) {
+                                    OwnPickCard(
+                                        Modifier.width(cardWidthDp).height(cardHeightDp), pickedOpt
+                                    ) { onOwnPickOpen?.invoke() }
                                     return@forEach
                                 }
                                 SubjectGridImageCard(
