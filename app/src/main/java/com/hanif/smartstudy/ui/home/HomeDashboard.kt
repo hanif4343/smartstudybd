@@ -99,6 +99,19 @@ private fun hdGreeting(): String {
     }
 }
 
+/** হেডারের নিচের লাইন — স্থির motto-র বদলে ইউজারের আসল অবস্থা (স্ট্রিক, আজকের পড়া/প্রশ্ন) */
+private fun hdStatusLine(state: HomeUiState): String {
+    val streak = state.streakInfo.streakDays
+    val studyMin = state.goalProgress.doneMinutes
+    val answered = state.overview.todayQuizAnswered
+    return when {
+        streak >= 2 && (studyMin > 0 || answered > 0) -> "🔥 $streak দিন টানা · আজ ${hdFmtMin(studyMin)} পড়া, $answered প্রশ্ন"
+        studyMin > 0 || answered > 0 -> "আজ ${hdFmtMin(studyMin)} পড়েছো, $answered টি প্রশ্নের উত্তর দিয়েছো"
+        streak >= 1 -> "🔥 $streak দিনের স্ট্রিক — আজ শুরু করলে বজায় থাকবে"
+        else -> "আজ এখনো পড়া শুরু হয়নি — একটা কুইজ দিয়ে শুরু করো"
+    }
+}
+
 private val HdMottos = listOf(
     "লক্ষ্য বড় রাখি, চেষ্টা আরো বড়",
     "আজকের পরিশ্রম, কালকের সাফল্য",
@@ -186,7 +199,8 @@ internal fun HomeSkyHeader(
     val sun      = if (dark) Color(0xFFFDE68A) else Color(0xFFFFE9A8)
 
     var menuOpen by remember { mutableStateOf(false) }
-    val motto = remember { HdMottos[java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR) % HdMottos.size] }
+    // ── আসল তথ্য-ভিত্তিক লাইন (স্থির motto না): স্ট্রিক / আজকের পড়া / আজকের প্রশ্ন থেকে ──
+    val motto = hdStatusLine(state)
     val name = state.user?.displayName() ?: "বন্ধু"
 
     Box(Modifier.fillMaxWidth().height(128.dp)) {
@@ -233,7 +247,7 @@ internal fun HomeSkyHeader(
                 Box(
                     Modifier.align(Alignment.BottomEnd).size(16.dp).clip(CircleShape)
                         .background(Color.White).padding(2.dp).clip(CircleShape)
-                        .background(Color(0xFF22C55E))
+                        .background(if (state.isOffline) Color(0xFF94A3B8) else Color(0xFF22C55E))   // আসল নেট-স্ট্যাটাস
                 )
             }
             Spacer(Modifier.width(10.dp))
@@ -248,7 +262,7 @@ internal fun HomeSkyHeader(
                     Text(state.xpInfo.currentLevel.emoji, fontSize = 18.sp)
                 }
                 Spacer(Modifier.height(2.dp))
-                Text("$motto 🌱", fontSize = 12.sp, color = textSub, fontFamily = NotoSansBengali,
+                Text(motto, fontSize = 12.sp, color = textSub, fontFamily = NotoSansBengali,
                     maxLines = 2, lineHeight = 16.sp)
             }
             Spacer(Modifier.width(6.dp))
@@ -395,7 +409,7 @@ private fun HdBuddyInner(state: HomeUiState, onOpen: () -> Unit) {
                 fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val bd = b.buddyProgress
             Text(
-                if (bd.doneMinutes >= 0) "আজ ${hdFmtMin(bd.doneMinutes)}" else "এখন সক্রিয়",
+                if (bd.doneMinutes >= 0) "আজ ${hdFmtMin(bd.doneMinutes)}" else "আজকের তথ্য নেই",
                 fontSize = 11.sp, color = Color(0xFF4F46E5), fontFamily = NotoSansBengali, maxLines = 1
             )
         }
@@ -414,16 +428,17 @@ internal fun HomeProgressCard(
     onOpenStats: () -> Unit
 ) {
     HdCard(Modifier.fillMaxWidth(), radius = 24.dp, onClick = onOpenStats) {
+      Column {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             HdRing(
-                fraction = overview.quizAccuracyPct / 100f,
+                fraction = overview.progressPct / 100f,
                 size = 84.dp, stroke = 10.dp, color = HdGreen,
                 track = HdGreen.copy(alpha = 0.16f)
             ) {
-                Text("${overview.quizAccuracyPct}%", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
+                Text("${overview.progressPct}%", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
                 Text("মোট অগ্রগতি", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = NotoSansBengali, maxLines = 1)
@@ -437,20 +452,30 @@ internal fun HomeProgressCard(
                     HdGreen, Modifier.weight(1f)
                 )
                 HdMiniStat(
-                    Icons.Default.FactCheck, HdIndigo, "কুইজ",
+                    Icons.Default.FactCheck, HdIndigo, "প্রশ্ন",
                     "${overview.todayQuizAnswered} / ${overview.quizDailyTarget}",
                     if (overview.quizDailyTarget > 0) overview.todayQuizAnswered.toFloat() / overview.quizDailyTarget else 0f,
                     HdBlue, Modifier.weight(1f)
                 )
                 HdMiniStat(
                     Icons.Default.Description, HdGreen, "মডেল টেস্ট",
-                    "${overview.todayModelTests} / ${overview.modelTestTarget}",
-                    if (overview.modelTestTarget > 0) overview.todayModelTests.toFloat() / overview.modelTestTarget else 0f,
+                    "আজ ${overview.todayModelTests} · ৭ দিনে ${overview.weekModelTests}",
+                    if (overview.modelTestTarget > 0) (overview.todayModelTests.toFloat() / overview.modelTestTarget) else 0f,
                     Color(0xFF94A3B8), Modifier.weight(1f)
                 )
             }
             HdChevron(MaterialTheme.colorScheme.onSurface, 22.dp)
         }
+        // ── আসল সংখ্যা: কতগুলো প্রশ্ন সমাধান, মোটের কতটা, আর সঠিক হার ──
+        if (overview.totalQuestions > 0 || overview.quizAttempted > 0) {
+            Text(
+                "${overview.quizAttempted} / ${overview.totalQuestions} প্রশ্ন সমাধান · সঠিক হার ${overview.quizAccuracyPct}%",
+                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 14.dp, end = 12.dp, bottom = 8.dp)
+            )
+        }
+      }
     }
 }
 
@@ -700,9 +725,9 @@ private fun hdActivityStyle(r: RecentActivityItem): Triple<ImageVector, Color, C
 // ৫) Leaderboard · Support · Tools — তিনটা গ্রেডিয়েন্ট কার্ড
 // ═══════════════════════════════════════════════════════════
 @Composable
-internal fun HomeBottomTilesRow(onLeaderboard: () -> Unit, onSupport: () -> Unit, onTools: () -> Unit) {
+internal fun HomeBottomTilesRow(onLeaderboard: () -> Unit, onSupport: () -> Unit, onTools: () -> Unit, leaderboardSub: String = "শীর্ষ শিক্ষার্থী") {
     Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        HdBigTile("Leaderboard", "শীর্ষ শিক্ষার্থী", Icons.Default.EmojiEvents, Color(0xFFFBBF24), Color(0xFFF97316), onLeaderboard, Modifier.weight(1f))
+        HdBigTile("Leaderboard", leaderboardSub, Icons.Default.EmojiEvents, Color(0xFFFBBF24), Color(0xFFF97316), onLeaderboard, Modifier.weight(1f))
         HdBigTile("Support", "AI সাহায্য", Icons.Default.SupportAgent, Color(0xFF818CF8), Color(0xFF4F46E5), onSupport, Modifier.weight(1f))
         HdBigTile("More", "আরও সব", Icons.Default.Build, Color(0xFF2DD4BF), Color(0xFF0D9488), onTools, Modifier.weight(1f))
     }
