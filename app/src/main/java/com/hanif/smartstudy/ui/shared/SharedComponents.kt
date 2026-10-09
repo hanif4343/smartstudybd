@@ -2922,7 +2922,8 @@ fun QuestionPaperHeaderButton(
     expanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    onDark: Boolean = false
+    onDark: Boolean = false,
+    count: Int = 0          // ছবির সংখ্যা — ১-এর বেশি হলে বাটনে দেখায়
 ) {
     val base = if (onDark) Color.White else Indigo600
     val tint = base.copy(alpha = if (enabled) 1f else 0.4f)
@@ -2941,7 +2942,7 @@ fun QuestionPaperHeaderButton(
         ) {
             Icon(Icons.Default.Image, null, tint = tint, modifier = Modifier.size(14.dp))
             Text(
-                "মূল প্রশ্নপত্র", fontFamily = NotoSansBengali,
+                if (count > 1) "মূল প্রশ্নপত্র ($count)" else "মূল প্রশ্নপত্র", fontFamily = NotoSansBengali,
                 fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tint, maxLines = 1
             )
             if (enabled) {
@@ -2966,8 +2967,10 @@ fun QuestionPaperImagesPanel(
     isAdmin: Boolean = false,
     isUploading: Boolean = false,
     errorMsg: String? = null,
+    uploadProgress: String? = null,     // যেমন "২/৫" — একাধিক ছবি আপলোডের সময়
     onAddImage: (() -> Unit)? = null
 ) {
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
     Column(modifier.fillMaxWidth()) {
         if (isAdmin && onAddImage != null) {
             Row(
@@ -2980,11 +2983,16 @@ fun QuestionPaperImagesPanel(
                         modifier = Modifier.padding(6.dp).size(16.dp),
                         strokeWidth = 2.dp, color = Indigo600
                     )
+                    Text(
+                        if (uploadProgress != null) "আপলোড হচ্ছে… $uploadProgress" else "আপলোড হচ্ছে…",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Indigo600
+                    )
                 } else {
                     TextButton(onClick = onAddImage) {
                         Icon(Icons.Default.Add, null, tint = Indigo600, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("ছবি যোগ করুন", fontFamily = NotoSansBengali, fontSize = 12.sp,
+                        // গ্যালারি থেকে একসাথে একাধিক ছবি বাছা যায়
+                        Text("ছবি যোগ করুন (একাধিক বাছা যায়)", fontFamily = NotoSansBengali, fontSize = 12.sp,
                             fontWeight = FontWeight.Bold, color = Indigo600)
                     }
                 }
@@ -2993,7 +3001,11 @@ fun QuestionPaperImagesPanel(
                 Text(it, fontSize = 11.sp, color = Color(0xFFDC2626), fontFamily = NotoSansBengali)
             }
         }
-        urls.forEach { url -> ZoomableImage(url = url) }
+        // swipe + থাম্বনেইল + ফুল-স্ক্রিন ভিউয়ার (দেখো QuestionPaperViewer.kt)
+        QuestionPaperPager(urls = urls, onOpen = { viewerIndex = it })
+    }
+    viewerIndex?.let { i ->
+        QuestionPaperViewer(urls = urls, startIndex = i, onDismiss = { viewerIndex = null })
     }
 }
 
