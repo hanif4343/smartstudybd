@@ -28,6 +28,9 @@ data class QuizUiState(
     val mode          : StudyMode        = StudyMode.QUIZ,
     // ── Quiz "Set Own Subject" — SSC / HSC / একটা বিষয়ের key (QuizOwnPick.Option.key), null = সব ──
     val ownPick       : String?          = null,
+    // true = ইউজার বাছা "নিজের বিষয়" খুলেছে — শুধু তখনই ownPick-এর audience/বিষয়-ফিল্টার কার্যকর;
+    // মূল Quiz-এর সব বিষয় (ownScopeActive=false) সবসময় আগের মতোই দেখায়
+    val ownScopeActive: Boolean          = false,
     val navPath       : NavPath          = NavPath(),
     val subjects      : List<SubjectEntry>   = emptyList(),
     val subTopics     : List<SubTopicEntry>  = emptyList(),
@@ -177,7 +180,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var quizOwnAudienceMem: String? = null
     @Volatile private var quizOwnPickMem: String? = null
     private fun quizOwnAudience(mode: StudyMode = _state.value.mode): String {
-        if (mode != StudyMode.QUIZ) return ""
+        if (mode != StudyMode.QUIZ || !_state.value.ownScopeActive) return ""
         return quizOwnAudienceMem ?: session.getQuizOwnAudience().also { quizOwnAudienceMem = it }
     }
     private fun quizOwnPickKey(): String =
@@ -227,11 +230,34 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             quizOwnPickMem = key.orEmpty()
             quizOwnAudienceMem = audience
             session.setQuizOwnPick(key.orEmpty(), audience)
-            _state.update { it.copy(ownPick = key?.takeIf { k -> k.isNotBlank() }, isLoading = true, error = null) }
-            if (_state.value.mode == StudyMode.QUIZ) {
-                try { rebuildSubjectsLazy(StudyMode.QUIZ) } catch (e: Exception) {
-                    Log.w("QuizVM", "setOwnPick rebuild failed: ${e.message}")
-                }
+            // শুধু বাছাই সেভ — মূল Quiz-এর বিষয়-তালিকা বদলায় না। কার্ড ট্যাপ করলে openOwnPick()
+            _state.update { it.copy(ownPick = key?.takeIf { k -> k.isNotBlank() }) }
+        }
+    }
+
+    /** বাছা বিষয়ের কার্ডে ট্যাপ — শুধু সেই বিষয়/SSC/HSC-এর ডেটা খোলে */
+    fun openOwnPick() {
+        val opt = com.hanif.smartstudy.util.QuizOwnPick.find(_state.value.ownPick) ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(ownScopeActive = true, isLoading = true, subjects = emptyList(), navPath = NavPath(), error = null) }
+            try { rebuildSubjectsLazy(StudyMode.QUIZ) } catch (e: Exception) {
+                Log.w("QuizVM", "openOwnPick rebuild failed: ${e.message}")
+            }
+            _state.update { it.copy(isLoading = false) }
+            // একটা নির্দিষ্ট বিষয় আর ঠিক ১টা মিললে সরাসরি তার টপিক-লিস্টে ঢোকো
+            val only = _state.value.subjects.singleOrNull()
+            if (opt.audienceTag == null && only != null) navigateToSubjectLazy(only.name)
+        }
+    }
+
+    /** "নিজের বিষয়" স্কোপ থেকে বেরিয়ে মূল Quiz-এর সব বিষয়ে ফেরো */
+    private fun exitOwnScope() {
+        timerJob?.cancel()
+        _state.update { it.copy(ownScopeActive = false, navPath = NavPath(), subTopics = emptyList(),
+            subjects = emptyList(), isLoading = true, isQuizActive = false, showResult = false, result = null, timerSec = 0) }
+        viewModelScope.launch {
+            try { rebuildSubjectsLazy(StudyMode.QUIZ) } catch (e: Exception) {
+                Log.w("QuizVM", "exitOwnScope rebuild failed: ${e.message}")
             }
             _state.update { it.copy(isLoading = false) }
         }
@@ -344,6 +370,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 mode         = newMode,
+                ownScopeActive = false,
                 navPath      = NavPath(),
                 isQuizActive = false,
                 result       = null,
@@ -482,7 +509,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val user     = session.getCurrentUser().withQuizOwnAudience(mode)
         val adminTag = quizAdminTag(user, mode)
         // ── Set Own Subject: একটা নির্দিষ্ট বিষয় বাছা থাকলে (SSC/HSC না) শুধু নামে-মেলা Subject ──
-        val ownSubjectOpt = if (mode == StudyMode.QUIZ)
+        val ownSubjectOpt = if (mode == StudyMode.QUIZ && _state.value.ownScopeActive)
             com.hanif.smartstudy.util.QuizOwnPick.find(quizOwnPickKey())?.takeIf { it.audienceTag == null } else null
         val tagsById = repo.getRoomTags().associateBy({ it.tagId }, { it.name })
         // ── FIX ("যেই সাবজেক্ট ফাঁকা সেটা দেখানোর দরকার কী?"): এই sheet-এ অন্তত একটা
@@ -1209,6 +1236,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         subTopicLoadJob?.cancel()
         subTopicLoadToken++
         when {
+            // ── "নিজের বিষয়" স্কোপ: স্কোপের রুট (বা একক-বিষয়ের টপিক-লিস্ট) থেকে back → মূল Quiz ──
+            _state.value.ownScopeActive && !_state.value.showResult && !_state.value.isQuizActive &&
+                !_state.value.isMockZone && !_state.value.isModelTestZone && !_state.value.isModelTestSubjectPicker &&
+                (path.depth() == 0 ||
+                 (path.depth() == 1 && com.hanif.smartstudy.util.QuizOwnPick.find(_state.value.ownPick)?.audienceTag == null &&
+                  _state.value.subjects.size <= 1)) -> exitOwnScope()
             // ── QBank Model Test: চলমান টেস্ট/রেজাল্ট থেকে back → আবার সেটআপ স্ক্রিনে (প্ল্যান আগের মতোই) ──
             _state.value.activeQBankMt != null -> {
                 timerJob?.cancel()
