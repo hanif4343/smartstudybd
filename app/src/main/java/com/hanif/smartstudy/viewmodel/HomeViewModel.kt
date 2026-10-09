@@ -102,20 +102,24 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
             }.timeInMillis
             val modelToday = history.count { it.isModelTest && it.timestamp >= dayStart }
-            val overview   = repo.getHomeOverview(modelToday)
+            val weekStart  = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+            val modelWeek  = history.count { it.isModelTest && it.timestamp >= weekStart }
+            val overview   = repo.getHomeOverview(modelToday, modelWeek)
             val recent     = history.take(3).map { h ->
                 val first = h.topics.firstOrNull().orEmpty()
                 val parts = first.split(" - ", limit = 2)
                 val title = when {
-                    h.isModelTest       -> "মডেল টেস্ট"
+                    h.isModelTest       -> first.ifBlank { "মডেল টেস্ট" }
                     h.mode == "STUDY"   -> parts.firstOrNull().orEmpty().ifBlank { "পড়াশোনা" }
                     parts.isNotEmpty() && parts[0].isNotBlank() -> "${parts[0]} ${h.modeLabel}"
                     else                -> h.modeLabel
                 }
+                // আসল স্কোর দেখাও (সঠিক/মোট · %) — গ্রেড না-হওয়া (written) টেস্টে শুধু জমার সংখ্যা
                 val sub = when {
                     h.mode == "STUDY" && parts.size > 1 -> parts[1]
-                    h.total > 0 -> "${h.total} প্রশ্ন"
-                    else        -> h.modeLabel
+                    h.isUngraded -> "${h.recorded}টি উত্তর জমা"
+                    h.total > 0  -> "${h.correct}/${h.total} সঠিক · ${h.pct}%"
+                    else         -> h.modeLabel
                 }
                 RecentActivityItem(h.mode, title, sub, h.timestamp, h.isModelTest)
             }
