@@ -265,7 +265,9 @@ fun HomeScreen(
             HomeBottomTilesRow(
                 onLeaderboard = { onOpenMenuPage("leaderboard") },
                 onSupport     = onOpenAiChat,
-                onTools       = { showTools = true }
+                onTools       = { showTools = true },
+                // আসল XP ও লেভেল (শীর্ষ শিক্ষার্থী-র স্থির লেখার বদলে)
+                leaderboardSub = "${state.xpInfo.xp} XP · লেভেল ${state.xpInfo.currentLevel.level}"
             )
 
             AdBannerPlaceholder()
@@ -283,7 +285,7 @@ fun HomeScreen(
 
     if (showTools) {
         val toolEntries = buildList {
-            add(HdQuickEntry("Model Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
+            add(HdQuickEntry("Mock Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
             add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
             add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
             add(HdQuickEntry("Wrong Review", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
