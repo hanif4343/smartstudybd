@@ -279,13 +279,24 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * ফিল্টারে ছাঁটা, তাই খালি/নতুন Subject-এ কিছু সরানো যেত না)। প্রতিটা মোডের Subject/Topic
      * আলাদা: subjects.sheet কলাম অনুযায়ী, আর Topic সবসময় তার Subject-এর অধীনে।
      */
-    suspend fun adminSubjectsForMove(sheet: String): List<String> =
-        repo.getRoomSubjectsRefBySheet(sheet).map { it.name }.filter { it.isNotBlank() }.distinct()
+    suspend fun adminSubjectsForMove(sheet: String): List<String> {
+        // Reference টেবিল + প্রশ্নে থাকা সব Subject মিলিয়ে (কোনোটা বাদ পড়বে না)
+        val ref = repo.getRoomSubjectsRefBySheet(sheet).map { it.name }
+        val fromQuestions = try { repo.getRoomQuestionSubjects(sheet) } catch (_: Exception) { emptyList() }
+        val seen = HashSet<String>()
+        return (ref + fromQuestions).map { it.trim() }.filter { it.isNotBlank() }
+            .filter { seen.add(it.replace(" ", "").lowercase()) }
             .sortedWith { a, b -> com.hanif.smartstudy.util.TopicOrdering.naturalCompare(a, b) }
+    }
 
     suspend fun adminTopicsForSubject(sheet: String, subject: String): List<String> {
-        val subjectId = repo.resolveSubjectId(sheet, subject) ?: return emptyList()
-        return repo.getRoomTopicsForSubject(subjectId).map { it.name }
+        val subjectId = repo.resolveSubjectId(sheet, subject)
+        val ref = if (subjectId != null) repo.getRoomTopicsForSubject(subjectId).map { it.name } else emptyList()
+        val fromQuestions = try { repo.getRoomQuestionSubTopics(sheet, subject) } catch (_: Exception) { emptyList() }
+        val seen = HashSet<String>()
+        return (ref + fromQuestions).map { it.trim() }.filter { it.isNotBlank() }
+            .filter { seen.add(it.replace(" ", "").lowercase()) }
+            .sortedWith { a, b -> com.hanif.smartstudy.util.TopicOrdering.naturalCompare(a, b) }
     }
 
     private val _state = MutableStateFlow(QuizUiState())
