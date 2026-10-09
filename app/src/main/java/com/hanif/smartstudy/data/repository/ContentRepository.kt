@@ -406,6 +406,9 @@ class ContentRepository(private val context: Context) {
         else    -> emptyList()
     }.toSet()
     suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
+    // Move ডায়ালগে সব Subject/Topic দেখাতে — প্রশ্নের টেবিল থেকে distinct (reference-এ না থাকলেও)
+    suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet)
+    suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet, subject)
     // ── PERF/UX FIX ("Subject list এ প্রশ্নসংখ্যা/প্রগ্রেস দেখানো দরকার, কিন্তু পুরো
     // content ডাউনলোড না করেই"): Topics reference-টেবিলে প্রতিটা topic-এর rowCount
     // (Quiz/QBank/Study — mode অনুযায়ী আলাদা কলাম, দেখো TopicEntity-এর কমেন্ট)
