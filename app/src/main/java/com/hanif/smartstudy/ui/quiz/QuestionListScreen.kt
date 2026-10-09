@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -234,10 +235,23 @@ fun QuestionListScreen(
     // ── Study Nav Phase 4: Study টুলবার থেকে অন্য ট্যাবে যাওয়া (Practice/Wrong Review) ──
     onStudyAction: ((StudyAction) -> Unit)? = null
 ) {
+    // ── QBank: MCQ আর Written প্রশ্ন আলাদা ট্যাবে দেখানো। দুই ধরনের প্রশ্নই থাকলে
+    // তবেই ট্যাব দেখায়; `questions` এখন ফিল্টার করা লিস্ট, আসল পুরো লিস্ট `allQuestions`
+    // (ViewModel-এর index আসল লিস্ট ধরে চলে, তাই vmIdx দিয়ে ম্যাপ করা হয়)। ──
+    val allQuestions = questions
+    var qbankTypeTab by rememberSaveable { mutableStateOf(0) }   // 0 = MCQ, 1 = Written
+    val qbankMcqCount = remember(allQuestions) { allQuestions.count { !it.isWritten() } }
+    val qbankWrittenCount = remember(allQuestions) { allQuestions.count { it.isWritten() } }
+    val qbankSplit = mode == StudyMode.QBANK && qbankMcqCount > 0 && qbankWrittenCount > 0
+    @Suppress("NAME_SHADOWING")
+    val questions = if (qbankSplit) {
+        if (qbankTypeTab == 0) allQuestions.filter { !it.isWritten() } else allQuestions.filter { it.isWritten() }
+    } else allQuestions
+    val realIndexById = remember(allQuestions) { allQuestions.withIndex().associate { it.value.id to it.index } }
     // QBank-এ পেজিনেশন নেই — সব প্রশ্ন এক পেজে (pageSize বিশাল ধরা হয়)
     val pageSize = if (mode == StudyMode.QBANK) Int.MAX_VALUE else QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
-    val effectiveTotal = if (totalQuestions > 0) totalQuestions else questions.size
+    val effectiveTotal = if (qbankSplit) questions.size else if (totalQuestions > 0) totalQuestions else questions.size
     val totalPages = if (mode == StudyMode.QBANK) 1 else (effectiveTotal + pageSize - 1) / pageSize
     val safeCurrentPage = currentPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
     val pageOffset = safeCurrentPage * pageSize
@@ -357,9 +371,14 @@ fun QuestionListScreen(
         viewModel.clearFeedback()
     }
 
-    LaunchedEffect(highlightQuestionId, questions) {
+    LaunchedEffect(highlightQuestionId, allQuestions) {
         val targetId = highlightQuestionId ?: return@LaunchedEffect
-        val globalIdx = questions.indexOfFirst { it.id == targetId }
+        val target = allQuestions.firstOrNull { it.id == targetId }
+        if (qbankSplit && target != null) qbankTypeTab = if (target.isWritten()) 1 else 0
+        val globalIdx = if (qbankSplit && target != null) {
+            val list = if (target.isWritten()) allQuestions.filter { it.isWritten() } else allQuestions.filter { !it.isWritten() }
+            list.indexOfFirst { it.id == targetId }
+        } else questions.indexOfFirst { it.id == targetId }
         if (globalIdx >= 0) {
             // সঠিক page-এ যাও প্রথমে
             val targetPage = globalIdx / pageSize
@@ -374,7 +393,7 @@ fun QuestionListScreen(
     }
 
     // Page পরিবর্তন হলে list এর উপরে scroll করো
-    LaunchedEffect(safeCurrentPage) {
+    LaunchedEffect(safeCurrentPage, qbankTypeTab) {
         listState.scrollToItem(0)
     }
 
@@ -454,7 +473,7 @@ fun QuestionListScreen(
                 val q = pagedQuestions.getOrNull(kbIdx)
                 val optionText = when (opt) { 1 -> q?.optionA; 2 -> q?.optionB; 3 -> q?.optionC; else -> q?.optionD }
                 if (q != null && q.isMcq() && !optionText.isNullOrBlank()) {
-                    viewModel.answerMcq(pageOffset + kbIdx, opt)
+                    viewModel.answerMcq(realIndexById[q.id] ?: (pageOffset + kbIdx), opt)
                 }
                 true
             }
@@ -588,6 +607,36 @@ fun QuestionListScreen(
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
 
+                // ── QBank: MCQ / Written আলাদা ট্যাব ──
+                if (qbankSplit) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            Triple(0, "🔘 MCQ", qbankMcqCount),
+                            Triple(1, "✍️ Written", qbankWrittenCount)
+                        ).forEach { (tab, label, count) ->
+                            val selected = qbankTypeTab == tab
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) Indigo600 else MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { qbankTypeTab = tab }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "$label ($count)",
+                                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                    color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // ── QBank: "মূল প্রশ্নপত্র" বাটন হেডারে সরানো হয়েছে (QuestionTopBar)।
                 // বাটন চাপলে এখানে ছবিগুলো খোলে। ──
                 if (mode == StudyMode.QBANK && paperExpanded && (paperImages.isNotEmpty() || vmState.isAdmin)) {
@@ -656,7 +705,8 @@ fun QuestionListScreen(
                     verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     itemsIndexed(pagedQuestions, key = { _, q -> q.id }) { localIdx, q ->
-                        val globalIdx = pageOffset + localIdx
+                        val globalIdx = pageOffset + localIdx   // দেখানোর নম্বর
+                        val vmIdx = realIndexById[q.id] ?: globalIdx   // ViewModel-এর আসল index
                         val isHighlighted = q.id == activeHighlightId
                         // ── চেকমার্ক দিলে (study mode) পরের প্রশ্ন কার্ডটা স্মুথলি
                         //    স্ক্রল হয়ে স্ক্রিনে উঠে আসবে — এটা শুধুই স্ক্রল অ্যানিমেশন,
@@ -692,7 +742,7 @@ fun QuestionListScreen(
                         // Study-র রিকল-টাইপিং মোডের মতোই একই আচরণ। অন্য মোডে (Quiz/Model
                         // Test) আগের মতোই শুধু ফলাফল সেভ হয়, স্ক্রল হয় না। ──
                         val onWrittenSelfGradeAdvance: (Boolean) -> Unit = { correct ->
-                            viewModel.answerWrittenSelfGrade(globalIdx, correct)
+                            viewModel.answerWrittenSelfGrade(vmIdx, correct)
                             if (mode == StudyMode.QBANK) {
                                 scrollScope.launch {
                                     val nextLocalIdx = (localIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
@@ -813,14 +863,14 @@ fun QuestionListScreen(
                                     item        = q,
                                     mode        = mode,
                                     totalCount  = questions.size,
-                                    onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
-                                    onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
+                                    onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
+                                    onWritten   = { text -> viewModel.answerWritten(vmIdx, text) },
                                     onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                                     isModelTest = isModelTest,
                                     onWrittenSelfGrade = onWrittenSelfGradeAdvance,
                                     onBookmark  = { viewModel.toggleBookmark(q.id) },
                                     onStudyDone = onStudyDoneWithScroll,
-                                    onReport    = { reportIdx = globalIdx },
+                                    onReport    = { reportIdx = vmIdx },
                                     currentUser = currentUser,
                                     onAdminRefresh = { viewModel.adminRefreshContent() },
                                     // ── UX ফিক্স: Admin কন্ট্রোল ডিফল্ট-হাইড, "🔧 Admin Tools" টগল
@@ -858,14 +908,14 @@ fun QuestionListScreen(
                             item        = q,
                             mode        = mode,
                             totalCount  = questions.size,
-                            onMcqAnswer = { opt -> viewModel.answerMcq(globalIdx, opt) },
-                            onWritten   = { text -> viewModel.answerWritten(globalIdx, text) },
+                            onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
+                            onWritten   = { text -> viewModel.answerWritten(vmIdx, text) },
                             onWrittenDraft = { text -> viewModel.updateWrittenDraft(q.sourceKey(), text) },
                             isModelTest = isModelTest,
                             onWrittenSelfGrade = onWrittenSelfGradeAdvance,
                             onBookmark  = { viewModel.toggleBookmark(q.id) },
                             onStudyDone = onStudyDoneWithScroll,
-                            onReport    = { reportIdx = globalIdx },
+                            onReport    = { reportIdx = vmIdx },
                             currentUser = currentUser,
                             onAdminRefresh = { viewModel.adminRefreshContent() },
                             onAdminEdit = onAdminEdit,   // সবসময় পাস — edit পিল সবসময় দেখা যায়; null হলে Firebase-এ সরাসরি লিখত (ভুল পথ)
@@ -1210,8 +1260,10 @@ fun QuestionListScreen(
             subjects        = vmState.subjects.map { it.name },
             onLoadSubjects  = { viewModel.adminSubjectsForMove(moveSheetKey) },
             selectedCount   = moveTargetIds.size,
-            currentSubject  = subject,
-            currentSubTopic = subTopic,
+            // ── QBank-এ navPath-এর subject/subTopic আসলে পদবী/প্রতিষ্ঠান/সাল হতে পারে,
+            // তাই প্রশ্নের নিজের আসল Subject/Topic ব্যবহার হয় ──
+            currentSubject  = moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subject?.takeIf { it.isNotBlank() } } ?: subject,
+            currentSubTopic = moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subTopic?.takeIf { it.isNotBlank() } } ?: subTopic,
             openTopicFirst  = moveDialogOpenTopicFirst,
             onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(moveSheetKey, subj) },
             onConfirm = { newSubject, newSubTopic ->
@@ -1431,7 +1483,7 @@ fun QuestionListScreen(
 
     // ── Report dialog ──
     if (reportIdx >= 0) {
-        val q = questions.getOrNull(reportIdx)
+        val q = allQuestions.getOrNull(reportIdx)
         ReportDialog(
             questionId   = q?.id ?: "",
             questionText = q?.question ?: "",
@@ -1938,7 +1990,7 @@ private fun QuestionTopBar(
             // ── UX ফিক্স ("Admin কন্ট্রোল সবসময় দেখা যাচ্ছে, জায়গা নষ্ট হচ্ছে"): এই
             // একটা 🔧 টগল দিয়ে সব কার্ডের move-row/edit-pill-row একসাথে দেখানো/লুকানো
             // যায় — ডিফল্ট বন্ধ (student-এর মতো ক্লিন ভিউ), Admin ইচ্ছা করলেই খুলবে ──
-            if (isAdmin && onToggleAdminControls != null && mode != StudyMode.QBANK) {
+            if (isAdmin && onToggleAdminControls != null) {
                 IconButton(onClick = onToggleAdminControls) {
                     Icon(
                         Icons.Default.Build,
@@ -1961,7 +2013,7 @@ private fun QuestionTopBar(
             }
             // ── Admin "Move" সিলেক্ট-মোড টগল — চালু থাকলে প্রতিটা কার্ডের পাশে চেকবক্স
             // দেখা যায়, এক/একাধিক প্রশ্ন সিলেক্ট করে নিচের floating bar দিয়ে move করা যায় ──
-            if (isAdmin && onToggleSelectMode != null && mode != StudyMode.QBANK) {
+            if (isAdmin && onToggleSelectMode != null) {
                 IconButton(onClick = onToggleSelectMode) {
                     Icon(
                         if (isSelectMode) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
