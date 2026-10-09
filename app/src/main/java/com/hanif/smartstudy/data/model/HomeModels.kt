@@ -105,13 +105,22 @@ data class MotivationalQuote(
 
 // ── নতুন Home ড্যাশবোর্ডের "মোট অগ্রগতি" কার্ড ──
 // quizAccuracyPct = Quiz মোডে এখন পর্যন্ত দেওয়া সব উত্তরের গড় সঠিক % (correct ÷ attempted)
+//
+// ⚠️ এখন সব মান আসল (Room + TestHistory থেকে):
+//  • progressPct   = (Quiz+QBank-এ যতগুলো আলাদা প্রশ্নের উত্তর দিয়েছে) ÷ (ইউজারের audience-এর সব বিষয়ের মোট প্রশ্ন, Topics টেবিল)
+//  • quizAccuracyPct/quizAttempted/quizCorrect = Quiz+QBank মিলিয়ে সঠিক হার ও গণনা
+//  • quizDailyTarget = ইউজারের গত ৭ দিনের গড় দৈনিক প্রশ্ন-সংখ্যার ওপর ভিত্তি করে (ফিক্সড ৩০ না)
+//  • weekModelTests = গত ৭ দিনে দেওয়া Model Test
 data class HomeOverview(
+    val progressPct       : Int = 0,
+    val totalQuestions    : Int = 0,     // ইউজারের audience-এর মোট প্রশ্ন (Quiz+QBank)
     val quizAccuracyPct   : Int = 0,
-    val quizAttempted     : Int = 0,
+    val quizAttempted     : Int = 0,     // আলাদা আলাদা কতগুলো প্রশ্নের উত্তর দিয়েছে (Quiz+QBank)
     val quizCorrect       : Int = 0,
-    val todayQuizAnswered : Int = 0,     // আজ কতগুলো Quiz প্রশ্নের উত্তর দিয়েছে
-    val quizDailyTarget   : Int = 30,    // আজকের Quiz লক্ষ্য (প্রশ্ন)
+    val todayQuizAnswered : Int = 0,     // আজ কতগুলো প্রশ্নের উত্তর দিয়েছে (Quiz+QBank)
+    val quizDailyTarget   : Int = 20,    // আজকের লক্ষ্য (প্রশ্ন) — গত ৭ দিনের গড় থেকে
     val todayModelTests   : Int = 0,     // আজ কয়টা Model Test দিয়েছে
+    val weekModelTests    : Int = 0,     // গত ৭ দিনে
     val modelTestTarget   : Int = 1
 )
 
