@@ -55,6 +55,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlin.math.roundToInt
@@ -438,13 +439,16 @@ fun QuestionListScreen(
     var kbIdx by remember { mutableStateOf(0) }
     var kbActive by remember { mutableStateOf(false) }
     var kbScrolling by remember { mutableStateOf(false) }
+    var kbOption by remember { mutableStateOf(0) }                       // ↑/↓-এ বাছা অপশন (০ = কিছু না)
+    var techniqueOpenId by remember { mutableStateOf<String?>(null) }    // Ctrl+T — এই প্রশ্নে টেকনিক-ডায়ালগ খোলা
+    LaunchedEffect(kbIdx) { kbOption = 0 }
     LaunchedEffect(listState.firstVisibleItemIndex) {
         // হাতে স্ক্রল করলে কিবোর্ডের "বর্তমান প্রশ্ন" ও সেখানে সরে আসে
         if (!kbScrolling) kbIdx = listState.firstVisibleItemIndex
     }
-    LaunchedEffect(showSubmitDialog, reportIdx) {
+    LaunchedEffect(showSubmitDialog, reportIdx, techniqueOpenId) {
         // ডায়ালগ বন্ধ হলে ফোকাস ফিরিয়ে আনা, নইলে কী-ইভেন্ট আর আসে না
-        if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0) runCatching { kbFocus.requestFocus() }
+        if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0 && techniqueOpenId == null) runCatching { kbFocus.requestFocus() }
     }
     val kbKeyHandler: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ ev ->
         if (mode == StudyMode.STUDY || ev.type != KeyEventType.KeyDown || pagedQuestions.isEmpty()) return@handler false
@@ -458,6 +462,29 @@ fun QuestionListScreen(
                 kbScrolling = false
             }
         }
+        // Ctrl+T = বর্তমান প্রশ্নে টেকনিক যোগ করার বক্স সরাসরি খোলো (টাইপ করে Ctrl+S দিলেই সেভ)
+        if (ev.isCtrlPressed) {
+            return@handler if (ev.key == Key.T) {
+                kbActive = true
+                // স্ক্রিনে যে প্রশ্নটা সবচেয়ে বেশি দেখা যাচ্ছে (ইউজার এখন যেটা পড়ছে) সেটাতেই খোলে —
+                // firstVisibleItemIndex নয়, কারণ ওটা অর্ধেক-স্ক্রল-হয়ে-যাওয়া আগের প্রশ্নও হতে পারে
+                val li = listState.layoutInfo
+                val best = li.visibleItemsInfo.maxByOrNull { it ->
+                    val top = maxOf(it.offset, li.viewportStartOffset)
+                    val bottom = minOf(it.offset + it.size, li.viewportEndOffset)
+                    bottom - top
+                }
+                val curIdx = (best?.index ?: kbIdx).coerceIn(0, pagedQuestions.lastIndex)
+                kbIdx = curIdx
+                pagedQuestions.getOrNull(curIdx)?.let { techniqueOpenId = it.id }
+                true
+            } else false
+        }
+        val cur = pagedQuestions.getOrNull(kbIdx)
+        val availOpts = if (cur != null && cur.isMcq() && cur.answerState !is AnswerState.McqSelected)
+            listOf(1 to cur.optionA, 2 to cur.optionB, 3 to cur.optionC, 4 to cur.optionD)
+                .filter { it.second.isNotBlank() }.map { it.first }
+        else emptyList()
         val opt = when (ev.key) {
             Key.One, Key.NumPad1 -> 1
             Key.Two, Key.NumPad2 -> 2
@@ -466,14 +493,32 @@ fun QuestionListScreen(
             else -> 0
         }
         when {
-            ev.key == Key.DirectionRight || ev.key == Key.DirectionDown -> { goTo(kbIdx + 1); true }
-            ev.key == Key.DirectionLeft  || ev.key == Key.DirectionUp   -> { goTo(kbIdx - 1); true }
+            // ←/→ = আগের/পরের প্রশ্ন
+            ev.key == Key.DirectionRight -> { goTo(kbIdx + 1); true }
+            ev.key == Key.DirectionLeft  -> { goTo(kbIdx - 1); true }
+            // ↑/↓ = অপশন বাছা (হাইলাইট সরে), Enter = কনফার্ম। উত্তর দেওয়া/Written প্রশ্নে সাধারণ স্ক্রল চলবে
+            ev.key == Key.DirectionDown && availOpts.isNotEmpty() -> {
+                kbActive = true
+                val i = availOpts.indexOf(kbOption)
+                kbOption = if (i < 0) availOpts.first() else availOpts[(i + 1) % availOpts.size]
+                true
+            }
+            ev.key == Key.DirectionUp && availOpts.isNotEmpty() -> {
+                kbActive = true
+                val i = availOpts.indexOf(kbOption)
+                kbOption = if (i < 0) availOpts.last() else availOpts[(i - 1 + availOpts.size) % availOpts.size]
+                true
+            }
+            (ev.key == Key.Enter || ev.key == Key.NumPadEnter) && kbOption > 0 && cur != null && kbOption in availOpts -> {
+                viewModel.answerMcq(realIndexById[cur.id] ?: (pageOffset + kbIdx), kbOption)
+                kbOption = 0
+                true
+            }
+            // 1-4 = সরাসরি অপশন বাছা
             opt > 0 -> {
                 kbActive = true
-                val q = pagedQuestions.getOrNull(kbIdx)
-                val optionText = when (opt) { 1 -> q?.optionA; 2 -> q?.optionB; 3 -> q?.optionC; else -> q?.optionD }
-                if (q != null && q.isMcq() && !optionText.isNullOrBlank()) {
-                    viewModel.answerMcq(realIndexById[q.id] ?: (pageOffset + kbIdx), opt)
+                if (cur != null && opt in availOpts) {
+                    viewModel.answerMcq(realIndexById[cur.id] ?: (pageOffset + kbIdx), opt)
                 }
                 true
             }
@@ -861,6 +906,9 @@ fun QuestionListScreen(
                                 QuestionCard(
                                     index       = globalIdx,
                                     item        = q,
+                                    kbOption    = if (kbActive && localIdx == kbIdx) kbOption else 0,
+                                    openTechniqueSignal = techniqueOpenId == q.id,
+                                    onTechniqueSignalConsumed = { techniqueOpenId = null },
                                     mode        = mode,
                                     totalCount  = questions.size,
                                     onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
@@ -906,6 +954,9 @@ fun QuestionListScreen(
                         QuestionCard(
                             index       = globalIdx,
                             item        = q,
+                            kbOption    = if (kbActive && localIdx == kbIdx) kbOption else 0,
+                            openTechniqueSignal = techniqueOpenId == q.id,
+                            onTechniqueSignalConsumed = { techniqueOpenId = null },
                             mode        = mode,
                             totalCount  = questions.size,
                             onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
