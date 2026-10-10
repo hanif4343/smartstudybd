@@ -291,6 +291,10 @@ interface QuestionDao {
     @Query("SELECT fbKey FROM questions WHERE sheet = :sheet AND fbKey IN (:ids)")
     suspend fun getExistingFbKeys(sheet: String, ids: List<String>): List<String>
 
+    // ── QBank কার্ডে সঠিক MCQ/লিখিত ব্যাজ দেখাতে — পুরো sheet-এর (fbKey, type) একবারে ──
+    @Query("SELECT fbKey AS fbKey, questionType AS questionType FROM questions WHERE sheet = :sheet")
+    suspend fun getAllTypes(sheet: String): List<FbKeyTypeRow>
+
     // ── Review System (Admin-only): লোকাল Room cache-এ reviewed status আপডেট —
     // GAS-এ লেখার পর Room-ও সাথে সাথে sync রাখার জন্য (fresh fetch ছাড়াই cache নির্ভুল থাকে) ──
     @Query("UPDATE questions SET reviewed = :reviewed, reviewedAt = :reviewedAt WHERE sheet = :sheet AND fbKey = :fbKey")
@@ -368,3 +372,6 @@ interface QuestionDao {
 // ── Helper projection classes ─────────────────────────────────────────────────
 data class SubjectCount(val subject: String, val count: Int)
 data class SubTopicCount(val subTopic: String, val count: Int)
+
+/** getAllTypes()-এর হালকা projection */
+data class FbKeyTypeRow(val fbKey: String, val questionType: String)
