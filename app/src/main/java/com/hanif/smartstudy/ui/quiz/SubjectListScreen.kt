@@ -2172,7 +2172,7 @@ private fun QBankTopicCard(
         else      -> Color(0xFF0891B2)
     }
     val typeIcon  = when (st.questionTypeLabel) { "written" -> "✍️"; "mixed" -> "🔀"; else -> "🔘" }
-    val typeLabel = when (st.questionTypeLabel) { "written" -> "Written"; "mixed" -> "মিশ্র"; else -> "MCQ" }
+    val typeLabel = when (st.questionTypeLabel) { "written" -> "লিখিত"; "mixed" -> "মিশ্র"; else -> "MCQ" }
 
     Card(
         modifier  = Modifier.fillMaxWidth()
@@ -2206,12 +2206,23 @@ private fun QBankTopicCard(
             }
             Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
+            if (st.questionTypeLabel == "mixed") {
+                // ── দুই-ভাগ: MCQ আর লিখিত আলাদা সংখ্যায় ──
+                Text(totalQLabel(st.totalQ), fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🔘 MCQ ${bnDigits(st.mcqCount)}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0891B2), fontFamily = NotoSansBengali)
+                    Text("✍️ লিখিত ${bnDigits(st.writtenCount)}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
+                }
+            } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(totalQLabel(st.totalQ), fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
                 Text("·", fontSize = 10.sp, color = mutedColor)
                 Text(typeIcon, fontSize = 10.sp)
                 Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
                     color = accent, fontFamily = NotoSansBengali)
+            }
             }
             if (reviewPct != null) {
                 Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
