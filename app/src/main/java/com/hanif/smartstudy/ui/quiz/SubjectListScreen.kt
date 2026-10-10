@@ -132,10 +132,16 @@ private fun ownPickImageRes(opt: com.hanif.smartstudy.util.QuizOwnPick.Option): 
 private fun OwnPickCard(
     modifier : Modifier,
     opt      : com.hanif.smartstudy.util.QuizOwnPick.Option,
+    onReset  : (() -> Unit)? = null,   // লং-প্রেস করলে "বাছাই বাতিল" মেনু (+ কার্ড লুকানো থাকায় এটাই বদলানোর উপায়)
     onClick  : () -> Unit
 ) {
     val res = ownPickImageRes(opt)
-    Box(modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
+    var menuOpen by remember { mutableStateOf(false) }
+    @OptIn(ExperimentalFoundationApi::class)
+    Box(modifier.clip(RoundedCornerShape(12.dp)).combinedClickable(
+        onClick = onClick,
+        onLongClick = if (onReset != null) ({ menuOpen = true }) else null
+    )) {
         if (res != null) {
             Image(
                 painter = painterResource(res), contentDescription = opt.label,
@@ -153,6 +159,12 @@ private fun OwnPickCard(
                 .clip(RoundedCornerShape(8.dp)).background(Color(0xFF3157D5))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         ) { Text("📌 আমার", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = NotoSansBengali) }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("↺  বাছাই বাতিল — সব বিষয় দেখান", fontSize = 13.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                onClick = { menuOpen = false; onReset?.invoke() }
+            )
+        }
     }
 }
 
@@ -852,7 +864,7 @@ fun SubjectListScreen(
                 val gridItems: List<SubjectEntry?> =
                     orderedSubjects +
                     (if (showOwnCard && pickedOpt != null) listOf<SubjectEntry?>(ownPickEntry) else emptyList()) +
-                    (if (showOwnCard) listOf<SubjectEntry?>(null) else emptyList())
+                    (if (showOwnCard && pickedOpt == null) listOf<SubjectEntry?>(null) else emptyList())
                 val count = gridItems.size.coerceAtLeast(1)
 
                 // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
@@ -885,13 +897,15 @@ fun SubjectListScreen(
                     Box(Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp), contentAlignment = Alignment.Center) {
                         Row(horizontalArrangement = Arrangement.spacedBy(spacingDp)) {
                             if (pickedOpt != null) {
-                                OwnPickCard(Modifier.width(150.dp).height(170.dp), pickedOpt) { onOwnPickOpen?.invoke() }
+                                OwnPickCard(Modifier.width(150.dp).height(170.dp), pickedOpt,
+                                    onReset = { onOwnPickChange?.invoke(null) }) { onOwnPickOpen?.invoke() }
+                            } else {
+                                OwnSubjectAddCard(
+                                    modifier = Modifier.width(150.dp).height(170.dp),
+                                    ownPick  = ownPick,
+                                    onPick   = { onOwnPickChange?.invoke(it) }
+                                )
                             }
-                            OwnSubjectAddCard(
-                                modifier = Modifier.width(150.dp).height(170.dp),
-                                ownPick  = ownPick,
-                                onPick   = { onOwnPickChange?.invoke(it) }
-                            )
                         }
                     }
                 } else
@@ -915,7 +929,8 @@ fun SubjectListScreen(
                                 }
                                 if (subject === ownPickEntry && pickedOpt != null) {
                                     OwnPickCard(
-                                        Modifier.width(cardWidthDp).height(cardHeightDp), pickedOpt
+                                        Modifier.width(cardWidthDp).height(cardHeightDp), pickedOpt,
+                                        onReset = { onOwnPickChange?.invoke(null) }
                                     ) { onOwnPickOpen?.invoke() }
                                     return@forEach
                                 }
