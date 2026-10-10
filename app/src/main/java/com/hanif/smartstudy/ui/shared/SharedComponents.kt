@@ -70,6 +70,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -270,6 +276,10 @@ fun QuestionCard(
     // null থাকলে (API key সেট নেই, বা এই স্ক্রিনে এখনো wire করা হয়নি) কিছুই দেখাবে না। ──
     onRequestAiExplanation: (suspend (question: String, answer: String, subjectTopic: String, options: List<String>) -> String?)? = null,
     studyRevealMode: Boolean = false,
+    // ── এক্সটার্নাল কিবোর্ড: ↑/↓-এ বাছা অপশন (০ = কিছু না) আর Ctrl+T-তে টেকনিক-যোগ ডায়ালগ খোলার সিগন্যাল ──
+    kbOption       : Int = 0,
+    openTechniqueSignal: Boolean = false,
+    onTechniqueSignalConsumed: () -> Unit = {},
     modifier       : Modifier = Modifier
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
@@ -607,7 +617,7 @@ fun QuestionCard(
 
             when {
                 item.isMcq() && mode != StudyMode.STUDY -> {
-                    McqOptions(item = item, onAnswer = onMcqAnswer)
+                    McqOptions(item = item, onAnswer = onMcqAnswer, highlightOption = kbOption)
                 }
                 item.isWritten() && mode == StudyMode.QBANK && !isModelTest -> {
                     // ── QBank-এর Written প্রশ্নে ডিফল্টে সরাসরি টাইপ-বক্স দেখা যায় —
@@ -1090,11 +1100,13 @@ fun QuestionCard(
                 )
             }
 
-            if (showAnswerBox) {
+            if (showAnswerBox || openTechniqueSignal) {
                 Spacer(Modifier.height(6.dp))
                 UserTechniqueSection(
                     questionId  = item.id,
-                    currentUser = currentUser
+                    currentUser = currentUser,
+                    openSignal  = openTechniqueSignal,
+                    onSignalConsumed = onTechniqueSignalConsumed
                 )
             }
             }
@@ -1444,7 +1456,7 @@ fun MathWebView(latex: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
+fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit, highlightOption: Int = 0) {
     val answered = item.answerState as? AnswerState.McqSelected
     val options  = listOf(1 to item.optionA, 2 to item.optionB, 3 to item.optionC, 4 to item.optionD)
         .filter { it.second.isNotBlank() }
@@ -1496,6 +1508,9 @@ fun McqOptions(item: QuestionItem, onAnswer: (Int) -> Unit) {
                     .clip(RoundedCornerShape(12.dp))
                     .background(bg)
                     .border(1.5.dp, border, RoundedCornerShape(12.dp))
+                    // ── এক্সটার্নাল কিবোর্ড: ↑/↓ দিয়ে বাছা অপশনের হাইলাইট (Enter চাপলে কনফার্ম) ──
+                    .then(if (answered == null && highlightOption == n)
+                        Modifier.border(3.dp, Indigo600, RoundedCornerShape(12.dp)) else Modifier)
                     .then(if (answered == null) Modifier.clickable { onAnswer(n) } else Modifier)
                     .padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -2145,7 +2160,9 @@ fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = 
 @Composable
 fun UserTechniqueSection(
     questionId  : String,
-    currentUser : User?
+    currentUser : User?,
+    openSignal  : Boolean = false,          // Ctrl+T — ডায়ালগ সরাসরি খোলো
+    onSignalConsumed: () -> Unit = {}       // ডায়ালগ বন্ধ হলে সিগন্যাল রিসেট
 ) {
     if (questionId.isBlank() || currentUser == null) return
     // ── UX ফিক্স ("ছবি আপলোড সবার জন্য available হওয়া উচিত না"): টেকনিক/ব্যাখ্যা
@@ -2161,6 +2178,7 @@ fun UserTechniqueSection(
     var techniques     by remember(questionId) { mutableStateOf<List<UserTechnique>>(emptyList()) }
     var isLoading      by remember(questionId) { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
+    LaunchedEffect(openSignal) { if (openSignal && currentUser != null) { editTarget = null; showAddDialog = true } }
     var editTarget     by remember { mutableStateOf<UserTechnique?>(null) }
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
@@ -2331,7 +2349,7 @@ fun UserTechniqueSection(
         AddTechniqueDialog(
             existing    = editTarget,
             isAdmin     = isAdminUser,
-            onDismiss   = { showAddDialog = false; editTarget = null },
+            onDismiss   = { showAddDialog = false; editTarget = null; onSignalConsumed() },
             onSave      = { text, isPublic, type ->
                 scope.launch {
                     val target  = editTarget
@@ -2411,6 +2429,7 @@ fun UserTechniqueSection(
                     showAddDialog = false
                     editTarget = null
                     expanded = true
+                    onSignalConsumed()
                 }
             }
         )
@@ -2582,8 +2601,18 @@ private fun AddTechniqueDialog(
     val subBg     = MaterialTheme.colorScheme.surfaceVariant
     val subBorder = MaterialTheme.colorScheme.outline
 
+    val textFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { textFocus.requestFocus() } }   // খুলেই টাইপ শুরু করা যায়
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
+            modifier  = Modifier.onPreviewKeyEvent { ev ->
+                // Ctrl+S = সেভ (এক্সটার্নাল কিবোর্ড)
+                if (ev.type == KeyEventType.KeyDown && ev.isCtrlPressed && ev.key == Key.S) {
+                    if (text.trim().isNotBlank() && !isUploadingImage) onSave(text.trim(), isPublic, type)
+                    true
+                } else false
+            },
             shape     = RoundedCornerShape(16.dp),
             colors    = CardDefaults.cardColors(containerColor = cardBg),
             elevation = CardDefaults.cardElevation(8.dp)
@@ -2640,7 +2669,7 @@ private fun AddTechniqueDialog(
                             color      = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
-                    modifier   = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                    modifier   = Modifier.fillMaxWidth().heightIn(min = 80.dp).focusRequester(textFocus),
                     minLines   = 3,
                     maxLines   = 6,
                     shape      = RoundedCornerShape(10.dp),
