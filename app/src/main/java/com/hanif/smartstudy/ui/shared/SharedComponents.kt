@@ -2561,7 +2561,9 @@ private fun AddTechniqueDialog(
     onDismiss : () -> Unit,
     onSave    : (text: String, isPublic: Boolean, type: String) -> Unit
 ) {
-    var text     by remember(existing) { mutableStateOf(existing?.text ?: "") }
+    // TextFieldValue — সিলেকশন জানতে হয় (Ctrl+B/U/H দিয়ে সিলেক্ট করা অংশে ফরম্যাট বসাতে)
+    var tfv      by remember(existing) { mutableStateOf(TextFieldValue(existing?.text ?: "")) }
+    val text     = tfv.text
     var isPublic by remember(existing) { mutableStateOf(existing?.isPublic ?: false) }
     // ── ব্যাখ্যা না টেকনিক — কোনটা যোগ/এডিট করা হচ্ছে ──
     var type     by remember(existing) { mutableStateOf(existing?.type ?: "technique") }
@@ -2585,7 +2587,8 @@ private fun AddTechniqueDialog(
             // ── Image/CDN Hosting Phase: ImgBB-এর বদলে GAS-proxy দিয়ে CDN-এ ──
             when (val result = com.hanif.smartstudy.data.remote.CdnImageUploadService.uploadFromUri(context, uri, "attachments", "att")) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                    text = if (text.isBlank()) result.data else text.trimEnd() + "\n" + result.data
+                    val nt = if (tfv.text.isBlank()) result.data else tfv.text.trimEnd() + "\n" + result.data
+                    tfv = TextFieldValue(nt, TextRange(nt.length))
                 }
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     imageUploadError = result.message
@@ -2608,9 +2611,14 @@ private fun AddTechniqueDialog(
         Card(
             modifier  = Modifier.onPreviewKeyEvent { ev ->
                 // Ctrl+S = সেভ (এক্সটার্নাল কিবোর্ড)
-                if (ev.type == KeyEventType.KeyDown && ev.isCtrlPressed && ev.key == Key.S) {
-                    if (text.trim().isNotBlank() && !isUploadingImage) onSave(text.trim(), isPublic, type)
-                    true
+                if (ev.type == KeyEventType.KeyDown && ev.isCtrlPressed) {
+                    when (ev.key) {
+                        Key.S -> { if (tfv.text.trim().isNotBlank() && !isUploadingImage) onSave(tfv.text.trim(), isPublic, type); true }
+                        Key.B -> { tfv = wrapSelection(tfv, "<b>", "</b>"); true }              // Bold
+                        Key.U -> { tfv = wrapSelection(tfv, "<u>", "</u>"); true }              // Underline
+                        Key.H -> { tfv = wrapSelection(tfv, "<mark>", "</mark>"); true }        // Highlight
+                        else -> false
+                    }
                 } else false
             },
             shape     = RoundedCornerShape(16.dp),
@@ -2658,9 +2666,32 @@ private fun AddTechniqueDialog(
 
                 Spacer(Modifier.height(12.dp))
 
+                // ── ফরম্যাট টুলবার (টাচ ইউজারের জন্য) — কিবোর্ডে Ctrl+B / Ctrl+U / Ctrl+H ──
+                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        Triple("B", "<b>", "</b>"),
+                        Triple("U", "<u>", "</u>"),
+                        Triple("H", "<mark>", "</mark>")
+                    ).forEach { (label, o, c) ->
+                        Box(
+                            Modifier.clip(RoundedCornerShape(8.dp))
+                                .background(if (label == "H") Color(0x66FACC15) else subBg)
+                                .border(1.dp, subBorder, RoundedCornerShape(8.dp))
+                                .clickable { tfv = wrapSelection(tfv, o, c); runCatching { textFocus.requestFocus() } }
+                                .padding(horizontal = 14.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(label, fontSize = 13.sp, color = onCardBg,
+                                fontWeight = if (label == "B") FontWeight.ExtraBold else FontWeight.SemiBold,
+                                textDecoration = if (label == "U") TextDecoration.Underline else null)
+                        }
+                    }
+                    Text("Ctrl+B · U · H", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterVertically))
+                }
                 OutlinedTextField(
-                    value         = text,
-                    onValueChange = { text = it },
+                    value         = tfv,
+                    onValueChange = { tfv = it },
                     placeholder   = {
                         Text(
                             if (type == "explanation") "এখানে আপনার ব্যাখ্যা লিখুন..." else "এখানে টেকনিক লিখুন...",
@@ -3988,5 +4019,27 @@ fun AdminOptionReorderRow(
         }
 
         Box(Modifier.weight(1f)) { content() }
+    }
+}
+
+// ── সিলেক্ট করা অংশে ট্যাগ বসায়/সরায় (toggle); সিলেকশন না থাকলে ট্যাগ-জোড়া বসিয়ে কার্সর মাঝে রাখে ──
+private fun wrapSelection(v: TextFieldValue, open: String, close: String): TextFieldValue {
+    val t = v.text
+    val st = v.selection.min.coerceIn(0, t.length)
+    val en = v.selection.max.coerceIn(0, t.length)
+    if (st == en) {
+        val nt = t.substring(0, st) + open + close + t.substring(en)
+        return TextFieldValue(nt, TextRange(st + open.length))
+    }
+    val before = t.substring(0, st); val sel = t.substring(st, en); val after = t.substring(en)
+    return when {
+        before.endsWith(open) && after.startsWith(close) ->
+            TextFieldValue(before.dropLast(open.length) + sel + after.drop(close.length),
+                TextRange(st - open.length, en - open.length))
+        sel.startsWith(open) && sel.endsWith(close) && sel.length >= open.length + close.length -> {
+            val inner = sel.substring(open.length, sel.length - close.length)
+            TextFieldValue(before + inner + after, TextRange(st, st + inner.length))
+        }
+        else -> TextFieldValue(before + open + sel + close + after, TextRange(st + open.length, en + open.length))
     }
 }
