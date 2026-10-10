@@ -406,6 +406,12 @@ class ContentRepository(private val context: Context) {
         else    -> emptyList()
     }.toSet()
     suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
+    /** fbKey → isWritten (true = লিখিত, false = MCQ); Study টাইপ বাদ। Room-এ নেই এমন id এখানে থাকে না। */
+    suspend fun getRoomQuestionTypeMap(sheet: String): Map<String, Boolean> = withContext(Dispatchers.IO) {
+        dao.getAllTypes(sheet.uppercase())
+            .filter { !it.questionType.trim().equals("study", ignoreCase = true) }
+            .associate { it.fbKey to it.questionType.trim().equals("written", ignoreCase = true) }
+    }
     // Move ডায়ালগে সব Subject/Topic দেখাতে — প্রশ্নের টেবিল থেকে distinct (reference-এ না থাকলেও)
     suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet)
     suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet, subject)
