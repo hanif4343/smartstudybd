@@ -2431,6 +2431,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val posts        = repo.getRoomPosts().associateBy { it.postId }
         val progressMap  = loadProgressMap()
         val mode = StudyMode.QBANK
+        val typeMap = repo.getRoomQuestionTypeMap("QBANK")   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য
 
         val entries = institutions.map { inst ->
             val appearances = repo.getRoomAppearancesForInstitution(inst.institutionId)
@@ -2445,7 +2446,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
                     subjectId         = inst.institutionId,
                     topicId           = postId,
-                    linkedQuestionIds = qIds
+                    linkedQuestionIds = qIds,
+                    mcqCount          = qIds.count { typeMap[it] == false },
+                    writtenCount      = qIds.count { typeMap[it] == true }
                 )
             }.sortedBy { it.name }
                 .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.topicId }) }
@@ -2665,6 +2668,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val institutions = repo.getRoomInstitutions().associateBy { it.institutionId }
         val progressMap  = loadProgressMap()
         val mode = StudyMode.QBANK
+        val typeMap = repo.getRoomQuestionTypeMap("QBANK")   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য
 
         val entries = posts.map { post ->
             val appearances   = repo.getRoomAppearancesForPost(post.postId)
@@ -2679,7 +2683,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
                     subjectId         = post.postId,
                     topicId           = instId,
-                    linkedQuestionIds = qIds
+                    linkedQuestionIds = qIds,
+                    mcqCount          = qIds.count { typeMap[it] == false },
+                    writtenCount      = qIds.count { typeMap[it] == true }
                 )
             }.sortedBy { it.name }
                 .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION, l) { it.topicId }) }
