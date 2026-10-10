@@ -2178,8 +2178,8 @@ fun UserTechniqueSection(
     var techniques     by remember(questionId) { mutableStateOf<List<UserTechnique>>(emptyList()) }
     var isLoading      by remember(questionId) { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
-    LaunchedEffect(openSignal) { if (openSignal && currentUser != null) { editTarget = null; showAddDialog = true } }
     var editTarget     by remember { mutableStateOf<UserTechnique?>(null) }
+    LaunchedEffect(openSignal) { if (openSignal && currentUser != null) { editTarget = null; showAddDialog = true } }
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
 
