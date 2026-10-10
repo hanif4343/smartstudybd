@@ -227,6 +227,8 @@ fun QuestionListScreen(
     // Subject/Topic-এ move করে। sheet ঠিক onAdminDelete/onAdminEdit-এর মতোই ("Quiz"/
     // "QBank"/"Study")। null দিলে (student view) সিলেক্ট-মোড টগলটাই দেখানো হয় না। ──
     onAdminMoveQuestions: ((sheet: String, ids: List<String>, newSubject: String, newSubTopic: String) -> Unit)? = null,
+    // ── QBank দুই-ভাগ (MCQ | লিখিত) — বাইরের QBankTwoPartBar ট্যাব ঠিক করে দিলে (০ = MCQ, ১ = লিখিত) ──
+    forceTypeTab: Int? = null,
     // ── "প্রশ্ন" এডিটের সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে অপশন/উত্তর আবার
     // জেনারেট করা — ডিফল্টভাবেই এই স্ক্রিনের নিজের viewModel (উপরের প্যারামিটার)
     // ব্যবহার করে, তাই CoreScreen.kt বা অন্য কোনো caller-এ আলাদা করে কিছু যোগ
@@ -240,7 +242,9 @@ fun QuestionListScreen(
     // তবেই ট্যাব দেখায়; `questions` এখন ফিল্টার করা লিস্ট, আসল পুরো লিস্ট `allQuestions`
     // (ViewModel-এর index আসল লিস্ট ধরে চলে, তাই vmIdx দিয়ে ম্যাপ করা হয়)। ──
     val allQuestions = questions
-    var qbankTypeTab by rememberSaveable { mutableStateOf(0) }   // 0 = MCQ, 1 = Written
+    var qbankTypeTabState by rememberSaveable { mutableStateOf(0) }   // 0 = MCQ, 1 = Written
+    // forceTypeTab != null হলে বাইরের দুই-ভাগ বার (QBankTwoPartBar) ট্যাব ঠিক করে দেয়, ভেতরের ট্যাব-সারি লুকানো থাকে
+    val qbankTypeTab = forceTypeTab ?: qbankTypeTabState
     val qbankMcqCount = remember(allQuestions) { allQuestions.count { !it.isWritten() } }
     val qbankWrittenCount = remember(allQuestions) { allQuestions.count { it.isWritten() } }
     val qbankSplit = mode == StudyMode.QBANK && qbankMcqCount > 0 && qbankWrittenCount > 0
@@ -375,7 +379,7 @@ fun QuestionListScreen(
     LaunchedEffect(highlightQuestionId, allQuestions) {
         val targetId = highlightQuestionId ?: return@LaunchedEffect
         val target = allQuestions.firstOrNull { it.id == targetId }
-        if (qbankSplit && target != null) qbankTypeTab = if (target.isWritten()) 1 else 0
+        if (qbankSplit && target != null && forceTypeTab == null) qbankTypeTabState = if (target.isWritten()) 1 else 0
         val globalIdx = if (qbankSplit && target != null) {
             val list = if (target.isWritten()) allQuestions.filter { it.isWritten() } else allQuestions.filter { !it.isWritten() }
             list.indexOfFirst { it.id == targetId }
@@ -440,6 +444,7 @@ fun QuestionListScreen(
     var kbActive by remember { mutableStateOf(false) }
     var kbScrolling by remember { mutableStateOf(false) }
     var kbOption by remember { mutableStateOf(0) }                       // ↑/↓-এ বাছা অপশন (০ = কিছু না)
+    var editMenuOpenId by remember { mutableStateOf<String?>(null) }       // Ctrl+E — এই প্রশ্নের এডিট মেনু খোলা
     var techniqueOpenId by remember { mutableStateOf<String?>(null) }    // Ctrl+T — এই প্রশ্নে টেকনিক-ডায়ালগ খোলা
     LaunchedEffect(kbIdx) { kbOption = 0 }
     LaunchedEffect(listState.firstVisibleItemIndex) {
@@ -449,6 +454,16 @@ fun QuestionListScreen(
     LaunchedEffect(showSubmitDialog, reportIdx, techniqueOpenId) {
         // ডায়ালগ বন্ধ হলে ফোকাস ফিরিয়ে আনা, নইলে কী-ইভেন্ট আর আসে না
         if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0 && techniqueOpenId == null) runCatching { kbFocus.requestFocus() }
+    }
+    // ── FIX: উত্তর দেওয়ার পর (বা প্রশ্ন বদলালে) কিবোর্ড-ফোকাস অন্য কোথাও (নিচের Prev/Next নেভ বার) চলে যেত,
+    // তখন ←/→ কী আর এই হ্যান্ডলারে আসত না — সিস্টেম নিজে ফোকাস সরিয়ে নেভ-বারে নিয়ে যেত।
+    // এখন প্রতিবার উত্তর/প্রশ্ন বদলের পর ফোকাস আবার কিবোর্ড-বক্সে ফিরিয়ে আনা হয়। ──
+    val answeredSig = questions.count { it.answerState !is AnswerState.Unanswered }
+    LaunchedEffect(answeredSig, kbIdx) {
+        if (mode != StudyMode.STUDY && !showSubmitDialog && reportIdx < 0 && techniqueOpenId == null) {
+            kotlinx.coroutines.delay(80)   // রিকম্পোজিশন/AI-ব্যাখ্যা বক্স বসার পরে
+            runCatching { kbFocus.requestFocus() }
+        }
     }
     val kbKeyHandler: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ ev ->
         if (mode == StudyMode.STUDY || ev.type != KeyEventType.KeyDown || pagedQuestions.isEmpty()) return@handler false
@@ -464,7 +479,7 @@ fun QuestionListScreen(
         }
         // Ctrl+T = বর্তমান প্রশ্নে টেকনিক যোগ করার বক্স সরাসরি খোলো (টাইপ করে Ctrl+S দিলেই সেভ)
         if (ev.isCtrlPressed) {
-            return@handler if (ev.key == Key.T) {
+            return@handler if (ev.key == Key.T || (ev.key == Key.E && vmState.isAdmin)) {
                 kbActive = true
                 // স্ক্রিনে যে প্রশ্নটা সবচেয়ে বেশি দেখা যাচ্ছে (ইউজার এখন যেটা পড়ছে) সেটাতেই খোলে —
                 // firstVisibleItemIndex নয়, কারণ ওটা অর্ধেক-স্ক্রল-হয়ে-যাওয়া আগের প্রশ্নও হতে পারে
@@ -476,7 +491,9 @@ fun QuestionListScreen(
                 }
                 val curIdx = (best?.index ?: kbIdx).coerceIn(0, pagedQuestions.lastIndex)
                 kbIdx = curIdx
-                pagedQuestions.getOrNull(curIdx)?.let { techniqueOpenId = it.id }
+                pagedQuestions.getOrNull(curIdx)?.let {
+                    if (ev.key == Key.E) editMenuOpenId = it.id else techniqueOpenId = it.id
+                }
                 true
             } else false
         }
@@ -653,7 +670,7 @@ fun QuestionListScreen(
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
 
                 // ── QBank: MCQ / Written আলাদা ট্যাব ──
-                if (qbankSplit) {
+                if (qbankSplit && forceTypeTab == null) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -668,7 +685,7 @@ fun QuestionListScreen(
                                     .weight(1f)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(if (selected) Indigo600 else MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { qbankTypeTab = tab }
+                                    .clickable { qbankTypeTabState = tab }
                                     .padding(vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -909,6 +926,8 @@ fun QuestionListScreen(
                                     kbOption    = if (kbActive && localIdx == kbIdx) kbOption else 0,
                                     openTechniqueSignal = techniqueOpenId == q.id,
                                     onTechniqueSignalConsumed = { techniqueOpenId = null },
+                                    openEditMenuSignal = editMenuOpenId == q.id,
+                                    onEditMenuConsumed = { editMenuOpenId = null },
                                     mode        = mode,
                                     totalCount  = questions.size,
                                     onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
@@ -957,6 +976,8 @@ fun QuestionListScreen(
                             kbOption    = if (kbActive && localIdx == kbIdx) kbOption else 0,
                             openTechniqueSignal = techniqueOpenId == q.id,
                             onTechniqueSignalConsumed = { techniqueOpenId = null },
+                            openEditMenuSignal = editMenuOpenId == q.id,
+                            onEditMenuConsumed = { editMenuOpenId = null },
                             mode        = mode,
                             totalCount  = questions.size,
                             onMcqAnswer = { opt -> viewModel.answerMcq(vmIdx, opt) },
