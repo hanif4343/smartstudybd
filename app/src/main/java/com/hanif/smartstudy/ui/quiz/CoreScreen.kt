@@ -2,6 +2,9 @@ package com.hanif.smartstudy.ui.quiz
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
 import com.hanif.smartstudy.data.model.*
@@ -148,6 +151,17 @@ fun CoreScreen(
             !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null && !state.showResult
         if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
     }
+
+    // ── QBank প্রতিষ্ঠান/পদবী: MCQ + লিখিত দুটোই থাকলে "দুই-ভাগ" (আগে লিখিত থাকলে MCQ লুকিয়ে যেত) ──
+    val qbankTwoPart = mode == StudyMode.QBANK &&
+        (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION ||
+         state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
+        state.navPath.depth() == 2 &&
+        state.questions.any { it.questionType.equals("written", ignoreCase = true) } &&
+        state.questions.any { it.isMcq() }
+    var qbankPart by androidx.compose.runtime.saveable.rememberSaveable(state.navPath.subject, state.navPath.subTopic) { mutableStateOf(0) }
+    val qbankMcqN = if (qbankTwoPart) state.questions.count { it.isMcq() } else 0
+    val qbankWrittenN = if (qbankTwoPart) state.questions.count { it.questionType.equals("written", ignoreCase = true) } else 0
 
     when {
         // ── Mock Zone ──
@@ -303,7 +317,8 @@ fun CoreScreen(
             (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION ||
              state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
             state.navPath.depth() == 2 &&
-            state.questions.any { it.questionType.equals("written", ignoreCase = true) } -> {
+            state.questions.any { it.questionType.equals("written", ignoreCase = true) } &&
+            !(qbankTwoPart && qbankPart == 0) -> {
             val institutionOrSubject = when (state.qbankFilterMode) {
                 QBankFilterMode.INSTITUTION -> state.navPath.subject ?: ""   // প্রতিষ্ঠান-মোডে navPath = (institution, designation)
                 else -> state.navPath.subTopic ?: ""                        // পদবী-মোডে navPath = ("পদ", institution) placeholder
@@ -312,6 +327,7 @@ fun CoreScreen(
                 QBankFilterMode.INSTITUTION -> state.navPath.subTopic ?: ""
                 else -> state.qbankSelectedPost ?: state.qbankDirectPost ?: ""
             }
+            val paperContent: @Composable () -> Unit = {
             QBankExamPaperScreen(
                 institutionName = institutionOrSubject,
                 postName        = postOrDesignation,
@@ -330,10 +346,18 @@ fun CoreScreen(
                 onBookmark      = { qid -> viewModel.toggleBookmark(qid) },
                 onReport        = { idx, issue -> viewModel.reportQuestion(idx, issue) }
             )
+            }
+            if (qbankTwoPart) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    QBankTwoPartBar(qbankPart, qbankMcqN, qbankWrittenN) { qbankPart = it }
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) { paperContent() }
+                }
+            } else paperContent()
         }
 
         // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
+            val listContent: @Composable () -> Unit = {
             QuestionListScreen(
                 viewModel           = viewModel,
                 onStudyAction       = onStudyAction,
@@ -384,8 +408,16 @@ fun CoreScreen(
                 onHighlightConsumed = { viewModel.consumeHighlight() },
                 onAdminEdit         = onAdminEdit,
                 onAdminDelete       = onAdminDelete,
-                onAdminMoveQuestions = onAdminMoveQuestions
+                onAdminMoveQuestions = onAdminMoveQuestions,
+                forceTypeTab        = if (qbankTwoPart) 0 else null
             )
+            }
+            if (qbankTwoPart) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    QBankTwoPartBar(qbankPart, qbankMcqN, qbankWrittenN) { qbankPart = it }
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.weight(1f)) { listContent() }
+                }
+            } else listContent()
         }
 
         // ── SubTopic List (depth 1) — Phase 6: এখন লেজি (Topics reference-টেবিল
