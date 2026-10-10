@@ -280,6 +280,9 @@ fun QuestionCard(
     kbOption       : Int = 0,
     openTechniqueSignal: Boolean = false,
     onTechniqueSignalConsumed: () -> Unit = {},
+    // ── Ctrl+E — এডিট মেনু (প্রশ্ন/অপশন/উত্তর...) কিবোর্ড থেকে খোলা (শুধু admin) ──
+    openEditMenuSignal: Boolean = false,
+    onEditMenuConsumed: () -> Unit = {},
     modifier       : Modifier = Modifier
 ) {
     val isAdminUser = currentUser?.isAdmin() == true
@@ -291,6 +294,14 @@ fun QuestionCard(
     } else null
     var activeEditField by remember { mutableStateOf<String?>(null) }
     var showEditMenu    by remember { mutableStateOf(false) }   // ✎ আইকনের ড্রপডাউন (admin)
+    val editMenuFirstFocus = remember { FocusRequester() }
+    LaunchedEffect(openEditMenuSignal) {
+        if (openEditMenuSignal) { if (isAdminUser) showEditMenu = true; onEditMenuConsumed() }
+    }
+    // মেনু খুললে প্রথম আইটেমে ফোকাস — তারপর ↑/↓ দিয়ে সরানো, Enter দিয়ে বাছা, Esc দিয়ে বন্ধ
+    LaunchedEffect(showEditMenu) {
+        if (showEditMenu) { kotlinx.coroutines.delay(120); runCatching { editMenuFirstFocus.requestFocus() } }
+    }
     // ── UX ফিচার: AI ব্যাখ্যা — অপশন সিলেক্ট করার সাথে সাথেই অটো-লোড হয় (নিচে
     // LaunchedEffect দেখো), item.id বদলালে (পরের প্রশ্নে গেলে) রিসেট হয়ে যায়।
     // scope = coroutineScope, যেহেতু suspend ফাংশন কল করতে হবে LaunchedEffect-এর
@@ -421,6 +432,7 @@ fun QuestionCard(
                             }
                             DropdownMenu(expanded = showEditMenu, onDismissRequest = { showEditMenu = false }) {
                                 DropdownMenuItem(text = { Text("✎ প্রশ্ন", fontFamily = NotoSansBengali) },
+                                    modifier = Modifier.focusRequester(editMenuFirstFocus),
                                     onClick = { showEditMenu = false; activeEditField = "question" })
                                 if (item.isMcq()) {
                                     DropdownMenuItem(text = { Text("✎ ক", fontFamily = NotoSansBengali) },
@@ -436,6 +448,10 @@ fun QuestionCard(
                                     DropdownMenuItem(text = { Text("✎ উত্তর", fontFamily = NotoSansBengali) },
                                         onClick = { showEditMenu = false; activeEditField = "answer" })
                                 }
+                                DropdownMenuItem(text = { Text("✎ ব্যাখ্যা", fontFamily = NotoSansBengali) },
+                                    onClick = { showEditMenu = false; activeEditField = "explanation" })
+                                DropdownMenuItem(text = { Text("✎ টেকনিক", fontFamily = NotoSansBengali) },
+                                    onClick = { showEditMenu = false; activeEditField = "technique" })
                             }
                         }
                     }
