@@ -642,9 +642,11 @@ private fun HdGoalCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 HdRing(fraction, 66.dp, 7.dp, HdGreen, HdGreen.copy(alpha = 0.18f)) {
-                    Text(hdFmtHm(totalMin), fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold,
+                    // আগে এখানে লক্ষ্যের মোট সময় (ডিফল্ট 2h 0m) দেখাত বলে সবসময় একই থাকত —
+                    // এখন আজ কতক্ষণ পড়েছো সেটা দেখায়, নিচে ছোট করে লক্ষ্য
+                    Text(hdFmtMin(doneMin), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 1, softWrap = false)
-                    Text("মোট সময়", fontSize = 8.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text("লক্ষ্য ${hdFmtMin(totalMin)}", fontSize = 8.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali, maxLines = 1)
                 }
                 Spacer(Modifier.width(8.dp))
