@@ -280,6 +280,15 @@ object FirebaseDataService {
 
     // ── User Techniques ──
 
+    /** ট্যাগ-তালিকা JSON-এ বসায় (সর্বোচ্চ ৫টা); clearIfEmpty = PATCH-এ পুরনো ট্যাগ মুছতে null পাঠায় */
+    private fun putTags(obj: JsonObject, tags: List<String>, clearIfEmpty: Boolean = false) {
+        val clean = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(5)
+        if (clean.isEmpty()) { if (clearIfEmpty) obj.add("tags", com.google.gson.JsonNull.INSTANCE); return }
+        val arr = com.google.gson.JsonArray()
+        clean.forEach { arr.add(it) }
+        obj.add("tags", arr)
+    }
+
     suspend fun fetchTechniquesForQuestion(
         questionId: String,
         myUserId  : String
@@ -328,6 +337,7 @@ object FirebaseDataService {
                         addProperty("status",     "approved")
                         addProperty("timestamp",  t.timestamp)
                         addProperty("type",       t.type)
+                        putTags(this, t.tagList())
                     }
                     root.add("UserTechniques/${t.questionId}/${t.id}", obj)
                 }
@@ -348,7 +358,8 @@ object FirebaseDataService {
         text      : String,
         isPublic  : Boolean,
         type      : String = "technique",
-        autoApprove: Boolean = false     // Admin নিজের পাবলিক টেকনিক সাথে সাথে approved (নিজেকে approve করার দরকার নেই)
+        autoApprove: Boolean = false,    // Admin নিজের পাবলিক টেকনিক সাথে সাথে approved (নিজেকে approve করার দরকার নেই)
+        tags      : List<String> = emptyList()
     ): ApiResult<String> {
         return withContext(Dispatchers.IO) {
             try {
@@ -363,6 +374,7 @@ object FirebaseDataService {
                     addProperty("status",     if (autoApprove) "approved" else "pending")
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("type",       type)
+                    putTags(this, tags)
                 }
                 val body     = obj.toString().toRequestBody("application/json".toMediaType())
                 val req      = Request.Builder().url(url).post(body).build()
@@ -385,7 +397,8 @@ object FirebaseDataService {
         text      : String,
         isPublic  : Boolean,
         type      : String = "technique",
-        autoApprove: Boolean = false
+        autoApprove: Boolean = false,
+        tags      : List<String>? = null     // null = ট্যাগ অপরিবর্তিত; ফাঁকা তালিকা = সব ট্যাগ মুছে ফেলো
     ): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
@@ -397,6 +410,7 @@ object FirebaseDataService {
                     addProperty("status",    if (isPublic && !autoApprove) "pending" else "approved")
                     addProperty("timestamp", System.currentTimeMillis())
                     addProperty("type",      type)
+                    if (tags != null) putTags(this, tags, clearIfEmpty = true)
                 }
                 val body = obj.toString().toRequestBody("application/json".toMediaType())
                 val req  = Request.Builder().url(url).patch(body).build()
@@ -448,6 +462,7 @@ object FirebaseDataService {
                 addProperty("type",        src.type)
                 addProperty("linkedFrom",  src.id)
                 addProperty("linkedFromQ", src.questionId)
+                putTags(this, src.tagList())
             }
             val req = Request.Builder().url("${fbBase()}/UserTechniques/$targetQuestionId.json$auth")
                 .post(obj.toString().toRequestBody("application/json".toMediaType())).build()
