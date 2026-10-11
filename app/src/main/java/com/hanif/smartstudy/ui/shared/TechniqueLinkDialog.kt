@@ -33,11 +33,14 @@ import com.hanif.smartstudy.data.model.UserTechnique
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.util.TechniqueMatch
 import com.hanif.smartstudy.util.TechniqueSuggester
 import com.hanif.smartstudy.util.TechniqueSuggestResult
 import com.hanif.smartstudy.util.TechniqueSuggestion
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Admin-এর জন্য: একটা টেকনিকের সাথে সম্পর্কিত প্রশ্নের প্রস্তাব-তালিকা।
@@ -63,6 +66,11 @@ fun TechniqueLinkDialog(
     val status = remember(source.id) { mutableStateMapOf<String, String>() }
     var selected by remember(source.id) { mutableStateOf(0) }
     var filter by remember(source.id) { mutableStateOf("") }   // "" = সব, নইলে TechniqueMatch.*
+    // ✨ AI অনুসন্ধান — শুধু বাটন চাপলে চলে (নিজে থেকে কখনো না)
+    val aiItems = remember(source.id) { mutableStateListOf<TechniqueSuggestion>() }
+    var aiLoading by remember(source.id) { mutableStateOf(false) }
+    var aiMsg by remember(source.id) { mutableStateOf<String?>(null) }
+    var aiDone by remember(source.id) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val focus = remember { FocusRequester() }
 
@@ -117,8 +125,29 @@ fun TechniqueLinkDialog(
         }
     }
 
-    val allItems = result?.items ?: emptyList()
-    val items = if (filter.isEmpty()) allItems else allItems.filter { filter in it.kinds }
+    val ruleItems = result?.items ?: emptyList()
+    val allItems = ruleItems + aiItems.filter { a -> ruleItems.none { it.questionId == a.questionId } }
+    // "সব"-এ 🔶 (আংশিক সম্পর্কিত) দেখানো হয় না — ওগুলো আলাদা 🔶 ফিল্টারে
+    val items = if (filter.isEmpty()) allItems.filter { TechniqueMatch.AIR !in it.kinds } else allItems.filter { filter in it.kinds }
+
+    fun runAi() {
+        if (aiLoading) return
+        aiLoading = true; aiMsg = null
+        scope.launch {
+            val keys = withContext(Dispatchers.IO) { SessionManager(context.applicationContext).getAiApiKeys() }
+            val linkedKeys: Set<String>; val rej: Set<String>
+            val st = if (privateMode) null else FirebaseDataService.fetchTechniqueLinkState(source.id)
+            if (st is ApiResult.Success) { linkedKeys = st.data.first.keys; rej = st.data.second }
+            else { linkedKeys = emptySet(); rej = emptySet() }
+            val skip = (ruleItems.map { it.questionId } + aiItems.map { it.questionId }).toSet()
+            val r = TechniqueSuggester.aiSuggest(context, source, skip, linkedKeys, rej, keys)
+            aiItems.addAll(r.items)
+            aiMsg = r.message
+            aiDone = r.ok
+            aiLoading = false
+            if (r.items.any { TechniqueMatch.AI in it.kinds }) filter = TechniqueMatch.AI
+        }
+    }
     LaunchedEffect(filter) { selected = 0 }
     LaunchedEffect(selected) { if (items.isNotEmpty()) runCatching { listState.animateScrollToItem(selected.coerceIn(0, items.lastIndex)) } }
 
@@ -166,23 +195,48 @@ fun TechniqueLinkDialog(
                 }
                 Spacer(Modifier.height(6.dp))
 
-                // ── ৪ ধরনের মিলের ফিল্টার ──
+                // ── ✨ AI বাটন (Admin চাইলে) ──
+                if (!privateMode) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = { runAi() }, enabled = !aiLoading && !loading,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            if (aiLoading) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                                Text("AI খুঁজছে…", fontSize = 12.sp, fontFamily = NotoSansBengali)
+                            } else {
+                                Text(if (aiDone) "✨ আবার AI দিয়ে খুঁজুন" else "✨ AI দিয়ে আরও খুঁজুন", fontSize = 12.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text("শুধু আপনি চাপলে চলে", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                    }
+                    aiMsg?.let { Text(it, fontSize = 10.5.sp, color = Indigo600, fontFamily = NotoSansBengali, modifier = Modifier.padding(top = 3.dp)) }
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                // ── মিলের ধরন অনুযায়ী ফিল্টার ──
                 if (allItems.isNotEmpty()) {
                     val chips = listOf(
                         "" to "সব",
                         TechniqueMatch.TAG to "🏷 ট্যাগ",
                         TechniqueMatch.Q   to "❓ প্রশ্ন",
                         TechniqueMatch.OA  to "🔘 অপশন+উত্তর",
-                        TechniqueMatch.ALL to "✅ সব মিল"
+                        TechniqueMatch.ALL to "✅ সব মিল",
+                        TechniqueMatch.AI  to "✨ AI",
+                        TechniqueMatch.AIR to "🔶 সম্পর্কিত"
                     )
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         chips.forEach { (k, label) ->
-                            val n = if (k.isEmpty()) allItems.size else allItems.count { k in it.kinds }
-                            FilterChip(
-                                selected = filter == k, onClick = { filter = k },
-                                enabled = n > 0 || k.isEmpty(),
-                                label = { Text("$label ($n)", fontSize = 11.sp, fontFamily = NotoSansBengali) }
-                            )
+                            val n = if (k.isEmpty()) allItems.count { TechniqueMatch.AIR !in it.kinds } else allItems.count { k in it.kinds }
+                            if (n > 0 || k.isEmpty() || (k == TechniqueMatch.AI && aiDone)) {
+                                FilterChip(
+                                    selected = filter == k, onClick = { filter = k },
+                                    label = { Text("$label ($n)", fontSize = 11.sp, fontFamily = NotoSansBengali) }
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(6.dp))
