@@ -43,6 +43,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import coil.compose.AsyncImage
 import com.hanif.smartstudy.data.local.LocalTechniqueStore
+import com.hanif.smartstudy.data.local.LocalTechniqueLinkStore
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.data.remote.CdnImageUploadService
@@ -2195,6 +2196,8 @@ fun UserTechniqueSection(
     var isLoading      by remember(questionId) { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
     var editTarget     by remember { mutableStateOf<UserTechnique?>(null) }
+    var linkSource     by remember { mutableStateOf<UserTechnique?>(null) }   // 🔗 সম্পর্কিত-প্রশ্ন ডায়ালগের উৎস টেকনিক
+    var linkAutoClose  by remember { mutableStateOf(false) }                   // সেভের পর নিজে থেকে খুললে, প্রস্তাব না থাকলে চুপচাপ বন্ধ
     LaunchedEffect(openSignal) { if (openSignal && currentUser != null) { editTarget = null; showAddDialog = true } }
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
@@ -2240,7 +2243,13 @@ fun UserTechniqueSection(
                 list
             } else emptyList() // অফলাইনে/এরর — cache-এ কিছু লেখা হয়নি, তাই পরেরবার আবার চেষ্টা হবে
         }
-        return (local + remote).distinctBy { it.id }.sortedByDescending { it.timestamp }
+        // ── প্রাইভেট টেকনিকের "সংযুক্ত" কপি (শুধু এই ফোনে): অন্য প্রশ্নের আমার প্রাইভেট টেকনিক এই প্রশ্নে দেখাও ──
+        val linkedIds = LocalTechniqueLinkStore.getTechIdsForTarget(context, questionId)
+        val linkedPrivate = LocalTechniqueStore.getByIds(context, linkedIds.toSet(), myPhone)
+            .filter { it.questionId != questionId }
+            .map { it.copy(id = "lnk_${it.id}_$questionId", questionId = questionId,
+                linkedFrom = it.id, linkedFromQ = it.questionId, synced = false) }
+        return (local + remote + linkedPrivate).distinctBy { it.id }.sortedByDescending { it.timestamp }
     }
 
     LaunchedEffect(questionId) {
@@ -2339,14 +2348,32 @@ fun UserTechniqueSection(
                 UserTechniqueCard(
                     technique   = t,
                     isOwn       = isOwn,
+                    isAdmin     = isAdminUser,
+                    onLinkSuggest = { linkAutoClose = false; linkSource = t },
+                    onUnlink    = {
+                        scope.launch {
+                            if (!t.isPublic) {
+                                // প্রাইভেট সংযুক্ত কপি — শুধু ফোনের লিংক সরাও
+                                LocalTechniqueLinkStore.unlink(context, t.linkedFrom, questionId)
+                            } else {
+                                FirebaseDataService.deleteTechnique(questionId, t.id)
+                                FirebaseDataService.unlinkTechniqueCopy(t.linkedFrom, questionId)
+                            }
+                            techniques = loadAll(forceRefresh = true)
+                            feedbackMsg = "সংযুক্ত টেকনিক সরানো হয়েছে"
+                        }
+                    },
                     onEdit      = { editTarget = t; showAddDialog = true },
                     onDelete    = {
                         scope.launch {
+                            if (!t.isPublic && !t.isLinkedCopy()) LocalTechniqueLinkStore.removeAll(context, t.id)
                             if (!t.synced) {
                                 // এখনো Firebase-এ পাঠানোই হয়নি — শুধু ফোন থেকে মুছলেই যথেষ্ট
                                 LocalTechniqueStore.delete(context, t.id)
                             } else {
                                 FirebaseDataService.deleteTechnique(questionId, t.id)
+                                // আসল টেকনিক মুছলে তার সংযুক্ত কপিগুলোও মুছে যাবে (Admin)
+                                if (isAdminUser && !t.isLinkedCopy()) FirebaseDataService.deleteLinkedCopies(t.id)
                                 // প্রাইভেট টেকনিক sync হয়ে গেলে local mirror-এও একই id দিয়ে
                                 // একটা copy থাকে — শুধু Firebase থেকে মুছলে ওই local copy-টা
                                 // থেকেই যেত আর মুছে-ফেলার পরও আবার "ফিরে আসত"
@@ -2359,6 +2386,11 @@ fun UserTechniqueSection(
                 )
             }
         }
+    }
+
+    linkSource?.let { src ->
+        TechniqueLinkDialog(source = src, privateMode = !src.isPublic, autoCloseIfEmpty = linkAutoClose,
+            onDismiss = { linkSource = null; linkAutoClose = false })
     }
 
     if (showAddDialog) {
@@ -2381,12 +2413,13 @@ fun UserTechniqueSection(
                     when {
                         // ১) নতুন এন্ট্রি, প্রাইভেট
                         target == null && !isPublic -> {
-                            LocalTechniqueStore.add(
+                            val created = LocalTechniqueStore.add(
                                 context = context, questionId = questionId, userId = myPhone,
                                 userName = currentUser.displayName(), text = text, type = type
                             )
                             feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
-                        }
+                            // প্রাইভেট টেকনিকও মিল থাকলে অন্য প্রশ্নে দেখানোর প্রস্তাব (কিছু না মিললে চুপচাপ বন্ধ)
+                            if (type == "technique") { linkAutoClose = true; linkSource = created }
                         // ২) আগে প্রাইভেট ছিল, এখনো প্রাইভেট — sync হয়ে থাকলে Firebase-এর একই
                         // pushKey-তে আপডেট, নাহলে (এখনো আপলোড হয়নি) শুধু local mirror আপডেট
                         target != null && !target.isPublic && !isPublic -> {
@@ -2399,6 +2432,7 @@ fun UserTechniqueSection(
                         // ৩) আগে পাবলিক ছিল, এখন প্রাইভেট করা হচ্ছে: রিমোট থেকে সরিয়ে ফোনে নিয়ে আসো
                         target != null && target.isPublic && !isPublic -> {
                             FirebaseDataService.deleteTechnique(questionId, target.id)
+                            if (isAdminUser && !target.isLinkedCopy()) FirebaseDataService.deleteLinkedCopies(target.id)
                             LocalTechniqueStore.add(
                                 context = context, questionId = questionId, userId = myPhone,
                                 userName = currentUser.displayName(), text = text, type = type
@@ -2411,13 +2445,26 @@ fun UserTechniqueSection(
                             val res = FirebaseDataService.saveTechnique(
                                 questionId = questionId, userId = myPhone,
                                 userName = currentUser.displayName(), text = text,
-                                isPublic = true, type = type
+                                isPublic = true, type = type,
+                                autoApprove = isAdminUser
                             )
                             if (res is ApiResult.Success<*>) {
+                                // Admin-এর নতুন পাবলিক টেকনিক → সাথে সাথে সম্পর্কিত-প্রশ্ন প্রস্তাব-তালিকা
+                                if (isAdminUser && type == "technique") {
+                                    val newId = (res.data as? String).orEmpty()
+                                    linkAutoClose = true
+                                    if (newId.isNotBlank()) linkSource = UserTechnique(
+                                        id = newId, questionId = questionId, userId = myPhone,
+                                        userName = currentUser.displayName(), text = text,
+                                        isPublic = true, status = "approved",
+                                        timestamp = System.currentTimeMillis(), type = type
+                                    )
+                                }
                                 if (target != null) {
                                     // আগের প্রাইভেট কপি (sync হয়ে থাকলে) মুছে ফেলো — নাহলে একই
                                     // টেকনিক প্রাইভেট + pending-public দুইভাবে দেখা যাবে
                                     LocalTechniqueStore.delete(context, target.id)
+                                    LocalTechniqueLinkStore.removeAll(context, target.id)
                                     if (target.synced) {
                                         FirebaseDataService.deleteTechnique(questionId, target.id)
                                     }
@@ -2436,7 +2483,9 @@ fun UserTechniqueSection(
                         }
                         // ৫) আগে পাবলিক ছিল, পাবলিকই আছে — টেক্সট আপডেট শুধু
                         else -> {
-                            FirebaseDataService.updateTechnique(questionId, target!!.id, text, true, type)
+                            FirebaseDataService.updateTechnique(questionId, target!!.id, text, true, type, autoApprove = isAdminUser)
+                            // আসল টেকনিক বদলালে সংযুক্ত কপিগুলোতেও বদলে যাবে
+                            if (isAdminUser && !target.isLinkedCopy()) FirebaseDataService.propagateTechniqueText(target.id, text)
                             feedbackMsg = "✅ আপডেট হয়েছে।"
                         }
                     }
@@ -2457,9 +2506,13 @@ private fun UserTechniqueCard(
     technique : UserTechnique,
     isOwn     : Boolean,
     onEdit    : () -> Unit,
-    onDelete  : () -> Unit
+    onDelete  : () -> Unit,
+    isAdmin   : Boolean = false,
+    onLinkSuggest: () -> Unit = {},   // Admin: "🔗 সম্পর্কিত প্রশ্ন" প্রস্তাব-তালিকা খোলো
+    onUnlink  : () -> Unit = {}       // Admin: সংযুক্ত কপি সরাও
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showUnlinkConfirm by remember { mutableStateOf(false) }
 
     Card(
         shape  = RoundedCornerShape(10.dp),
@@ -2504,6 +2557,16 @@ private fun UserTechniqueCard(
                         color = if (isOwn) GreenOk else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = NotoSansBengali
                     )
+                    if (technique.isLinkedCopy()) {
+                        Box(
+                            Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(Indigo600.copy(alpha = 0.12f))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text("🔗 সংযুক্ত", fontSize = 8.sp, color = Indigo600,
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     if (isOwn) {
                         Box(
                             Modifier.clip(RoundedCornerShape(6.dp))
@@ -2531,14 +2594,32 @@ private fun UserTechniqueCard(
                         }
                     }
                 }
-                if (isOwn) {
+                if (technique.isLinkedCopy()) {
+                    // সংযুক্ত কপি: এডিট/ডিলিট আসল টেকনিকে — এখানে শুধু সরানো যায়
+                    // (পাবলিক কপি শুধু Admin সরাতে পারে; নিজের প্রাইভেট কপি ইউজার নিজে সরাতে পারে)
+                    if (isAdmin || (isOwn && !technique.isPublic)) {
+                        TextButton(onClick = { showUnlinkConfirm = true }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                            Text("🔗✕ সরাও", fontSize = 10.sp, color = RedWrong, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else if (isOwn) {
                     Row {
+                        if (technique.isTechnique() && ((isAdmin && technique.isPublic && technique.isApproved()) || !technique.isPublic)) {
+                            TextButton(onClick = onLinkSuggest, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                                Text("🔗 সম্পর্কিত", fontSize = 10.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Default.Edit, null, tint = Indigo600, modifier = Modifier.size(14.dp))
                         }
                         IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Default.Delete, null, tint = RedWrong, modifier = Modifier.size(14.dp))
                         }
+                    }
+                } else if (isAdmin && technique.isPublic && technique.isApproved() && technique.isTechnique()) {
+                    // অন্য ইউজারের অনুমোদিত পাবলিক টেকনিক (পুরনোগুলো সহ) — Admin অন্য প্রশ্নে যোগ করতে পারবে
+                    TextButton(onClick = onLinkSuggest, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Text("🔗 সম্পর্কিত", fontSize = 10.sp, color = Indigo600, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2549,6 +2630,16 @@ private fun UserTechniqueCard(
                 fontSize  = 12
             )
         }
+    }
+
+    if (showUnlinkConfirm) {
+        AlertDialog(
+            onDismissRequest = { showUnlinkConfirm = false },
+            title = { Text("সংযুক্ত টেকনিক সরাবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text  = { Text("শুধু এই প্রশ্ন থেকে সরবে (আসল টেকনিক ও অন্য প্রশ্ন অপরিবর্তিত), আর এই প্রশ্ন ওই টেকনিকের জন্য আর প্রস্তাব হবে না।", fontFamily = NotoSansBengali) },
+            confirmButton = { TextButton(onClick = { showUnlinkConfirm = false; onUnlink() }) { Text("হ্যাঁ, সরাও", color = RedWrong, fontFamily = NotoSansBengali) } },
+            dismissButton = { TextButton(onClick = { showUnlinkConfirm = false }) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+        )
     }
 
     if (showDeleteConfirm) {
