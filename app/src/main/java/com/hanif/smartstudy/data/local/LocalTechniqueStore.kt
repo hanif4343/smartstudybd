@@ -62,7 +62,8 @@ object LocalTechniqueStore {
         userId    : String,
         userName  : String,
         text      : String,
-        type      : String = "technique"
+        type      : String = "technique",
+        tags      : List<String> = emptyList()
     ): UserTechnique {
         val technique = UserTechnique(
             id         = LOCAL_ID_PREFIX + UUID.randomUUID().toString(),
@@ -74,6 +75,7 @@ object LocalTechniqueStore {
             status     = "approved", // প্রাইভেট টেকনিক/ব্যাখ্যা নিজে থেকেই দেখা যায়, অনুমোদন লাগে না
             timestamp  = System.currentTimeMillis(),
             type       = type,
+            tags       = tags,
             synced     = false   // ব্যাচ sync (PrivateTechniqueSync) না হওয়া পর্যন্ত শুধু ফোনেই থাকবে
         )
         val all = getAll(context).toMutableList()
@@ -84,11 +86,12 @@ object LocalTechniqueStore {
 
     // ── লোকাল টেকনিক এডিট করো (synced flag অপরিবর্তিত থাকে — সেভ করা থাকলে সেটাই থাকবে,
     // কলার (SharedComponents.kt) প্রয়োজনে Firebase-এও আলাদা করে আপডেট পাঠাবে) ──
-    suspend fun update(context: Context, id: String, text: String) {
+    suspend fun update(context: Context, id: String, text: String, tags: List<String>? = null) {
         val all = getAll(context).toMutableList()
         val idx = all.indexOfFirst { it.id == id }
         if (idx >= 0) {
-            all[idx] = all[idx].copy(text = text, timestamp = System.currentTimeMillis())
+            all[idx] = all[idx].copy(text = text, timestamp = System.currentTimeMillis(),
+                tags = tags ?: all[idx].tagList())
             save(context, all)
         }
     }
