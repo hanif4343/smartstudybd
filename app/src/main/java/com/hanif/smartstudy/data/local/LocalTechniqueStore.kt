@@ -32,6 +32,10 @@ object LocalTechniqueStore {
         return getAll(context).filter { it.questionId == questionId && it.userId == userId }
     }
 
+    /** প্রাইভেট টেকনিকের "সংযুক্ত" লিংক দেখানোর জন্য — id ধরে এই ইউজারের টেকনিকগুলো */
+    suspend fun getByIds(context: Context, ids: Set<String>, userId: String): List<UserTechnique> =
+        if (ids.isEmpty()) emptyList() else getAll(context).filter { it.id in ids && it.userId == userId }
+
     /** এই ইউজারের যেসব টেকনিক এখনো Firebase-এ পাঠানো হয়নি (synced=false) — ব্যাকগ্রাউন্ড sync
      *  (SmartStudyApp চালু হওয়ার সময় + SyncWorker) এগুলো সব একসাথে, একটা মাত্র batch-request-এ
      *  আপলোড করার চেষ্টা করে — Firebase quota বাঁচাতে একে একে আলাদা রিকোয়েস্ট পাঠানো হয় না। */
