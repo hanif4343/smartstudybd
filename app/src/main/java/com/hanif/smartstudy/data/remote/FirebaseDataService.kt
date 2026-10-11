@@ -347,7 +347,8 @@ object FirebaseDataService {
         userName  : String,
         text      : String,
         isPublic  : Boolean,
-        type      : String = "technique"
+        type      : String = "technique",
+        autoApprove: Boolean = false     // Admin নিজের পাবলিক টেকনিক সাথে সাথে approved (নিজেকে approve করার দরকার নেই)
     ): ApiResult<String> {
         return withContext(Dispatchers.IO) {
             try {
@@ -359,7 +360,7 @@ object FirebaseDataService {
                     addProperty("userName",   userName)
                     addProperty("text",       text)
                     addProperty("isPublic",   isPublic)
-                    addProperty("status",     "pending")
+                    addProperty("status",     if (autoApprove) "approved" else "pending")
                     addProperty("timestamp",  System.currentTimeMillis())
                     addProperty("type",       type)
                 }
@@ -383,7 +384,8 @@ object FirebaseDataService {
         pushKey   : String,
         text      : String,
         isPublic  : Boolean,
-        type      : String = "technique"
+        type      : String = "technique",
+        autoApprove: Boolean = false
     ): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
             try {
@@ -392,7 +394,7 @@ object FirebaseDataService {
                 val obj  = JsonObject().apply {
                     addProperty("text",      text)
                     addProperty("isPublic",  isPublic)
-                    addProperty("status",    if (isPublic) "pending" else "approved")
+                    addProperty("status",    if (isPublic && !autoApprove) "pending" else "approved")
                     addProperty("timestamp", System.currentTimeMillis())
                     addProperty("type",      type)
                 }
@@ -403,6 +405,123 @@ object FirebaseDataService {
             } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  টেকনিক-লিংক (একই টেকনিক একাধিক প্রশ্নে) — Admin যাচাই করে যোগ করে
+    //  • লিংক = টার্গেট প্রশ্নের UserTechniques-এ একটা approved "কপি" (linkedFrom = আসল id)
+    //    → তাই আগের cache/দেখানো/মডারেশন সব যেমন ছিল তেমনই কাজ করে, নতুন read লাগে না
+    //  • TechniqueLinks/{আসলId}/{টার্গেটQ} = কপির pushKey  (এডিট/ডিলিটে propagate করতে)
+    //  • TechniqueRejects/{আসলId}/{টার্গেটQ} = true       (বাদ দেওয়া প্রশ্ন আর প্রস্তাব হবে না)
+    // ═══════════════════════════════════════════════════════════════════════
+    private fun fbBase() = BuildConfig.FIREBASE_URL.trimEnd('/')
+
+    /** (এখনো সংযুক্ত টার্গেট প্রশ্ন → কপির key, বাদ দেওয়া টার্গেট প্রশ্নের সেট) */
+    suspend fun fetchTechniqueLinkState(srcId: String): ApiResult<Pair<Map<String, String>, Set<String>>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val l = client.newCall(Request.Builder().url("${fbBase()}/TechniqueLinks/$srcId.json$auth").get().build())
+                    .execute().body?.string() ?: "null"
+                val r = client.newCall(Request.Builder().url("${fbBase()}/TechniqueRejects/$srcId.json$auth").get().build())
+                    .execute().body?.string() ?: "null"
+                val linked = firebaseEntries(l).associate { (k, v) -> k to (if (v.isJsonPrimitive) v.asString else "") }
+                val rejected = firebaseEntries(r).map { it.first }.toSet()
+                ApiResult.Success(linked to rejected)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
+
+    /** আসল টেকনিকের কপি টার্গেট প্রশ্নে বসায় (approved, পাবলিক) — রিটার্ন: কপির pushKey */
+    suspend fun createTechniqueLink(
+        src: com.hanif.smartstudy.data.model.UserTechnique,
+        targetQuestionId: String
+    ): ApiResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val auth = authQuery()
+            val obj = JsonObject().apply {
+                addProperty("questionId",  targetQuestionId)
+                addProperty("userId",      src.userId)
+                addProperty("userName",    src.userName)
+                addProperty("text",        src.text)
+                addProperty("isPublic",    true)
+                addProperty("status",      "approved")
+                addProperty("timestamp",   System.currentTimeMillis())
+                addProperty("type",        src.type)
+                addProperty("linkedFrom",  src.id)
+                addProperty("linkedFromQ", src.questionId)
+            }
+            val req = Request.Builder().url("${fbBase()}/UserTechniques/$targetQuestionId.json$auth")
+                .post(obj.toString().toRequestBody("application/json".toMediaType())).build()
+            val resp = client.newCall(req).execute()
+            val key = gson.fromJson(resp.body?.string() ?: "{}", JsonObject::class.java)?.get("name")?.asString ?: ""
+            resp.close()
+            if (key.isBlank()) return@withContext ApiResult.Error("কপি তৈরি হয়নি")
+            val idx = Request.Builder().url("${fbBase()}/TechniqueLinks/${src.id}/$targetQuestionId.json$auth")
+                .put("\"$key\"".toRequestBody("application/json".toMediaType())).build()
+            client.newCall(idx).execute().close()
+            ApiResult.Success(key)
+        } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+    }
+
+    /** "এটা মেলে না" — এই টেকনিকের জন্য এই প্রশ্ন আর প্রস্তাব হবে না */
+    suspend fun rejectTechniqueLink(srcId: String, targetQuestionId: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val req = Request.Builder().url("${fbBase()}/TechniqueRejects/$srcId/$targetQuestionId.json$auth")
+                    .put("true".toRequestBody("application/json".toMediaType())).build()
+                client.newCall(req).execute().close()
+                ApiResult.Success(Unit)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
+
+    /** সংযুক্ত কপি সরানোর পর: ইনডেক্স মুছে "বাদ" হিসেবে মনে রাখো (আবার প্রস্তাব হবে না) */
+    suspend fun unlinkTechniqueCopy(srcId: String, targetQuestionId: String): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                client.newCall(Request.Builder().url("${fbBase()}/TechniqueLinks/$srcId/$targetQuestionId.json$auth").delete().build()).execute().close()
+                client.newCall(Request.Builder().url("${fbBase()}/TechniqueRejects/$srcId/$targetQuestionId.json$auth")
+                    .put("true".toRequestBody("application/json".toMediaType())).build()).execute().close()
+                ApiResult.Success(Unit)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
+
+    /** আসল টেকনিকের লেখা বদলালে সব সংযুক্ত কপিতেও বদলে দাও */
+    suspend fun propagateTechniqueText(srcId: String, newText: String): ApiResult<Int> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val l = client.newCall(Request.Builder().url("${fbBase()}/TechniqueLinks/$srcId.json$auth").get().build())
+                    .execute().body?.string() ?: "null"
+                val links = firebaseEntries(l).filter { it.second.isJsonPrimitive }
+                if (links.isEmpty()) return@withContext ApiResult.Success(0)
+                val body = JsonObject().apply {
+                    addProperty("text", newText)
+                    addProperty("timestamp", System.currentTimeMillis())
+                }.toString()
+                links.forEach { (targetQ, copyKey) ->
+                    client.newCall(Request.Builder().url("${fbBase()}/UserTechniques/$targetQ/${copyKey.asString}.json$auth")
+                        .patch(body.toRequestBody("application/json".toMediaType())).build()).execute().close()
+                }
+                ApiResult.Success(links.size)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
+
+    /** আসল টেকনিক মুছলে/প্রাইভেট করলে সব সংযুক্ত কপি আর ইনডেক্স মুছে দাও */
+    suspend fun deleteLinkedCopies(srcId: String): ApiResult<Int> =
+        withContext(Dispatchers.IO) {
+            try {
+                val auth = authQuery()
+                val l = client.newCall(Request.Builder().url("${fbBase()}/TechniqueLinks/$srcId.json$auth").get().build())
+                    .execute().body?.string() ?: "null"
+                val links = firebaseEntries(l).filter { it.second.isJsonPrimitive }
+                links.forEach { (targetQ, copyKey) ->
+                    client.newCall(Request.Builder().url("${fbBase()}/UserTechniques/$targetQ/${copyKey.asString}.json$auth").delete().build()).execute().close()
+                }
+                if (links.isNotEmpty()) client.newCall(Request.Builder().url("${fbBase()}/TechniqueLinks/$srcId.json$auth").delete().build()).execute().close()
+                ApiResult.Success(links.size)
+            } catch (e: Exception) { ApiResult.Error(e.message ?: "Network error") }
+        }
 
     suspend fun deleteTechnique(questionId: String, pushKey: String): ApiResult<Unit> {
         return withContext(Dispatchers.IO) {
