@@ -79,6 +79,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import com.hanif.smartstudy.data.local.TechniqueDraft
 import com.hanif.smartstudy.data.local.TechniqueDraftStore
+import com.hanif.smartstudy.data.local.TechniqueTagStore
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -2464,7 +2465,7 @@ fun UserTechniqueSection(
                 showAddDialog = false; editTarget = null; onSignalConsumed()
             },
             onDismiss   = { showAddDialog = false; editTarget = null; onSignalConsumed() },
-            onSave      = { text, isPublic, type ->
+            onSave      = { text, isPublic, type, tags ->
                 scope.launch {
                     val target  = editTarget
                     val draftKeyToClear = TechniqueDraftStore.keyFor(questionId, target?.id, myPhone)
@@ -2482,7 +2483,7 @@ fun UserTechniqueSection(
                         target == null && !isPublic -> {
                             val created = LocalTechniqueStore.add(
                                 context = context, questionId = questionId, userId = myPhone,
-                                userName = currentUser.displayName(), text = text, type = type
+                                userName = currentUser.displayName(), text = text, type = type, tags = tags
                             )
                             feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
                             // প্রাইভেট টেকনিকও মিল থাকলে অন্য প্রশ্নে দেখানোর প্রস্তাব (কিছু না মিললে চুপচাপ বন্ধ)
@@ -2491,9 +2492,9 @@ fun UserTechniqueSection(
                         // ২) আগে প্রাইভেট ছিল, এখনো প্রাইভেট — sync হয়ে থাকলে Firebase-এর একই
                         // pushKey-তে আপডেট, নাহলে (এখনো আপলোড হয়নি) শুধু local mirror আপডেট
                         target != null && !target.isPublic && !isPublic -> {
-                            LocalTechniqueStore.update(context, target.id, text)
+                            LocalTechniqueStore.update(context, target.id, text, tags)
                             if (target.synced) {
-                                FirebaseDataService.updateTechnique(questionId, target.id, text, false, type)
+                                FirebaseDataService.updateTechnique(questionId, target.id, text, false, type, tags = tags)
                             }
                             feedbackMsg = "✅ প্রাইভেট $typeLbl আপডেট হয়েছে।"
                         }
@@ -2503,7 +2504,7 @@ fun UserTechniqueSection(
                             if (isAdminUser && !target.isLinkedCopy()) FirebaseDataService.deleteLinkedCopies(target.id)
                             LocalTechniqueStore.add(
                                 context = context, questionId = questionId, userId = myPhone,
-                                userName = currentUser.displayName(), text = text, type = type
+                                userName = currentUser.displayName(), text = text, type = type, tags = tags
                             )
                             feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
                         }
@@ -2514,7 +2515,7 @@ fun UserTechniqueSection(
                                 questionId = questionId, userId = myPhone,
                                 userName = currentUser.displayName(), text = text,
                                 isPublic = true, type = type,
-                                autoApprove = isAdminUser
+                                autoApprove = isAdminUser, tags = tags
                             )
                             if (res is ApiResult.Success<*>) {
                                 // Admin-এর নতুন পাবলিক টেকনিক → সাথে সাথে সম্পর্কিত-প্রশ্ন প্রস্তাব-তালিকা
@@ -2525,7 +2526,7 @@ fun UserTechniqueSection(
                                         id = newId, questionId = questionId, userId = myPhone,
                                         userName = currentUser.displayName(), text = text,
                                         isPublic = true, status = "approved",
-                                        timestamp = System.currentTimeMillis(), type = type
+                                        timestamp = System.currentTimeMillis(), type = type, tags = tags
                                     )
                                 }
                                 if (target != null) {
@@ -2543,7 +2544,7 @@ fun UserTechniqueSection(
                                 // (পুরনো প্রাইভেট কপি, থাকলে, অপরিবর্তিত থাকুক — কিছু হারাবে না)
                                 LocalTechniqueStore.add(
                                     context = context, questionId = questionId, userId = myPhone,
-                                    userName = currentUser.displayName(), text = text, type = type
+                                    userName = currentUser.displayName(), text = text, type = type, tags = tags
                                 )
                                 feedbackMsg = "⚠️ ইন্টারনেট সংযোগ নেই, তাই আপাতত প্রাইভেট হিসেবে ফোনে সেভ হয়েছে। " +
                                     "নেট আসলে আবার এডিট করে 'পাবলিক' করে দিন।"
@@ -2551,7 +2552,7 @@ fun UserTechniqueSection(
                         }
                         // ৫) আগে পাবলিক ছিল, পাবলিকই আছে — টেক্সট আপডেট শুধু
                         else -> {
-                            FirebaseDataService.updateTechnique(questionId, target!!.id, text, true, type, autoApprove = isAdminUser)
+                            FirebaseDataService.updateTechnique(questionId, target!!.id, text, true, type, autoApprove = isAdminUser, tags = tags)
                             // আসল টেকনিক বদলালে সংযুক্ত কপিগুলোতেও বদলে যাবে
                             if (isAdminUser && !target.isLinkedCopy()) FirebaseDataService.propagateTechniqueText(target.id, text)
                             feedbackMsg = "✅ আপডেট হয়েছে।"
@@ -2740,7 +2741,7 @@ private fun AddTechniqueDialog(
     initialDraft: TechniqueDraft? = null,
     onDraftSaved: () -> Unit = {},
     onDismiss : () -> Unit,
-    onSave    : (text: String, isPublic: Boolean, type: String) -> Unit
+    onSave    : (text: String, isPublic: Boolean, type: String, tags: List<String>) -> Unit
 ) {
     // TextFieldValue — সিলেকশন জানতে হয় (Ctrl+B/U/H দিয়ে সিলেক্ট করা অংশে ফরম্যাট বসাতে)
     // ড্রাফট থাকলে সেখান থেকেই শুরু (লেখা, টাইপ, পাবলিক/প্রাইভেট সব)
@@ -2755,12 +2756,22 @@ private fun AddTechniqueDialog(
     // ── অটো-ড্রাফট: সেভ না করে যেভাবেই বন্ধ হোক (বাতিল/back/বাইরে ট্যাপ/প্রশ্ন বদল/অ্যাপ বন্ধ),
     // লেখাটা ড্রাফটে থেকে যায়। সেভ বা ড্রাফট-সেভ করলে finished = true হয়ে যায়। ──
     val draftCtx = LocalContext.current
+
+    // ── 🏷 ট্যাগ (ঐচ্ছিক): ধারণা-বাক্য, যেমন "মৌলিক সংখ্যা"। ট্যাগ ছাড়াও সেভ করা যায় ──
+    var tagList  by remember(existing) { mutableStateOf((initialDraft?.tags ?: existing?.tagList() ?: emptyList()).take(5)) }
+    var tagInput by remember(existing) { mutableStateOf(TextFieldValue("")) }
+    var tagOpen  by remember { mutableStateOf(TechniqueTagStore.isOpen(draftCtx)) }
+    val recentTags = remember { TechniqueTagStore.recent(draftCtx) }
+    // টাইপ করা কিন্তু "যোগ" না চাপা ট্যাগও সেভের সময় ধরা হয়
+    fun finalTags(): List<String> =
+        (tagList + TechniqueTagStore.clean(tagInput.text))
+            .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(5)
     var finished by remember { mutableStateOf(false) }
     val draftKey = TechniqueDraftStore.keyFor(questionId, existing?.id, userId)
     val liveDraft = rememberUpdatedState(
         TechniqueDraft(
             key = draftKey, questionId = questionId, existingId = existing?.id.orEmpty(),
-            userId = userId, text = tfv.text.trim(), type = type, isPublic = isPublic,
+            userId = userId, text = tfv.text.trim(), type = type, isPublic = isPublic, tags = finalTags(),
             questionPreview = questionPreview.replace("\n", " ").take(80)
         )
     )
@@ -2781,6 +2792,12 @@ private fun AddTechniqueDialog(
                 else TechniqueDraftStore.deleteAsync(draftCtx, draftKey)
             }
         }
+    }
+    fun doSave() {
+        val tgs = finalTags()
+        finished = true
+        TechniqueTagStore.remember(draftCtx, tgs)
+        onSave(tfv.text.trim(), isPublic, type, tgs)
     }
     fun saveDraftAndClose() {
         val d = liveDraft.value
@@ -2837,7 +2854,7 @@ private fun AddTechniqueDialog(
                         // Ctrl+Shift+S = ড্রাফট হিসেবে সেভ (ডায়ালগ বন্ধ হবে); Ctrl+S = আসল সেভ
                         Key.S -> {
                             if (ev.isShiftPressed) saveDraftAndClose()
-                            else if (tfv.text.trim().isNotBlank() && !isUploadingImage) { finished = true; onSave(tfv.text.trim(), isPublic, type) }
+                            else if (tfv.text.trim().isNotBlank() && !isUploadingImage) doSave()
                             true
                         }
                         Key.B -> { tfv = wrapSelection(tfv, "<b>", "</b>"); true }              // Bold
@@ -2945,6 +2962,15 @@ private fun AddTechniqueDialog(
                     )
                 )
 
+                Spacer(Modifier.height(8.dp))
+                TechniqueTagBox(
+                    open = tagOpen,
+                    onOpenChange = { tagOpen = it; TechniqueTagStore.setOpen(draftCtx, it) },
+                    tags = tagList, onTagsChange = { tagList = it },
+                    input = tagInput, onInputChange = { tagInput = it },
+                    recent = recentTags, textColor = onCardBg
+                )
+
                 Spacer(Modifier.height(12.dp))
 
                 Surface(
@@ -3041,7 +3067,7 @@ private fun AddTechniqueDialog(
                         Text("📝 ড্রাফট", fontFamily = NotoSansBengali, fontSize = 12.sp, maxLines = 1)
                     }
                     Button(
-                        onClick  = { if (text.trim().isNotBlank()) { finished = true; onSave(text.trim(), isPublic, type) } },
+                        onClick  = { if (text.trim().isNotBlank()) doSave() },
                         enabled  = text.trim().isNotBlank(),
                         modifier = Modifier.weight(1.3f),
                         shape    = RoundedCornerShape(10.dp),
@@ -4385,6 +4411,115 @@ fun Modifier.bengaliBackspace(value: () -> TextFieldValue, onChange: (TextFieldV
             if (nv != null) { onChange(nv); true } else false
         } else false
     }
+
+
+// ────────────────────────────────────────────────────────────────
+// 🏷 ট্যাগ বক্স — টেকনিক যে ধারণা শেখায় সেটা এক-দুই বাক্যে লিখুন (যেমন "মৌলিক সংখ্যা")।
+// ঐচ্ছিক: খালি রেখেও সেভ করা যায়। toggle-এর অবস্থা মনে থাকে (ডিফল্ট: খোলা)।
+// ট্যাগ দিলে অন্য প্রশ্নে সেই ধারণা খুঁজে "সম্পর্কিত প্রশ্ন" প্রস্তাবে আনা হয়।
+// ────────────────────────────────────────────────────────────────
+@Composable
+private fun TechniqueTagBox(
+    open: Boolean, onOpenChange: (Boolean) -> Unit,
+    tags: List<String>, onTagsChange: (List<String>) -> Unit,
+    input: TextFieldValue, onInputChange: (TextFieldValue) -> Unit,
+    recent: List<String>, textColor: Color
+) {
+    fun add(raw: String) {
+        val t = TechniqueTagStore.clean(raw)
+        if (t.isBlank() || tags.size >= 5 || tags.any { it.equals(t, true) }) return
+        onTagsChange(tags + t)
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "🏷 ট্যাগ" + if (tags.isNotEmpty()) " (${tags.size})" else "",
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = textColor, fontFamily = NotoSansBengali,
+                modifier = Modifier.weight(1f)
+            )
+            Text("ঐচ্ছিক", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            Spacer(Modifier.width(6.dp))
+            Switch(
+                checked = open, onCheckedChange = onOpenChange,
+                colors = SwitchDefaults.colors(checkedThumbColor = Indigo600)
+            )
+        }
+        if (open) {
+            Text(
+                "ধারণা লিখুন, যেমন: মৌলিক সংখ্যা। শুধু \"মৌলিক\" না — পুরো ধারণা লিখলে ভুল প্রশ্ন কম আসে। একাধিকও দেওয়া যায়।",
+                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
+            )
+            if (tags.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    tags.forEach { t ->
+                        Surface(
+                            onClick = { onTagsChange(tags - t) },
+                            shape = RoundedCornerShape(50), color = Indigo600.copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                "$t  ✕", fontSize = 11.sp, color = Indigo600, fontWeight = FontWeight.Bold,
+                                fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            if (tags.size < 5) {
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { v ->
+                        val tx = v.text
+                        if (tx.endsWith(",") || tx.endsWith("،") || tx.endsWith("\n")) { add(tx.dropLast(1)); onInputChange(TextFieldValue("")) }
+                        else onInputChange(v)
+                    },
+                    placeholder = { Text("ট্যাগ লিখুন…", fontSize = 12.sp, fontFamily = NotoSansBengali) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().bengaliBackspace({ input }, onInputChange),
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = LocalTextStyle.current.copy(fontFamily = NotoSansBengali, fontSize = 13.sp, color = textColor),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add(input.text); onInputChange(TextFieldValue("")) }),
+                    trailingIcon = {
+                        TextButton(
+                            onClick = { add(input.text); onInputChange(TextFieldValue("")) },
+                            enabled = input.text.isNotBlank()
+                        ) { Text("যোগ", fontFamily = NotoSansBengali, fontSize = 12.sp) }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Indigo600, focusedTextColor = textColor,
+                        unfocusedTextColor = textColor, cursorColor = Indigo600
+                    )
+                )
+                // আগে ব্যবহার করা ট্যাগ — ট্যাপ করলেই যোগ
+                val q = input.text.trim()
+                val sugg = recent.filter { r -> tags.none { it.equals(r, true) } && (q.isEmpty() || r.contains(q, true)) }.take(8)
+                if (sugg.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        sugg.forEach { r ->
+                            Surface(
+                                onClick = { add(r); onInputChange(TextFieldValue("")) },
+                                shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Text("+ $r", fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ── সিলেক্ট করা অংশে ট্যাগ বসায়/সরায় (toggle); সিলেকশন না থাকলে ট্যাগ-জোড়া বসিয়ে কার্সর মাঝে রাখে ──
 private fun wrapSelection(v: TextFieldValue, open: String, close: String): TextFieldValue {
