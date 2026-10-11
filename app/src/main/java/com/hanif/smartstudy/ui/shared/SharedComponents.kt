@@ -74,6 +74,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import com.hanif.smartstudy.data.local.TechniqueDraft
 import com.hanif.smartstudy.data.local.TechniqueDraftStore
@@ -2924,7 +2926,8 @@ private fun AddTechniqueDialog(
                             color      = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
-                    modifier   = Modifier.fillMaxWidth().heightIn(min = 80.dp).focusRequester(textFocus),
+                    modifier   = Modifier.fillMaxWidth().heightIn(min = 80.dp).focusRequester(textFocus)
+                        .bengaliBackspace({ tfv }, { tfv = it }),
                     minLines   = 3,
                     maxLines   = 6,
                     shape      = RoundedCornerShape(10.dp),
@@ -4354,6 +4357,34 @@ fun AdminOptionReorderRow(
         Box(Modifier.weight(1f)) { content() }
     }
 }
+
+/**
+ * বাংলা-বান্ধব ব্যাকস্পেস: Compose-এর ডিফল্ট ব্যাকস্পেস পুরো "অক্ষর-গুচ্ছ" (grapheme) একবারে কাটে,
+ * তাই "মা" এক চাপেই পুরো যেত। এখানে একবারে একটা কোড-পয়েন্ট কাটে — "মা"-তে আগে কার (া) কাটে,
+ * তারপর ম। "ক্ষ"-এর মতো যুক্তাক্ষরে শেষ ব্যঞ্জন কাটলে ঝুলে থাকা হসন্ত (্)-ও সাথে যায়।
+ * সিলেকশন থাকলে বা কার্সর শুরুতে থাকলে null — তখন ডিফল্ট আচরণই চলবে।
+ */
+fun backspaceOneCodePoint(v: TextFieldValue): TextFieldValue? {
+    if (!v.selection.collapsed) return null
+    val end = v.selection.start
+    if (end <= 0 || end > v.text.length) return null
+    val t = v.text
+    var start = t.offsetByCodePoints(end, -1)
+    val removed = t.codePointAt(start)
+    val isBnConsonant = removed in 0x0995..0x09B9 || removed in 0x09DC..0x09DF || removed == 0x09F0 || removed == 0x09F1
+    if (isBnConsonant && start > 0 && t[start - 1] == '\u09CD') start -= 1   // হসন্ত
+    val nt = t.removeRange(start, end)
+    return TextFieldValue(nt, TextRange(start))
+}
+
+fun Modifier.bengaliBackspace(value: () -> TextFieldValue, onChange: (TextFieldValue) -> Unit): Modifier =
+    this.onPreviewKeyEvent { ev ->
+        if (ev.type == KeyEventType.KeyDown && ev.key == Key.Backspace &&
+            !ev.isCtrlPressed && !ev.isAltPressed && !ev.isMetaPressed) {
+            val nv = backspaceOneCodePoint(value())
+            if (nv != null) { onChange(nv); true } else false
+        } else false
+    }
 
 // ── সিলেক্ট করা অংশে ট্যাগ বসায়/সরায় (toggle); সিলেকশন না থাকলে ট্যাগ-জোড়া বসিয়ে কার্সর মাঝে রাখে ──
 private fun wrapSelection(v: TextFieldValue, open: String, close: String): TextFieldValue {
