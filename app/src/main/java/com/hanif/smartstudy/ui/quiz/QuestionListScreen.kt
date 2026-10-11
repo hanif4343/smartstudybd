@@ -759,6 +759,20 @@ fun QuestionListScreen(
                         }
                     }
                 } else {
+                // ── 📝 টেকনিক/ব্যাখ্যার অসমাপ্ত ড্রাফট — সবসময় উপরে আটকানো (প্রশ্ন নিচে নামলেও) ──
+                TechniqueDraftStrip(
+                    questions  = pagedQuestions,
+                    userId     = currentUser?.phone.orEmpty(),
+                    pageOffset = pageOffset,
+                    onOpen     = { qid, existingId ->
+                        val i = pagedQuestions.indexOfFirst { it.id == qid }
+                        if (i >= 0) scrollScope.launch {
+                            listState.animateScrollToItem(i)
+                            // নতুন-এন্ট্রির ড্রাফট সরাসরি খোলে; এডিটের ড্রাফট প্রশ্নের নিচের 📝 চিপ থেকে খোলে
+                            if (existingId.isBlank()) techniqueOpenId = qid
+                        }
+                    }
+                )
                 // Question list
                 LazyColumn(
                     state               = listState,
