@@ -30,6 +30,7 @@ data class TechniqueDraft(
     val text            : String  = "",
     val type            : String  = "technique",
     val isPublic        : Boolean = false,
+    val tags            : List<String> = emptyList(),
     val questionPreview : String  = "",
     val updatedAt       : Long    = 0L
 )
