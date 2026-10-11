@@ -2,6 +2,8 @@ package com.hanif.smartstudy.ui.shared
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -31,6 +33,7 @@ import com.hanif.smartstudy.data.model.UserTechnique
 import com.hanif.smartstudy.data.remote.ApiResult
 import com.hanif.smartstudy.data.remote.FirebaseDataService
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.util.TechniqueMatch
 import com.hanif.smartstudy.util.TechniqueSuggester
 import com.hanif.smartstudy.util.TechniqueSuggestResult
 import com.hanif.smartstudy.util.TechniqueSuggestion
@@ -59,6 +62,7 @@ fun TechniqueLinkDialog(
     // প্রশ্ন-id → "added" | "rejected" | "busy" | "error"
     val status = remember(source.id) { mutableStateMapOf<String, String>() }
     var selected by remember(source.id) { mutableStateOf(0) }
+    var filter by remember(source.id) { mutableStateOf("") }   // "" = সব, নইলে TechniqueMatch.*
     val listState = rememberLazyListState()
     val focus = remember { FocusRequester() }
 
@@ -113,7 +117,9 @@ fun TechniqueLinkDialog(
         }
     }
 
-    val items = result?.items ?: emptyList()
+    val allItems = result?.items ?: emptyList()
+    val items = if (filter.isEmpty()) allItems else allItems.filter { filter in it.kinds }
+    LaunchedEffect(filter) { selected = 0 }
     LaunchedEffect(selected) { if (items.isNotEmpty()) runCatching { listState.animateScrollToItem(selected.coerceIn(0, items.lastIndex)) } }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -151,7 +157,36 @@ fun TechniqueLinkDialog(
                     fontSize = 10.5.sp, fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 loadError?.let { Text(it, fontSize = 10.sp, color = RedWrong, fontFamily = NotoSansBengali) }
+                if (source.tagList().isNotEmpty()) {
+                    Text("🏷 " + source.tagList().joinToString(", "), fontSize = 11.sp, color = Indigo600,
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                } else if (!loading) {
+                    Text("ট্যাগ দেওয়া নেই — তাই ট্যাগ-মিল খোঁজা হয়নি (এডিট করে ট্যাগ দিলে পাওয়া যাবে)",
+                        fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                }
                 Spacer(Modifier.height(6.dp))
+
+                // ── ৪ ধরনের মিলের ফিল্টার ──
+                if (allItems.isNotEmpty()) {
+                    val chips = listOf(
+                        "" to "সব",
+                        TechniqueMatch.TAG to "🏷 ট্যাগ",
+                        TechniqueMatch.Q   to "❓ প্রশ্ন",
+                        TechniqueMatch.OA  to "🔘 অপশন+উত্তর",
+                        TechniqueMatch.ALL to "✅ সব মিল"
+                    )
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        chips.forEach { (k, label) ->
+                            val n = if (k.isEmpty()) allItems.size else allItems.count { k in it.kinds }
+                            FilterChip(
+                                selected = filter == k, onClick = { filter = k },
+                                enabled = n > 0 || k.isEmpty(),
+                                label = { Text("$label ($n)", fontSize = 11.sp, fontFamily = NotoSansBengali) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
@@ -161,7 +196,7 @@ fun TechniqueLinkDialog(
                             fontSize = 12.sp, fontFamily = NotoSansBengali, modifier = Modifier.align(Alignment.Center).padding(12.dp)
                         )
                         items.isEmpty() -> Text(
-                            "কোনো প্রস্তাব পাওয়া যায়নি।\n(শুধু এই ফোনে ডাউনলোড হওয়া, একই বিষয়ের ${result?.poolSize ?: 0}টা প্রশ্নে খোঁজা হয়েছে)",
+                            (if (allItems.isEmpty()) "কোনো প্রস্তাব পাওয়া যায়নি।" else "এই ধরনের কোনো প্রশ্ন নেই।") + "\n(এই ফোনে ডাউনলোড হওয়া সব বিষয়ের ${result?.poolSize ?: 0}টা প্রশ্নে খোঁজা হয়েছে)",
                             fontSize = 12.sp, fontFamily = NotoSansBengali, modifier = Modifier.align(Alignment.Center).padding(12.dp)
                         )
                         else -> LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
