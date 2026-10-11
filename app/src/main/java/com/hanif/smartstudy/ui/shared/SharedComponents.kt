@@ -74,6 +74,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import com.hanif.smartstudy.data.local.TechniqueDraft
+import com.hanif.smartstudy.data.local.TechniqueDraftStore
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -1121,6 +1124,7 @@ fun QuestionCard(
                 Spacer(Modifier.height(6.dp))
                 UserTechniqueSection(
                     questionId  = item.id,
+                    questionPreview = item.question,
                     currentUser = currentUser,
                     openSignal  = openTechniqueSignal,
                     onSignalConsumed = onTechniqueSignalConsumed
@@ -2178,6 +2182,7 @@ fun TechniqueBox(text: String, onEdit: (() -> Unit)? = null, isAdmin: Boolean = 
 fun UserTechniqueSection(
     questionId  : String,
     currentUser : User?,
+    questionPreview : String = "",          // ড্রাফট স্ট্রিপে কোন প্রশ্নের ড্রাফট তা দেখাতে
     openSignal  : Boolean = false,          // Ctrl+T — ডায়ালগ সরাসরি খোলো
     onSignalConsumed: () -> Unit = {}       // ডায়ালগ বন্ধ হলে সিগন্যাল রিসেট
 ) {
@@ -2201,6 +2206,23 @@ fun UserTechniqueSection(
     LaunchedEffect(openSignal) { if (openSignal && currentUser != null) { editTarget = null; showAddDialog = true } }
     var expanded       by remember { mutableStateOf(false) }
     var feedbackMsg    by remember { mutableStateOf<String?>(null) }
+
+    // ── ড্রাফট: সেভ না করে বন্ধ হলে লেখা এখানে জমে থাকে (দেখো TechniqueDraftStore) ──
+    val allDrafts by TechniqueDraftStore.flow(context).collectAsState(initial = emptyList())
+    var dialogDraft by remember { mutableStateOf<TechniqueDraft?>(null) }
+    var dialogReady by remember { mutableStateOf(false) }
+    LaunchedEffect(showAddDialog, editTarget?.id) {
+        if (showAddDialog) {
+            // ডায়ালগ খোলার আগে ড্রাফট পড়ে নাও, যাতে টাইপ করার সময় লেখা উল্টে না যায়
+            dialogDraft = TechniqueDraftStore.get(
+                context, TechniqueDraftStore.keyFor(questionId, editTarget?.id, myPhone)
+            )
+            dialogReady = true
+        } else {
+            dialogReady = false
+            dialogDraft = null
+        }
+    }
 
     // ── remote (পাবলিক/অনুমোদিত + নিজের ব্যাকআপ-করা প্রাইভেট) + লোকাল (ফোনে জমে থাকা —
     // sync হোক বা না হোক, সবসময় local mirror) টেকনিক একসাথে মার্জ করো।
@@ -2325,6 +2347,40 @@ fun UserTechniqueSection(
             }
         }
 
+        // ── 📝 এই প্রশ্নের অসমাপ্ত ড্রাফট — ট্যাপ করলে যেখানে ছেড়েছিলেন সেখান থেকে শুরু ──
+        val visibleDrafts = allDrafts.filter { d ->
+            d.questionId == questionId && d.userId == myPhone && d.text.isNotBlank() &&
+                (d.existingId.isBlank() || techniques.any { it.id == d.existingId })
+        }
+        if (!showAddDialog && visibleDrafts.isNotEmpty()) {
+            val d0 = visibleDrafts.first()
+            Surface(
+                onClick = {
+                    editTarget = if (d0.existingId.isBlank()) null else techniques.firstOrNull { it.id == d0.existingId }
+                    showAddDialog = true
+                },
+                shape    = RoundedCornerShape(8.dp),
+                color    = OrangeTech.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("📝", fontSize = 12.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "ড্রাফট আছে — " + d0.text.replace("\n", " ").take(40) + if (d0.text.length > 40) "…" else "",
+                        fontSize = 11.sp, color = OrangeTech, fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold, maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("চালিয়ে লিখুন", fontSize = 10.sp, color = OrangeTech, fontFamily = NotoSansBengali)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
         feedbackMsg?.let { msg ->
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(2500)
@@ -2393,14 +2449,23 @@ fun UserTechniqueSection(
             onDismiss = { linkSource = null; linkAutoClose = false })
     }
 
-    if (showAddDialog) {
+    if (showAddDialog && dialogReady) {
         AddTechniqueDialog(
             existing    = editTarget,
             isAdmin     = isAdminUser,
+            questionId  = questionId,
+            userId      = myPhone,
+            questionPreview = questionPreview,
+            initialDraft = dialogDraft,
+            onDraftSaved = {
+                feedbackMsg = "📝 ড্রাফটে সেভ হয়েছে — পরে যেকোনো সময় চালিয়ে লেখা যাবে।"
+                showAddDialog = false; editTarget = null; onSignalConsumed()
+            },
             onDismiss   = { showAddDialog = false; editTarget = null; onSignalConsumed() },
             onSave      = { text, isPublic, type ->
                 scope.launch {
                     val target  = editTarget
+                    val draftKeyToClear = TechniqueDraftStore.keyFor(questionId, target?.id, myPhone)
                     val typeLbl = if (type == "explanation") "ব্যাখ্যা" else "টেকনিক"
 
                     // ── FIX: প্রাইভেট টেকনিক এখন ব্যাকগ্রাউন্ডে Firebase-এও sync হয় (দেখো
@@ -2420,6 +2485,7 @@ fun UserTechniqueSection(
                             feedbackMsg = "✅ প্রাইভেট $typeLbl আপনার ফোনে সেভ হয়েছে।"
                             // প্রাইভেট টেকনিকও মিল থাকলে অন্য প্রশ্নে দেখানোর প্রস্তাব (কিছু না মিললে চুপচাপ বন্ধ)
                             if (type == "technique") { linkAutoClose = true; linkSource = created }
+                        }
                         // ২) আগে প্রাইভেট ছিল, এখনো প্রাইভেট — sync হয়ে থাকলে Firebase-এর একই
                         // pushKey-তে আপডেট, নাহলে (এখনো আপলোড হয়নি) শুধু local mirror আপডেট
                         target != null && !target.isPublic && !isPublic -> {
@@ -2490,6 +2556,7 @@ fun UserTechniqueSection(
                         }
                     }
 
+                    TechniqueDraftStore.delete(context, draftKeyToClear)   // সেভ হয়ে গেছে — ড্রাফট আর লাগবে না
                     refresh()
                     showAddDialog = false
                     editTarget = null
@@ -2665,16 +2732,61 @@ private fun UserTechniqueCard(
 private fun AddTechniqueDialog(
     existing  : UserTechnique?,
     isAdmin   : Boolean = false,
+    questionId: String = "",
+    userId    : String = "",
+    questionPreview: String = "",
+    initialDraft: TechniqueDraft? = null,
+    onDraftSaved: () -> Unit = {},
     onDismiss : () -> Unit,
     onSave    : (text: String, isPublic: Boolean, type: String) -> Unit
 ) {
     // TextFieldValue — সিলেকশন জানতে হয় (Ctrl+B/U/H দিয়ে সিলেক্ট করা অংশে ফরম্যাট বসাতে)
-    var tfv      by remember(existing) { mutableStateOf(TextFieldValue(existing?.text ?: "")) }
+    // ড্রাফট থাকলে সেখান থেকেই শুরু (লেখা, টাইপ, পাবলিক/প্রাইভেট সব)
+    val startText = initialDraft?.text ?: (existing?.text ?: "")
+    var tfv      by remember(existing) { mutableStateOf(TextFieldValue(startText, TextRange(startText.length))) }
     val text     = tfv.text
-    var isPublic by remember(existing) { mutableStateOf(existing?.isPublic ?: false) }
+    var isPublic by remember(existing) { mutableStateOf(initialDraft?.isPublic ?: existing?.isPublic ?: false) }
     // ── ব্যাখ্যা না টেকনিক — কোনটা যোগ/এডিট করা হচ্ছে ──
-    var type     by remember(existing) { mutableStateOf(existing?.type ?: "technique") }
+    var type     by remember(existing) { mutableStateOf(existing?.type ?: initialDraft?.type ?: "technique") }
     val isEditingExisting = existing != null
+
+    // ── অটো-ড্রাফট: সেভ না করে যেভাবেই বন্ধ হোক (বাতিল/back/বাইরে ট্যাপ/প্রশ্ন বদল/অ্যাপ বন্ধ),
+    // লেখাটা ড্রাফটে থেকে যায়। সেভ বা ড্রাফট-সেভ করলে finished = true হয়ে যায়। ──
+    val draftCtx = LocalContext.current
+    var finished by remember { mutableStateOf(false) }
+    val draftKey = TechniqueDraftStore.keyFor(questionId, existing?.id, userId)
+    val liveDraft = rememberUpdatedState(
+        TechniqueDraft(
+            key = draftKey, questionId = questionId, existingId = existing?.id.orEmpty(),
+            userId = userId, text = tfv.text.trim(), type = type, isPublic = isPublic,
+            questionPreview = questionPreview.replace("\n", " ").take(80)
+        )
+    )
+    val originalText = existing?.text.orEmpty().trim()
+    fun hasDraftWorthy(d: TechniqueDraft) = d.text.isNotBlank() && d.text != originalText
+    // টাইপ করতে করতেই (থামার ০.৭ সেকেন্ড পর) ব্যাকগ্রাউন্ডে ড্রাফট সেভ — হঠাৎ কেটে গেলেও হারাবে না
+    LaunchedEffect(tfv.text, isPublic, type) {
+        if (finished || questionId.isBlank()) return@LaunchedEffect
+        kotlinx.coroutines.delay(700)
+        val d = liveDraft.value
+        if (hasDraftWorthy(d)) TechniqueDraftStore.put(draftCtx, d)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            if (!finished && questionId.isNotBlank()) {
+                val d = liveDraft.value
+                if (hasDraftWorthy(d)) TechniqueDraftStore.putAsync(draftCtx, d)
+                else TechniqueDraftStore.deleteAsync(draftCtx, draftKey)
+            }
+        }
+    }
+    fun saveDraftAndClose() {
+        val d = liveDraft.value
+        if (d.text.isBlank() || questionId.isBlank()) return
+        finished = true
+        TechniqueDraftStore.putAsync(draftCtx, d)
+        onDraftSaved()
+    }
 
     // ── ছবি আপলোড: গ্যালারি থেকে ছবি নিয়ে imgbb-তে আপলোড, তারপর লিংকটা টেক্সটের
     // মধ্যেই বসিয়ে দেওয়া হয় — ছবি দেখানোর সিস্টেম (RichContentText) আগে থেকেই
@@ -2720,7 +2832,12 @@ private fun AddTechniqueDialog(
                 // Ctrl+S = সেভ (এক্সটার্নাল কিবোর্ড)
                 if (ev.type == KeyEventType.KeyDown && ev.isCtrlPressed) {
                     when (ev.key) {
-                        Key.S -> { if (tfv.text.trim().isNotBlank() && !isUploadingImage) onSave(tfv.text.trim(), isPublic, type); true }
+                        // Ctrl+Shift+S = ড্রাফট হিসেবে সেভ (ডায়ালগ বন্ধ হবে); Ctrl+S = আসল সেভ
+                        Key.S -> {
+                            if (ev.isShiftPressed) saveDraftAndClose()
+                            else if (tfv.text.trim().isNotBlank() && !isUploadingImage) { finished = true; onSave(tfv.text.trim(), isPublic, type) }
+                            true
+                        }
                         Key.B -> { tfv = wrapSelection(tfv, "<b>", "</b>"); true }              // Bold
                         Key.U -> { tfv = wrapSelection(tfv, "<u>", "</u>"); true }              // Underline
                         Key.H -> { tfv = wrapSelection(tfv, "<mark>", "</mark>"); true }        // Highlight
@@ -2902,22 +3019,131 @@ private fun AddTechniqueDialog(
 
                 Spacer(Modifier.height(16.dp))
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedButton(
                         onClick  = onDismiss,
                         modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(10.dp)
+                        shape    = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                     ) {
-                        Text("বাতিল", fontFamily = NotoSansBengali)
+                        Text("বাতিল", fontFamily = NotoSansBengali, fontSize = 12.sp, maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick  = { saveDraftAndClose() },
+                        enabled  = text.trim().isNotBlank() && questionId.isNotBlank(),
+                        modifier = Modifier.weight(1.3f),
+                        shape    = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                    ) {
+                        Text("📝 ড্রাফট", fontFamily = NotoSansBengali, fontSize = 12.sp, maxLines = 1)
                     }
                     Button(
-                        onClick  = { if (text.trim().isNotBlank()) onSave(text.trim(), isPublic, type) },
+                        onClick  = { if (text.trim().isNotBlank()) { finished = true; onSave(text.trim(), isPublic, type) } },
                         enabled  = text.trim().isNotBlank(),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1.3f),
                         shape    = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = Indigo600)
                     ) {
-                        Text("সেভ করুন", fontFamily = NotoSansBengali)
+                        Text("সেভ করুন", fontFamily = NotoSansBengali, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "সেভ না করে বন্ধ করলেও লেখা ড্রাফটে থাকবে · Ctrl+Shift+S = ড্রাফট",
+                        fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
+                    )
+                    if (initialDraft != null) {
+                        TextButton(
+                            onClick = {
+                                finished = true
+                                TechniqueDraftStore.deleteAsync(draftCtx, draftKey)
+                                onDismiss()
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("🗑 ড্রাফট মুছুন", fontSize = 10.sp, color = RedWrong, fontFamily = NotoSansBengali)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+// 📝 অসমাপ্ত টেকনিক/ব্যাখ্যা ড্রাফটের স্ট্রিপ — প্রশ্নের তালিকার একদম উপরে আটকানো থাকে
+// (LazyColumn-এর বাইরে), তাই উত্তর দেওয়ার পর প্রশ্ন নিচে নেমে গেলেও ড্রাফট হারায় না/চোখের
+// আড়াল হয় না। চিপে ট্যাপ করলে ওই প্রশ্নে স্ক্রল করে ডায়ালগ আবার খোলে।
+// ────────────────────────────────────────────────────────────────
+@Composable
+fun TechniqueDraftStrip(
+    questions  : List<QuestionItem>,
+    userId     : String,
+    pageOffset : Int = 0,
+    onOpen     : (questionId: String, existingId: String) -> Unit
+) {
+    if (userId.isBlank()) return
+    val context = LocalContext.current
+    val all by TechniqueDraftStore.flow(context).collectAsState(initial = emptyList())
+    val byId = remember(questions) { questions.withIndex().associate { it.value.id to it } }
+    val mine = remember(all, byId, userId) {
+        all.filter { it.userId == userId && it.text.isNotBlank() && byId.containsKey(it.questionId) }
+    }
+    if (mine.isEmpty()) return
+
+    Surface(
+        color    = OrangeTech.copy(alpha = 0.10f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(top = 6.dp, bottom = 6.dp)) {
+            Text(
+                "📝 ড্রাফট (${mine.size}) — ট্যাপ করে চালিয়ে লিখুন",
+                fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = OrangeTech,
+                fontFamily = NotoSansBengali, modifier = Modifier.padding(horizontal = 12.dp)
+            )
+            Spacer(Modifier.height(4.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(mine, key = { it.key }) { d ->
+                    val iv = byId[d.questionId]
+                    Surface(
+                        onClick  = { onOpen(d.questionId, d.existingId) },
+                        shape    = RoundedCornerShape(10.dp),
+                        color    = MaterialTheme.colorScheme.surface,
+                        border   = BorderStroke(1.dp, OrangeTech.copy(alpha = 0.5f)),
+                        modifier = Modifier.width(230.dp)
+                    ) {
+                        Row(
+                            Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "প্রশ্ন ${pageOffset + (iv?.index ?: 0) + 1} · " +
+                                        (if (d.type == "explanation") "ব্যাখ্যা" else "টেকনিক"),
+                                    fontSize = 10.sp, fontWeight = FontWeight.Bold, color = OrangeTech,
+                                    fontFamily = NotoSansBengali, maxLines = 1
+                                )
+                                Text(
+                                    d.text.replace("\n", " "),
+                                    fontSize = 11.sp, fontFamily = NotoSansBengali, maxLines = 2,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            IconButton(
+                                onClick = { TechniqueDraftStore.deleteAsync(context, d.key) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "ড্রাফট মুছুন",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp))
+                            }
+                        }
                     }
                 }
             }
