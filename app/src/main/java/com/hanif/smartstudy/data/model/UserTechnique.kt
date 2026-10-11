@@ -15,8 +15,12 @@ data class UserTechnique(
     // জন্য প্রাসঙ্গিক) — false মানে এটা এখনো Firebase-এ নেই, পরবর্তী batch sync-এ যাবে।
     // Firebase থেকে fetch করা যেকোনো টেকনিক (নিজের হোক বা অন্যের) মানেই ইতিমধ্যে সেখানে আছে,
     // তাই ডিফল্ট true। দেখো data/local/LocalTechniqueStore.kt আর util/PrivateTechniqueSync.kt ──
-    val synced      : Boolean = true
+    val synced      : Boolean = true,
+    // ── সংযুক্ত কপি: Admin অন্য প্রশ্নের টেকনিক এই প্রশ্নে "যোগ" করলে এখানে আসল টেকনিকের id/প্রশ্ন থাকে ──
+    val linkedFrom  : String = "",   // আসল টেকনিকের pushKey (খালি = এটা মূল টেকনিক)
+    val linkedFromQ : String = ""    // আসল টেকনিক যে প্রশ্নে লেখা হয়েছিল
 ) {
+    fun isLinkedCopy()   = linkedFrom.isNotBlank()
     fun isPending()      = status == "pending"
     fun isApproved()     = status == "approved"
     fun isRejected()     = status == "rejected"
@@ -33,7 +37,9 @@ data class UserTechnique(
             isPublic   = map["isPublic"]?.toString()?.toBooleanStrictOrNull() ?: false,
             status     = map["status"]?.toString()     ?: "pending",
             timestamp  = map["timestamp"]?.toString()?.toLongOrNull() ?: 0L,
-            type       = map["type"]?.toString()       ?: "technique"
+            type       = map["type"]?.toString()       ?: "technique",
+            linkedFrom  = map["linkedFrom"]?.toString()  ?: "",
+            linkedFromQ = map["linkedFromQ"]?.toString() ?: ""
         )
     }
 }
