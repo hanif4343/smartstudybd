@@ -249,6 +249,7 @@ private fun StudyImageBlock(
 private fun StudyVideoCard(url: String, isYoutube: Boolean, meta: LinkMeta?, show: Boolean, textColor: Color) {
     val ctx = LocalContext.current
     var revealed by remember(url) { mutableStateOf(false) }
+    var showPlayer by remember(url) { mutableStateOf(false) }   // ▶ অ্যাপের ভিতরেই চালানো
     val accent = if (isYoutube) Color(0xFFBE123C) else Color(0xFF0369A1)
     if (!show && !revealed) {
         HiddenChip((if (isYoutube) "🎥 YouTube" else "🔵 Facebook") + " ভিডিও লুকানো — দেখান", textColor) { revealed = true }
@@ -258,7 +259,7 @@ private fun StudyVideoCard(url: String, isYoutube: Boolean, meta: LinkMeta?, sho
         shape = RoundedCornerShape(14.dp),
         color = textColor.copy(alpha = 0.05f),
         border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
-        modifier = Modifier.fillMaxWidth().clickable { openVideoApp(ctx, url) }
+        modifier = Modifier.fillMaxWidth().clickable { showPlayer = true }
     ) {
         Column {
             if (isYoutube) {
@@ -278,7 +279,7 @@ private fun StudyVideoCard(url: String, isYoutube: Boolean, meta: LinkMeta?, sho
             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (!isYoutube) {
                     Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center) { Text("🔵", fontSize = 20.sp) }
+                        contentAlignment = Alignment.Center) { VideoLogo(false, 24.dp) }
                     Spacer(Modifier.width(10.dp))
                 }
                 Column(Modifier.weight(1f)) {
@@ -297,9 +298,13 @@ private fun StudyVideoCard(url: String, isYoutube: Boolean, meta: LinkMeta?, sho
                     fontFamily = NotoSansBengali,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(accent)
                         .padding(horizontal = 12.dp, vertical = 8.dp))
+                // ↗ বাইরের অ্যাপে খুলুন
+                Text("↗", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accent,
+                    modifier = Modifier.clickable { openVideoApp(ctx, url) }.padding(start = 8.dp, top = 6.dp, bottom = 6.dp))
             }
         }
     }
+    if (showPlayer) VideoPlayerDialog(url, isYoutube, meta?.title, onClose = { showPlayer = false })
 }
 
 /** 16:9 — aspectRatio modifier import না বাড়িয়ে লোকাল হেল্পার */
