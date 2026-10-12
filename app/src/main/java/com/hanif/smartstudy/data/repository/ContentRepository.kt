@@ -1849,6 +1849,66 @@ class ContentRepository(private val context: Context) {
         dao.replaceTopicId(sheet.uppercase(), oldTopicId, newTopicId)
     }
 
+    suspend fun replaceRoomSubjectId(sheet: String, oldSubjectId: String, newSubjectId: String) = withContext(Dispatchers.IO) {
+        refDao.replaceSubjectId(oldSubjectId, newSubjectId)
+        dao.replaceSubjectId(sheet.uppercase(), oldSubjectId, newSubjectId)
+    }
+
+    /** ── Move-এর destination-এর অস্থায়ী ("-local...") Subject/Topic id গুলো GAS থেকে আসল id বানিয়ে
+     *  নেয় এবং Room-এ (reference + questions) বদলে দেয়। background sync, VM-এর Sync Now আর
+     *  SyncWorker — তিন জায়গা থেকেই এটা কল হয়। retry-তে আগের বার তৈরি হয়ে যাওয়া আসল
+     *  Subject/Topic (Room-এ ইতিমধ্যে বদলানো) থাকলে সেটাই ব্যবহার করে — ডুপ্লিকেট বানায় না।
+     *  সফল হলে (আসল subjectId, আসল topicId) ফেরত দেয়। */
+    suspend fun resolveMoveTargets(
+        sheet: String, newSubject: String, newSubjectId: String, newSubTopic: String, newTopicId: String,
+        createSubject: Boolean, createTopic: Boolean
+    ): com.hanif.smartstudy.data.remote.ApiResult<Pair<String, String>> {
+        val gas = com.hanif.smartstudy.data.remote.GasContentService
+        var sid = newSubjectId
+        if (createSubject || sid.isBlank() || sid.startsWith("-local")) {
+            val existing = resolveSubjectId(sheet, newSubject)?.takeIf { !it.startsWith("-local") }
+            if (existing != null) {
+                sid = existing
+            } else {
+                when (val r = gas.addReferenceItem("subjects", newSubject, sheet = sheet)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val old = sid
+                        sid = r.data
+                        try {
+                            if (old.isNotBlank() && old.startsWith("-local")) replaceRoomSubjectId(sheet, old, sid)
+                            else addRoomSubjectLocal(sid, newSubject, sheet)
+                        } catch (_: Exception) { }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                        return com.hanif.smartstudy.data.remote.ApiResult.Error("নতুন Subject \"$newSubject\" তৈরি ব্যর্থ: ${r.message}")
+                }
+            }
+        }
+        var tid = newTopicId
+        if (createTopic || tid.isBlank() || tid.startsWith("-local")) {
+            val existing = resolveTopicId(sid, newSubTopic)?.takeIf { !it.startsWith("-local") }
+            if (existing != null) {
+                tid = existing
+            } else {
+                when (val r = gas.addReferenceItem("topics", newSubTopic, sid)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val old = tid
+                        tid = r.data
+                        try {
+                            if (old.isNotBlank() && old.startsWith("-local")) {
+                                replaceRoomTopicId(old, tid)
+                                replaceRoomQuestionsTopicId(sheet, old, tid)
+                            } else addRoomTopicLocal(tid, sid, newSubTopic)
+                        } catch (_: Exception) { }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                        return com.hanif.smartstudy.data.remote.ApiResult.Error("নতুন Topic \"$newSubTopic\" তৈরি ব্যর্থ: ${r.message}")
+                }
+            }
+        }
+        return com.hanif.smartstudy.data.remote.ApiResult.Success(sid to tid)
+    }
+
     // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
     //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
     suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
