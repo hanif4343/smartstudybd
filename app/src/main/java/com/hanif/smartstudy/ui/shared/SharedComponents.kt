@@ -224,6 +224,31 @@ private fun toBengaliNumber(n: Int): String {
     return n.toString().map { c -> if (c.isDigit()) bnDigits[c - '0'] else c }.joinToString("")
 }
 
+/** ছোট্ট রঙিন Google "G" আইকন — ছবি/ফাইল ছাড়া, Canvas-এ আঁকা (লাল-হলুদ-সবুজ-নীল চাপ + নীল দাগ) */
+@Composable
+fun GoogleGIcon(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val sw = size.minDimension * 0.20f
+        val inset = sw / 2f
+        val arcSize = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw)
+        val tl = androidx.compose.ui.geometry.Offset(inset, inset)
+        val st = androidx.compose.ui.graphics.drawscope.Stroke(width = sw)
+        fun arc(c: Color, start: Float, sweep: Float) =
+            drawArc(c, start, sweep, false, tl, arcSize, style = st)
+        arc(Color(0xFFEA4335), 215f, 100f)   // লাল (উপরে)
+        arc(Color(0xFFFBBC05), 135f, 82f)    // হলুদ (বামে)
+        arc(Color(0xFF34A853), 50f, 87f)     // সবুজ (নিচে)
+        arc(Color(0xFF4285F4), 0f, 52f)      // নীল (ডানে-নিচে)
+        // ডান দিকের নীল আড়াআড়ি দাগ
+        drawLine(
+            Color(0xFF4285F4),
+            start = androidx.compose.ui.geometry.Offset(size.width * 0.50f, size.height * 0.50f),
+            end   = androidx.compose.ui.geometry.Offset(size.width - inset * 0.2f, size.height * 0.50f),
+            strokeWidth = sw
+        )
+    }
+}
+
 @Composable
 fun QuestionCard(
     index          : Int,
@@ -419,6 +444,15 @@ fun QuestionCard(
                     // aiExplanation state + LaunchedEffect দেখো) — কোনো ম্যানুয়াল বাটন
                     // চাপা লাগবে না। onAskAi প্যারামিটার/voice-AI চ্যাট ফিচার অক্ষত
                     // রইল (অন্য কোথাও লাগলে), শুধু এই per-card badge-টাই সরানো হলো। ──
+                    // ── 🔍 এক ক্লিকে গুগল সার্চ (বুকমার্কের আগে) — পুরো প্রশ্ন সার্চ হয়।
+                    // অংশ সিলেক্ট করে সার্চ আগের মতোই চলে (সিলেকশন-টুলবার) ──
+                    val searchCtx = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(
+                        onClick = { com.hanif.smartstudy.util.WebSearchLauncher.search(searchCtx, displayQuestion.ifBlank { item.question }) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        GoogleGIcon(Modifier.size(16.dp))
+                    }
                     IconButton(onClick = onBookmark, modifier = Modifier.size(28.dp)) {
                         Icon(
                             if (item.isBookmarked) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -2814,6 +2848,7 @@ private fun AddTechniqueDialog(
     val scope             = rememberCoroutineScope()
     var isUploadingImage  by remember { mutableStateOf(false) }
     var imageUploadError  by remember { mutableStateOf<String?>(null) }
+    var showVideoDialog   by remember { mutableStateOf(false) }   // 🎬 ভিডিও লিংক (হেডিং + লিংক)
 
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -2970,6 +3005,16 @@ private fun AddTechniqueDialog(
                     input = tagInput, onInputChange = { tagInput = it },
                     recent = recentTags, textColor = onCardBg
                 )
+                if (showVideoDialog) {
+                    VideoLinkAddDialog(
+                        onDismiss = { showVideoDialog = false },
+                        onInsert  = { md ->
+                            val nt = if (tfv.text.isBlank()) md else tfv.text.trimEnd() + "\n" + md
+                            tfv = TextFieldValue(nt, TextRange(nt.length))
+                            showVideoDialog = false
+                        }
+                    )
+                }
 
                 Spacer(Modifier.height(12.dp))
 
@@ -2990,6 +3035,15 @@ private fun AddTechniqueDialog(
                         // গ্যালারি খুলে CDN-এ আপলোড হয়ে লিংক টেক্সটে বসে যায়। আপলোড
                         // চলাকালীন ছোট লোডার দেখায় ──
                         if (isAdmin) {
+                            // 🎬 ভিডিও লিংক — আগে হেডিং, তারপর ইউটিউব/ফেসবুক লিংক পেস্ট
+                            Surface(
+                                onClick  = { showVideoDialog = true },
+                                shape    = RoundedCornerShape(9.dp),
+                                color    = Indigo600.copy(alpha = 0.12f),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) { Text("🎬", fontSize = 16.sp) }
+                            }
                             Surface(
                                 onClick  = { if (!isUploadingImage) imageLauncher.launch("image/*") },
                                 shape    = RoundedCornerShape(9.dp),
@@ -3536,6 +3590,100 @@ fun ReportDialog(
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  🎬 VideoLinkAddDialog — ব্যাখ্যা/টেকনিকে ভিডিও যোগ করার ছোট ডায়ালগ।
+//  আগে হেডিং (যেমন "মৌলিক ও সাধিত শব্দ"), তারপর ইউটিউব/ফেসবুক লিংক পেস্ট।
+//  "যোগ করুন" চাপলে টেক্সটে `[হেডিং](লিংক)` বসে — দেখাবে হেডিং + ছোট লোগো + "দেখুন"
+//  (দেখো MediaViewer.VideoButton)। হেডিং না দিলে শুধু লিংক বসে (আগের মতো বাটন)।
+// ═══════════════════════════════════════════════════════════════
+
+private val VIDEO_URL_OK = Regex("^https?://(?:www\\.)?(?:youtube\\.com|youtu\\.be|facebook\\.com)/\\S+", RegexOption.IGNORE_CASE)
+private val MOBILE_HOST  = Regex("^(https?://)(?:m|mobile|web|mbasic|touch)\\.(youtube\\.com|facebook\\.com)", RegexOption.IGNORE_CASE)
+
+/** লিংক ঠিক করে নেয় (m./mobile. বাদ, https যোগ); ইউটিউব/ফেসবুক না হলে null */
+private fun cleanVideoUrl(raw: String): String? {
+    var url = raw.trim().takeWhile { !it.isWhitespace() }.trimEnd(',', '।', '.')
+    if (url.isBlank()) return null
+    if (!url.startsWith("http", ignoreCase = true)) url = "https://$url"
+    url = MOBILE_HOST.replace(url, "$1$2").replace(")", "%29").replace("(", "%28")
+    return if (VIDEO_URL_OK.matches(url)) url else null
+}
+
+/** `[হেডিং](লিংক)`; হেডিং ফাঁকা হলে শুধু লিংক; লিংক ভুল হলে null */
+fun buildVideoMarkdown(title: String, link: String): String? {
+    val url = cleanVideoUrl(link) ?: return null
+    val t = title.replace(Regex("[\\[\\]|\\r\\n]"), " ").replace(Regex("\\s+"), " ").trim().take(120)
+    return if (t.isBlank()) url else "[$t]($url)"
+}
+
+@Composable
+fun VideoLinkAddDialog(onDismiss: () -> Unit, onInsert: (String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var link  by remember { mutableStateOf("") }
+    var err   by remember { mutableStateOf<String?>(null) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val valid = cleanVideoUrl(link) != null
+    val isYt  = link.contains("youtu", ignoreCase = true)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🎬 ভিডিও লিংক যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Indigo600) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title, onValueChange = { title = it; err = null },
+                    label = { Text("হেডিং (যেমন: মৌলিক ও সাধিত শব্দ)", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(fontFamily = NotoSansBengali, fontSize = 14.sp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Indigo600)
+                )
+                OutlinedTextField(
+                    value = link, onValueChange = { link = it; err = null },
+                    label = { Text("ইউটিউব / ফেসবুক লিংক", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    placeholder = { Text("লিংক পেস্ট করুন", fontFamily = NotoSansBengali, fontSize = 12.sp) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        TextButton(onClick = { link = clipboard.getText()?.text.orEmpty().trim(); err = null }) {
+                            Text("📋 পেস্ট", fontFamily = NotoSansBengali, fontSize = 12.sp)
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Indigo600)
+                )
+                if (valid) {
+                    // প্রিভিউ — যেমন দেখাবে
+                    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            com.hanif.smartstudy.ui.components.VideoLogo(isYt, 20.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                title.trim().ifBlank { if (isYt) "ইউটিউব অ্যাপে দেখুন" else "ফেইসবুক অ্যাপে দেখুন" },
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 2
+                            )
+                        }
+                    }
+                }
+                err?.let { Text(it, color = RedWrong, fontSize = 11.sp, fontFamily = NotoSansBengali) }
+                Text(
+                    "শুধু ইউটিউব (youtube.com / youtu.be) ও ফেসবুক (facebook.com) লিংক চলবে। হেডিং না দিলে শুধু \"দেখুন\" বাটন দেখাবে।",
+                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val md = buildVideoMarkdown(title, link)
+                    if (md == null) err = "ঠিক লিংক দিন — ইউটিউব বা ফেসবুকের (https://...) লিংক হতে হবে"
+                    else onInsert(md)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Indigo600)
+            ) { Text("যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  AdminFieldEditDialog — পুরনো index.html স্টাইলের ছোট per-field
 //  এডিট পপআপ। প্রতিটা ফিল্ড (প্রশ্ন/অপশন/উত্তর/ব্যাখ্যা/টেকনিক) এর
 //  পাশে আলাদা ✎ আইকনে ক্লিক করলে এই ছোট মোডালটা খোলে — শুধু ওই
@@ -3589,6 +3737,7 @@ fun AdminFieldEditDialog(
 
     var text        by remember { mutableStateOf(initialValue) }
     var isSaving    by remember { mutableStateOf(false) }
+    var showVideoDialog by remember { mutableStateOf(false) }   // 🎬 ব্যাখ্যা/টেকনিকে ভিডিও লিংক
     // ── পুরো প্রশ্ন কার্ড ডিলিট — শুধু এই ফিল্ড না, পুরো row (প্রশ্ন+অপশন+
     // উত্তর+ব্যাখ্যা+টেকনিক সব) ডিলিট হয়ে যায়, তাই confirm করার জন্য
     // আলাদা রেড ওয়ার্নিং ডায়ালগ দেখানো হয় ──
@@ -3795,6 +3944,17 @@ fun AdminFieldEditDialog(
                     fontFamily = NotoSansBengali
                 )
                 Spacer(Modifier.height(12.dp))
+                // ── 🎬 ব্যাখ্যা/টেকনিকে ভিডিও যোগ: আগে হেডিং, তারপর লিংক পেস্ট → [হেডিং](লিংক) বসে যায় ──
+                if (fieldId == "explanation" || fieldId == "technique") {
+                    OutlinedButton(
+                        onClick  = { showVideoDialog = true },
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        shape    = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("🎬 ভিডিও লিংক যোগ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
                 OutlinedTextField(
                     value         = text,
                     onValueChange = { text = it },
@@ -3882,6 +4042,16 @@ fun AdminFieldEditDialog(
                 }
             }
         }
+    }
+
+    if (showVideoDialog) {
+        VideoLinkAddDialog(
+            onDismiss = { showVideoDialog = false },
+            onInsert  = { md ->
+                text = if (text.isBlank()) md else text.trimEnd() + "\n" + md
+                showVideoDialog = false
+            }
+        )
     }
 
     // ── রেড ওয়ার্নিং: পুরো প্রশ্ন কার্ড ডিলিট কনফার্মেশন ──
