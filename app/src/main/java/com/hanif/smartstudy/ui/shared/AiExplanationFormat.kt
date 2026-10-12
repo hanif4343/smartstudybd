@@ -70,6 +70,19 @@ fun formatAiExplanation(raw: String): String {
     }
     t = out.joinToString("\n")
 
+    // ── শেষে "অতএব/তাই/সুতরাং এটাই (সঠিক) উত্তর" ধরনের জাস্টিফিকেশন লাইন বাদ ──
+    // শুধু ছোট (≤১২০ অক্ষর), "এটাই/এটিই/ইহাই ... উত্তর" বা "... সঠিক উত্তর" যুক্ত শেষ লাইন
+    // এবং আগে অন্তত একটা লাইন থাকলে; গণিতের চূড়ান্ত ফল (যেমন "∴ x = 5") ছোঁয়া হয় না।
+    val lines = t.split("\n").toMutableList()
+    while (lines.size > 1) {
+        val last = lines.last().trim().trim('*').trim()
+        if (last.isEmpty()) { lines.removeAt(lines.lastIndex); continue }
+        val isJustify = last.length <= 120 &&
+            Regex("""^(?:✅\s*)?(?:অতএব|তাই|সুতরাং|অতঃপর|এজন্য|এ কারণে|কাজেই)[\s,]""" + """[^\n]*(?:এটাই|এটিই|ইহাই|সঠিক)[^\n]*উত্তর[^\n]*$""").containsMatchIn(last)
+        if (isJustify) lines.removeAt(lines.lastIndex) else break
+    }
+    t = lines.joinToString("\n")
+
     // বাড়তি ফাঁকা লাইন কমানো (সর্বোচ্চ ১টা)
     t = t.replace(Regex("\n{3,}"), "\n\n").trim()
     return t
