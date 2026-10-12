@@ -488,24 +488,34 @@ private fun ytVideoId(url: String): String? {
     return raw.takeIf { Regex("^[A-Za-z0-9_-]{6,20}$").matches(it) }
 }
 
-/** (baseUrl, html) — প্লেয়ার চালানো না গেলে (ID নেই) null */
+/** (baseUrl, html) — প্লেয়ার চালানো না গেলে (ID নেই) null.
+ *  YouTube → IFrame API ব্যবহার হয়, যাতে embed বন্ধ/ভিডিও আনপ্লেয়েবল হলে onError ধরা যায়
+ *  (Android.onError) এবং কোনো মেসেজ ছাড়াই সরাসরি বাইরের অ্যাপে চলে যাওয়া যায়। */
 private fun playerPage(url: String, isYoutube: Boolean): Pair<String, String>? {
-    val src: String
-    val base: String
     if (isYoutube) {
         val id = ytVideoId(url) ?: return null
-        src  = "https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1"
-        base = "https://www.youtube.com"
-    } else {
-        src  = "https://www.facebook.com/plugins/video.php?href=${Uri.encode(url)}&show_text=false&autoplay=true&allowfullscreen=true"
-        base = "https://www.facebook.com"
+        val html = "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}" +
+            "#p{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head><body>" +
+            "<div id=\"p\"></div>" +
+            "<script>" +
+            "var tag=document.createElement('script');tag.src='https://www.youtube.com/iframe_api';" +
+            "tag.onerror=function(){try{Android.onError(-1)}catch(e){}};" +
+            "document.head.appendChild(tag);" +
+            "function onYouTubeIframeAPIReady(){new YT.Player('p',{videoId:'$id',width:'100%',height:'100%'," +
+            "playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,fs:1}," +
+            "events:{onReady:function(e){try{Android.onReady()}catch(x){};e.target.playVideo()}," +
+            "onError:function(e){try{Android.onError(e.data)}catch(x){}}}})}" +
+            "</script></body></html>"
+        return "https://www.youtube.com" to html
     }
+    val src  = "https://www.facebook.com/plugins/video.php?href=${Uri.encode(url)}&show_text=false&autoplay=true&allowfullscreen=true"
     val html = "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
         "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}" +
         "iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head><body>" +
         "<iframe src=\"$src\" allow=\"autoplay; encrypted-media; picture-in-picture; fullscreen\" allowfullscreen></iframe>" +
         "</body></html>"
-    return base to html
+    return "https://www.facebook.com" to html
 }
 
 @Composable
@@ -524,6 +534,19 @@ fun VideoPlayerDialog(url: String, isYoutube: Boolean, title: String?, onClose: 
     var loading by remember { mutableStateOf(true) }
     val webHolder = remember { arrayOfNulls<WebView>(1) }
     var rotated by remember { mutableStateOf(false) }
+
+    // ── ইন-অ্যাপ প্লেয়ার চালু না হলে (embed বন্ধ/নেটওয়ার্ক/লোড এরর/টাইমআউট) কোনো মেসেজ বা
+    // সতর্কতা ছাড়াই সরাসরি বাইরের ইউটিউব/ফেসবুক অ্যাপে চলে যায় — ইউজার টেরও পাবে না
+    // যে ভেতরে কিছু ঝামেলা হয়েছিল। ব্যাক চাপলে একই প্রশ্নে ফেরে (openVideoApp-এর নোট দেখো)। ──
+    var playerReady by remember { mutableStateOf(false) }
+    var fallbackToApp by remember { mutableStateOf(false) }
+    LaunchedEffect(fallbackToApp) {
+        if (fallbackToApp) { openVideoApp(ctx, url); onClose() }
+    }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(10_000)
+        if (!playerReady) fallbackToApp = true
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -586,8 +609,25 @@ fun VideoPlayerDialog(url: String, isYoutube: Boolean, title: String?, onClose: 
                                 // প্লেয়ারের ভিতরের লিংক ট্যাপে পুরো পেজ বদলে যেতে দেওয়া হয় না (iframe-এর ভেতরের লোড চলে)
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean =
                                     request?.isForMainFrame == true
-                                override fun onPageFinished(view: WebView?, u: String?) { loading = false }
+                                override fun onPageFinished(view: WebView?, u: String?) {
+                                    loading = false
+                                    if (!isYoutube) playerReady = true   // FB: পেজ লোড হলেই ঠিক ধরা হয়
+                                }
+                                override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                                    if (request?.isForMainFrame == true) fallbackToApp = true
+                                }
+                                override fun onReceivedHttpError(view: WebView?, request: android.webkit.WebResourceRequest?, errorResponse: android.webkit.WebResourceResponse?) {
+                                    if (request?.isForMainFrame == true) fallbackToApp = true
+                                }
                             }
+                            wv.addJavascriptInterface(object {
+                                @android.webkit.JavascriptInterface fun onReady() {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post { playerReady = true; loading = false }
+                                }
+                                @android.webkit.JavascriptInterface fun onError(code: Int) {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post { fallbackToApp = true }
+                                }
+                            }, "Android")
                             var customView: android.view.View? = null
                             wv.webChromeClient = object : WebChromeClient() {
                                 override fun onShowCustomView(view: android.view.View?, callback: WebChromeClient.CustomViewCallback?) {
@@ -618,13 +658,6 @@ fun VideoPlayerDialog(url: String, isYoutube: Boolean, title: String?, onClose: 
                         }
                     )
                     if (loading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
-                }
-                if (fsCallback == null) {
-                    Text(
-                        "ভিডিও না চললে ওপরের ↗ অ্যাপে খুলুন চাপুন। কিছু ভিডিও (প্রাইভেট/embed বন্ধ) অ্যাপের ভিতরে চলে না।",
-                        color = Color.White.copy(alpha = 0.65f), fontFamily = NotoSansBengali, fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
                 }
             }
         }
