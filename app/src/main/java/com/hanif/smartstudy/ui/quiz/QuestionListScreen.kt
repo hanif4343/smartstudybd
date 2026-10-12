@@ -252,7 +252,13 @@ fun QuestionListScreen(
     val questions = if (qbankSplit) {
         if (qbankTypeTab == 0) allQuestions.filter { !it.isWritten() } else allQuestions.filter { it.isWritten() }
     } else allQuestions
-    val realIndexById = remember(allQuestions) { allQuestions.withIndex().associate { it.value.id to it.index } }
+    // ── FIX (পরের পেজে অপশন সিলেক্ট হচ্ছিল না): `allQuestions` এ শুধু বর্তমান পেজের প্রশ্ন
+    // থাকে, তাই এর index পেজ-লোকাল (০..৪৯)। কিন্তু ViewModel (answerMcq ইত্যাদি) নিজে
+    // currentPage*PAGE_SIZE বাদ দিয়ে লোকাল index বানায় — ফলে ২য়+ পেজে ঋণাত্মক index হয়ে
+    // getOrNull() null দিত, ট্যাপ চুপচাপ হারিয়ে যেত। এখন এখানেই পেজের base যোগ করে
+    // গ্লোবাল index পাঠানো হচ্ছে, যাতে ViewModel-এর বিয়োগের পর সঠিক লোকাল index মেলে। ──
+    val vmPageBase = if (mode == StudyMode.QBANK) 0 else currentPage * QuizViewModel.PAGE_SIZE
+    val realIndexById = remember(allQuestions, vmPageBase) { allQuestions.withIndex().associate { it.value.id to (vmPageBase + it.index) } }
     // QBank-এ পেজিনেশন নেই — সব প্রশ্ন এক পেজে (pageSize বিশাল ধরা হয়)
     val pageSize = if (mode == StudyMode.QBANK) Int.MAX_VALUE else QuizViewModel.PAGE_SIZE
     // totalQuestions Room থেকে — questions.size শুধু current page এর count
@@ -1569,7 +1575,7 @@ fun QuestionListScreen(
 
     // ── Report dialog ──
     if (reportIdx >= 0) {
-        val q = allQuestions.getOrNull(reportIdx)
+        val q = allQuestions.getOrNull(reportIdx - vmPageBase)
         ReportDialog(
             questionId   = q?.id ?: "",
             questionText = q?.question ?: "",
