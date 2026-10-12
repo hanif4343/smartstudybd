@@ -22,7 +22,10 @@ data class PendingAction(
     val type       : String,      // "quiz_answer" | "study_progress" | "xp_update" | "admin_edit_question"
     val payload    : String,      // JSON string
     val createdAt  : Long   = System.currentTimeMillis(),
-    val retryCount : Int    = 0
+    val retryCount : Int    = 0,
+    // সর্বশেষ ব্যর্থতার কারণ ও সময় (nullable — পুরনো সেভ-করা JSON-এ এই ফিল্ড নেই, Gson তখন null দেয়)
+    val lastError  : String? = "",
+    val lastTriedAt: Long   = 0L
 )
 
 class PendingQueue(private val context: Context) {
@@ -33,9 +36,15 @@ class PendingQueue(private val context: Context) {
 
     // ── Queue-এ action যোগ করো ──
     suspend fun enqueue(action: PendingAction) {
+        // সরাসরি চেষ্টা ব্যর্থ হয়ে queue-তে আসলে (ঠিক আগে ApiResult.Error হয়ে থাকলে) সেই কারণটাও রাখা হয়;
+        // অফলাইন হলে কোনো সাম্প্রতিক এরর থাকে না — তখন কারণ খালি, UI \"ইন্টারনেট ছিল না\" ধরে নেয় না,
+        // শুধু \"অপেক্ষমাণ\" দেখায়।
+        val recent = if (action.type.startsWith("admin_")) com.hanif.smartstudy.data.remote.ApiErrorTracker.takeRecent(30_000L) else null
+        val withReason = if (recent != null) action.copy(lastError = recent, lastTriedAt = System.currentTimeMillis()) else action
         val queue = getAll().toMutableList()
-        queue.add(action)
+        queue.add(withReason)
         save(queue)
+        if (recent != null) SyncHistoryStore(context).recordFromAction(withReason, success = false, reason = recent)
         // নেট ফিরলেই যেন নিজে নিজে sync হয় — WorkManager শুধু তখনই চালায় যখন নেটওয়ার্ক সংযুক্ত
         // (আগে শুধু ১৫ মিনিটের periodic worker ভরসা ছিল, তাই নেট আসার পরও আইটেম পড়ে থাকত)
         try { com.hanif.smartstudy.worker.SyncWorker.scheduleOneTime(context) } catch (e: Exception) { /* queue সেভ হয়ে গেছে; পরের রানে sync হবে */ }
@@ -165,7 +174,9 @@ class PendingQueue(private val context: Context) {
         newTopicId     : String,
         // ── newTopicId ফাঁকা/অস্থায়ী হলে (নতুন Topic বানানো বাকি) true — SyncWorker
         // retry-এর সময় আগে GAS addReferenceItem দিয়ে আসল topicId বানিয়ে নেবে ──
-        createIfMissing: Boolean = false
+        createIfMissing: Boolean = false,
+        // ── নতুন Subject-ও লোকাল temp id-তে বানানো থাকলে true — sync-এর সময় আগে Subject তৈরি হবে ──
+        createSubjectIfMissing: Boolean = false
     ) {
         enqueue(PendingAction(
             type    = "admin_move_questions",
@@ -176,7 +187,8 @@ class PendingQueue(private val context: Context) {
                 "newSubjectId"   to newSubjectId,
                 "newSubTopic"    to newSubTopic,
                 "newTopicId"     to newTopicId,
-                "createIfMissing" to createIfMissing
+                "createIfMissing" to createIfMissing,
+                "createSubjectIfMissing" to createSubjectIfMissing
             ))
         ))
     }
@@ -373,16 +385,29 @@ class PendingQueue(private val context: Context) {
     // ── একটি action সফলভাবে sync হলে remove করো ──
     suspend fun remove(actionId: String) {
         val queue = getAll().toMutableList()
+        // সফল sync-এর পর ইতিহাসে \"সফল\" হিসেবে লেখা (শুধু admin action)
+        queue.firstOrNull { it.id == actionId }?.takeIf { it.type.startsWith("admin_") }?.let {
+            SyncHistoryStore(context).recordFromAction(it, success = true)
+        }
         queue.removeAll { it.id == actionId }
         save(queue)
     }
 
     // ── retry count বাড়াও ──
-    suspend fun incrementRetry(actionId: String) {
+    suspend fun incrementRetry(actionId: String, fallbackReason: String? = null) {
         val queue = getAll().toMutableList()
         val idx   = queue.indexOfFirst { it.id == actionId }
         if (idx >= 0) {
-            queue[idx] = queue[idx].copy(retryCount = queue[idx].retryCount + 1)
+            // ব্যর্থতার কারণ: ঠিক আগের ApiResult.Error (থাকলে), নাহলে caller-এর দেওয়া fallback
+            val reason = com.hanif.smartstudy.data.remote.ApiErrorTracker.takeRecent() ?: fallbackReason
+            queue[idx] = queue[idx].copy(
+                retryCount = queue[idx].retryCount + 1,
+                lastError = reason ?: queue[idx].lastError,
+                lastTriedAt = System.currentTimeMillis()
+            )
+            if (queue[idx].type.startsWith("admin_")) {
+                SyncHistoryStore(context).recordFromAction(queue[idx], success = false, reason = reason ?: queue[idx].lastError)
+            }
         }
         save(queue)
     }
