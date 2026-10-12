@@ -1,6 +1,10 @@
 package com.hanif.smartstudy.ui.shared
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,9 +22,20 @@ import kotlinx.coroutines.withContext
 // ── Phase 6: "এই প্রশ্নটি কোন কোন পরীক্ষায় এসেছে" ──
 // একই প্রশ্ন ডুপ্লিকেট না করে Exam_Appearances (Room: exam_appearances) থেকে প্রশ্নের আইডি
 // ধরে পরীক্ষার তালিকা দেখায়। কোনো appearance না থাকলে কিছুই দেখায় না (UI খালি থাকে)।
+//
+// ── নতুন নিয়ম (চিপে Post + Year): ইউজার এখন যে প্রশ্নপত্রে (Post/Institution/Year) আছে,
+// প্রশ্নের সেই appearance বাদ দিয়ে বাকিগুলো "Post — Year" চিপে দেখানো হয়। যেমন ৩৫তম বিসিএস
+// প্রশ্নপত্রে থাকলে ৪৫তমে আসা প্রশ্নে শুধু "৪৫তম বিসিএস" দেখাবে (৩৫তমের কথা না — ইউজার
+// নিজেই ওখানে), আর ৪৫তমের প্রশ্নপত্রে সেই প্রশ্নেই দেখাবে "৩৫তম বিসিএস"। বর্তমান প্রশ্নপত্র
+// জানা না থাকলে (সাবজেক্ট-ভিত্তিক QBank) আগের মতো ২+ appearance হলে সবগুলো দেখায়। ──
 // শুধু পড়ে (read-only) — কোনো ডেটা লেখে না, ডাটাবেস স্কিমা বদলায় না।
 
-private data class AppearanceLine(val institution: String, val post: String, val year: String)
+/** ইউজার এখন QBank-এর কোন প্রশ্নপত্রে আছে — CoreScreen থেকে provide করা হয় */
+class QBankAppearanceCtx(val post: String? = null, val institution: String? = null, val year: String? = null)
+
+val LocalQBankAppearanceCtx = compositionLocalOf<QBankAppearanceCtx?> { null }
+
+private data class AppearanceLine(val institution: String, val post: String, val year: String, val isCurrent: Boolean)
 
 // post/institution নামের ম্যাপ প্রতি কার্ডে আবার না আনতে একবার লোড করে রাখা হয় (খালি হলে ক্যাশ হয় না)
 private object AppearanceNameCache {
@@ -29,17 +44,24 @@ private object AppearanceNameCache {
 }
 
 private fun bnToLatin(s: String): String = buildString {
-    for (c in s) append(if (c in '০'..'৯') ('0' + (c - '০')) else c)
+    for (c in s) append(if (c in '\u09E6'..'\u09EF') ('0' + (c - '\u09E6')) else c)
 }
 
+private fun norm(s: String?): String = (s ?: "").trim().lowercase()
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
     if (questionId.isBlank()) return
     val context = LocalContext.current
-    var lines by remember(questionId) { mutableStateOf<List<AppearanceLine>>(emptyList()) }
+    // Post + Year চিপের নতুন নিয়ম শুধু \"প্রাথমিক\" ক্যাটাগরিতে; বাকি চিপে আগের আচরণ
+    val isPrimary = com.hanif.smartstudy.util.QBankCategory.selected == "প্রাথমিক"
+    val cur = if (isPrimary) LocalQBankAppearanceCtx.current else null
     var expanded by remember(questionId) { mutableStateOf(false) }
+    val curPost = cur?.post; val curInst = cur?.institution; val curYear = cur?.year
+    var lines by remember(questionId, curPost, curInst, curYear) { mutableStateOf<List<AppearanceLine>>(emptyList()) }
 
-    LaunchedEffect(questionId) {
+    LaunchedEffect(questionId, curPost, curInst, curYear) {
         lines = try {
             withContext(Dispatchers.IO) {
                 val dao = AppDatabase.getInstance(context).referenceDao()
@@ -53,11 +75,20 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
                 }
                 rows.sortedByDescending { bnToLatin(it.year).toIntOrNull() ?: 0 }
                     .map {
-                        AppearanceLine(
-                            institution = AppearanceNameCache.institutions[it.institutionId] ?: it.institutionId,
-                            post        = AppearanceNameCache.posts[it.postId] ?: it.postId,
-                            year        = it.year
-                        )
+                        val instName = AppearanceNameCache.institutions[it.institutionId] ?: it.institutionId
+                        val postName = AppearanceNameCache.posts[it.postId] ?: it.postId
+                        val isCurrent = when {
+                            // সাল-মোড: এই সালের appearance-ই বর্তমান
+                            !curYear.isNullOrBlank() -> norm(bnToLatin(it.year)) == norm(bnToLatin(curYear))
+                            // পদবী/প্রতিষ্ঠান-মোড: Post (+ Institution) মিললে বর্তমান
+                            !curPost.isNullOrBlank() -> {
+                                val postOk = norm(postName) == norm(curPost) || norm("$postName, $instName") == norm(curPost)
+                                val instOk = curInst.isNullOrBlank() || norm(instName) == norm(curInst) || norm("$postName, $instName") == norm(curPost)
+                                postOk && instOk
+                            }
+                            else -> false
+                        }
+                        AppearanceLine(instName, postName, it.year, isCurrent)
                     }
             }
         } catch (e: Exception) {
@@ -65,33 +96,63 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
         }
     }
 
-    // শুধু ২+ বার এলে দেখাও — ১টা appearance মানে প্রশ্নটা কেবল ওই চলতি প্রশ্নপত্রেই আছে
-    // (আলাদা করে বলার কিছু নেই), "এসেছে" লেখা অর্থবহ হয় ২ বা তার বেশি পরীক্ষায় থাকলে ──
-    if (lines.size < 2) return
+    val hasCtx = !curPost.isNullOrBlank() || !curYear.isNullOrBlank()
+    // বর্তমান প্রশ্নপত্র জানা থাকলে: সেটা বাদ দিয়ে বাকি (অন্তত ১টা) দেখাও।
+    // না জানা থাকলে আগের মতো — ২+ appearance হলেই সবগুলো।
+    val shown = if (hasCtx) lines.filter { !it.isCurrent } else lines
+    if (shown.isEmpty() || (!hasCtx && shown.size < 2)) return
+    if (!isPrimary) {
+        // ── আগের আচরণ (বিসিএস/নিবন্ধন/ব্যাংক/১৬-২০ গ্রেড): ২+ হলে ট্যাপ করে খোলা তালিকা ──
+        Column(modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Text(
+                text = (if (expanded) "▾ " else "▸ ") + "\uD83D\uDCC5 এই প্রশ্ন পরীক্ষায় এসেছে (${shown.size})",
+                fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp)
+                    .clickable { expanded = !expanded }.padding(vertical = 8.dp)
+            )
+            if (expanded) {
+                shown.forEach { l ->
+                    val parts = listOf(l.institution, l.post, l.year).filter { it.isNotBlank() }
+                    Text(
+                        text = "• " + parts.joinToString(" — "),
+                        fontFamily = NotoSansBengali, fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+    val showInst = com.hanif.smartstudy.util.QBankCategory.selected == com.hanif.smartstudy.util.QBankCategory.GRADE
 
     Column(
         modifier
             .fillMaxWidth()
-            .padding(top = 6.dp)
+            .padding(top = 8.dp)
     ) {
         Text(
-            text = (if (expanded) "▾ " else "▸ ") + "📅 এই প্রশ্ন পরীক্ষায় এসেছে (${lines.size})",
-            fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 36.dp)
-                .clickable { expanded = !expanded }
-                .padding(vertical = 8.dp)
+            text = if (hasCtx) "\uD83D\uDCC5 এই প্রশ্ন আরও এসেছে" else "\uD83D\uDCC5 এই প্রশ্ন পরীক্ষায় এসেছে (${shown.size})",
+            fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            modifier = Modifier.padding(bottom = 4.dp)
         )
-        if (expanded) {
-            lines.forEach { l ->
-                val parts = listOf(l.institution, l.post, l.year).filter { it.isNotBlank() }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            shown.forEach { l ->
+                // চিপে Post এর সাথে Year (Grade-এ প্রতিষ্ঠানও)
+                val parts = listOf(if (showInst) l.institution else "", l.post, l.year).filter { it.isNotBlank() }
                 Text(
-                    text = "• " + parts.joinToString(" — "),
-                    fontFamily = NotoSansBengali, fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                    text = parts.joinToString(" — "),
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
         }
