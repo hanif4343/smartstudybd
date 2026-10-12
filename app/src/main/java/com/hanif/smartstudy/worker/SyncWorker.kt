@@ -425,26 +425,25 @@ class SyncWorker(
             val newSubject = payload["newSubject"]?.toString() ?: return false
             val newSubjectId = payload["newSubjectId"]?.toString() ?: return false
             val newSubTopic = payload["newSubTopic"]?.toString() ?: return false
-            var newTopicId = payload["newTopicId"]?.toString() ?: ""
+            val newTopicId = payload["newTopicId"]?.toString() ?: ""
             val createIfMissing = payload["createIfMissing"]?.toString()?.toBoolean() ?: false
+            val createSubject = payload["createSubjectIfMissing"]?.toString()?.toBoolean() ?: false
             if (ids.isEmpty()) return false
 
-            // ── অফলাইনে "নতুন Topic যোগ করে Move" queue হয়ে থাকলে — retry-এর সময়
-            // প্রথমে GAS addReferenceItem দিয়ে আসল topicId বানিয়ে নিতে হবে (offline
-            // অবস্থায় শুধু অস্থায়ী লোকাল id ছিল, blank/local id দিয়ে move করা যাবে না) ──
-            if (createIfMissing || newTopicId.isBlank() || newTopicId.startsWith("-local")) {
-                when (val cr = com.hanif.smartstudy.data.remote.GasContentService
-                    .addReferenceItem("topics", newSubTopic, newSubjectId)) {
-                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> newTopicId = cr.data
-                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                        Log.w(TAG, "syncAdminMoveQuestions: addReferenceItem failed: ${cr.message}")
-                        return false
-                    }
+            // ── অফলাইনে \"নতুন Subject/Topic যোগ করে Move\" queue হয়ে থাকলে — retry-এর সময়
+            // প্রথমে GAS থেকে আসল id বানিয়ে (এবং Room-এও বদলে) নিতে হবে ──
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+            val (realSubjectId, realTopicId) = when (val t = repo.resolveMoveTargets(
+                sheet, newSubject, newSubjectId, newSubTopic, newTopicId, createSubject, createIfMissing)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> t.data
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminMoveQuestions: target create failed: ${t.message}")
+                    return false
                 }
             }
 
             when (val r = com.hanif.smartstudy.data.remote.GasContentService
-                .moveQuestions(sheet, ids, newSubject, newSubjectId, newSubTopic, newTopicId)) {
+                .moveQuestions(sheet, ids, newSubject, realSubjectId, newSubTopic, realTopicId)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     Log.i(TAG, "syncAdminMoveQuestions $sheet/${ids.size}টি → $newSubject/$newSubTopic success")
                     true
