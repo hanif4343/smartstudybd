@@ -78,7 +78,7 @@ private val FbBorder      = Color(0xFFBAE6FD)
 sealed class MediaSegment {
     data class PlainText(val text: String) : MediaSegment()
     data class ImageLink(val url: String)  : MediaSegment()
-    data class VideoLink(val url: String, val isYoutube: Boolean) : MediaSegment()
+    data class VideoLink(val url: String, val isYoutube: Boolean, val title: String? = null) : MediaSegment()
     data class PdfLink(val url: String)    : MediaSegment()
     // ── Study Nav Phase 3: সাধারণ ওয়েবসাইট/আর্টিকেল লিংক — শুধু parse(allowWeb = true)
     // দিলে তৈরি হয় (Study রিডার), ডিফল্টে কখনো না → বাকি অ্যাপের আচরণ অপরিবর্তিত ──
@@ -194,6 +194,23 @@ object MediaLinkParser {
         return segments
     }
 
+    // ── ভিডিওর শিরোনাম: [মৌলিক ও সাধিত শব্দ](https://youtu.be/xxxx) ──
+    // শুধু YouTube/Facebook লিংকের জন্য; অন্য মার্কডাউন লিংক যেমন আছে তেমনই থাকে।
+    // [শিরোনাম|verified](url) লিখলেও চলে (Study-র মতো) — এখানে |... অংশ উপেক্ষা হয়।
+    private val TITLED_VIDEO = Regex("""\[([^\]\n|]{1,120})(?:\|[^\]\n]*)?]\((https?://[^)\s]+)\)""")
+
+    /** `[শিরোনাম](ভিডিও-লিংক)` → শুধু লিংক (parse আগের মতো চলে) + লিংক→শিরোনাম ম্যাপ */
+    fun extractVideoTitles(text: String): Pair<String, Map<String, String>> {
+        if (!text.contains("](")) return text to emptyMap()
+        val titles = LinkedHashMap<String, String>()
+        val out = TITLED_VIDEO.replace(text) { m ->
+            val url = m.groupValues[2].trim()
+            if (VIDEO_REGEX.matchEntire(url) == null) m.value
+            else { titles[url] = m.groupValues[1].trim(); " $url " }
+        }
+        return out to titles
+    }
+
     // index এর normalizePdfUrl: /d/{fileId}/preview
     fun normalizePdfUrl(url: String): String {
         if (!url.contains("drive.google.com")) return url
@@ -236,7 +253,8 @@ fun RichContentText(
         return
     }
 
-    val segments = remember(text) { MediaLinkParser.parse(text) }
+    val videoPrepared = remember(text) { MediaLinkParser.extractVideoTitles(text) }
+    val segments = remember(videoPrepared.first) { MediaLinkParser.parse(videoPrepared.first) }
 
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
 
@@ -278,7 +296,10 @@ fun RichContentText(
                     )
                 }
                 is MediaSegment.VideoLink -> {
-                    VideoButton(url = seg.url, isYoutube = seg.isYoutube)
+                    VideoButton(
+                        url = seg.url, isYoutube = seg.isYoutube,
+                        title = seg.title ?: videoPrepared.second[seg.url]
+                    )
                 }
                 is MediaSegment.PdfLink -> {
                     val ctx = LocalContext.current
@@ -371,86 +392,299 @@ fun AutoImage(url: String, onClick: () -> Unit) {
 //   "🔵 ফেইসবুক অ্যাপে দেখুন"
 // ─────────────────────────────────────────────────────────────────
 @Composable
-fun VideoButton(url: String, isYoutube: Boolean) {
+fun VideoButton(url: String, isYoutube: Boolean, title: String? = null) {
     val ctx = LocalContext.current
+    val accent = if (isYoutube) YtRed else FbBlue
+    var showPlayer by remember { mutableStateOf(false) }   // ▶ অ্যাপের ভিতরেই চালানো
 
-    Button(
-        onClick  = { openVideoApp(ctx, url) },
+    if (showPlayer) VideoPlayerDialog(url, isYoutube, title, onClose = { showPlayer = false })
+
+    Surface(
+        onClick  = { showPlayer = true },
         modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(12.dp),
-        colors   = ButtonDefaults.buttonColors(
-            containerColor = if (isYoutube) YtBg else FbBg,
-            contentColor   = if (isYoutube) YtRed else FbBlue
-        ),
-        border    = BorderStroke(1.dp, if (isYoutube) YtBorder else FbBorder),
-        elevation = ButtonDefaults.buttonElevation(0.dp)
+        color    = if (isYoutube) YtBg else FbBg,
+        border   = BorderStroke(1.dp, if (isYoutube) YtBorder else FbBorder)
     ) {
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier              = Modifier.padding(vertical = 4.dp)
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            Text(
-                text     = if (isYoutube) "🎬" else "🔵",
-                fontSize = 18.sp
-            )
+            VideoLogo(isYoutube, 22.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                if (!title.isNullOrBlank()) {
+                    // শিরোনাম থাকলে: উপরে শিরোনাম (বোল্ড), নিচে ছোট করে কোথায় দেখবেন
+                    Text(
+                        text = title, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp, color = accent, maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (isYoutube) "ইউটিউবে দেখুন" else "ফেসবুকে দেখুন",
+                        fontFamily = NotoSansBengali, fontSize = 11.sp, color = accent.copy(alpha = 0.75f)
+                    )
+                } else {
+                    Text(
+                        text = if (isYoutube) "ইউটিউব অ্যাপে দেখুন" else "ফেইসবুক অ্যাপে দেখুন",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp, color = accent
+                    )
+                }
+            }
             Spacer(Modifier.width(8.dp))
+            Text("▶", fontSize = 14.sp, color = accent)
+            // ↗ বাইরের ইউটিউব/ফেসবুক অ্যাপে খুলুন (ব্যাক চাপলে এই অ্যাপেই ফেরে)
             Text(
-                text       = if (isYoutube) "ইউটিউব অ্যাপে দেখুন" else "ফেইসবুক অ্যাপে দেখুন",
-                fontFamily = NotoSansBengali,
-                fontWeight = FontWeight.Bold,
-                fontSize   = 14.sp,
-                color      = if (isYoutube) YtRed else FbBlue
+                "↗", fontSize = 16.sp, color = accent, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { openVideoApp(ctx, url) }.padding(start = 6.dp, top = 4.dp, bottom = 4.dp, end = 2.dp)
             )
         }
     }
 }
 
-// index এর openVideoApp() হুবহু Kotlin port:
-//   YT → vnd.youtube:{videoId} intent (app) → fallback browser
-//   FB → fb://facewebmodal/f?href={encoded} intent → fallback browser (1500ms delay)
+/** ছোট YouTube/Facebook লোগো — ছবি ছাড়া, Compose-এ আঁকা; রঙ আগের Yt/Fb রঙই */
+@Composable
+fun VideoLogo(isYoutube: Boolean, s: androidx.compose.ui.unit.Dp = 22.dp) {
+    if (isYoutube) {
+        Box(
+            Modifier.size(width = s * 1.4f, height = s).clip(RoundedCornerShape(s * 0.28f)).background(YtRed),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.size(s * 0.4f)) {
+                val tri = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(size.width * 0.12f, 0f)
+                    lineTo(size.width, size.height / 2f)
+                    lineTo(size.width * 0.12f, size.height)
+                    close()
+                }
+                drawPath(tri, Color.White)
+            }
+        }
+    } else {
+        Box(Modifier.size(s).clip(CircleShape).background(FbBlue), contentAlignment = Alignment.Center) {
+            Text("f", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = (s.value * 0.78f).sp)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 🎬 VideoPlayerDialog — অ্যাপের ভিতরেই ভিডিও চালায় (WebView + অফিসিয়াল embed)।
+//   YouTube  → youtube.com/embed/{id}   (সব ভিডিও না-ও চলতে পারে: মালিক embed বন্ধ রাখলে)
+//   Facebook → facebook.com/plugins/video.php (শুধু পাবলিক ভিডিও; প্রাইভেট/গ্রুপ চলে না)
+// না চললে উপরের "↗ অ্যাপে খুলুন" বাটন বাইরের অ্যাপে নিয়ে যায়। ব্যাক চাপলে প্লেয়ার বন্ধ হয়ে
+// একই প্রশ্নে থাকে; ফুল-স্ক্রিন বাটন চাপলে আড়াআড়ি হয়, ব্যাকে আগের অবস্থায়।
+// ─────────────────────────────────────────────────────────────────
+private fun ytVideoId(url: String): String? {
+    val raw = when {
+        url.contains("v=")        -> url.substringAfter("v=").substringBefore("&")
+        url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
+        url.contains("shorts/")   -> url.substringAfter("shorts/").substringBefore("?")
+        url.contains("embed/")    -> url.substringAfter("embed/").substringBefore("?")
+        url.contains("live/")     -> url.substringAfter("live/").substringBefore("?")
+        else -> ""
+    }
+    // শুধু বৈধ ID — প্লেলিস্ট/চ্যানেল লিংকে null (তখন বাইরের অ্যাপে যায়)
+    return raw.takeIf { Regex("^[A-Za-z0-9_-]{6,20}$").matches(it) }
+}
+
+/** (baseUrl, html) — প্লেয়ার চালানো না গেলে (ID নেই) null */
+private fun playerPage(url: String, isYoutube: Boolean): Pair<String, String>? {
+    val src: String
+    val base: String
+    if (isYoutube) {
+        val id = ytVideoId(url) ?: return null
+        src  = "https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1"
+        base = "https://www.youtube.com"
+    } else {
+        src  = "https://www.facebook.com/plugins/video.php?href=${Uri.encode(url)}&show_text=false&autoplay=true&allowfullscreen=true"
+        base = "https://www.facebook.com"
+    }
+    val html = "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+        "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}" +
+        "iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head><body>" +
+        "<iframe src=\"$src\" allow=\"autoplay; encrypted-media; picture-in-picture; fullscreen\" allowfullscreen></iframe>" +
+        "</body></html>"
+    return base to html
+}
+
+@Composable
+fun VideoPlayerDialog(url: String, isYoutube: Boolean, title: String?, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val page = remember(url) { playerPage(url, isYoutube) }
+
+    // embed করা যায় না (যেমন ইউটিউব প্লেলিস্ট) → সরাসরি বাইরের অ্যাপে
+    if (page == null) {
+        LaunchedEffect(Unit) { openVideoApp(ctx, url); onClose() }
+        return
+    }
+
+    val activity = remember(ctx) { ctx.findHostActivity() }
+    var fsCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    val webHolder = remember { arrayOfNulls<WebView>(1) }
+    var rotated by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (rotated) activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            webHolder[0]?.let { w -> try { w.stopLoading(); w.loadUrl("about:blank"); w.destroy() } catch (_: Exception) { } }
+            webHolder[0] = null
+        }
+    }
+
+    Dialog(
+        onDismissRequest = {
+            // ফুল-স্ক্রিনে থাকলে আগে সেটা থেকে বের হও, নইলে প্লেয়ার বন্ধ
+            val cb = fsCallback
+            if (cb != null) cb.onCustomViewHidden() else onClose()
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+            Column(Modifier.fillMaxSize()) {
+                if (fsCallback == null) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        com.hanif.smartstudy.ui.components.VideoLogo(isYoutube, 20.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            title?.takeIf { it.isNotBlank() } ?: if (isYoutube) "ইউটিউব ভিডিও" else "ফেসবুক ভিডিও",
+                            color = Color.White, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { openVideoApp(ctx, url); onClose() }) {
+                            Text("↗ অ্যাপে খুলুন", color = Color.White, fontFamily = NotoSansBengali, fontSize = 12.sp)
+                        }
+                        IconButton(onClick = onClose) {
+                            Icon(Icons.Default.Close, contentDescription = "বন্ধ", tint = Color.White)
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    AndroidView(
+                        modifier = if (isYoutube && fsCallback == null) Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                                   else Modifier.fillMaxSize(),
+                        factory = { c ->
+                            val root = android.widget.FrameLayout(c)
+                            val wv = WebView(c)
+                            wv.setBackgroundColor(android.graphics.Color.BLACK)
+                            wv.settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                mediaPlaybackRequiresUserGesture = false
+                                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                setSupportMultipleWindows(false)
+                                useWideViewPort = true
+                                loadWithOverviewMode = true
+                            }
+                            wv.webViewClient = object : WebViewClient() {
+                                // প্লেয়ারের ভিতরের লিংক ট্যাপে পুরো পেজ বদলে যেতে দেওয়া হয় না (iframe-এর ভেতরের লোড চলে)
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean =
+                                    request?.isForMainFrame == true
+                                override fun onPageFinished(view: WebView?, u: String?) { loading = false }
+                            }
+                            var customView: android.view.View? = null
+                            wv.webChromeClient = object : WebChromeClient() {
+                                override fun onShowCustomView(view: android.view.View?, callback: WebChromeClient.CustomViewCallback?) {
+                                    if (view == null) { callback?.onCustomViewHidden(); return }
+                                    customView = view
+                                    wv.visibility = android.view.View.GONE
+                                    root.addView(view, android.view.ViewGroup.LayoutParams(
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+                                    fsCallback = callback
+                                    activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                    rotated = true
+                                }
+                                override fun onHideCustomView() {
+                                    customView?.let { root.removeView(it) }
+                                    customView = null
+                                    wv.visibility = android.view.View.VISIBLE
+                                    fsCallback = null
+                                    activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                }
+                            }
+                            root.addView(wv, android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+                            webHolder[0] = wv
+                            wv.loadDataWithBaseURL(page.first, page.second, "text/html", "utf-8", null)
+                            root
+                        }
+                    )
+                    if (loading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
+                }
+                if (fsCallback == null) {
+                    Text(
+                        "ভিডিও না চললে ওপরের ↗ অ্যাপে খুলুন চাপুন। কিছু ভিডিও (প্রাইভেট/embed বন্ধ) অ্যাপের ভিতরে চলে না।",
+                        color = Color.White.copy(alpha = 0.65f), fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// openVideoApp — YT → vnd.youtube:{videoId} (অ্যাপ) → না থাকলে ব্রাউজার;
+//                FB → fb://facewebmodal/f?href={encoded} (অ্যাপ) → না থাকলে ব্রাউজার।
+//
+// ── FIX ("ইউটিউব/ফেসবুকে গিয়ে ব্যাক চাপলে অ্যাপে ফেরে না"): আগে সব intent-এ
+// FLAG_ACTIVITY_NEW_TASK দেওয়া ছিল — তাতে YouTube/Facebook নিজের আলাদা টাস্কে খুলত
+// (আগে থেকে ব্যাকগ্রাউন্ডে থাকলে তার পুরনো স্ক্রিনই সামনে আসত), তাই ব্যাক চাপলে সে
+// তার আগের পেজে যেত, আমাদের অ্যাপে না। এখন Activity থেকে খোলার সময় NEW_TASK ছাড়াই
+// খোলা হয় — বাইরের অ্যাপ আমাদের টাস্কের উপরে বসে, ব্যাক চাপলে একই প্রশ্নে ফিরে আসে।
+// (Activity না পেলে — খুব বিরল — আগের মতো NEW_TASK লাগে।) ──
+private fun Context.findHostActivity(): android.app.Activity? {
+    var c: Context? = this
+    while (c is android.content.ContextWrapper) {
+        if (c is android.app.Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
+
+private fun startInSameTask(ctx: Context, intent: Intent) {
+    val act = ctx.findHostActivity()
+    if (act != null) act.startActivity(intent)
+    else ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
 internal fun openVideoApp(ctx: Context, url: String) {
     try {
         when {
             url.contains("youtube.com") || url.contains("youtu.be") -> {
-                // index: if (url.includes("v=")) videoId = url.split("v=")[1].split("&")[0]
-                //        else videoId = url.substring(url.lastIndexOf("/") + 1)
                 val videoId = when {
                     url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
                     url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
                     url.contains("shorts/") -> url.substringAfter("shorts/").substringBefore("?")
                     else -> url.substringAfterLast("/").substringBefore("?")
                 }
-                val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId")).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
                 try {
-                    ctx.startActivity(ytIntent)
+                    startInSameTask(ctx, Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$videoId")))
                 } catch (e: Exception) {
-                    // YT App নেই → Browser
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
+                    // YT অ্যাপ নেই → ব্রাউজার (এটাও একই টাস্কে, তাই ব্যাকে ফেরা যায়)
+                    startInSameTask(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 }
             }
             url.contains("facebook.com") -> {
-                // index: fb://facewebmodal/f?href={encodedUrl}
-                val fbIntent = Intent(Intent.ACTION_VIEW,
-                    Uri.parse("fb://facewebmodal/f?href=${Uri.encode(url)}")).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
                 try {
-                    ctx.startActivity(fbIntent)
+                    startInSameTask(ctx, Intent(Intent.ACTION_VIEW,
+                        Uri.parse("fb://facewebmodal/f?href=${Uri.encode(url)}")))
                 } catch (e: Exception) {
-                    // FB App নেই → Browser (index এ 1500ms timeout, Kotlin এ সরাসরি)
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
+                    // FB অ্যাপ নেই → ব্রাউজার
+                    startInSameTask(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 }
             }
         }
     } catch (e: Exception) {
         e.printStackTrace()
+        android.widget.Toast.makeText(ctx.applicationContext, "ভিডিও খোলা যায়নি", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -460,15 +694,14 @@ internal fun openVideoApp(ctx: Context, url: String) {
 // Drive লিংক → browser এ preview
 // Direct PDF → system PDF viewer / browser
 // ─────────────────────────────────────────────────────────────────
+// ── FIX: ভিডিওর মতোই — NEW_TASK ছাড়া (একই টাস্কে) খোলে, তাই PDF/ব্রাউজার থেকে ব্যাক
+// চাপলে এই অ্যাপের একই স্ক্রিনে ফেরা যায় (দেখো openVideoApp-এর নোট) ──
 fun openPdfExternal(ctx: Context, url: String) {
     try {
-        val uri = Uri.parse(url)
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        ctx.startActivity(intent)
+        startInSameTask(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     } catch (e: Exception) {
         e.printStackTrace()
+        android.widget.Toast.makeText(ctx.applicationContext, "PDF খোলা যায়নি", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
