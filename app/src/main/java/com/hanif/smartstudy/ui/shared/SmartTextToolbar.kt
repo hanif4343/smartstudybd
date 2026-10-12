@@ -195,15 +195,8 @@ private fun SmartToolbarPopup(toolbar: SmartTextToolbarImpl) {
                 ToolbarActionButton(Icons.Default.Search, "ওয়েব সার্চ") {
                     val text = toolbar.readSelectedText()
                     toolbar.hide()
-                    if (text.isNotBlank()) {
-                        try {
-                            val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
-                                putExtra(SearchManager.QUERY, text)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        } catch (_: Exception) { }
-                    }
+                    // প্রতিবার নতুন সার্চ — আগের সার্চ-স্ক্রিন আটকে থাকে না (দেখো WebSearchLauncher)
+                    if (text.isNotBlank()) com.hanif.smartstudy.util.WebSearchLauncher.search(context, text)
                 }
                 ToolbarActionButton(Icons.Default.RecordVoiceOver, "পড়ে শোনাও") {
                     val text = toolbar.readSelectedText()
