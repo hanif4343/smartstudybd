@@ -203,6 +203,23 @@ interface ReferenceDao {
         reassignSubTopics(oldTopicId, newTopicId)
     }
 
+    // ── "নতুন Subject যোগ করে Move" — অস্থায়ী লোকাল subjectId ("-localS...") ব্যাকগ্রাউন্ডে
+    // GAS-এর আসল id দিয়ে replace (Subjects PK বদলায় বলে delete+insert) + এর আন্ডারের
+    // Topics-এর subjectId-ও বদলে দেয় ──
+    @Query("SELECT * FROM subjects WHERE subjectId = :subjectId LIMIT 1")
+    suspend fun getSubjectById(subjectId: String): SubjectEntity?
+
+    @Query("UPDATE topics SET subjectId = :newSubjectId WHERE subjectId = :oldSubjectId")
+    suspend fun reassignTopicsSubject(oldSubjectId: String, newSubjectId: String)
+
+    @Transaction
+    suspend fun replaceSubjectId(oldSubjectId: String, newSubjectId: String) {
+        val old = getSubjectById(oldSubjectId) ?: return
+        deleteSubjectById(oldSubjectId)
+        upsertSubjects(listOf(old.copy(subjectId = newSubjectId)))
+        reassignTopicsSubject(oldSubjectId, newSubjectId)
+    }
+
     // ── Tags ──────────────────────────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTags(items: List<TagEntity>)
