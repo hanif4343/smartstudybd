@@ -1,5 +1,6 @@
 package com.hanif.smartstudy.ui.menu.sections
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -114,13 +115,27 @@ fun AdminPage(
 
 
 // ── Pending Sync Tab ──
+// Sync Now-এর লাইভ প্রোগ্রেস বার (কোন action চলছে, কয়টা শেষ), পেন্ডিং তালিকা (ব্যর্থ হলে
+// কারণসহ), আর "ইতিহাস" — সফল/ব্যর্থ সব action তারিখ-ফিল্টার সহ, ব্যর্থতার কারণ সুন্দর করে।
+private enum class DateFilter(val label: String) { TODAY("আজ"), YESTERDAY("গতকাল"), D7("৭ দিন"), D30("৩০ দিন"), ALL("সব"), PICKED("📅") }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
     val pending  = state.pendingEdits
     val syncing  = state.isSyncingEdits
     val syncMsg  = state.syncEditsMsg
     val gson     = remember { com.google.gson.Gson() }
-    val sdf      = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()) }
+    val sdfTime  = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
+    val sdfDay   = remember { SimpleDateFormat("dd MMM yyyy, EEEE", Locale("bn")) }
+    val sdfFull  = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+    var section      by remember { mutableStateOf(0) }                 // 0 = পেন্ডিং, 1 = ইতিহাস
+    var dateFilter   by remember { mutableStateOf(DateFilter.ALL) }
+    var statusFilter by remember { mutableStateOf(0) }                 // 0 সব, 1 সফল, 2 ব্যর্থ
+    var pickedDay    by remember { mutableStateOf<Long?>(null) }
+    var showPicker   by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
 
     LaunchedEffect(syncMsg) {
         if (syncMsg != null) {
@@ -129,7 +144,37 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // ── তারিখ-ফিল্টার: দিনের শুরু (লোকাল টাইমজোন) বের করার হেল্পার ──
+    fun dayStart(t: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = t; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val DAY = 24L * 3600_000L
+    val todayStart = dayStart(System.currentTimeMillis())
+
+    val history = state.syncHistory
+    val filtered = remember(history, dateFilter, statusFilter, pickedDay, todayStart) {
+        history.filter { e ->
+            val okDate = when (dateFilter) {
+                DateFilter.TODAY     -> e.updatedAt >= todayStart
+                DateFilter.YESTERDAY -> e.updatedAt in (todayStart - DAY) until todayStart
+                DateFilter.D7        -> e.updatedAt >= todayStart - 6 * DAY
+                DateFilter.D30       -> e.updatedAt >= todayStart - 29 * DAY
+                DateFilter.ALL       -> true
+                DateFilter.PICKED    -> pickedDay?.let { d -> e.updatedAt in d until d + DAY } ?: true
+            }
+            val okStatus = when (statusFilter) {
+                1 -> e.status == com.hanif.smartstudy.data.local.SyncHistoryEntry.STATUS_SUCCESS
+                2 -> e.status == com.hanif.smartstudy.data.local.SyncHistoryEntry.STATUS_FAILED
+                else -> true
+            }
+            okDate && okStatus
+        }
+    }
+    val okCount   = filtered.count { it.status == com.hanif.smartstudy.data.local.SyncHistoryEntry.STATUS_SUCCESS }
+    val failCount = filtered.size - okCount
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
         // Header card
         Card(
@@ -142,19 +187,18 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("⏳", fontSize = 28.sp)
+                Text(if (pending.isEmpty()) "✅" else "⏳", fontSize = 26.sp)
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (pending.isEmpty()) "কোনো pending edit নেই" else "${pending.size}টি edit sync হয়নি",
+                        if (pending.isEmpty()) "কোনো pending action নেই" else "${pending.size}টি action sync হয়নি",
                         fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
                         fontSize = 14.sp, color = Color(0xFF1E1B4B)
                     )
                     Text(
-                        "Offline এ করা edit গুলো এখানে জমা থাকে",
+                        "Move, Delete, Rename, Edit — অফলাইনে/ব্যর্থ হলে এখানে জমা থাকে",
                         fontFamily = NotoSansBengali, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                // Badge
                 if (pending.isNotEmpty()) {
                     Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFFEF4444)) {
                         Text(
@@ -170,12 +214,10 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
         // Sync Now button
         Button(
             onClick  = { vm.syncPendingEditsNow() },
-            enabled  = !syncing,
+            enabled  = !syncing && pending.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().height(50.dp),
             shape    = RoundedCornerShape(14.dp),
-            colors   = ButtonDefaults.buttonColors(
-                containerColor = if (pending.isEmpty()) Color(0xFF94A3B8) else Color(0xFF4F46E5)
-            )
+            colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
         ) {
             if (syncing) {
                 CircularProgressIndicator(Modifier.size(20.dp), Color.White, strokeWidth = 2.dp)
@@ -188,6 +230,36 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
                     if (pending.isEmpty()) "✅ সব Sync হয়ে গেছে" else "☁ Sync Now (${pending.size}টি)",
                     fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp
                 )
+            }
+        }
+
+        // ── লাইভ প্রোগ্রেস বার ──
+        if (syncing && state.syncTotal > 0) {
+            val frac = (state.syncDone.toFloat() / state.syncTotal).coerceIn(0f, 1f)
+            val animated by animateFloatAsState(frac, label = "syncProgress")
+            Card(
+                Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(1.dp)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔄 Sync চলছে", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Text("${state.syncDone}/${state.syncTotal} • ${(frac * 100).toInt()}%",
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Indigo600)
+                    }
+                    LinearProgressIndicator(
+                        progress = { animated },
+                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)),
+                        color = Indigo600, trackColor = Indigo600.copy(alpha = 0.15f)
+                    )
+                    if (state.syncCurrentLabel.isNotBlank()) {
+                        Text("এখন: ${state.syncCurrentLabel}", fontFamily = NotoSansBengali, fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                }
             }
         }
 
@@ -205,125 +277,244 @@ private fun PendingSyncTab(state: MenuUiState, vm: MenuViewModel) {
             }
         }
 
-        // Pending list
-        if (pending.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("✅", fontSize = 48.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("সব edit sync হয়ে গেছে!", fontFamily = NotoSansBengali,
-                        fontWeight = FontWeight.Bold, color = GreenOk, fontSize = 15.sp)
+        // ── সেকশন সুইচ: পেন্ডিং | ইতিহাস ──
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = section == 0, onClick = { section = 0 },
+                label = { Text("⏳ পেন্ডিং (${pending.size})", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp) })
+            FilterChip(selected = section == 1, onClick = { section = 1; vm.loadSyncHistory() },
+                label = { Text("📜 ইতিহাস (${history.size})", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp) })
+        }
+
+        if (section == 0) {
+            // ════════ পেন্ডিং তালিকা ════════
+            if (pending.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✅", fontSize = 48.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text("সব action sync হয়ে গেছে!", fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold, color = GreenOk, fontSize = 15.sp)
+                        Text("কী কী হয়েছে দেখতে \"ইতিহাস\" ট্যাব খুলুন", fontFamily = NotoSansBengali,
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-            }
-        } else {
-            Text(
-                "pending edits:",
-                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold,
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(pending, key = { it.id }) { action ->
-                    val payload = try {
-                        gson.fromJson(action.payload, Map::class.java)
-                    } catch (e: Exception) { emptyMap<String, Any>() }
-
-                    // ── admin_delete_subject_topic-এ "sheet" (singular) না, "sheets" (লিস্ট)
-                    // থাকে আর questionPreview-এর বদলে subject/subTopic নাম দিয়ে preview বানাতে
-                    // হয় — নাহলে এই কার্ডে sheet="?" আর preview খালি দেখাতো ──
-                    val sheet = payload["sheet"]?.toString()
-                        ?: (payload["sheets"] as? List<*>)?.joinToString("+") ?: "?"
-                    val preview = payload["questionPreview"]?.toString()?.ifBlank { null }
-                        ?: run {
-                            when (action.type) {
-                                "admin_move_questions" -> {
-                                    val ids = (payload["ids"] as? List<*>)?.size ?: 0
-                                    val ns = payload["newSubject"]?.toString().orEmpty()
-                                    val nst = payload["newSubTopic"]?.toString().orEmpty()
-                                    "${ids}টি প্রশ্ন → \"$ns\" › \"$nst\""
-                                }
-                                "admin_move_topic" -> {
-                                    val nst = payload["newSubTopicName"]?.toString().orEmpty()
-                                    val ns = payload["newSubjectName"]?.toString().orEmpty()
-                                    val merge = payload["mergeTopicId"]?.toString()?.isNotBlank() == true
-                                    "\"$nst\" অধ্যায় → \"$ns\"" + (if (merge) " (merge)" else "")
-                                }
-                                else -> {
-                                    val subj = payload["subject"]?.toString().orEmpty()
-                                    val subT = payload["subTopic"]?.toString().orEmpty()
-                                    val delSub = payload["deleteSubTopic"]?.toString()?.toBoolean() ?: false
-                                    if (subj.isNotBlank()) {
-                                        if (delSub && subT.isNotBlank()) "\"$subj\" › \"$subT\" (পুরো অধ্যায়)" else "\"$subj\" (পুরো বিষয়)"
-                                    } else ""
-                                }
-                            }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                    items(pending, key = { it.id }) { action ->
+                        val (sheet0, preview0) = com.hanif.smartstudy.data.local.SyncHistoryStore.describe(action, gson)
+                        val sheet = sheet0.ifBlank { "?" }
+                        val retry = action.retryCount
+                        val running = syncing && state.syncCurrentId == action.id
+                        val idx = pending.indexOfFirst { it.id == action.id }
+                        val waiting = syncing && !running && idx > state.syncDone
+                        val alreadyDone = syncing && !running && idx < state.syncDone
+                        val typeColor = when (action.type) {
+                            "admin_add_question" -> Color(0xFF16A34A)
+                            "admin_delete_question", "admin_delete_subject_topic" -> Color(0xFFDC2626)
+                            "admin_move_questions", "admin_move_topic" -> Color(0xFF0EA5E9)
+                            else -> Color(0xFF4F46E5)
                         }
-                    val retry    = action.retryCount
-
-                    Card(
-                        Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(1.dp)
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Card(
+                            Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = if (running) Indigo600.copy(alpha = 0.07f) else MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(1.dp)
                         ) {
-                            // Status icon
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (retry > 0) Color(0xFFFFF7ED) else Color(0xFFEEF2FF)
-                            ) {
-                                Text(
-                                    if (retry > 0) "⚠️" else "📴",
-                                    Modifier.padding(6.dp), fontSize = 16.sp
-                                )
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF4F46E5).copy(0.1f)) {
-                                        Text(sheet, Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                                            color = Color(0xFF4F46E5), fontFamily = NotoSansBengali)
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Surface(shape = RoundedCornerShape(8.dp),
+                                        color = if (retry > 0) Color(0xFFFFF7ED) else Color(0xFFEEF2FF)) {
+                                        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                                            if (running) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Indigo600)
+                                            else Text(if (retry > 0) "⚠️" else "📴", fontSize = 16.sp)
+                                        }
                                     }
-                                    val (typeLabel, typeColor) = when (action.type) {
-                                        "admin_add_question"         -> "➕ নতুন" to Color(0xFF16A34A)
-                                        "admin_delete_question"      -> "🗑️ ডিলিট" to Color(0xFFDC2626)
-                                        "admin_delete_subject_topic" -> "🗑️ বিষয়/অধ্যায় ডিলিট" to Color(0xFFDC2626)
-                                        "admin_move_questions"       -> "📦 প্রশ্ন Move" to Color(0xFF0EA5E9)
-                                        "admin_move_topic"           -> "📦 অধ্যায় Move" to Color(0xFF0EA5E9)
-                                        else                          -> "✏️ এডিট" to Color(0xFF4F46E5)
+                                    Column(Modifier.weight(1f)) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(shape = RoundedCornerShape(6.dp), color = Indigo600.copy(0.1f)) {
+                                                Text(sheet, Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 9.sp,
+                                                    fontWeight = FontWeight.ExtraBold, color = Indigo600, fontFamily = NotoSansBengali)
+                                            }
+                                            Surface(shape = RoundedCornerShape(6.dp), color = typeColor.copy(0.1f)) {
+                                                Text(com.hanif.smartstudy.data.local.SyncHistoryStore.typeLabel(action.type),
+                                                    Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 9.sp,
+                                                    fontWeight = FontWeight.ExtraBold, color = typeColor, fontFamily = NotoSansBengali)
+                                            }
+                                            Text(sdfFull.format(Date(action.createdAt)), fontSize = 9.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                                        }
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(preview0.ifBlank { "প্রশ্ন preview নেই" }, fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     }
-                                    Surface(shape = RoundedCornerShape(6.dp),
-                                        color = typeColor.copy(0.1f)) {
-                                        Text(typeLabel, Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
-                                            color = typeColor, fontFamily = NotoSansBengali)
-                                    }
-                                    Text(sdf.format(java.util.Date(action.createdAt)),
-                                        fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
-                                    if (retry > 0) {
-                                        Text("retry: $retry", fontSize = 9.sp,
-                                            color = Color(0xFFEA580C), fontFamily = NotoSansBengali,
-                                            fontWeight = FontWeight.Bold)
-                                    }
+                                    Text(
+                                        when { running -> "চলছে…"; waiting -> "অপেক্ষায়"; alreadyDone -> "শেষ"; retry > 0 -> "retry $retry"; else -> "" },
+                                        fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                                        color = if (running) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    preview.ifBlank { "প্রশ্ন preview নেই" },
-                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface,
-                                    fontFamily = NotoSansBengali,
-                                    maxLines = 2,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
+                                // সর্বশেষ ব্যর্থতার কারণ
+                                if (!action.lastError.isNullOrBlank() && !running) {
+                                    FailureReasonBox(action.lastError, action.lastTriedAt.takeIf { it > 0 }?.let { sdfFull.format(Date(it)) },
+                                        footer = "পরের Sync-এ আবার চেষ্টা হবে")
+                                }
                             }
                         }
                     }
                 }
+            }
+        } else {
+            // ════════ ইতিহাস ════════
+            // তারিখ ফিল্টার
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                DateFilter.values().forEach { f ->
+                    val label = if (f == DateFilter.PICKED)
+                        (pickedDay?.let { "📅 " + SimpleDateFormat("dd MMM", Locale("bn")).format(Date(it)) } ?: "📅 তারিখ বাছুন")
+                    else f.label
+                    FilterChip(selected = dateFilter == f,
+                        onClick = { if (f == DateFilter.PICKED) showPicker = true else dateFilter = f },
+                        label = { Text(label, fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold) })
+                }
+            }
+            // স্ট্যাটাস ফিল্টার + সংখ্যা
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                listOf("সব (${filtered.size})", "✅ সফল ($okCount)", "❌ ব্যর্থ ($failCount)").forEachIndexed { i, t ->
+                    FilterChip(selected = statusFilter == i, onClick = { statusFilter = i },
+                        label = { Text(t, fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold) })
+                }
+                if (history.isNotEmpty()) {
+                    TextButton(onClick = { confirmClear = true }) {
+                        Text("🧹 মুছুন", fontFamily = NotoSansBengali, fontSize = 11.sp, color = RedWrong)
+                    }
+                }
+            }
+
+            if (filtered.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(top = 28.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("📭", fontSize = 40.sp)
+                        Text(if (history.isEmpty()) "এখনো কোনো ইতিহাস নেই" else "এই ফিল্টারে কিছু পাওয়া যায়নি",
+                            fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                val grouped = remember(filtered) { filtered.groupBy { dayStart(it.updatedAt) }.toList().sortedByDescending { it.first } }
+                val stillPendingIds = remember(pending) { pending.map { it.id }.toSet() }
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                    grouped.forEach { (day, dayItems) ->
+                        item(key = "h$day") {
+                            val dayLabel = when (day) {
+                                todayStart -> "আজ"
+                                todayStart - DAY -> "গতকাল"
+                                else -> sdfDay.format(Date(day))
+                            }
+                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(dayLabel, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                Text("${dayItems.size}টি", fontFamily = NotoSansBengali, fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        items(dayItems, key = { it.id }) { e ->
+                            val ok = e.status == com.hanif.smartstudy.data.local.SyncHistoryEntry.STATUS_SUCCESS
+                            val c = if (ok) GreenOk else RedWrong
+                            Card(
+                                Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(1.dp)
+                            ) {
+                                Row(Modifier.height(IntrinsicSize.Min)) {
+                                    Box(Modifier.width(4.dp).fillMaxHeight().background(c))
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(if (ok) "✅" else "❌", fontSize = 14.sp)
+                                            Text(com.hanif.smartstudy.data.local.SyncHistoryStore.typeLabel(e.actionType),
+                                                fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = c)
+                                            if (e.sheet.isNotBlank()) {
+                                                Surface(shape = RoundedCornerShape(6.dp), color = Indigo600.copy(0.1f)) {
+                                                    Text(e.sheet, Modifier.padding(horizontal = 6.dp, vertical = 1.dp), fontSize = 9.sp,
+                                                        fontWeight = FontWeight.ExtraBold, color = Indigo600, fontFamily = NotoSansBengali)
+                                                }
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                            Text(sdfTime.format(Date(e.updatedAt)), fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+                                        }
+                                        if (e.summary.isNotBlank()) {
+                                            Text(e.summary, fontFamily = NotoSansBengali, fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface, maxLines = 3,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                        }
+                                        if (e.attempts > 1) {
+                                            Text(if (ok) "${e.attempts}তম চেষ্টায় সফল" else "${e.attempts} বার চেষ্টা করা হয়েছে",
+                                                fontFamily = NotoSansBengali, fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        if (!ok) {
+                                            FailureReasonBox(e.reason, null,
+                                                footer = if (e.id in stillPendingIds) "পেন্ডিং-এ আছে — পরের Sync-এ আবার চেষ্টা হবে" else null)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── তারিখ বাছাই ──
+    if (showPicker) {
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = pickedDay ?: System.currentTimeMillis())
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { utc ->
+                        // DatePicker UTC-মধ্যরাত দেয় — লোকাল দিনের শুরুতে বদলে নেওয়া
+                        val u = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utc }
+                        pickedDay = Calendar.getInstance().apply {
+                            clear(); set(u.get(Calendar.YEAR), u.get(Calendar.MONTH), u.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                        dateFilter = DateFilter.PICKED
+                    }
+                    showPicker = false
+                }) { Text("ঠিক আছে", fontFamily = NotoSansBengali) }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+        ) { DatePicker(state = pickerState) }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("ইতিহাস মুছবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+            text = { Text("শুধু ইতিহাসের তালিকা মুছবে — পেন্ডিং action আর আসল ডেটা অক্ষত থাকবে।", fontFamily = NotoSansBengali) },
+            confirmButton = { TextButton(onClick = { vm.clearSyncHistory(); confirmClear = false }) { Text("মুছুন", color = RedWrong, fontFamily = NotoSansBengali) } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("থাক", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+/** ব্যর্থতার কারণ — সুন্দর বাংলা শিরোনাম + নিচে কাঁচা বার্তা (ছোট, কপি করা যায়) */
+@Composable
+private fun FailureReasonBox(raw: String?, whenText: String?, footer: String?) {
+    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFFEF2F2), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(com.hanif.smartstudy.data.local.SyncHistoryStore.prettyReason(raw),
+                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF991B1B))
+            if (!raw.isNullOrBlank()) {
+                SelectionContainer {
+                    Text(raw, fontFamily = NotoSansBengali, fontSize = 10.sp, color = Color(0xFF7F1D1D).copy(alpha = 0.75f),
+                        maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+            val foot = listOfNotNull(whenText?.let { "সর্বশেষ চেষ্টা: $it" }, footer).joinToString(" • ")
+            if (foot.isNotBlank()) {
+                Text(foot, fontFamily = NotoSansBengali, fontSize = 10.sp, color = Color(0xFF92400E))
             }
         }
     }
