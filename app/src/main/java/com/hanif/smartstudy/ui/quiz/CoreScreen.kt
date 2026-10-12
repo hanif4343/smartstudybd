@@ -357,7 +357,19 @@ fun CoreScreen(
 
         // ── Question List (depth 2) ──
         state.navPath.depth() == 2 -> {
+            // ── QBank: ইউজার কোন প্রশ্নপত্রে আছে — প্রশ্ন-কার্ডের \"আরও এসেছে\" চিপ থেকে
+            // বর্তমান প্রশ্নপত্রের appearance বাদ দিতে (দেখো ExamAppearanceInfo.kt) ──
+            val appearanceCtx = if (mode == StudyMode.QBANK) when (state.qbankFilterMode) {
+                QBankFilterMode.INSTITUTION -> com.hanif.smartstudy.ui.shared.QBankAppearanceCtx(
+                    post = state.navPath.subTopic, institution = state.navPath.subject)
+                QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> com.hanif.smartstudy.ui.shared.QBankAppearanceCtx(
+                    post = state.qbankSelectedPost ?: state.qbankDirectPost, institution = state.navPath.subTopic)
+                QBankFilterMode.YEAR -> com.hanif.smartstudy.ui.shared.QBankAppearanceCtx(year = state.qbankSelectedYear)
+            } else null
             val listContent: @Composable () -> Unit = {
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.hanif.smartstudy.ui.shared.LocalQBankAppearanceCtx provides appearanceCtx
+            ) {
             QuestionListScreen(
                 viewModel           = viewModel,
                 onStudyAction       = onStudyAction,
@@ -411,6 +423,7 @@ fun CoreScreen(
                 onAdminMoveQuestions = onAdminMoveQuestions,
                 forceTypeTab        = if (qbankTwoPart) 0 else null
             )
+            }
             }
             if (qbankTwoPart) {
                 androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
