@@ -832,5 +832,22 @@ object FirebaseDataService {
 
 sealed class ApiResult<out T> {
     data class Success<T>(val data: T) : ApiResult<T>()
-    data class Error(val message: String) : ApiResult<Nothing>()
+    data class Error(val message: String) : ApiResult<Nothing>() {
+        // সর্বশেষ এরর মনে রাখা — Admin Sync ইতিহাসে ব্যর্থতার কারণ দেখাতে PendingQueue এটা পড়ে
+        init { ApiErrorTracker.record(message) }
+    }
+}
+
+/** সর্বশেষ ApiResult.Error-এর বার্তা (ছোট সময়ের জন্য) — Pending-queue sequentially চলে,
+ *  তাই একটা action ব্যর্থ হওয়ার ঠিক পরে এটা সেই action-এরই কারণ। */
+object ApiErrorTracker {
+    @Volatile private var msg: String? = null
+    @Volatile private var at: Long = 0L
+    fun record(m: String) { msg = m; at = System.currentTimeMillis() }
+    fun takeRecent(maxAgeMs: Long = 60_000L): String? {
+        val m = msg
+        if (m != null && System.currentTimeMillis() - at <= maxAgeMs) { msg = null; return m }
+        return null
+    }
+    fun clear() { msg = null }
 }
