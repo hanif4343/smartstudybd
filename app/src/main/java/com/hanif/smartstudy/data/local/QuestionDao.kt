@@ -254,6 +254,10 @@ interface QuestionDao {
     @Query("UPDATE questions SET topicId = :newTopicId WHERE sheet = :sheet AND topicId = :oldTopicId")
     suspend fun replaceTopicId(sheet: String, oldTopicId: String, newTopicId: String)
 
+    // ── নতুন Subject-এর অস্থায়ী লোকাল subjectId → আসল id (দেখো ReferenceDao.replaceSubjectId) ──
+    @Query("UPDATE questions SET subjectId = :newSubjectId WHERE sheet = :sheet AND subjectId = :oldSubjectId")
+    suspend fun replaceSubjectId(sheet: String, oldSubjectId: String, newSubjectId: String)
+
     // ── সব data মুছো ──────────────────────────────────────────────────────────
     @Query("DELETE FROM questions")
     suspend fun deleteAll()
