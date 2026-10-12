@@ -2827,13 +2827,26 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     // ═════════════════════════════════════════════════════════
     fun clearQBankAdminMsg() { _state.update { it.copy(qbankAdminMsg = null) } }
 
+    /** QBank পদবী/প্রতিষ্ঠান/সাল action-এর ফলাফল Admin Sync ইতিহাসে লেখে (সফল/ব্যর্থ + কারণ) */
+    private fun logQBankAdmin(summary: String, ok: Boolean, reason: String? = null) {
+        viewModelScope.launch {
+            com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication<Application>()).recordDirect(
+                type = when {
+                    summary.startsWith("Rename") -> "admin_rename"
+                    summary.contains("Move") -> "admin_qbank_move"
+                    else -> "admin_qbank_delete"
+                },
+                summary = summary, sheet = "QBank", success = ok, reason = reason)
+        }
+    }
+
     /** Post রিনেম — GAS-এর renameReferenceItem (Posts ট্যাব), সফল হলে qbankPosts রিফ্রেশ */
     fun adminRenameQBankPost(postId: String, newName: String) {
         if (!_state.value.isAdmin || postId.isBlank() || newName.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem("posts", postId, newName)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "✅ পদবী rename হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("Rename পদবী → \"$newName\"", true); rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "✅ পদবী rename হয়েছে") } }
+                is ApiResult.Error   -> { logQBankAdmin("Rename পদবী → \"$newName\"", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2843,8 +2856,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin || postId.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem("posts", postId)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🗑️ পদবী ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("পদবী ডিলিট (${_state.value.qbankPosts.find { it.subjectId == postId }?.name ?: postId})", true); rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🗑️ পদবী ডিলিট হয়েছে") } }
+                is ApiResult.Error   -> { logQBankAdmin("পদবী ডিলিট (${_state.value.qbankPosts.find { it.subjectId == postId }?.name ?: postId})", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2856,8 +2869,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (toPostId.isNullOrBlank()) { _state.update { it.copy(qbankAdminMsg = "❌ টার্গেট পদবী খুঁজে পাওয়া যায়নি") }; return }
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.mergeReferenceItem("posts", fromPostId, toPostId)) {
-                is ApiResult.Success -> { rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🔀 পদবী move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("পদবী Move/merge → \"$toPostName\" (${r.data}টা প্রশ্ন-লিংক)", true); rebuildQBankPosts(); _state.update { it.copy(qbankAdminMsg = "🔀 পদবী move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
+                is ApiResult.Error   -> { logQBankAdmin("পদবী Move/merge → \"$toPostName\"", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2867,8 +2880,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin || institutionId.isBlank() || newName.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem("institutions", institutionId, newName)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "✅ প্রতিষ্ঠান rename হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("Rename প্রতিষ্ঠান → \"$newName\"", true); rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "✅ প্রতিষ্ঠান rename হয়েছে") } }
+                is ApiResult.Error   -> { logQBankAdmin("Rename প্রতিষ্ঠান → \"$newName\"", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2878,8 +2891,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin || institutionId.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem("institutions", institutionId)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🗑️ প্রতিষ্ঠান ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("প্রতিষ্ঠান ডিলিট (${_state.value.qbankInstitutions.find { it.subjectId == institutionId }?.name ?: institutionId})", true); rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🗑️ প্রতিষ্ঠান ডিলিট হয়েছে") } }
+                is ApiResult.Error   -> { logQBankAdmin("প্রতিষ্ঠান ডিলিট (${_state.value.qbankInstitutions.find { it.subjectId == institutionId }?.name ?: institutionId})", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2891,8 +2904,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (toId.isNullOrBlank()) { _state.update { it.copy(qbankAdminMsg = "❌ টার্গেট প্রতিষ্ঠান খুঁজে পাওয়া যায়নি") }; return }
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.mergeReferenceItem("institutions", fromInstitutionId, toId)) {
-                is ApiResult.Success -> { rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🔀 প্রতিষ্ঠান move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("প্রতিষ্ঠান Move/merge → \"$toInstitutionName\" (${r.data}টা প্রশ্ন-লিংক)", true); rebuildQBankInstitutions(); _state.update { it.copy(qbankAdminMsg = "🔀 প্রতিষ্ঠান move/merge হয়েছে (${r.data}টা প্রশ্ন-লিংক)") } }
+                is ApiResult.Error   -> { logQBankAdmin("প্রতিষ্ঠান Move/merge → \"$toInstitutionName\"", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2902,8 +2915,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin || oldYear.isBlank() || newYear.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameQBankYear(oldYear, newYear)) {
-                is ApiResult.Success -> { rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "✅ সাল rename হয়েছে (${r.data}টা প্রশ্ন)") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("Rename সাল: $oldYear → $newYear (${r.data}টা প্রশ্ন)", true); rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "✅ সাল rename হয়েছে (${r.data}টা প্রশ্ন)") } }
+                is ApiResult.Error   -> { logQBankAdmin("Rename সাল: $oldYear → $newYear", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
@@ -2913,8 +2926,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         if (!_state.value.isAdmin || year.isBlank()) return
         viewModelScope.launch {
             when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteQBankYear(year)) {
-                is ApiResult.Success -> { rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "🗑️ সালের ${r.data}টা প্রশ্ন ডিলিট হয়েছে") } }
-                is ApiResult.Error   -> _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") }
+                is ApiResult.Success -> { logQBankAdmin("সাল ডিলিট: $year (${r.data}টা প্রশ্ন)", true); rebuildQBankYearsPublic(); _state.update { it.copy(qbankAdminMsg = "🗑️ সালের ${r.data}টা প্রশ্ন ডিলিট হয়েছে") } }
+                is ApiResult.Error   -> { logQBankAdmin("সাল ডিলিট: $year", false, r.message); _state.update { it.copy(qbankAdminMsg = "❌ ${r.message}") } }
             }
         }
     }
