@@ -215,7 +215,10 @@ data class SubjectEntry(
     // প্রশ্নের fbKey লিস্ট — ট্যাপ করলে সরাসরি repo.getRoomQuestionsByIds() দিয়ে
     // flat প্রশ্ন-লিস্ট দেখানো হয়, ঠিক SubTopicEntry.linkedQuestionIds (পদ-মোড)-এর
     // মতোই প্যাটার্ন, কোনো raw questions.year কলাম ম্যাচিং লাগে না ──
-    val linkedQuestionIds : List<String> = emptyList()
+    val linkedQuestionIds : List<String> = emptyList(),
+    // ── QBank \"প্রাথমিক\" ক্যাটাগরির পদ-কার্ডে দেখানোর জন্য: এই পদের প্রশ্ন যে সালগুলোতে এসেছে
+    // (নতুন থেকে পুরনো; খালি হলে কিছু দেখায় না) ──
+    val years : List<String> = emptyList()
 ) {
     val progressPct: Int get() = if (totalQ > 0) (doneQ * 100) / totalQ else 0
 }
@@ -243,7 +246,9 @@ data class SubTopicEntry(
     // (দেখো QuizViewModel.selectQBankInstitutionUnderPost)
     val linkedQuestionIds : List<String> = emptyList(),
     // ── Admin-সেট টপিক-সিরিয়াল (Topics.sortOrder; ≤০ = দেওয়া নেই) — দেখো util/TopicOrdering ──
-    val sortOrder    : Int = 0
+    val sortOrder    : Int = 0,
+    // ── QBank \"প্রাথমিক\": এই (পদ+প্রতিষ্ঠান) জোড়ার প্রশ্ন যে সালগুলোতে এসেছে (নতুন থেকে পুরনো) ──
+    val years        : List<String> = emptyList()
 ) {
     val progressPct: Int get() = if (totalQ > 0) ((doneQ * 100) / totalQ).coerceAtMost(100) else 0
 
