@@ -2594,6 +2594,7 @@ fun UserTechniqueSection(
                     }
 
                     TechniqueDraftStore.delete(context, draftKeyToClear)   // সেভ হয়ে গেছে — ড্রাফট আর লাগবে না
+                    com.hanif.smartstudy.util.LastTechniqueTracker.record(context, questionId)   // 📍 লাস্ট টেকনিক
                     refresh()
                     showAddDialog = false
                     editTarget = null
