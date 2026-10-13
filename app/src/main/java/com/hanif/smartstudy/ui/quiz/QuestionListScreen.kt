@@ -69,6 +69,7 @@ import com.hanif.smartstudy.ui.theme.LocalAppTheme
 import com.hanif.smartstudy.ui.theme.NordicSage
 import com.hanif.smartstudy.ui.theme.NordicSageDeep
 import com.hanif.smartstudy.util.AdManager
+import com.hanif.smartstudy.util.LastTechniqueTracker
 import com.hanif.smartstudy.util.SessionManager
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
@@ -465,6 +466,53 @@ fun QuestionListScreen(
         }
     }
 
+    // ── 📍 লাস্ট টেকনিক — এই লিস্টের প্রশ্নগুলোর মধ্যে সবচেয়ে সম্প্রতি টেকনিক যোগ করা প্রশ্ন ──
+    var pendingTechniqueId by remember { mutableStateOf<String?>(null) }
+
+    fun lastTechniqueQuestion() = run {
+        val byId = allQuestions.associateBy { it.id }
+        LastTechniqueTracker.recent(ctxForPrefs).firstNotNullOfOrNull { byId[it] }
+    }
+    fun lastTechniqueLabel(): String {
+        val q = lastTechniqueQuestion() ?: return "💡 লাস্ট টেকনিক দেখুন (এখনো নেই)"
+        val list = if (qbankSplit) { if (q.isWritten()) allQuestions.filter { it.isWritten() } else allQuestions.filter { !it.isWritten() } } else allQuestions
+        val n = list.indexOfFirst { it.id == q.id }
+        return if (n >= 0) "💡 লাস্ট টেকনিক দেখুন (প্রশ্ন #${vmPageBase + n + 1})" else "💡 লাস্ট টেকনিক দেখুন"
+    }
+    fun lastMoveLabel(): String =
+        if (lastMoveInfo != null) "📍 লাস্ট মুভ দেখুন (প্রশ্ন #${lastMoveInfo.pos + 1})" else "📍 লাস্ট মুভ দেখুন (এখনো নেই)"
+    fun goToLastTechnique() {
+        val q = lastTechniqueQuestion()
+        if (q == null) {
+            android.widget.Toast.makeText(ctxForPrefs, "এই প্রশ্নপত্রে/পেজে এখনো কোনো টেকনিক যোগ করা হয়নি", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (qbankSplit) {
+            val tab = if (q.isWritten()) 1 else 0
+            if (forceTypeTab != null) {
+                if (forceTypeTab != tab) {
+                    android.widget.Toast.makeText(ctxForPrefs, "লাস্ট টেকনিক ${if (tab == 0) "MCQ" else "লিখিত"} অংশে আছে — ওই অংশে যান", android.widget.Toast.LENGTH_SHORT).show()
+                    return
+                }
+            } else if (qbankTypeTabState != tab) qbankTypeTabState = tab
+        }
+        pendingTechniqueId = q.id
+    }
+    LaunchedEffect(pendingTechniqueId, pagedQuestions, qbankTypeTab) {
+        val id = pendingTechniqueId ?: return@LaunchedEffect
+        val idx = pagedQuestions.indexOfFirst { it.id == id }
+        if (idx < 0) return@LaunchedEffect        // ট্যাব বদলে লিস্ট আপডেট হওয়ার অপেক্ষা
+        pendingTechniqueId = null
+        scrollScope.launch {
+            kotlinx.coroutines.delay(150)
+            listState.animateScrollToItem(idx)
+            activeHighlightId = id
+            kotlinx.coroutines.delay(2500)
+            if (activeHighlightId == id) activeHighlightId = null
+        }
+    }
+
+
     // ── বিস্তারিত লিস্টে কোনো ভুল প্রশ্নে ট্যাপ করলে ডায়ালগ বন্ধ করে সরাসরি
     // সেই প্রশ্নের কার্ডে স্ক্রল করে ২.৫ সেকেন্ড হাইলাইট করে দেখায় (রিপোর্ট
     // রেজল্ভড হাইলাইটের মতোই একই প্রক্রিয়া) ──
@@ -754,7 +802,12 @@ fun QuestionListScreen(
                     onToggleQbankPaper = if (mode == StudyMode.QBANK) { { paperExpanded = !paperExpanded } } else null,
                     qbankPaperCount    = paperImages.size,
                     qbankPaperEnabled  = paperImages.isNotEmpty() || vmState.isAdmin,
-                    qbankPaperExpanded = paperExpanded
+                    qbankPaperExpanded = paperExpanded,
+                    // ── 📍 মুভ আইকনের পাশের ▾ মেনু: লাস্ট মুভ / লাস্ট টেকনিক ──
+                    onGoLastMove = if (onAdminMoveQuestions != null) { { goToLastMove() } } else null,
+                    lastMoveLabel = { lastMoveLabel() },
+                    onGoLastTechnique = { goToLastTechnique() },
+                    lastTechniqueLabel = { lastTechniqueLabel() }
                 )
             },
             snackbarHost = { SnackbarHost(moveSnackbarHostState) }
@@ -1372,23 +1425,6 @@ fun QuestionListScreen(
                     Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val hasLastMove = lastMoveInfo != null
-                    Row(
-                        Modifier
-                            .align(Alignment.End)
-                            .shadow(6.dp, RoundedCornerShape(16.dp))
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (hasLastMove) Color(0xFF7C3AED) else Color(0xFF6B7280))
-                            .clickable { goToLastMove() }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (lastMoveInfo != null) "📍 লাস্ট মুভ দেখুন (প্রশ্ন #${lastMoveInfo.pos + 1})" else "📍 লাস্ট মুভ দেখুন",
-                            color = Color.White, fontFamily = NotoSansBengali,
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold
-                        )
-                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2176,7 +2212,12 @@ private fun QuestionTopBar(
     onToggleQbankPaper      : (() -> Unit)? = null,
     qbankPaperEnabled       : Boolean = false,
     qbankPaperExpanded      : Boolean = false,
-    qbankPaperCount         : Int = 0
+    qbankPaperCount         : Int = 0,
+    // ── 📍 এক্সপ্যান্ড (▾) মেনু ──
+    onGoLastMove            : (() -> Unit)? = null,
+    lastMoveLabel           : () -> String = { "" },
+    onGoLastTechnique       : (() -> Unit)? = null,
+    lastTechniqueLabel      : () -> String = { "" }
 ) {
     // Study তে সবসময়, QBank-এ শুধু Written প্রশ্ন থাকলে
     val showRevealRecallIcons = mode == StudyMode.STUDY ||
@@ -2260,6 +2301,34 @@ private fun QuestionTopBar(
                         contentDescription = if (isSelectMode) "সিলেক্ট মোড: চালু" else "সিলেক্ট মোড: বন্ধ",
                         tint = if (isSelectMode) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+            // ── ▾ এক্সপ্যান্ড — মুভ আইকনের ঠিক পাশে। ট্যাপ করলে "📍 লাস্ট মুভ দেখুন" (শুধু Admin)
+            // আর "💡 লাস্ট টেকনিক দেখুন" অপশন আসে — চাপলে সরাসরি সেই প্রশ্নে স্ক্রল হয় ──
+            if ((isAdmin && onGoLastMove != null) || onGoLastTechnique != null) {
+                var lastMenuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { lastMenuOpen = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "লাস্ট মুভ / টেকনিক",
+                            tint = if (lastMenuOpen) Indigo600 else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(expanded = lastMenuOpen, onDismissRequest = { lastMenuOpen = false }) {
+                        if (isAdmin && onGoLastMove != null) {
+                            DropdownMenuItem(
+                                text = { Text(lastMoveLabel(), fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                                onClick = { lastMenuOpen = false; onGoLastMove() }
+                            )
+                        }
+                        if (onGoLastTechnique != null) {
+                            DropdownMenuItem(
+                                text = { Text(lastTechniqueLabel(), fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                                onClick = { lastMenuOpen = false; onGoLastTechnique() }
+                            )
+                        }
+                    }
                 }
             }
             if (onSubmit != null) {
