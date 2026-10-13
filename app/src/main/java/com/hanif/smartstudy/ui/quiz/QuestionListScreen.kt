@@ -192,6 +192,24 @@ private fun recordMoveTopicUsage(ctx: Context, subject: String, topic: String) {
     } catch (_: Exception) { }
 }
 
+// ── Subject-ও একইভাবে: যে Subject-এ সবচেয়ে বেশিবার Move করা হয়েছে সেটা Move ডায়ালগে শুরুতে ──
+private fun moveSubjectUsageKey(subject: String) = "subject␟${subject}"
+
+private fun recordMoveSubjectUsage(ctx: Context, subject: String) {
+    try {
+        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
+        val key   = moveSubjectUsageKey(subject)
+        prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply()
+    } catch (_: Exception) { }
+}
+
+private fun sortSubjectsByUsage(ctx: Context, subjects: List<String>): List<String> {
+    return try {
+        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
+        subjects.sortedByDescending { prefs.getInt(moveSubjectUsageKey(it), 0) }
+    } catch (_: Exception) { subjects }
+}
+
 /** বেশি ব্যবহৃত Topic উপরে — কাউন্ট বেশি থেকে কমে (সমান হলে আগের ক্রম অক্ষুণ্ণ থাকে) */
 private fun sortTopicsByUsage(ctx: Context, subject: String, topics: List<String>): List<String> {
     return try {
@@ -1362,6 +1380,7 @@ fun QuestionListScreen(
                 // ── সবচেয়ে বেশি ব্যবহৃত Topic উপরে দেখানোর জন্য প্রতিবার move
                 // করার সময় সিলেকশন-কাউন্ট বাড়ানো হয় (ডিভাইস-লোকাল, SharedPreferences) ──
                 recordMoveTopicUsage(ctxForPrefs, newSubject, newSubTopic)
+                recordMoveSubjectUsage(ctxForPrefs, newSubject)
                 val movedIds    = moveTargetIds
                 val wasSingleMove = singleMoveQuestionId != null
                 val fromSubject = subject
@@ -1684,8 +1703,7 @@ private fun AdminMoveQuestionsPickerDialog(
     LaunchedEffect(Unit) {
         val loaded = try { onLoadSubjects() } catch (e: Exception) { emptyList() }
         if (loaded.isNotEmpty()) allSubjects = loaded
-        loadTopicsFor(currentSubject, autoOpenTopicMenu = openTopicFirst)
-        if (!openTopicFirst) subjectMenuExpanded = true
+        loadTopicsFor(currentSubject, autoOpenTopicMenu = false)
     }
 
     fun finishMove(newSubject: String, newSubTopic: String) {
@@ -1699,64 +1717,47 @@ private fun AdminMoveQuestionsPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // ── ড্রপডাউনের বদলে ৩-কলামের চিপ-গ্রিড: Subject আর Topic একসাথে চোখের সামনে, স্ক্রল কম ──
+            val sortedSubjects = remember(allSubjects) { sortSubjectsByUsage(ctx, allSubjects) }
+            var subjectsExpanded by remember { mutableStateOf(false) }
+            var topicsExpanded by remember { mutableStateOf(false) }
+            val subjectLimit = 9
+            val topicLimit = 18
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    "Subject আর Topic বেছে নিলেই সাথে সাথে Move হয়ে যাবে",
+                    "Subject বেছে Topic-এ ট্যাপ করলেই সাথে সাথে Move হবে",
                     fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
                 )
                 if (allSubjects.isEmpty()) {
                     Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
 
-                // ── Subject ▼ ──
-                ExposedDropdownMenuBox(
-                    expanded = subjectMenuExpanded,
-                    onExpandedChange = { subjectMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = pickedSubject,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Subject", fontFamily = NotoSansBengali) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjectMenuExpanded) },
-                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = subjectMenuExpanded,
-                        onDismissRequest = { subjectMenuExpanded = false }
-                    ) {
-                        allSubjects.forEach { subj ->
-                            DropdownMenuItem(
-                                text = { Text(subj, fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                                onClick = {
-                                    subjectMenuExpanded = false
-                                    if (subj != pickedSubject) {
-                                        pickedSubject = subj
-                                        pickedTopic = null
-                                        addingNewTopic = false
-                                        newTopicText = ""
-                                        // নতুন subject অনুযায়ি topic দেখানো + একটা ট্যাপ বাঁচাতে auto-open
-                                        loadTopicsFor(subj, autoOpenTopicMenu = true)
-                                    }
-                                }
-                            )
-                        }
-                        Divider()
-                        // ── এই মোডে নতুন Subject (অন্য মোডে দেখা যাবে না) ──
-                        DropdownMenuItem(
-                            text = {
-                                Text("🆕 নতুন Subject যোগ করুন", fontFamily = NotoSansBengali, fontSize = 13.sp,
-                                    color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
-                            },
-                            onClick = {
-                                subjectMenuExpanded = false
-                                addingNewSubject = true
-                                newSubjectText = ""
+                // ── Subject গ্রিড (বেশি ব্যবহৃত আগে) ──
+                Text("Subject", fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0369A1))
+                val shownSubjects = if (subjectsExpanded || sortedSubjects.size <= subjectLimit) sortedSubjects
+                    else (sortedSubjects.take(subjectLimit) + listOfNotNull(pickedSubject.takeIf { it !in sortedSubjects.take(subjectLimit) && it in sortedSubjects }))
+                val subjectCells = buildList {
+                    shownSubjects.forEach { subj ->
+                        add(MoveCell(subj, selected = subj == pickedSubject) {
+                            if (subj != pickedSubject) {
+                                pickedSubject = subj
+                                pickedTopic = null
+                                addingNewTopic = false
+                                newTopicText = ""
+                                topicsExpanded = false
+                                loadTopicsFor(subj, autoOpenTopicMenu = false)
                             }
-                        )
+                        })
                     }
+                    if (!subjectsExpanded && sortedSubjects.size > subjectLimit) {
+                        add(MoveCell("▾ আরও ${sortedSubjects.size - subjectLimit}টি", accent = Color(0xFF6B7280)) { subjectsExpanded = true })
+                    }
+                    add(MoveCell("🆕 নতুন Subject", accent = Color(0xFF16A34A)) { addingNewSubject = true; newSubjectText = "" })
                 }
+                MoveChipGrid(subjectCells, columns = 3)
 
                 // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সিলেক্ট হয়, তারপর Topic (নতুন) লিখে move ──
                 if (addingNewSubject) {
@@ -1790,64 +1791,33 @@ private fun AdminMoveQuestionsPickerDialog(
                     }
                 }
 
-                // ── Topic ▼ — বাছার সাথে সাথেই move ──
-                ExposedDropdownMenuBox(
-                    expanded = topicMenuExpanded && !topicsLoading,
-                    onExpandedChange = { topicMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = pickedTopic ?: "",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Topic", fontFamily = NotoSansBengali) },
-                        placeholder = { Text("বাছাই করুন", fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                        trailingIcon = {
-                            if (topicsLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = topicMenuExpanded)
-                            }
-                        },
-                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = topicMenuExpanded && !topicsLoading,
-                        onDismissRequest = { topicMenuExpanded = false }
-                    ) {
-                        val topics = topicsCache[pickedSubject].orEmpty()
-                        if (topics.isEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)) },
-                                onClick = {},
-                                enabled = false
-                            )
-                        }
-                        topics.forEach { topic ->
-                            DropdownMenuItem(
-                                text = { Text(topic, fontFamily = NotoSansBengali, fontSize = 13.sp) },
-                                onClick = {
-                                    topicMenuExpanded = false
-                                    pickedTopic = topic
-                                    finishMove(pickedSubject, topic)
-                                }
-                            )
-                        }
-                        Divider()
-                        // ── নতুন Topic যোগ করার অপশন — dropdown-এর একদম নিচে ──
-                        DropdownMenuItem(
-                            text = {
-                                Text("🆕 নতুন Topic যোগ করুন", fontFamily = NotoSansBengali, fontSize = 13.sp,
-                                    color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
-                            },
-                            onClick = {
-                                topicMenuExpanded = false
-                                addingNewTopic = true
-                                newTopicText = ""
-                            }
-                        )
+                // ── Topic গ্রিড — ট্যাপ করার সাথে সাথেই move ──
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Topic  ·  $pickedSubject", fontFamily = NotoSansBengali, fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, color = Color(0xFF0369A1), modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (topicsLoading) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                }
+                val topics = topicsCache[pickedSubject].orEmpty()
+                if (!topicsLoading && topics.isEmpty()) {
+                    Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280))
+                }
+                val shownTopics = if (topicsExpanded || topics.size <= topicLimit) topics else topics.take(topicLimit)
+                val topicCells = buildList {
+                    shownTopics.forEach { topic ->
+                        add(MoveCell(topic, selected = topic == pickedTopic) {
+                            pickedTopic = topic
+                            finishMove(pickedSubject, topic)
+                        })
+                    }
+                    if (!topicsExpanded && topics.size > topicLimit) {
+                        add(MoveCell("▾ আরও ${topics.size - topicLimit}টি", accent = Color(0xFF6B7280)) { topicsExpanded = true })
+                    }
+                    if (!topicsLoading) {
+                        add(MoveCell("🆕 নতুন Topic", accent = Color(0xFF16A34A)) { addingNewTopic = true; newTopicText = "" })
                     }
                 }
+                MoveChipGrid(topicCells, columns = 3)
 
                 // ── নতুন Topic টাইপ করার ফিল্ড — ✓ চাপলেই সেই মুহূর্তেই move ──
                 if (addingNewTopic) {
@@ -1880,6 +1850,50 @@ private fun AdminMoveQuestionsPickerDialog(
             TextButton(onClick = onDismiss) { Text("বন্ধ করুন", fontFamily = NotoSansBengali) }
         }
     )
+}
+
+private data class MoveCell(
+    val label: String,
+    val selected: Boolean = false,
+    val accent: Color? = null,
+    val onClick: () -> Unit
+)
+
+/** সমান-প্রস্থের কলামে চিপ-গ্রিড (ডিফল্ট ৩ কলাম) — লম্বা তালিকাতেও স্ক্রল কম লাগে */
+@Composable
+private fun MoveChipGrid(cells: List<MoveCell>, columns: Int = 3) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        cells.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { c ->
+                    val base = c.accent ?: Color(0xFF0EA5E9)
+                    val shape = RoundedCornerShape(10.dp)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 42.dp)
+                            .clip(shape)
+                            .background(if (c.selected) base else base.copy(alpha = 0.10f))
+                            .border(1.dp, base.copy(alpha = if (c.selected) 1f else 0.35f), shape)
+                            .clickable(onClick = c.onClick)
+                            .padding(horizontal = 5.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            c.label,
+                            fontFamily = NotoSansBengali, fontSize = 11.5.sp,
+                            fontWeight = if (c.selected) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (c.selected) Color.White else (if (c.accent == null) Color(0xFF0369A1) else base),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 2, lineHeight = 14.sp,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }
 
 /**
