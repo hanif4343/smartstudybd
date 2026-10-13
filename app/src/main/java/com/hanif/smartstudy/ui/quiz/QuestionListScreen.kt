@@ -218,6 +218,37 @@ private fun sortTopicsByUsage(ctx: Context, subject: String, topics: List<String
     } catch (_: Exception) { topics }
 }
 
+// ── 📍 লাস্ট মুভ — প্রতিটা প্রশ্নপত্রে (sheet + subject + topic + পদবী/প্রতিষ্ঠান) সর্বশেষ
+// কোন জায়গায় Move করা হয়েছিল সেটা SharedPreferences-এ সেভ থাকে। অ্যাপ বন্ধ করে পরে
+// একই প্রশ্নপত্রে ফিরলেও "📍 লাস্ট মুভ দেখুন" চাপলে সরাসরি সেই জায়গায় স্ক্রল করে যায়।
+// Move করা প্রশ্ন লিস্ট থেকে সরে যায়, তাই সেই জায়গার ঠিক পরের (এখনো বাকি) প্রশ্নের
+// id + আগের প্রশ্নের id + পজিশন — তিনটাই রাখা হয়, যাতে কিছু বদলালেও জায়গা খুঁজে পাওয়া যায়। ──
+private const val LAST_MOVE_PREFS = "last_move_position_prefs"
+private const val LM_SEP = "\u241F"
+
+private data class LastMoveInfo(val tab: Int, val pos: Int, val nextId: String, val prevId: String)
+
+private fun buildLastMoveKey(sheet: String, subject: String, subTopic: String, title: String?, inst: String?) =
+    listOf(sheet, subject, subTopic, title.orEmpty(), inst.orEmpty()).joinToString(LM_SEP)
+
+private fun readLastMoveRaw(ctx: Context, key: String): String? = try {
+    ctx.getSharedPreferences(LAST_MOVE_PREFS, Context.MODE_PRIVATE).getString(key, null)
+} catch (_: Exception) { null }
+
+private fun writeLastMoveRaw(ctx: Context, key: String, raw: String?) {
+    try {
+        val e = ctx.getSharedPreferences(LAST_MOVE_PREFS, Context.MODE_PRIVATE).edit()
+        if (raw == null) e.remove(key) else e.putString(key, raw)
+        e.apply()
+    } catch (_: Exception) { }
+}
+
+private fun parseLastMove(raw: String): LastMoveInfo? = try {
+    val parts = raw.split(LM_SEP, limit = 4)
+    if (parts.size < 4) null
+    else LastMoveInfo(parts[0].toInt(), parts[1].toInt(), parts[2], parts[3])
+} catch (_: Exception) { null }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionListScreen(
@@ -368,6 +399,71 @@ fun QuestionListScreen(
     // move হয়ে গেলে ফেরানোর জন্য নিচে ৫ সেকেন্ডের "Undo" স্ন্যাকবার দেখানো হয়। ──
     val moveSnackbarHostState = remember { SnackbarHostState() }
     val moveSnackbarScope = rememberCoroutineScope()
+
+    // ── 📍 লাস্ট মুভ: সেভ করা সর্বশেষ move-পজিশন + সেখানে স্ক্রল করার pending রিকোয়েস্ট ──
+    val lastMoveKey = remember(moveSheetKey, subject, subTopic, qbankTitle, qbankInstitution) {
+        buildLastMoveKey(moveSheetKey, subject, subTopic, qbankTitle, qbankInstitution)
+    }
+    var lastMoveRaw by remember(lastMoveKey) { mutableStateOf(readLastMoveRaw(ctxForPrefs, lastMoveKey)) }
+    val lastMoveInfo = remember(lastMoveRaw) { lastMoveRaw?.let { parseLastMove(it) } }
+    var pendingLastMove by remember { mutableStateOf<LastMoveInfo?>(null) }
+
+    fun goToLastMove() {
+        val info = lastMoveInfo
+        if (info == null) {
+            android.widget.Toast.makeText(ctxForPrefs, "এই প্রশ্নপত্রে এখনো কোনো প্রশ্ন Move করা হয়নি", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (qbankSplit) {
+            if (forceTypeTab != null) {
+                if (forceTypeTab != info.tab) {
+                    android.widget.Toast.makeText(
+                        ctxForPrefs,
+                        "লাস্ট মুভ ${if (info.tab == 0) "MCQ" else "লিখিত"} অংশে আছে — ওই অংশে যান",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return
+                }
+            } else if (qbankTypeTabState != info.tab) {
+                qbankTypeTabState = info.tab
+            }
+        }
+        pendingLastMove = info
+    }
+
+    // pending থাকলে (ট্যাব/পেজ বদলে লিস্ট লোড হওয়ার পর) সঠিক প্রশ্নে স্ক্রল + হাইলাইট
+    LaunchedEffect(pendingLastMove, pagedQuestions, safeCurrentPage, qbankTypeTab) {
+        val p = pendingLastMove ?: return@LaunchedEffect
+        if (pagedQuestions.isEmpty()) {
+            kotlinx.coroutines.delay(1500)
+            if (pagedQuestions.isEmpty()) pendingLastMove = null
+            return@LaunchedEffect
+        }
+        val targetPage = if (pageSize == Int.MAX_VALUE) 0 else p.pos / pageSize
+        var local: Int? = pagedQuestions.indexOfFirst { it.id == p.nextId }.takeIf { it >= 0 && p.nextId.isNotEmpty() }
+            ?: pagedQuestions.indexOfFirst { it.id == p.prevId }
+                .takeIf { it >= 0 && p.prevId.isNotEmpty() }
+                ?.let { (it + 1).coerceAtMost(pagedQuestions.lastIndex) }
+        if (local == null) {
+            if (targetPage != safeCurrentPage) {
+                viewModel.goToPage(targetPage)
+                return@LaunchedEffect
+            }
+            local = (p.pos - pageOffset).coerceIn(0, pagedQuestions.lastIndex)
+        }
+        val finalLocal: Int = local
+        val q = pagedQuestions.getOrNull(finalLocal)
+        pendingLastMove = null
+        scrollScope.launch {
+            kotlinx.coroutines.delay(150)
+            listState.animateScrollToItem(finalLocal)
+            if (q != null) {
+                activeHighlightId = q.id
+                kotlinx.coroutines.delay(2500)
+                if (activeHighlightId == q.id) activeHighlightId = null
+            }
+        }
+    }
 
     // ── বিস্তারিত লিস্টে কোনো ভুল প্রশ্নে ট্যাপ করলে ডায়ালগ বন্ধ করে সরাসরি
     // সেই প্রশ্নের কার্ডে স্ক্রল করে ২.৫ সেকেন্ড হাইলাইট করে দেখায় (রিপোর্ট
@@ -1263,7 +1359,8 @@ fun QuestionListScreen(
             }
         }
 
-        // ── Admin "Move" সিলেক্ট-মোড — নিচে floating bar: কতগুলো সিলেক্ট হয়েছে + Move/বাতিল ──
+        // ── Admin "Move" সিলেক্ট-মোড — নিচে floating bar: কতগুলো সিলেক্ট হয়েছে + Move/বাতিল
+        // + 📍 লাস্ট মুভ দেখুন (সর্বশেষ যেখানে Move করা হয়েছিল সেখানে সরাসরি স্ক্রল) ──
         if (isSelectMode && vmState.isAdmin) {
             Box(
                 Modifier
@@ -1271,34 +1368,56 @@ fun QuestionListScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .shadow(8.dp, RoundedCornerShape(20.dp))
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xFF0F172A))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Column(
+                    Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "${selectedQuestionIds.size}টি প্রশ্ন সিলেক্টেড",
-                        color = Color.White, fontFamily = NotoSansBengali,
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { isSelectMode = false; selectedQuestionIds.clear() }) {
-                            Text("বাতিল", color = Color.White.copy(alpha = 0.75f), fontFamily = NotoSansBengali)
-                        }
-                        Button(
-                            onClick = { moveDialogOpenTopicFirst = false; showMoveQuestionsDialog = true },
-                            enabled = selectedQuestionIds.isNotEmpty(),
-                            colors  = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF0EA5E9),
-                                disabledContainerColor = Color(0xFF0EA5E9).copy(alpha = 0.4f)
-                            )
-                        ) {
-                            Text("📦 Move", color = Color.White, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    val hasLastMove = lastMoveInfo != null
+                    Row(
+                        Modifier
+                            .align(Alignment.End)
+                            .shadow(6.dp, RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (hasLastMove) Color(0xFF7C3AED) else Color(0xFF6B7280))
+                            .clickable { goToLastMove() }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (lastMoveInfo != null) "📍 লাস্ট মুভ দেখুন (প্রশ্ন #${lastMoveInfo.pos + 1})" else "📍 লাস্ট মুভ দেখুন",
+                            color = Color.White, fontFamily = NotoSansBengali,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .shadow(8.dp, RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF0F172A))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${selectedQuestionIds.size}টি প্রশ্ন সিলেক্টেড",
+                            color = Color.White, fontFamily = NotoSansBengali,
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { isSelectMode = false; selectedQuestionIds.clear() }) {
+                                Text("বাতিল", color = Color.White.copy(alpha = 0.75f), fontFamily = NotoSansBengali)
+                            }
+                            Button(
+                                onClick = { moveDialogOpenTopicFirst = false; showMoveQuestionsDialog = true },
+                                enabled = selectedQuestionIds.isNotEmpty(),
+                                colors  = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF0EA5E9),
+                                    disabledContainerColor = Color(0xFF0EA5E9).copy(alpha = 0.4f)
+                                )
+                            ) {
+                                Text("📦 Move", color = Color.White, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -1383,6 +1502,19 @@ fun QuestionListScreen(
                 recordMoveSubjectUsage(ctxForPrefs, newSubject)
                 val movedIds    = moveTargetIds
                 val wasSingleMove = singleMoveQuestionId != null
+                // ── 📍 লাস্ট মুভ পজিশন সেভ (Undo করলে আগেরটা ফেরত আসে) ──
+                val prevLastMoveRaw = lastMoveRaw
+                run {
+                    val positions = movedIds.mapNotNull { id -> pagedQuestions.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+                    val pm = positions.maxOrNull() ?: return@run
+                    val movedSet = movedIds.toSet()
+                    val nextId = pagedQuestions.drop(pm + 1).firstOrNull { it.id !in movedSet }?.id.orEmpty()
+                    val prevId = pagedQuestions.take(pm).lastOrNull { it.id !in movedSet }?.id.orEmpty()
+                    val pos = (pageOffset + pm + 1 - positions.size).coerceAtLeast(0)
+                    val raw = listOf(qbankTypeTab.toString(), pos.toString(), nextId, prevId).joinToString(LM_SEP)
+                    writeLastMoveRaw(ctxForPrefs, lastMoveKey, raw)
+                    lastMoveRaw = raw
+                }
                 val fromSubject = subject
                 val fromTopic   = subTopic
                 onAdminMoveQuestions(moveSheetKey, movedIds, newSubject, newSubTopic)
@@ -1408,6 +1540,8 @@ fun QuestionListScreen(
                     autoDismiss.cancel()
                     if (result == SnackbarResult.ActionPerformed) {
                         onAdminMoveQuestions(moveSheetKey, movedIds, fromSubject, fromTopic)
+                        writeLastMoveRaw(ctxForPrefs, lastMoveKey, prevLastMoveRaw)
+                        lastMoveRaw = prevLastMoveRaw
                     }
                 }
             },
@@ -1713,139 +1847,139 @@ private fun AdminMoveQuestionsPickerDialog(
         onDismiss()   // move হোক বা না হোক (একই জায়গা হলে), dialog সবসময় বন্ধ হয়ে যাবে
     }
 
+    // ── ২-ধাপ: ধাপ ০ = শুধু Subject তালিকা (৩ কলাম গ্রিড, সব Subject);
+    // Subject-এ ট্যাপ করলে ধাপ ১ = সেই Subject-এর সব Topic (৩ কলাম গ্রিড, "আরও" নেই) ──
+    var stage by remember { mutableStateOf(if (openTopicFirst) 1 else 0) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
         text = {
-            // ── ড্রপডাউনের বদলে ৩-কলামের চিপ-গ্রিড: Subject আর Topic একসাথে চোখের সামনে, স্ক্রল কম ──
             val sortedSubjects = remember(allSubjects) { sortSubjectsByUsage(ctx, allSubjects) }
-            var subjectsExpanded by remember { mutableStateOf(false) }
-            var topicsExpanded by remember { mutableStateOf(false) }
-            val subjectLimit = 9
-            val topicLimit = 18
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    "Subject বেছে Topic-এ ট্যাপ করলেই সাথে সাথে Move হবে",
-                    fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
-                )
-                if (allSubjects.isEmpty()) {
-                    Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
-                }
-
-                // ── Subject গ্রিড (বেশি ব্যবহৃত আগে) ──
-                Text("Subject", fontFamily = NotoSansBengali, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0369A1))
-                val shownSubjects = if (subjectsExpanded || sortedSubjects.size <= subjectLimit) sortedSubjects
-                    else (sortedSubjects.take(subjectLimit) + listOfNotNull(pickedSubject.takeIf { it !in sortedSubjects.take(subjectLimit) && it in sortedSubjects }))
-                val subjectCells = buildList {
-                    shownSubjects.forEach { subj ->
-                        add(MoveCell(subj, selected = subj == pickedSubject) {
-                            if (subj != pickedSubject) {
-                                pickedSubject = subj
-                                pickedTopic = null
-                                addingNewTopic = false
-                                newTopicText = ""
-                                topicsExpanded = false
-                                loadTopicsFor(subj, autoOpenTopicMenu = false)
-                            }
-                        })
+                if (stage == 0) {
+                    Text(
+                        "প্রথমে Subject বেছে নিন, তারপর তার Topic দেখাবে",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
+                    )
+                    if (allSubjects.isEmpty()) {
+                        Text("⚠️ কোনো Subject পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                     }
-                    if (!subjectsExpanded && sortedSubjects.size > subjectLimit) {
-                        add(MoveCell("▾ আরও ${sortedSubjects.size - subjectLimit}টি", accent = Color(0xFF6B7280)) { subjectsExpanded = true })
-                    }
-                    add(MoveCell("🆕 নতুন Subject", accent = Color(0xFF16A34A)) { addingNewSubject = true; newSubjectText = "" })
-                }
-                MoveChipGrid(subjectCells, columns = 3)
 
-                // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সিলেক্ট হয়, তারপর Topic (নতুন) লিখে move ──
-                if (addingNewSubject) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = newSubjectText,
-                            onValueChange = { newSubjectText = it },
-                            label = { Text("নতুন Subject-এর নাম", fontFamily = NotoSansBengali) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = {
-                                val name = newSubjectText.trim()
-                                if (name.isNotBlank()) {
-                                    if (name !in allSubjects) allSubjects = allSubjects + name
-                                    pickedSubject = name
+                    // ── শুধু Subject গ্রিড (বেশি ব্যবহৃত আগে) ──
+                    val subjectCells = buildList {
+                        sortedSubjects.forEach { subj ->
+                            add(MoveCell(subj, selected = subj == pickedSubject) {
+                                if (subj != pickedSubject) {
+                                    pickedSubject = subj
                                     pickedTopic = null
-                                    topicsCache[name] = topicsCache[name] ?: emptyList()
-                                    addingNewSubject = false
-                                    // নতুন Subject-এ Topic নেই — সরাসরি নতুন-Topic ফিল্ড
-                                    addingNewTopic = true
+                                    addingNewTopic = false
                                     newTopicText = ""
                                 }
-                            },
-                            enabled = newSubjectText.isNotBlank()
-                        ) {
-                            Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-                                color = if (newSubjectText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
+                                loadTopicsFor(subj, autoOpenTopicMenu = false)
+                                stage = 1
+                            })
+                        }
+                        add(MoveCell("🆕 নতুন Subject", accent = Color(0xFF16A34A)) { addingNewSubject = true; newSubjectText = "" })
+                    }
+                    MoveChipGrid(subjectCells, columns = 3)
+
+                    // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সেই Subject সিলেক্ট হয়ে Topic ধাপে যায় ──
+                    if (addingNewSubject) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = newSubjectText,
+                                onValueChange = { newSubjectText = it },
+                                label = { Text("নতুন Subject-এর নাম", fontFamily = NotoSansBengali) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    val name = newSubjectText.trim()
+                                    if (name.isNotBlank()) {
+                                        if (name !in allSubjects) allSubjects = allSubjects + name
+                                        pickedSubject = name
+                                        pickedTopic = null
+                                        topicsCache[name] = topicsCache[name] ?: emptyList()
+                                        addingNewSubject = false
+                                        // নতুন Subject-এ Topic নেই — সরাসরি নতুন-Topic ফিল্ড
+                                        addingNewTopic = true
+                                        newTopicText = ""
+                                        stage = 1
+                                    }
+                                },
+                                enabled = newSubjectText.isNotBlank()
+                            ) {
+                                Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = if (newSubjectText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
+                            }
                         }
                     }
-                }
+                } else {
+                    Text(
+                        "Topic-এ ট্যাপ করলেই সাথে সাথে Move হবে",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
+                    )
 
-                // ── Topic গ্রিড — ট্যাপ করার সাথে সাথেই move ──
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Topic  ·  $pickedSubject", fontFamily = NotoSansBengali, fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold, color = Color(0xFF0369A1), modifier = Modifier.weight(1f, fill = false),
-                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                    if (topicsLoading) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                }
-                val topics = topicsCache[pickedSubject].orEmpty()
-                if (!topicsLoading && topics.isEmpty()) {
-                    Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280))
-                }
-                val shownTopics = if (topicsExpanded || topics.size <= topicLimit) topics else topics.take(topicLimit)
-                val topicCells = buildList {
-                    shownTopics.forEach { topic ->
-                        add(MoveCell(topic, selected = topic == pickedTopic) {
-                            pickedTopic = topic
-                            finishMove(pickedSubject, topic)
-                        })
+                    // ── নির্বাচিত Subject-এর সব Topic (৩ কলাম, ট্যাপ করার সাথে সাথেই move) ──
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Topic  ·  $pickedSubject", fontFamily = NotoSansBengali, fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold, color = Color(0xFF0369A1), modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        if (topicsLoading) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                     }
-                    if (!topicsExpanded && topics.size > topicLimit) {
-                        add(MoveCell("▾ আরও ${topics.size - topicLimit}টি", accent = Color(0xFF6B7280)) { topicsExpanded = true })
+                    val topics = topicsCache[pickedSubject].orEmpty()
+                    if (!topicsLoading && topics.isEmpty()) {
+                        Text("এই বিষয়ে এখনো কোনো Topic নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280))
                     }
-                    if (!topicsLoading) {
-                        add(MoveCell("🆕 নতুন Topic", accent = Color(0xFF16A34A)) { addingNewTopic = true; newTopicText = "" })
+                    val topicCells = buildList {
+                        topics.forEach { topic ->
+                            add(MoveCell(topic, selected = topic == pickedTopic) {
+                                pickedTopic = topic
+                                finishMove(pickedSubject, topic)
+                            })
+                        }
+                        if (!topicsLoading) {
+                            add(MoveCell("🆕 নতুন Topic", accent = Color(0xFF16A34A)) { addingNewTopic = true; newTopicText = "" })
+                        }
                     }
-                }
-                MoveChipGrid(topicCells, columns = 3)
+                    MoveChipGrid(topicCells, columns = 3)
 
-                // ── নতুন Topic টাইপ করার ফিল্ড — ✓ চাপলেই সেই মুহূর্তেই move ──
-                if (addingNewTopic) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = newTopicText,
-                            onValueChange = { newTopicText = it },
-                            label = { Text("নতুন Topic-এর নাম", fontFamily = NotoSansBengali) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = {
-                                val name = newTopicText.trim()
-                                if (name.isNotBlank()) {
-                                    addingNewTopic = false
-                                    finishMove(pickedSubject, name)
-                                }
-                            },
-                            enabled = newTopicText.isNotBlank()
-                        ) {
-                            Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
-                                color = if (newTopicText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
+                    // ── নতুন Topic টাইপ করার ফিল্ড — ✓ চাপলেই সেই মুহূর্তেই move ──
+                    if (addingNewTopic) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = newTopicText,
+                                onValueChange = { newTopicText = it },
+                                label = { Text("নতুন Topic-এর নাম", fontFamily = NotoSansBengali) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    val name = newTopicText.trim()
+                                    if (name.isNotBlank()) {
+                                        addingNewTopic = false
+                                        finishMove(pickedSubject, name)
+                                    }
+                                },
+                                enabled = newTopicText.isNotBlank()
+                            ) {
+                                Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = if (newTopicText.isNotBlank()) Color(0xFF16A34A) else Color(0xFF9CA3AF))
+                            }
                         }
                     }
                 }
             }
         },
+        dismissButton = if (stage == 1) {
+            { TextButton(onClick = { stage = 0; addingNewTopic = false }) { Text("← Subject তালিকা", fontFamily = NotoSansBengali) } }
+        } else null,
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("বন্ধ করুন", fontFamily = NotoSansBengali) }
         }
