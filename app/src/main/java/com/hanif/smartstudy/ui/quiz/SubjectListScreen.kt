@@ -1635,6 +1635,7 @@ private fun SubjectCard(
                     color = textColor, fontFamily = NotoSansBengali)
                 Text("${subject.totalQ} প্রশ্ন", fontSize = 11.sp, color = mutedColor,
                     fontFamily = NotoSansBengali)
+                QBankYearsLine(subject.years, mutedColor)
                 Spacer(Modifier.height(6.dp))
                 Box(
                     Modifier.fillMaxWidth().height(5.dp)
@@ -1720,6 +1721,8 @@ private fun QBankSubjectCard(
 
             Text(titleOverride ?: subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = if (titleOverride != null) 4 else 2)
+
+            QBankYearsLine(subject.years, qbankAccent)
 
             if (!hideSubLabel) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2105,6 +2108,7 @@ private fun SubTopicCard(
                 }
                 Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
                     color = mutedColor, fontFamily = NotoSansBengali)
+                QBankYearsLine(st.years, mutedColor, 10.sp)
                 Spacer(Modifier.height(5.dp))
                 Box(
                     Modifier.fillMaxWidth().height(4.dp)
@@ -2239,4 +2243,15 @@ private fun QBankTopicCard(
             }
         }
     }
+}
+
+
+/** QBank "প্রাথমিক" ক্যাটাগরির কার্ডে পদের সাথে সাল — "📅 ২০২২ • ২০১৯ +১"; অন্য ক্যাটাগরিতে/সাল না থাকলে কিছু দেখায় না */
+@Composable
+private fun QBankYearsLine(years: List<String>, color: Color, fontSize: androidx.compose.ui.unit.TextUnit = 11.sp) {
+    if (years.isEmpty() || com.hanif.smartstudy.util.QBankCategory.selected != "প্রাথমিক") return
+    val shown = years.take(3).joinToString(" • ")
+    val more  = if (years.size > 3) "  +${years.size - 3}" else ""
+    Text("📅 $shown$more", fontSize = fontSize, color = color, fontWeight = FontWeight.SemiBold,
+        fontFamily = NotoSansBengali, maxLines = 2)
 }
