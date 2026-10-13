@@ -2662,6 +2662,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     /** পদ-মোড: Room-এর exam_appearances (Post+Institution ধরে group করা) থেকে তালিকা —
      *  প্রতিটা পদের ভিতরে (subTopics ফিল্ডে) সেই পদের আন্ডারে যত প্রতিষ্ঠান আছে তার নেস্টেড
      *  লিস্ট, ঠিক rebuildQBankInstitutions()-এর প্যাটার্নেই। */
+    /** সালের তালিকা (কার্ডে দেখানোর জন্য): কোনো অঙ্কই নেই এমন placeholder ("-", "--", "..") বাদ,
+     *  ইংরেজি/বাংলা অঙ্কে লেখা একই সাল ("2014" / "২০১৪") এক করে বাংলায়, নতুন → পুরনো */
+    private fun yearsNewestFirst(raw: List<String>): List<String> {
+        fun latin(y: String): String = buildString {
+            for (c in y) append(if (c in '\u09E6'..'\u09EF') ('0' + (c - '\u09E6')) else c)
+        }
+        fun bangla(y: String): String = buildString {
+            for (c in y) append(if (c in '0'..'9') ('\u09E6' + (c - '0')) else c)
+        }
+        return raw.map { latin(it.trim()) }
+            .filter { y -> y.any { it.isDigit() } }          // "-", "--", ".." ইত্যাদি বাদ
+            .distinct()
+            .sortedByDescending { y -> y.filter { it.isDigit() }.toIntOrNull() ?: 0 }
+            .map { bangla(it) }
+    }
+
     private suspend fun rebuildQBankPosts() {
         repo.syncExamAppearances()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে, exception ছোঁড়ে না
         val posts        = repo.getRoomPosts()
@@ -2685,7 +2701,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     topicId           = instId,
                     linkedQuestionIds = qIds,
                     mcqCount          = qIds.count { typeMap[it] == false },
-                    writtenCount      = qIds.count { typeMap[it] == true }
+                    writtenCount      = qIds.count { typeMap[it] == true },
+                    years             = yearsNewestFirst(apps.map { it.year })
                 )
             }.sortedBy { it.name }
                 .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION, l) { it.topicId }) }
@@ -2694,7 +2711,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 totalQ    = subTopics.sumOf { it.totalQ },
                 doneQ     = subTopics.sumOf { it.doneQ },
                 subTopics = subTopics,
-                subjectId = post.postId
+                subjectId = post.postId,
+                years     = yearsNewestFirst(appearances.map { it.year })
             )
         }.filter { it.subTopics.isNotEmpty() }.sortedBy { it.name }
             .let { l -> com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.subjectId } }
