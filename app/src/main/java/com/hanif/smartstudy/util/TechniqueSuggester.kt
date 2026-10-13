@@ -15,7 +15,7 @@ object TechniqueMatch {
     const val ALL  = "ALL"   // ✅ প্রশ্ন + সব অপশন + উত্তর, সব মিলছে
     const val Q    = "Q"     // ❓ সম্পূর্ণ প্রশ্ন হুবহু মিলছে
     const val OA   = "OA"    // 🔘 সব অপশন + উত্তর মিলছে
-    const val TAG  = "TAG"   // 🏷 টেকনিকের ট্যাগ প্রশ্ন/অপশন/উত্তরে আছে
+    const val TAG  = "TAG"   // 🏷 টেকনিকের ট্যাগ শুধু প্রশ্ন/উত্তরে আছে (অপশনে নয়)
     const val AI   = "AI"    // ✨ AI বলছে সরাসরি কাজে লাগবে (শুধু Admin বাটন চাপলে)
     const val AIR  = "AIR"   // 🔶 AI বলছে সম্পর্কিত, তবে আংশিক কাজে লাগবে
 }
@@ -56,7 +56,8 @@ data class TechniqueSuggestResult(
  *  ✅ ALL  — প্রশ্ন + সব অপশন + উত্তর, সব মিলছে
  *  ❓ Q    — সম্পূর্ণ প্রশ্ন হুবহু মিলছে (অপশন/উত্তর আলাদা হতে পারে)
  *  🔘 OA   — সব অপশন + উত্তর মিলছে (প্রশ্ন আলাদা হতে পারে)
- *  🏷 TAG  — টেকনিকে দেওয়া ট্যাগ-বাক্য অন্য প্রশ্নের লেখা/অপশন/উত্তরে আছে
+ *  🏷 TAG  — টেকনিকে দেওয়া ট্যাগ-বাক্য অন্য প্রশ্নের লেখা বা সঠিক উত্তরে আছে
+ *            (অপশনে থাকলে ধরা হয় না — ভুল অপশনের শব্দ মিলে ভুল সাজেশন আসত)
  *
  * মিল দেখার সময় নম্বর-চিহ্ন ("৯১."), যতিচিহ্ন, HTML, বড়/ছোট হাতের অক্ষর, বাংলা/ইংরেজি অঙ্ক
  * আর অপশনের ক্রম উপেক্ষা করা হয়। সব subject-এর (Quiz + QBank) ডাউনলোড হওয়া প্রশ্নে খোঁজা হয়।
@@ -171,10 +172,10 @@ object TechniqueSuggester {
                     val needle = " $t"
                     val inQ = p.spacedQ.contains(needle)
                     val inA = p.spacedA.contains(needle)
-                    val inO = p.spacedO.contains(needle)
-                    if (inQ || inA || inO) {
+                    // অপশন (spacedO) ইচ্ছা করেই দেখা হয় না — শুধু প্রশ্ন + সঠিক উত্তর
+                    if (inQ || inA) {
                         hit += tagLabels.getOrElse(i) { t }
-                        tagScore += (if (inQ) 3 else 0) + (if (inA) 2 else 0) + (if (inO) 1 else 0)
+                        tagScore += (if (inQ) 3 else 0) + (if (inA) 2 else 0)
                     }
                 }
                 if (hit.isNotEmpty()) {
@@ -266,13 +267,12 @@ Rules: phrases must be specific, e.g. "মৌলিক সংখ্যা" not j
         for (e in pool) {
             if (e.fbKey == source.questionId || e.fbKey in skipIds || e.fbKey in linked || e.fbKey in rejected) continue
             val p = prepare(e)
-            if (excl.any { x -> (" $x") in p.spacedQ || (" $x") in p.spacedA || (" $x") in p.spacedO }) continue
+            if (excl.any { x -> (" $x") in p.spacedQ || (" $x") in p.spacedA }) continue
             var sc = 0.0
             for (ph in phrases) {
                 val n = " $ph"
                 if (n in p.spacedQ) sc += 3
                 if (n in p.spacedA) sc += 2
-                if (n in p.spacedO) sc += 1
             }
             if (sc > 0) cands += p to sc
         }
