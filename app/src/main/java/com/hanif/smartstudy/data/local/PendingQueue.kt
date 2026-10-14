@@ -244,7 +244,11 @@ class PendingQueue(private val context: Context) {
                     }
                     "admin_move_questions" -> {
                         val map: Map<String, Any> = gson.fromJson(action.payload, object : TypeToken<Map<String, Any>>() {}.type)
-                        (map["ids"] as? List<*>)?.forEach { out.add(it.toString()) }
+                        // QBank-এ "move" আসলে Quiz-এ কপি — QBank-এর প্রশ্ন নিজের জায়গায় থাকে, তাই এগুলো
+                        // "pending" হিসেবে ধরে CDN-রিফ্রেশ থেকে বাদ দেওয়া হয় না
+                        if (map["sheet"]?.toString()?.equals("QBank", ignoreCase = true) != true) {
+                            (map["ids"] as? List<*>)?.forEach { out.add(it.toString()) }
+                        }
                     }
                 }
             } catch (e: Exception) { /* malformed payload হলে চুপচাপ skip — বাকি ফিল্টারিং থেমে না যায় */ }
