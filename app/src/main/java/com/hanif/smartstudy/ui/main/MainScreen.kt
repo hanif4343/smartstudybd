@@ -552,6 +552,10 @@ fun MainScreen(
                     // তাই এখানে removeQuestionsLocally() ইচ্ছাকৃতভাবে কল করা হয় না
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
+                    },
+                    // QBank টপিক ম্যানেজার → "🔀 মার্জ টু": পুরো টপিকের MCQ Quiz-এ কপি, QBank-এ যেমন আছে তেমনই
+                    onAdminMergeQBankTopic = { topicId, topicLabel, newSubject, newSubTopic ->
+                        menuViewModel.adminMergeQBankTopicToQuiz(topicId, topicLabel, newSubject, newSubTopic)
                     }
                 )
                 BottomTab.STUDY -> CoreScreen(
