@@ -818,6 +818,12 @@ fun SubjectListScreen(
                                     insts.size <= 2 -> subject.name + ", " + insts.joinToString(", ")
                                     else            -> subject.name + ", " + insts.first() + " +${insts.size - 1}"
                                 }
+                            } else if ((selectedExamCategory == "প্রাথমিক" || selectedExamCategory == "ব্যাংক") &&
+                                (qbankFilterMode == QBankFilterMode.POST || qbankFilterMode == QBankFilterMode.DESIGNATION) &&
+                                subject.years.isNotEmpty()) {
+                                // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
+                                subject.name + ", " + subject.years.take(3).joinToString(", ") +
+                                    (if (subject.years.size > 3) " +${subject.years.size - 3}" else "")
                             } else null,
                             // ১৬-২০ গ্রেড ছাড়া বাকি ক্যাটাগরিতে "X টি প্রতিষ্ঠান" ব্যাজ নেই
                             hideSubLabel = selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE,
@@ -1837,7 +1843,7 @@ private fun QBankSubjectCard(
             Text(titleOverride ?: subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                 color = textColor, fontFamily = NotoSansBengali, maxLines = if (titleOverride != null) 4 else 2)
 
-            QBankYearsLine(subject.years, qbankAccent)
+            if (titleOverride == null) QBankYearsLine(subject.years, qbankAccent)
 
             if (!hideSubLabel) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
