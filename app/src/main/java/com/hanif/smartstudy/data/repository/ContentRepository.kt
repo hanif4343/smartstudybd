@@ -340,6 +340,7 @@ class ContentRepository(private val context: Context) {
             institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
         )
         reapplyLocalReferenceOverrides()   // ← Move-এ নতুন বানানো Subject/Topic CDN-এর পুরনো তালিকায় হারিয়ে না যাক
+        reapplyDeletedAndRenamedReferences()   // ← ডিলিট/rename করা আইটেম CDN-এর পুরনো তালিকা থেকে ফিরে না আসুক (late sync-এও)
         reapplyTopicOrderOverrides()
         // ── QBank পদবী/প্রতিষ্ঠান সিরিয়াল (CDN-এর sort_order) — সাধারণ ইউজারদের জন্য সংরক্ষণ;
         // admin-এর লোকাল ক্রম (QBankOrderStore LOCAL) সবসময় এর ওপরে থাকে ──
@@ -446,6 +447,90 @@ class ContentRepository(private val context: Context) {
         } catch (_: Exception) { }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // ডিলিট (tombstone) + rename (override) — "লেট হলেও যেন পুনরায় দেখা না যায়"
+    //
+    // সমস্যা: Admin Subject/Topic ডিলিট বা rename করলে Room-এ সাথে সাথে বদলায়, Sheet-এ
+    // বদলায় ব্যাকগ্রাউন্ডে। কিন্তু CDN-এর reference/subjects.json ও topics.json নতুন হয় কেবল
+    // পরের "Publish"-এর পর। এর মধ্যে syncReferenceData() চললে Room-এর replaceAll() CDN-এর
+    // পুরনো তালিকা দিয়ে সব ওভাররাইট করত — ফলে ডিলিট করা আইটেম আবার ফিরে আসত আর rename করা
+    // নাম আবার পুরনো হয়ে যেত।
+    //
+    // সমাধান: ডিলিট করা id-গুলো "tombstone" হিসেবে, আর নতুন নামগুলো "override" হিসেবে একটা
+    // ছোট SharedPreferences-এ রাখা হয়; প্রতিটা reference-sync-এর পর আবার প্রয়োগ হয়।
+    // CDN ধরে ফেললে (ডিলিটের ক্ষেত্রে id আর নেই / rename-এর ক্ষেত্রে নাম মিলে গেছে) অথবা
+    // ৩০ দিন পার হলে এন্ট্রি নিজে থেকেই মুছে যায়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val refTombPrefs   get() = context.getSharedPreferences("ref_delete_tombstones", Context.MODE_PRIVATE)
+    private val refRenamePrefs get() = context.getSharedPreferences("ref_rename_overrides", Context.MODE_PRIVATE)
+
+    private fun rememberDeletedRef(kind: String, id: String) {
+        if (id.isBlank() || id.startsWith("-local")) return
+        try { refTombPrefs.edit().putLong("$kind|$id", System.currentTimeMillis()).apply() } catch (_: Exception) { }
+    }
+
+    private fun rememberRenamedRef(kind: String, id: String, name: String) {
+        if (id.isBlank() || id.startsWith("-local") || name.isBlank()) return
+        try {
+            refRenamePrefs.edit().putString("$kind|$id", name + LR_SEP + System.currentTimeMillis()).apply()
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun reapplyDeletedAndRenamedReferences() {
+        val tombs   = refTombPrefs
+        val renames = refRenamePrefs
+        val tAll = tombs.all
+        val rAll = renames.all
+        if (tAll.isEmpty() && rAll.isEmpty()) return
+        val now = System.currentTimeMillis()
+
+        // ── ১) ডিলিট: CDN যদি এখনো আইটেমটা রেখে থাকে, আবার সরাও; না থাকলে কাজ শেষ — tombstone মুছে দাও ──
+        if (tAll.isNotEmpty()) {
+            val tEd = tombs.edit()
+            val subjIds  = refDao.getAllSubjects().map { it.subjectId }.toHashSet()
+            val topicIds = refDao.getAllTopics().map { it.topicId }.toHashSet()
+            for ((k, v) in tAll) {
+                val at = (v as? Long) ?: 0L
+                if (now - at > LR_TTL_MS || k.length < 3) { tEd.remove(k); continue }
+                val id = k.substring(2)
+                try {
+                    if (k.startsWith("S|")) {
+                        if (id in subjIds) refDao.deleteSubjectCascade(id) else tEd.remove(k)
+                    } else if (k.startsWith("T|")) {
+                        if (id in topicIds) refDao.deleteTopicCascade(id) else tEd.remove(k)
+                    } else tEd.remove(k)
+                } catch (_: Exception) { }
+            }
+            tEd.apply()
+        }
+
+        // ── ২) rename: CDN-এর নাম এখনো পুরনো হলে নতুন নামটা আবার বসাও; মিলে গেলে override মুছে দাও ──
+        if (rAll.isNotEmpty()) {
+            val rEd = renames.edit()
+            val subjById  = refDao.getAllSubjects().associateBy { it.subjectId }
+            val topicById = refDao.getAllTopics().associateBy { it.topicId }
+            for ((k, v) in rAll) {
+                val parts = (v as? String)?.split(LR_SEP)
+                val name  = parts?.getOrNull(0).orEmpty()
+                val at    = parts?.getOrNull(1)?.toLongOrNull() ?: 0L
+                if (name.isBlank() || now - at > LR_TTL_MS || k.length < 3) { rEd.remove(k); continue }
+                val id = k.substring(2)
+                try {
+                    if (k.startsWith("S|")) {
+                        val cur = subjById[id]
+                        if (cur == null || normName(cur.name) == normName(name)) rEd.remove(k)
+                        else refDao.renameSubjectById(id, name)
+                    } else if (k.startsWith("T|")) {
+                        val cur = topicById[id]
+                        if (cur == null || normName(cur.name) == normName(name)) rEd.remove(k)
+                        else refDao.renameTopicById(id, name)
+                    } else rEd.remove(k)
+                } catch (_: Exception) { }
+            }
+            rEd.apply()
+        }
+    }
+
     private suspend fun reapplyLocalReferenceOverrides() {
         val prefs = localRefPrefs
         val all = prefs.all
@@ -482,6 +567,59 @@ class ContentRepository(private val context: Context) {
         touchedTopics.forEach { tid ->
             for (sh in listOf("Quiz", "QBank", "Study")) { try { refreshTopicRowCount(sh, tid) } catch (_: Exception) { } }
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // QBank টপিক ম্যানেজার (Admin) — বাল্ক আপলোডে আসা QBank-এর নিজস্ব Subject › Topic তালিকা,
+    // "আনমুভ" ফিল্টার আর "মার্জ টু" (পুরো টপিকের MCQ Quiz-এ কপি) এর ডেটা-সোর্স।
+    // QBank-এর প্রশ্ন কখনো সরে না/মুছে না — "মুভ" = Quiz-এ কপি (দেখো MenuViewModel.adminCopyQBankToQuiz)।
+    // ═════════════════════════════════════════════════════════════════════════
+    data class QBankTopicRow(
+        val subjectId: String, val subject: String,
+        val topicId: String,   val topic: String,
+        val count: Int
+    )
+
+    /** Room reference-টেবিল থেকে QBank-এর সব Subject › Topic (নেটওয়ার্ক লাগে না) */
+    suspend fun getQBankTopicRows(): List<QBankTopicRow> = withContext(Dispatchers.IO) {
+        val out = ArrayList<QBankTopicRow>()
+        for (s in refDao.getSubjectsBySheet("QBank")) {
+            for (t in refDao.getTopicsForSubject(s.subjectId)) {
+                val n = if (t.rowCountQbank > 0) t.rowCountQbank else t.rowCount
+                out += QBankTopicRow(s.subjectId, s.name, t.topicId, t.name, n)
+            }
+        }
+        out
+    }
+
+    /** একটা QBank Topic-এর সব প্রশ্নের id — GAS-এর পেজ ধরে ধরে (Room-এ সব না-ও থাকতে পারে);
+     *  অফলাইন/ব্যর্থ হলে Room-এ যতটুকু cache আছে সেটাই। */
+    suspend fun fetchQBankTopicQuestionIds(topicId: String): List<String> = withContext(Dispatchers.IO) {
+        val ids = LinkedHashSet<String>()
+        var cursor: String? = null
+        var pages = 0
+        var anyOk = false
+        while (pages++ < 200) {
+            val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, null, cursor, 100)
+            if (!page.ok) break
+            anyOk = true
+            page.items.forEach { q -> q.id?.takeIf { it.isNotBlank() }?.let { ids.add(it) } }
+            cursor = page.nextCursor
+            if (!page.hasMore || cursor.isNullOrBlank()) break
+        }
+        if (!anyOk || ids.isEmpty()) {
+            try { dao.getByTopicId("QBANK", topicId, "").forEach { ids.add(it.fbKey) } } catch (_: Exception) { }
+        }
+        ids.toList()
+    }
+
+    /** প্রশ্ন-id → তাদের QBank topicId-গুলো (Room cache থেকে) — "মুভ করা হয়েছে" মার্ক করার জন্য */
+    suspend fun qbankTopicIdsOfQuestions(ids: List<String>): Set<String> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptySet()
+        try {
+            ids.chunked(500).flatMap { part -> dao.getByFbKeysFiltered("QBANK", part, "") }
+                .mapNotNull { it.topicId.takeIf { t -> t.isNotBlank() } }.toSet()
+        } catch (_: Exception) { emptySet() }
     }
 
     // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
@@ -591,6 +729,7 @@ class ContentRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val roomSheet = sheet.uppercase()
             renameLocalRef(if (refType == "topics") "T" else "S", id, name)
+            rememberRenamedRef(if (refType == "topics") "T" else "S", id, name)   // CDN পুরনো নাম ফেরাতে পারবে না
             if (refType == "topics") {
                 refDao.renameTopicById(id, name)
                 dao.renameSubTopicInQuestions(roomSheet, id, name)
@@ -1775,11 +1914,13 @@ class ContentRepository(private val context: Context) {
         if (!deleteSubTopic) {
             refDao.deleteSubjectCascade(subjectEntity.subjectId)
             forgetLocalRef("S", subjectEntity.subjectId)
+            rememberDeletedRef("S", subjectEntity.subjectId)   // CDN-এর পুরনো তালিকা ফিরিয়ে আনতে পারবে না
             subjectEntity.subjectId
         } else {
             val topicEntity = refDao.getTopicByName(subjectEntity.subjectId, subTopic) ?: return@withContext null
             refDao.deleteTopicCascade(topicEntity.topicId)
             forgetLocalRef("T", topicEntity.topicId)
+            rememberDeletedRef("T", topicEntity.topicId)   // CDN-এর পুরনো তালিকা ফিরিয়ে আনতে পারবে না
             topicEntity.topicId
         }
     }
@@ -1908,6 +2049,7 @@ class ContentRepository(private val context: Context) {
     ) = withContext(Dispatchers.IO) {
         if (!mergeTopicId.isNullOrBlank()) {
             refDao.mergeTopicCascade(topicId, mergeTopicId)
+            rememberDeletedRef("T", topicId)   // merge হয়ে যাওয়া সোর্স Topic CDN-এর পুরনো তালিকা থেকে ফিরবে না
             if (!sheet.isNullOrBlank()) refreshTopicRowCount(sheet, mergeTopicId)
         } else {
             refDao.reparentTopic(topicId, newSubjectId)
