@@ -73,6 +73,12 @@ private fun subjectIcon(rawName: String): String {
     return subjectIcons.entries.firstOrNull { name.contains(java.text.Normalizer.normalize(it.key, java.text.Normalizer.Form.NFC)) }?.value ?: "📚"
 }
 
+/** কিওয়ার্ড মিললে আইকন, নাহলে null (QBank কার্ডে ডিফল্ট 📚 আর দেখানো হয় না) */
+private fun subjectIconOrNull(rawName: String): String? {
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    return subjectIcons.entries.firstOrNull { name.contains(java.text.Normalizer.normalize(it.key, java.text.Normalizer.Form.NFC)) }?.value
+}
+
 // ── Subject illustration ছবি ম্যাপ (Image/CDN Hosting Phase-এর মতোই "app-এর সাথে
 // hardcoded থাকা লাগবে" রিকোয়ারমেন্ট — এই ছবিগুলো res/drawable-এ বান্ডল করা,
 // CDN/নেটওয়ার্ক থেকে আসে না, তাই অফলাইনে/স্লো নেটেও instant লোড হয়) — শুধু
@@ -546,7 +552,10 @@ fun SubjectListScreen(
     ownScopeActive  : Boolean = false,
     // ── শুধু QBank + Admin: "QBank টপিক ম্যানেজার" (আনমুভ ফিল্টার + মার্জ টু) খোলার কলব্যাক।
     // null হলে (Quiz/Study বা student) Admin মেনুতে এই অপশন আসে না ──
-    onOpenQBankTopicManager : (() -> Unit)? = null
+    onOpenQBankTopicManager : (() -> Unit)? = null,
+    // ── Admin "🔀 Merge To": source বিষয়ের সব প্রশ্ন/টপিক target-এ চলে যায়, source আর থাকে না।
+    // null হলে মেনুতে অপশন আসে না ──
+    onMergeSubject : ((source: String, target: String) -> Unit)? = null
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -604,7 +613,8 @@ fun SubjectListScreen(
             list = com.hanif.smartstudy.util.QBankSortStore.apply(
                 list, sortChoice,
                 name = { it.name }, subNames = { e -> e.subTopics.map { st -> st.name } },
-                totalQ = { it.totalQ }, progressPct = { it.progressPct }
+                totalQ = { it.totalQ }, progressPct = { it.progressPct },
+                years = { it.years }
             )
         }
         list
@@ -617,6 +627,7 @@ fun SubjectListScreen(
     // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMergeDialog  by remember { mutableStateOf(false) }
     // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
     var showSerialManager by remember { mutableStateOf(false) }
     // ── App feature request ৪: কোন subjectId-এর ইমুজি এডিট হচ্ছে (null মানে বন্ধ) ──
@@ -664,6 +675,7 @@ fun SubjectListScreen(
                                     onToggleReorder = onToggleReorder,
                                     onRenameClick   = { showRenameDialog = true },
                                     onDeleteClick   = { showDeleteDialog = true },
+                                    onMergeClick    = if (onMergeSubject != null && subjects.size > 1) { { showMergeDialog = true } } else null,
                                     onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null,
                                     onOpenQBankTopicManager = onOpenQBankTopicManager
                                 )
@@ -1011,6 +1023,18 @@ fun SubjectListScreen(
             onDismiss = { showDeleteDialog = false }
         )
     }
+    if (isAdmin && showMergeDialog && onMergeSubject != null) {
+        val allNames = subjects.map { it.name }
+        AdminMergePickerDialog(
+            title         = "$modeLabel বিষয় Merge To",
+            sourceHeading = "🔀 কোনটা মার্জ করবেন? (এটা আর থাকবে না)",
+            targetHeading = "➡️ কোনটার সাথে মার্জ হবে?",
+            sources       = allNames,
+            targetsFor    = { src -> allNames.filter { it != src }.map { MergeOption(it, subject = it) } },
+            onConfirm     = { src, tgt -> onMergeSubject(src, tgt.subject) },
+            onDismiss     = { showMergeDialog = false }
+        )
+    }
     // ── Phase 4: Serial Manager — subjects এখানে ইতিমধ্যে বর্তমান display-ক্রমেই আসে,
     // তাই এন্ট্রি নাম্বার = তাদের বর্তমান পজিশন + ১ ──
     if (isAdmin && showSerialManager) {
@@ -1050,6 +1074,7 @@ private fun AdminMenuButton(
     onRenameClick  : () -> Unit,
     onDeleteClick  : () -> Unit,
     onMoveClick    : (() -> Unit)? = null,
+    onMergeClick   : (() -> Unit)? = null,
     // ── "🔄 Force Full Resync" — শুধু Admin-এর ড্রপডাউনে, দেখো
     // QuizViewModel.forceFullResync()/ContentRepository.forceFullResync() এর কমেন্ট ──
     onForceResyncClick: (() -> Unit)? = null,
@@ -1104,6 +1129,13 @@ private fun AdminMenuButton(
                 text = { Text("✏️ Rename", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
                 onClick = { expanded = false; onRenameClick() }
             )
+            if (onMergeClick != null) {
+                DropdownMenuItem(
+                    text = { Text("🔀 Merge To", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF7C3AED)) },
+                    onClick = { expanded = false; onMergeClick() }
+                )
+            }
             if (onMoveClick != null) {
                 DropdownMenuItem(
                     text = { Text("📦 Move to Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
@@ -1432,8 +1464,13 @@ private fun AdminMoveTopicPickerDialog(
     onRenameTopic   : ((old: String, new: String) -> Unit)? = null,
     onDeleteTopic   : ((name: String) -> Unit)? = null,
     onRenameSubject : ((old: String, new: String) -> Unit)? = null,
-    onDeleteSubject : ((name: String) -> Unit)? = null
+    onDeleteSubject : ((name: String) -> Unit)? = null,
+    // ── 🔀 Merge To (Rename/Delete-এর পাশে) — null হলে বাটন দেখায় না ──
+    currentSubject  : String = "",
+    onMergeTopic    : ((src: String, target: String) -> Unit)? = null,
+    onMergeSubject  : ((src: String, target: String) -> Unit)? = null
 ) {
+    var merging by remember { mutableStateOf<String?>(null) }   // "T|নাম" বা "S|নাম"
     // স্থানীয় (instant) কপি — rename/delete করলে ডায়ালগের তালিকা সাথে সাথে বদলে যায়
     var localTopics   by remember { mutableStateOf(items) }
     var localSubjects by remember { mutableStateOf(otherSubjects) }
@@ -1450,11 +1487,19 @@ private fun AdminMoveTopicPickerDialog(
 
     @Composable
     fun EditButtons(kind: String, name: String, canRename: Boolean, canDelete: Boolean) {
+        val canMerge = if (kind == "T") onMergeTopic != null && localTopics.size > 1
+                       else onMergeSubject != null && (localSubjects.size + (if (currentSubject.isNotBlank()) 1 else 0)) > 1
         if (canRename) {
             TextButton(
                 onClick = { renaming = "$kind|$name"; renameText = name },
                 contentPadding = PaddingValues(horizontal = 6.dp)
             ) { Text("✏️", fontSize = 15.sp) }
+        }
+        if (canMerge) {
+            TextButton(
+                onClick = { merging = "$kind|$name" },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("🔀", fontSize = 15.sp) }
         }
         if (canDelete) {
             TextButton(
@@ -1567,6 +1612,36 @@ private fun AdminMoveTopicPickerDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
     )
 
+    // ── 🔀 Merge To — source আইটেম fix, target বাছাই ──
+    merging?.let { key ->
+        val kind = key.substringBefore('|')
+        val src  = key.substringAfter('|')
+        AdminMergePickerDialog(
+            title         = if (kind == "T") "🔀 অধ্যায় Merge To" else "🔀 বিষয় Merge To",
+            sourceHeading = "",
+            targetHeading = "➡️ কোনটার সাথে মার্জ হবে?",
+            sources       = listOf(src),
+            fixedSource   = src,
+            targetsFor    = { s ->
+                if (kind == "T") localTopics.filter { it != s }.map { MergeOption(it, subject = currentSubject, topic = it) }
+                else (localSubjects + listOfNotNull(currentSubject.takeIf { it.isNotBlank() }))
+                        .distinct().filter { it != s }.map { MergeOption(it, subject = it) }
+            },
+            onConfirm     = { s, t ->
+                if (kind == "T") {
+                    localTopics = localTopics.filter { it != s }
+                    if (selectedTopic == s) selectedTopic = localTopics.firstOrNull() ?: ""
+                    onMergeTopic?.invoke(s, t.topic)
+                } else {
+                    localSubjects = localSubjects.filter { it != s }
+                    if (selectedSubject == s) selectedSubject = localSubjects.firstOrNull() ?: ""
+                    onMergeSubject?.invoke(s, t.subject)
+                }
+            },
+            onDismiss     = { merging = null }
+        )
+    }
+
     // ── ডিলিট কনফার্ম — হ্যাঁ চাপলেই তালিকা থেকে সাথে সাথে সরে যায়; আসল ডিলিট ব্যাকগ্রাউন্ডে ──
     deleting?.let { key ->
         val kind = key.substringBefore('|')
@@ -1596,6 +1671,107 @@ private fun AdminMoveTopicPickerDialog(
                 }) { Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) }
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+/** 🔀 Merge To ডায়ালগের গন্তব্য অপশন — topic ফাঁকা হলে শুধু বিষয় */
+private data class MergeOption(val label: String, val subject: String = "", val topic: String = "")
+
+/**
+ * 🔀 Merge To — source (বিষয়/অধ্যায়) বাছো (বা fixedSource দাও), তারপর target বাছো; কনফার্মের পর
+ * source-এর সব প্রশ্ন (+ বিষয় হলে সব অধ্যায়) target-এ চলে যায় এবং source আর থাকে না।
+ */
+@Composable
+private fun AdminMergePickerDialog(
+    title         : String,
+    sourceHeading : String,
+    targetHeading : String,
+    sources       : List<String>,
+    fixedSource   : String? = null,
+    targetsFor    : (String) -> List<MergeOption>,
+    onConfirm     : (source: String, target: MergeOption) -> Unit,
+    onDismiss     : () -> Unit
+) {
+    val accent = Color(0xFF7C3AED)
+    var source by remember { mutableStateOf(fixedSource ?: sources.firstOrNull() ?: "") }
+    var targetLabel by remember { mutableStateOf<String?>(null) }
+    var askConfirm by remember { mutableStateOf(false) }
+    val targets = remember(source) { targetsFor(source) }
+    val target = targets.firstOrNull { it.label == targetLabel }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (fixedSource != null) {
+                    Text("🔀 \"$fixedSource\" মার্জ হবে (এটা আর থাকবে না)", fontFamily = NotoSansBengali,
+                        fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                } else {
+                    Text(sourceHeading, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (sources.isEmpty()) {
+                        Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                    }
+                    sources.forEach { name ->
+                        val pick = { source = name; targetLabel = null }
+                        Row(
+                            Modifier.fillMaxWidth().clickable { pick() }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = source == name, onClick = { pick() },
+                                colors = RadioButtonDefaults.colors(selectedColor = accent))
+                            Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        }
+                    }
+                    Divider(Modifier.padding(vertical = 4.dp))
+                }
+                Text(targetHeading, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (targets.isEmpty()) {
+                    Text("⚠️ মার্জ করার মতো অন্য কিছু নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                targets.forEach { opt ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { targetLabel = opt.label }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = targetLabel == opt.label, onClick = { targetLabel = opt.label },
+                            colors = RadioButtonDefaults.colors(selectedColor = accent))
+                        Text(opt.label, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text(
+                    "ℹ️ সব প্রশ্ন (বিষয় হলে সব অধ্যায়সহ) target-এ চলে যাবে। একই নামের অধ্যায় থাকলে এক হয়ে যাবে। মার্জের পর source আর থাকবে না।",
+                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { askConfirm = true }, enabled = source.isNotBlank() && target != null) {
+                Text("🔀 Merge করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = accent)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+
+    if (askConfirm && target != null) {
+        AlertDialog(
+            onDismissRequest = { askConfirm = false },
+            title = { Text("🔀 মার্জ করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent) },
+            text = {
+                Text("\"$source\" এর সব প্রশ্ন \"${target.label}\"-এ চলে যাবে এবং \"$source\" আর থাকবে না। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            },
+            confirmButton = {
+                TextButton(onClick = { askConfirm = false; onConfirm(source, target); onDismiss() }) {
+                    Text("হ্যাঁ, মার্জ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent)
+                }
+            },
+            dismissButton = { TextButton(onClick = { askConfirm = false }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
         )
     }
 }
@@ -1790,6 +1966,7 @@ private fun SubjectCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QBankSubjectCard(
     subject : SubjectEntry,
@@ -1815,7 +1992,11 @@ private fun QBankSubjectCard(
 
     Card(
         modifier  = Modifier.fillMaxWidth()
-            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
+            .then(if (!reorderEnabled) Modifier.combinedClickable(
+                onClick = onClick,
+                // অ্যাডমিন: ডিফল্ট 📚 সরানো হয়েছে — ইমুজি বসাতে কার্ডে লং-প্রেস
+                onLongClick = if (isAdmin && subject.subjectId.isNotBlank()) onEmojiClick else null
+            ) else Modifier),
         shape     = RoundedCornerShape(18.dp),
         colors    = CardDefaults.cardColors(containerColor = surfaceColor),
         elevation = CardDefaults.cardElevation(2.dp),
@@ -1823,16 +2004,20 @@ private fun QBankSubjectCard(
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
-                        .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
-                        .then(
-                            if (isAdmin && subject.subjectId.isNotBlank())
-                                Modifier.clickable(onClick = onEmojiClick)
-                            else Modifier
-                        ),
-                    contentAlignment = Alignment.Center
-                ) { Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 20.sp) }
+                // ডিফল্ট 📚 আর নেই — শুধু অ্যাডমিনের সেট করা ইমুজি বা নামের কিওয়ার্ড-মিল আইকন
+                val iconText = emojiOverride?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                if (iconText != null) {
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                            .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
+                            .then(
+                                if (isAdmin && subject.subjectId.isNotBlank())
+                                    Modifier.clickable(onClick = onEmojiClick)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) { Text(iconText, fontSize = 20.sp) }
+                }
                 Spacer(Modifier.weight(1f))
                 if (!reorderEnabled) {
                     Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
@@ -1990,12 +2175,19 @@ fun SubTopicListScreen(
     initialScrollIndex: Int = 0,
     onScrollIndexChanged: (Int) -> Unit = {},
     // ── Study Nav Phase 5: Topic-নাম → স্ট্যাটাস (Weak/Strong/Needs Revision...) — খালি = ব্যাজ নেই ──
-    statusByTopic: Map<String, StudyTopicStatus> = emptyMap()
+    statusByTopic: Map<String, StudyTopicStatus> = emptyMap(),
+    // ── 🔀 Merge To (অধ্যায়): old অধ্যায়ের সব প্রশ্ন targetSubject › targetTopic-এ যায়, old আর থাকে না ──
+    onMergeSubTopic: ((old: String, targetSubject: String, targetTopic: String) -> Unit)? = null,
+    // Move ডায়ালগে অন্য Subject-এর পাশের 🔀 (Subject → Subject merge)
+    onMergeOtherSubject: ((source: String, target: String) -> Unit)? = null,
+    // অন্য Subject-এর অধ্যায়ও merge target হতে পারে — subject → অধ্যায়-নামের তালিকা (খালি হলে শুধু এই Subject-এর অধ্যায়)
+    topicsBySubject: Map<String, List<String>> = emptyMap()
 ) {
     val isQBank = mode == StudyMode.QBANK
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveDialog   by remember { mutableStateOf(false) }
+    var showMergeDialog  by remember { mutableStateOf(false) }
     // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
     var showSerialManager by remember { mutableStateOf(false) }
 
@@ -2053,6 +2245,7 @@ fun SubTopicListScreen(
                             onRenameClick   = { showRenameDialog = true },
                             onDeleteClick   = { showDeleteDialog = true },
                             onMoveClick     = if (otherSubjectsForMove.isNotEmpty()) { { showMoveDialog = true } } else null,
+                            onMergeClick    = if (onMergeSubTopic != null) { { showMergeDialog = true } } else null,
                             onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
                         )
                     }
@@ -2150,7 +2343,27 @@ fun SubTopicListScreen(
             onRenameTopic   = { old, new -> onRenameSubTopic(old, new) },
             onDeleteTopic   = { name -> onDeleteSubTopic(name) },
             onRenameSubject = onRenameOtherSubject,
-            onDeleteSubject = onDeleteOtherSubject
+            onDeleteSubject = onDeleteOtherSubject,
+            currentSubject  = subject,
+            onMergeTopic    = if (onMergeSubTopic != null) { { src, tgt -> onMergeSubTopic(src, subject, tgt) } } else null,
+            onMergeSubject  = onMergeOtherSubject
+        )
+    }
+    if (isAdmin && showMergeDialog && onMergeSubTopic != null) {
+        val names = subTopics.filterNot { it.isModelTest }.map { it.name }
+        AdminMergePickerDialog(
+            title         = "$subject — অধ্যায় Merge To",
+            sourceHeading = "🔀 কোন অধ্যায় মার্জ করবেন? (এটা আর থাকবে না)",
+            targetHeading = "➡️ কোন অধ্যায়ের সাথে মার্জ হবে?",
+            sources       = names,
+            targetsFor    = { src ->
+                names.filter { it != src }.map { MergeOption(it, subject = subject, topic = it) } +
+                    topicsBySubject.filterKeys { it != subject }.flatMap { (sj, ts) ->
+                        ts.map { MergeOption("$sj › $it", subject = sj, topic = it) }
+                    }
+            },
+            onConfirm     = { src, tgt -> onMergeSubTopic(src, tgt.subject, tgt.topic) },
+            onDismiss     = { showMergeDialog = false }
         )
     }
     // ── Phase 4: Serial Manager — subTopics এখানে ইতিমধ্যে বর্তমান display-ক্রমেই
