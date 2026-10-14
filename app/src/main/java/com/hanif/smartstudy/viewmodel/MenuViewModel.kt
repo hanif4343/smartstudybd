@@ -1649,6 +1649,11 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         if (!_state.value.isAdmin) return
         if (ids.isEmpty() || newSubjectName.isBlank() || newSubTopicName.isBlank()) return
+        // ── QBank-এ "Move" = Quiz-এ কপি (QBank-এর প্রশ্ন একই জায়গায় থাকে, লুকায় না) ──
+        if (sheet.equals("QBank", ignoreCase = true)) {
+            adminCopyQBankToQuiz(ids, newSubjectName, newSubTopicName)
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
             val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
@@ -1781,6 +1786,87 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     } catch (e2: Exception) {
                         android.util.Log.e("AdminMove", "QUEUE ALSO FAILED: ${e2.message}", e2)
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * ── শুধু QBank-এর জন্য: "Move" মানে Quiz-এ কপি ──
+     * • QBank-এর প্রশ্ন (Room/cache/Sheet) কিছুই বদলায় না, লিস্ট থেকে হাইডও হয় না —
+     *   বাল্ক আপলোডের সময় দেওয়া Subject/Topic শুধু ফরম্যাট মেলানোর জন্য, সেটা যেমন আছে থাকে।
+     * • শুধু MCQ প্রশ্ন Quiz-এ, Admin-এর বেছে-দেওয়া Subject/Topic-এ যায় (নতুন হলে তৈরি হয়)।
+     * • Quiz-এ একই প্রশ্ন আগে থেকে থাকলে GAS সেটা স্কিপ করে।
+     * • অফলাইন/ব্যর্থ হলে আগের মতোই pending queue-তে যায় (sheet="QBank"), নেট এলে
+     *   SyncWorker একই GAS action চালায়।
+     */
+    private fun adminCopyQBankToQuiz(ids: List<String>, newSubjectName: String, newSubTopicName: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+
+            // destination হবে Quiz-এর Subject/Topic — থাকলে সেটাই, না থাকলে GAS-এ তৈরি হবে
+            val existingSid = contentRepo.resolveSubjectId("Quiz", newSubjectName)?.takeIf { !it.startsWith("-local") }
+            val existingTid = existingSid
+                ?.let { contentRepo.resolveTopicId(it, newSubTopicName) }
+                ?.takeIf { !it.startsWith("-local") }
+            val isNewSubject = existingSid == null
+            val isNewTopic = existingTid == null
+            val sidArg = existingSid ?: ""
+            val tidArg = existingTid ?: ""
+
+            suspend fun queueIt(reason: String) {
+                q.enqueueAdminMoveQuestions("QBank", ids, newSubjectName, sidArg, newSubTopicName, tidArg,
+                    createIfMissing = isNewTopic, createSubjectIfMissing = isNewSubject)
+                loadPendingEdits()
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "📴 $reason — ${ids.size}টি প্রশ্ন নেট ফিরলে Quiz-এ \"$newSubjectName\" › \"$newSubTopicName\"-এ কপি হবে",
+                    toast = "⏳ Quiz-এ কপি অপেক্ষমাণ") }
+            }
+
+            try {
+                if (!isReallyOnline()) { queueIt("অফলাইন"); return@launch }
+                when (val t = contentRepo.resolveMoveTargets(
+                    "Quiz", newSubjectName, sidArg, newSubTopicName, tidArg,
+                    createSubject = isNewSubject, createTopic = isNewTopic)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        android.util.Log.e("AdminQBankCopy", "target create FAILED: ${t.message} — queueing")
+                        queueIt("Subject/Topic তৈরি ব্যর্থ")
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val (realSid, realTid) = t.data
+                        when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                            .copyQBankToQuiz(ids, newSubjectName, realSid, newSubTopicName, realTid)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                val c = r.data
+                                val skipNote = buildString {
+                                    if (c.skippedDuplicate > 0) append(" • ${c.skippedDuplicate}টি Quiz-এ আগে থেকেই আছে")
+                                    if (c.skippedNonMcq > 0) append(" • ${c.skippedNonMcq}টি MCQ নয়")
+                                }
+                                _state.update { it.copy(isMovingContent = false,
+                                    moveContentMsg = "✅ ${c.copied}টি MCQ Quiz-এ \"$newSubjectName\" › \"$newSubTopicName\"-এ যোগ হয়েছে$skipNote",
+                                    toast = "📦 Quiz-এ ${c.copied}টি যোগ হয়েছে" +
+                                            (if (c.skippedDuplicate > 0) " (${c.skippedDuplicate}টি আগেই ছিল)" else "")) }
+                                com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication()).recordDirect(
+                                    type = "admin_move_questions",
+                                    summary = "QBank→Quiz: ${c.copied}টি কপি → \"$newSubjectName\" › \"$newSubTopicName\"$skipNote",
+                                    sheet = "QBank", success = true)
+                            }
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                android.util.Log.e("AdminQBankCopy", "GAS copy FAILED: ${r.message} — queueing")
+                                q.enqueueAdminMoveQuestions("QBank", ids, newSubjectName, realSid, newSubTopicName, realTid)
+                                loadPendingEdits()
+                                _state.update { it.copy(isMovingContent = false,
+                                    moveContentMsg = "⚠️ Quiz-এ কপি এখন হয়নি (${r.message}) — পরে নিজে থেকে আবার চেষ্টা হবে") }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AdminQBankCopy", "EXCEPTION: ${e.message}", e)
+                try { queueIt("সমস্যা হয়েছে") } catch (_: Exception) {
+                    _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ Quiz-এ কপি ব্যর্থ: ${e.message ?: "unknown"}") }
                 }
             }
         }
