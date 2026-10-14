@@ -47,13 +47,8 @@ private fun bnToLatin(s: String): String = buildString {
     for (c in s) append(if (c in '\u09E6'..'\u09EF') ('0' + (c - '\u09E6')) else c)
 }
 
-/** সাল ডাটাবেসে বাংলা বা ইংরেজি যেভাবেই থাকুক — UI-তে সবসময় বাংলা অঙ্কে দেখানো হয় */
-private fun toBnDigits(s: String): String = buildString {
-    for (c in s.trim()) append(if (c in '0'..'9') ('\u09E6' + (c - '0')) else c)
-}
-
-/** শুধু "-", "--", ".." ইত্যাদি হলে সাল ধরা হয় না */
-private fun cleanYear(s: String): String = s.trim().takeIf { y -> y.any { it.isDigit() } }?.let { toBnDigits(it) } ?: ""
+/** সাল ডাটাবেসে যেভাবেই থাকুক — UI-তে সবসময় বাংলা অঙ্কে (দেখো util/YearFormat) */
+private fun cleanYear(s: String): String = com.hanif.smartstudy.util.YearFormat.bn(s)
 
 private fun norm(s: String?): String = (s ?: "").trim().lowercase()
 
@@ -82,13 +77,13 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
                 if (AppearanceNameCache.institutions.isEmpty()) {
                     AppearanceNameCache.institutions = dao.getAllInstitutions().associate { it.institutionId to it.name }
                 }
-                rows.sortedByDescending { bnToLatin(it.year).toIntOrNull() ?: 0 }
+                rows.sortedByDescending { com.hanif.smartstudy.util.YearFormat.sortKey(it.year) }
                     .map {
                         val instName = AppearanceNameCache.institutions[it.institutionId] ?: it.institutionId
                         val postName = AppearanceNameCache.posts[it.postId] ?: it.postId
                         val isCurrent = when {
                             // সাল-মোড: এই সালের appearance-ই বর্তমান
-                            !curYear.isNullOrBlank() -> norm(bnToLatin(it.year)) == norm(bnToLatin(curYear))
+                            !curYear.isNullOrBlank() -> com.hanif.smartstudy.util.YearFormat.latin(it.year) == com.hanif.smartstudy.util.YearFormat.latin(curYear)
                             // পদবী/প্রতিষ্ঠান-মোড: Post (+ Institution) মিললে বর্তমান
                             !curPost.isNullOrBlank() -> {
                                 val postOk = norm(postName) == norm(curPost) || norm("$postName, $instName") == norm(curPost)
