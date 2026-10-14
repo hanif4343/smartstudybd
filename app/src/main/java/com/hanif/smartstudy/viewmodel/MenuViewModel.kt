@@ -1321,21 +1321,23 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                             val createIfMissing = payload["createIfMissing"]?.toString()?.toBoolean() ?: false
                             val createSubject = payload["createSubjectIfMissing"]?.toString()?.toBoolean() ?: false
                             // নতুন Subject/Topic লোকাল temp id-তে থাকলে আগে GAS থেকে আসল id বানিয়ে Room-এও বদলে নেওয়া হয়
-                            when (val t = repo.resolveMoveTargets(sheet, newSubject, newSubjectId, newSubTopic, newTopicId, createSubject, createIfMissing)) {
+                            // QBank-এ "Move" = Quiz-এ কপি — retry-তেও QBank-এর প্রশ্ন সরবে না
+                            val isQBankCopy = sheet.equals("QBank", ignoreCase = true)
+                            when (val t = repo.resolveMoveTargets(if (isQBankCopy) "Quiz" else sheet, newSubject, newSubjectId, newSubTopic, newTopicId, createSubject, createIfMissing)) {
                                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                                     q.incrementRetry(action.id); failCount++
                                 }
                                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                                     val (realSid, realTid) = t.data
-                                    when (com.hanif.smartstudy.data.remote.GasContentService
-                                        .moveQuestions(sheet, ids, newSubject, realSid, newSubTopic, realTid)) {
-                                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
-                                            q.remove(action.id); successCount++
-                                        }
-                                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                                            q.incrementRetry(action.id); failCount++
-                                        }
-                                    }
+                                    val moveRes = if (isQBankCopy)
+                                        com.hanif.smartstudy.data.remote.GasContentService
+                                            .copyQBankToQuiz(ids, newSubject, realSid, newSubTopic, realTid)
+                                    else
+                                        com.hanif.smartstudy.data.remote.GasContentService
+                                            .moveQuestions(sheet, ids, newSubject, realSid, newSubTopic, realTid)
+                                    val moveOk = moveRes is com.hanif.smartstudy.data.remote.ApiResult.Success
+                                    if (moveOk) { q.remove(action.id); successCount++ }
+                                    else { q.incrementRetry(action.id); failCount++ }
                                 }
                             }
                         }
