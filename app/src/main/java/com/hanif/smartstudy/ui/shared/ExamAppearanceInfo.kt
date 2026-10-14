@@ -54,8 +54,9 @@ private fun norm(s: String?): String = (s ?: "").trim().lowercase()
 fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
     if (questionId.isBlank()) return
     val context = LocalContext.current
-    // Post + Year চিপের নতুন নিয়ম শুধু \"প্রাথমিক\" ক্যাটাগরিতে; বাকি চিপে আগের আচরণ
-    val isPrimary = com.hanif.smartstudy.util.QBankCategory.selected == "প্রাথমিক"
+    // "পদবী, সাল" চিপের নিয়ম শুধু "প্রাথমিক" ও "ব্যাংক" ক্যাটাগরিতে; বাকি চিপে আগের আচরণ
+    // (সাল যেমন ডাটাবেসে আছে — বাংলা বা ইংরেজি — তেমনই দেখানো হয়)
+    val isPrimary = com.hanif.smartstudy.util.QBankCategory.selected.let { it == "প্রাথমিক" || it == "ব্যাংক" }
     val cur = if (isPrimary) LocalQBankAppearanceCtx.current else null
     var expanded by remember(questionId) { mutableStateOf(false) }
     val curPost = cur?.post; val curInst = cur?.institution; val curYear = cur?.year
@@ -142,11 +143,14 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            shown.forEach { l ->
-                // চিপে Post এর সাথে Year (Grade-এ প্রতিষ্ঠানও)
-                val parts = listOf(if (showInst) l.institution else "", l.post, l.year).filter { it.isNotBlank() }
+            // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
+            // (প্রতিষ্ঠান বাদ; একই পদবী+সাল একাধিক প্রতিষ্ঠান থেকে এলে একবারই দেখায়)
+            shown.map { l ->
+                listOf(if (showInst) l.institution else "", l.post, l.year)
+                    .filter { it.isNotBlank() }.joinToString(if (showInst) " — " else ", ")
+            }.distinct().forEach { chipText ->
                 Text(
-                    text = parts.joinToString(" — "),
+                    text = chipText,
                     fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
