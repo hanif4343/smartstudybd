@@ -282,6 +282,13 @@ fun QuestionListScreen(
     // Subject/Topic-এ move করে। sheet ঠিক onAdminDelete/onAdminEdit-এর মতোই ("Quiz"/
     // "QBank"/"Study")। null দিলে (student view) সিলেক্ট-মোড টগলটাই দেখানো হয় না। ──
     onAdminMoveQuestions: ((sheet: String, ids: List<String>, newSubject: String, newSubTopic: String) -> Unit)? = null,
+    // ── Move/কপি ডায়ালগের Subject ও Topic তালিকায় Rename/Delete — sheet হলো ডায়ালগ যে sheet-এর
+    // তালিকা দেখাচ্ছে সেটা (QBank-এ \"Quiz\", কারণ QBank-এ \"move\" মানে Quiz-এ কপি)। null হলে
+    // ডায়ালগে ✏️ Rename/Delete বাটন দেখানো হয় না ──
+    onAdminRenameSubject : ((sheet: String, oldName: String, newName: String) -> Unit)? = null,
+    onAdminDeleteSubject : ((sheet: String, name: String) -> Unit)? = null,
+    onAdminRenameSubTopic: ((sheet: String, subject: String, oldName: String, newName: String) -> Unit)? = null,
+    onAdminDeleteSubTopic: ((sheet: String, subject: String, name: String) -> Unit)? = null,
     // ── QBank দুই-ভাগ (MCQ | লিখিত) — বাইরের QBankTwoPartBar ট্যাব ঠিক করে দিলে (০ = MCQ, ১ = লিখিত) ──
     forceTypeTab: Int? = null,
     // ── "প্রশ্ন" এডিটের সময় "🔄 Regenerate" বাটন দিয়ে AI দিয়ে অপশন/উত্তর আবার
@@ -1544,6 +1551,10 @@ fun QuestionListScreen(
             currentSubTopic = if (isQBankCopyMode) "" else (moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subTopic?.takeIf { it.isNotBlank() } } ?: subTopic),
             openTopicFirst  = moveDialogOpenTopicFirst && !isQBankCopyMode,
             onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(movePickerSheetKey, subj) },
+            onRenameSubject = onAdminRenameSubject?.let { cb -> { old: String, new: String -> cb(movePickerSheetKey, old, new) } },
+            onDeleteSubject = onAdminDeleteSubject?.let { cb -> { name: String -> cb(movePickerSheetKey, name) } },
+            onRenameTopic   = onAdminRenameSubTopic?.let { cb -> { subj: String, old: String, new: String -> cb(movePickerSheetKey, subj, old, new) } },
+            onDeleteTopic   = onAdminDeleteSubTopic?.let { cb -> { subj: String, name: String -> cb(movePickerSheetKey, subj, name) } },
             onConfirm = { newSubject, newSubTopic ->
                 // ── সবচেয়ে বেশি ব্যবহৃত Topic উপরে দেখানোর জন্য প্রতিবার move
                 // করার সময় সিলেকশন-কাউন্ট বাড়ানো হয় (ডিভাইস-লোকাল, SharedPreferences) ──
@@ -1836,7 +1847,7 @@ fun QuestionListScreen(
 // আলাদা করে আগে Topic বানানোর দরকার নেই)। ──
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AdminMoveQuestionsPickerDialog(
+internal fun AdminMoveQuestionsPickerDialog(
     subjects        : List<String>,
     // এই মোডের সব Subject (খালি/নতুনসহ) — লোড হলে `subjects`-এর জায়গা নেয়; ব্যর্থ/খালি হলে আগেরটাই
     onLoadSubjects  : suspend () -> List<String> = { emptyList() },
@@ -1850,12 +1861,24 @@ private fun AdminMoveQuestionsPickerDialog(
     // false হলে আগের মতোই Subject dropdown দিয়ে শুরু হয় (Subject সেগমেন্টে ট্যাপ করলে) ──
     openTopicFirst  : Boolean = false,
     onLoadTopics    : suspend (subject: String) -> List<String>,
+    // ── Rename/Delete (Subject ও Topic তালিকায়) — সবগুলো null হলে ✏️ বাটনই দেখায় না।
+    // ডায়ালগের তালিকা সাথে সাথে (instant) বদলায়; আসল ডাটাবেজ সেভ ব্যাকগ্রাউন্ডে হয়, আর দেরিতে
+    // হলেও মুছে-ফেলা/পুরনো-নাম আর ফিরে আসে না (দেখো ContentRepository-র tombstone/override) ──
+    onRenameSubject : ((old: String, new: String) -> Unit)? = null,
+    onDeleteSubject : ((name: String) -> Unit)? = null,
+    onRenameTopic   : ((subject: String, old: String, new: String) -> Unit)? = null,
+    onDeleteTopic   : ((subject: String, name: String) -> Unit)? = null,
     onConfirm       : (newSubject: String, newSubTopic: String) -> Unit,
     onDismiss       : () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val topicsCache = remember { mutableStateMapOf<String, List<String>>() }
+    val canEdit = onRenameSubject != null || onDeleteSubject != null || onRenameTopic != null || onDeleteTopic != null
+    var editMode by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<String?>(null) }   // এখনকার ধাপের (Subject/Topic) নাম
 
     var allSubjects by remember { mutableStateOf(subjects) }
     var addingNewSubject by remember { mutableStateOf(false) }
@@ -1943,7 +1966,36 @@ private fun AdminMoveQuestionsPickerDialog(
                         }
                         add(MoveCell("🆕 নতুন Subject", accent = Color(0xFF16A34A)) { addingNewSubject = true; newSubjectText = "" })
                     }
-                    MoveChipGrid(subjectCells, columns = 3)
+                    if (canEdit) {
+                        TextButton(onClick = { editMode = !editMode; renaming = null }) {
+                            Text(if (editMode) "✔ সম্পাদনা শেষ" else "✏️ Rename / 🗑 Delete",
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                    if (editMode && canEdit) {
+                        MoveEditList(
+                            names = sortedSubjects,
+                            renaming = renaming, renameText = renameText,
+                            canRename = onRenameSubject != null, canDelete = onDeleteSubject != null,
+                            onRenameTextChange = { renameText = it },
+                            onStartRename = { renaming = it; renameText = it },
+                            onCancelRename = { renaming = null },
+                            onConfirmRename = { old, new ->
+                                val nn = new.trim()
+                                if (nn.isNotBlank() && nn != old) {
+                                    // ── instant: তালিকা + cache + বাছাই সাথে সাথে নতুন নামে ──
+                                    allSubjects = allSubjects.map { if (it == old) nn else it }.distinct()
+                                    topicsCache.remove(old)?.let { topicsCache[nn] = it }
+                                    if (pickedSubject == old) pickedSubject = nn
+                                    onRenameSubject?.invoke(old, nn)
+                                }
+                                renaming = null
+                            },
+                            onDelete = { deleteTarget = it }
+                        )
+                    } else {
+                        MoveChipGrid(subjectCells, columns = 3)
+                    }
 
                     // ── নতুন Subject টাইপ করার ফিল্ড — ✓ চাপলে সেই Subject সিলেক্ট হয়ে Topic ধাপে যায় ──
                     if (addingNewSubject) {
@@ -2005,7 +2057,34 @@ private fun AdminMoveQuestionsPickerDialog(
                             add(MoveCell("🆕 নতুন Topic", accent = Color(0xFF16A34A)) { addingNewTopic = true; newTopicText = "" })
                         }
                     }
-                    MoveChipGrid(topicCells, columns = 3)
+                    if (canEdit) {
+                        TextButton(onClick = { editMode = !editMode; renaming = null }) {
+                            Text(if (editMode) "✔ সম্পাদনা শেষ" else "✏️ Rename / 🗑 Delete",
+                                fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                    if (editMode && canEdit) {
+                        MoveEditList(
+                            names = topics,
+                            renaming = renaming, renameText = renameText,
+                            canRename = onRenameTopic != null, canDelete = onDeleteTopic != null,
+                            onRenameTextChange = { renameText = it },
+                            onStartRename = { renaming = it; renameText = it },
+                            onCancelRename = { renaming = null },
+                            onConfirmRename = { old, new ->
+                                val nn = new.trim()
+                                if (nn.isNotBlank() && nn != old) {
+                                    // ── instant: Topic তালিকায় সাথে সাথে নতুন নাম ──
+                                    topicsCache[pickedSubject] = topics.map { if (it == old) nn else it }.distinct()
+                                    onRenameTopic?.invoke(pickedSubject, old, nn)
+                                }
+                                renaming = null
+                            },
+                            onDelete = { deleteTarget = it }
+                        )
+                    } else {
+                        MoveChipGrid(topicCells, columns = 3)
+                    }
 
                     // ── নতুন Topic টাইপ করার ফিল্ড — ✓ চাপলেই সেই মুহূর্তেই move ──
                     if (addingNewTopic) {
@@ -2042,6 +2121,94 @@ private fun AdminMoveQuestionsPickerDialog(
             TextButton(onClick = onDismiss) { Text("বন্ধ করুন", fontFamily = NotoSansBengali) }
         }
     )
+
+    // ── ডিলিট কনফার্ম — হ্যাঁ চাপলেই তালিকা থেকে সাথে সাথে সরে যায়; আসল ডিলিট ব্যাকগ্রাউন্ডে ──
+    deleteTarget?.let { target ->
+        val isSubjectStage = stage == 0
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("🗑 ডিলিট করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Text(
+                    if (isSubjectStage) "\"$target\" বিষয় এবং তার সব Topic ও প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!"
+                    else "\"$target\" Topic-এর সব প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (isSubjectStage) {
+                        allSubjects = allSubjects - target
+                        topicsCache.remove(target)
+                        if (pickedSubject == target) { pickedSubject = ""; pickedTopic = null }
+                        onDeleteSubject?.invoke(target)
+                    } else {
+                        topicsCache[pickedSubject] = topicsCache[pickedSubject].orEmpty().filter { it != target }
+                        onDeleteTopic?.invoke(pickedSubject, target)
+                    }
+                    deleteTarget = null
+                }) { Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+/** Move/কপি ডায়ালগের সম্পাদনা-মোড: প্রতিটা নামের পাশে ✏️ Rename ও 🗑 Delete; Rename-এ নামের নিচেই ইনলাইন বক্স */
+@Composable
+internal fun MoveEditList(
+    names: List<String>,
+    renaming: String?,
+    renameText: String,
+    canRename: Boolean,
+    canDelete: Boolean,
+    onRenameTextChange: (String) -> Unit,
+    onStartRename: (String) -> Unit,
+    onCancelRename: () -> Unit,
+    onConfirmRename: (old: String, new: String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (names.isEmpty()) {
+            Text("কিছু পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280))
+        }
+        names.forEach { name ->
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF0EA5E9).copy(alpha = 0.07f))
+                    .padding(start = 10.dp, end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(name, modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    fontFamily = NotoSansBengali, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                if (canRename) {
+                    TextButton(onClick = { onStartRename(name) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("✏️", fontSize = 16.sp)
+                    }
+                }
+                if (canDelete) {
+                    TextButton(onClick = { onDelete(name) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("🗑", fontSize = 16.sp)
+                    }
+                }
+            }
+            if (renaming == name) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OutlinedTextField(
+                        value = renameText, onValueChange = onRenameTextChange,
+                        label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                        singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = { onConfirmRename(name, renameText) },
+                        enabled = renameText.trim().isNotBlank() && renameText.trim() != name
+                    ) { Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF16A34A)) }
+                    TextButton(onClick = onCancelRename) { Text("✕", fontSize = 18.sp, color = Color(0xFF9CA3AF)) }
+                }
+            }
+        }
+    }
 }
 
 private data class MoveCell(
