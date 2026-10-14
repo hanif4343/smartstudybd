@@ -404,7 +404,7 @@ fun QuestionCard(
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                item.year.trim().map { c -> if (c in '0'..'9') ('\u09E6' + (c - '0')) else c }.joinToString(""),
+                                com.hanif.smartstudy.util.YearFormat.bn(item.year).ifBlank { item.year },
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk
                             )
                         }
