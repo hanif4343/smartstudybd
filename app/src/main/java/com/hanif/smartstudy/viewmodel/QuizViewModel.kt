@@ -2664,19 +2664,12 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *  লিস্ট, ঠিক rebuildQBankInstitutions()-এর প্যাটার্নেই। */
     /** সালের তালিকা (কার্ডে দেখানোর জন্য): কোনো অঙ্কই নেই এমন placeholder ("-", "--", "..") বাদ,
      *  ইংরেজি/বাংলা অঙ্কে লেখা একই সাল ("2014" / "২০১৪") এক করে বাংলায়, নতুন → পুরনো */
-    private fun yearsNewestFirst(raw: List<String>): List<String> {
-        fun latin(y: String): String = buildString {
-            for (c in y) append(if (c in '\u09E6'..'\u09EF') ('0' + (c - '\u09E6')) else c)
-        }
-        fun bangla(y: String): String = buildString {
-            for (c in y) append(if (c in '0'..'9') ('\u09E6' + (c - '0')) else c)
-        }
-        return raw.map { latin(it.trim()) }
-            .filter { y -> y.any { it.isDigit() } }          // "-", "--", ".." ইত্যাদি বাদ
+    private fun yearsNewestFirst(raw: List<String>): List<String> =
+        raw.map { com.hanif.smartstudy.util.YearFormat.latin(it) }
+            .filter { it.isNotBlank() }
             .distinct()
-            .sortedByDescending { y -> y.filter { it.isDigit() }.toIntOrNull() ?: 0 }
-            .map { bangla(it) }
-    }
+            .sortedByDescending { y -> y.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+            .map { com.hanif.smartstudy.util.YearFormat.toBn(it) }
 
     private suspend fun rebuildQBankPosts() {
         repo.syncExamAppearances()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে, exception ছোঁড়ে না
