@@ -41,6 +41,9 @@ fun CoreScreen(
     // প্রশ্নসহ অন্য Subject-এ move) — SubTopicListScreen-এর "Admin" মেনুর "📦 Move to
     // Subject" থেকে ট্রিগার হয়। destination-এ same নামের Topic থাকলে auto-merge। ──
     onAdminMoveSubTopic   : ((sheet: String, subject: String, oldName: String, newSubject: String, newTopicName: String) -> Unit)? = null,
+    // ── শুধু QBank: "QBank টপিক ম্যানেজার"-এর "🔀 মার্জ টু" — একটা QBank টপিকের সব MCQ Quiz-এর বেছে-নেওয়া
+    // Subject › Topic-এ কপি (QBank-এর প্রশ্ন যেখানে ছিল সেখানেই থাকে)। null হলে ম্যানেজারে বাটন আসে না ──
+    onAdminMergeQBankTopic: ((topicId: String, topicLabel: String, newSubject: String, newSubTopic: String) -> Unit)? = null,
     // ── Study Nav Phase 4: Study টুলবার থেকে Quiz/Wrong Review-তে যাওয়া — MainScreen হ্যান্ডেল করে ──
     onStudyAction         : ((StudyAction) -> Unit)? = null
 ) {
@@ -163,6 +166,22 @@ fun CoreScreen(
     val qbankMcqN = if (qbankTwoPart) state.questions.count { it.isMcq() } else 0
     val qbankWrittenN = if (qbankTwoPart) state.questions.count { it.questionType.equals("written", ignoreCase = true) } else 0
 
+    // ── QBank টপিক ম্যানেজার (আনমুভ ফিল্টার + মার্জ টু) — শুধু QBank + Admin ──
+    var showQBankTopicManager by remember { mutableStateOf(false) }
+    val openQBankManager: (() -> Unit)? =
+        if (mode == StudyMode.QBANK && state.isAdmin) { { showQBankTopicManager = true } } else null
+    if (showQBankTopicManager && openQBankManager != null) {
+        QBankTopicManagerDialog(
+            viewModel        = viewModel,
+            onRenameSubject  = onAdminRenameSubject,
+            onDeleteSubject  = onAdminDeleteSubject,
+            onRenameSubTopic = onAdminRenameSubTopic,
+            onDeleteSubTopic = onAdminDeleteSubTopic,
+            onMergeToQuiz    = onAdminMergeQBankTopic,
+            onDismiss        = { showQBankTopicManager = false }
+        )
+    }
+
     when {
         // ── Mock Zone ──
         state.isMockZone -> {
@@ -249,7 +268,11 @@ fun CoreScreen(
                 currentUser    = currentUser,
                 onAdminEdit    = onAdminEdit,
                 onAdminDelete  = onAdminDelete,
-                onAdminMoveQuestions = onAdminMoveQuestions
+                onAdminMoveQuestions = onAdminMoveQuestions,
+                onAdminRenameSubject  = onAdminRenameSubject,
+                onAdminDeleteSubject  = onAdminDeleteSubject,
+                onAdminRenameSubTopic = onAdminRenameSubTopic,
+                onAdminDeleteSubTopic = onAdminDeleteSubTopic
             )
             ResultModal(
                 result  = state.result!!,
@@ -421,6 +444,10 @@ fun CoreScreen(
                 onAdminEdit         = onAdminEdit,
                 onAdminDelete       = onAdminDelete,
                 onAdminMoveQuestions = onAdminMoveQuestions,
+                onAdminRenameSubject  = onAdminRenameSubject,
+                onAdminDeleteSubject  = onAdminDeleteSubject,
+                onAdminRenameSubTopic = onAdminRenameSubTopic,
+                onAdminDeleteSubTopic = onAdminDeleteSubTopic,
                 forceTypeTab        = if (qbankTwoPart) 0 else null
             )
             }
@@ -467,7 +494,11 @@ fun CoreScreen(
                 otherSubjectsForMove = state.subjects.map { it.name }.filterNot { it == state.navPath.subject },
                 onMoveSubTopicToSubject = { old, newSubject, newTopicName ->
                     onAdminMoveSubTopic?.invoke(sheetKey, state.navPath.subject ?: "", old, newSubject, newTopicName)
-                }
+                },
+                // ── Move ডায়ালগের Subject তালিকায় Rename/Delete — ডায়ালগে সাথে সাথে দেখায়,
+                // ডাটাবেজ সেভ ব্যাকগ্রাউন্ডে (দেরিতে হলেও মুছে-ফেলা/পুরনো নাম আর ফিরে আসে না) ──
+                onRenameOtherSubject = if (onAdminRenameSubject != null) { { old: String, new: String -> onAdminRenameSubject.invoke(sheetKey, old, new) } } else null,
+                onDeleteOtherSubject = if (onAdminDeleteSubject != null) { { name: String -> onAdminDeleteSubject.invoke(sheetKey, name) } } else null
             )
         }
 
@@ -476,6 +507,7 @@ fun CoreScreen(
             state.navPath.depth() == 0 && state.qbankSelectedInstitution == null -> {
             SubjectListScreen(
                 audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
+                onOpenQBankTopicManager = openQBankManager,
                 mode       = state.mode,
                 subjects   = state.qbankInstitutions,
                 weakTopics = emptyList(),
@@ -557,6 +589,15 @@ fun CoreScreen(
                 onMoveSubTopicToSubject = { old, newPostName, _ ->
                     val id = state.qbankDesignationsUnderInstitution.find { it.name == old }?.topicId
                     if (!id.isNullOrBlank()) viewModel.adminMoveQBankPost(id, newPostName)
+                },
+                // ── Move ডায়ালগের "অন্য পদবী" তালিকায় Rename/Delete ──
+                onRenameOtherSubject = { old, new ->
+                    val id = state.qbankPosts.find { it.name == old }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankPost(id, new)
+                },
+                onDeleteOtherSubject = { name ->
+                    val id = state.qbankPosts.find { it.name == name }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankPost(id)
                 }
             )
         }
@@ -567,6 +608,7 @@ fun CoreScreen(
             state.navPath.depth() == 0 -> {
             SubjectListScreen(
                 audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
+                onOpenQBankTopicManager = openQBankManager,
                 mode       = state.mode,
                 subjects   = state.qbankYears,
                 weakTopics = emptyList(),
@@ -606,6 +648,7 @@ fun CoreScreen(
             state.navPath.depth() == 0 && state.qbankSelectedPost == null -> {
             SubjectListScreen(
                 audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
+                onOpenQBankTopicManager = openQBankManager,
                 mode       = state.mode,
                 subjects   = state.qbankPosts,
                 weakTopics = emptyList(),
@@ -684,6 +727,15 @@ fun CoreScreen(
                 onMoveSubTopicToSubject = { old, newInstitutionName, _ ->
                     val id = state.qbankInstitutionsUnderPost.find { it.name == old }?.topicId
                     if (!id.isNullOrBlank()) viewModel.adminMoveQBankInstitution(id, newInstitutionName)
+                },
+                // ── Move ডায়ালগের "অন্য প্রতিষ্ঠান" তালিকায় Rename/Delete ──
+                onRenameOtherSubject = { old, new ->
+                    val id = state.qbankInstitutions.find { it.name == old }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminRenameQBankInstitution(id, new)
+                },
+                onDeleteOtherSubject = { name ->
+                    val id = state.qbankInstitutions.find { it.name == name }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminDeleteQBankInstitution(id)
                 }
             )
         }
@@ -694,6 +746,7 @@ fun CoreScreen(
         else -> {
             SubjectListScreen(
                 audienceLabel = com.hanif.smartstudy.util.AudienceFilter.audienceGroupLabel(currentUser),
+                onOpenQBankTopicManager = openQBankManager,
                 mode       = state.mode,
                 subjects   = state.subjects,
                 weakTopics = state.weakTopics,
