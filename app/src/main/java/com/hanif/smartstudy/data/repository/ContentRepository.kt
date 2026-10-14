@@ -699,6 +699,11 @@ class ContentRepository(private val context: Context) {
     suspend fun resolveTopicId(subjectId: String, topicName: String): String? =
         findTopicEntity(subjectId, topicName)?.topicId
 
+    /** একটা Subject-এর সব Topic (topicId to name) — "Merge To"-তে বিষয়ের সব অধ্যায় সরাতে লাগে */
+    suspend fun topicsOfSubject(subjectId: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        refDao.getTopicsForSubject(subjectId).map { it.topicId to it.name }
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // Admin Rename (Subject/Topic) — instant-local। আগে rename শুধু Sheet-এর প্রশ্ন-রো বদলাত
     // (পুরনো নাম-ভিত্তিক renameField), কিন্তু UI পড়ে Room-এর Subjects/Topics reference
