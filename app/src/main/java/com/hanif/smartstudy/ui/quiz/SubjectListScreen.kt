@@ -2372,7 +2372,7 @@ private fun QBankTopicCard(
 /** QBank "প্রাথমিক" ক্যাটাগরির কার্ডে পদের সাথে সাল — "📅 ২০২২ • ২০১৯ +১"; অন্য ক্যাটাগরিতে/সাল না থাকলে কিছু দেখায় না */
 @Composable
 private fun QBankYearsLine(years: List<String>, color: Color, fontSize: androidx.compose.ui.unit.TextUnit = 11.sp) {
-    if (years.isEmpty() || com.hanif.smartstudy.util.QBankCategory.selected != "প্রাথমিক") return
+    if (years.isEmpty() || com.hanif.smartstudy.util.QBankCategory.selected.let { it != "প্রাথমিক" && it != "ব্যাংক" }) return
     val shown = years.take(3).joinToString(" • ")
     val more  = if (years.size > 3) "  +${years.size - 3}" else ""
     Text("📅 $shown$more", fontSize = fontSize, color = color, fontWeight = FontWeight.SemiBold,
