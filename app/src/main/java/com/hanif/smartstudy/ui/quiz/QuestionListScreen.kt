@@ -1923,6 +1923,8 @@ internal fun AdminMoveQuestionsPickerDialog(
 
     fun finishMove(newSubject: String, newSubTopic: String) {
         if (newSubject != currentSubject || newSubTopic != currentSubTopic) {
+            // ── QBank → Quiz: গন্তব্য Subject ও Topic সাথে সাথে স্থায়ীভাবে মার্ক (✅) ──
+            if (copyToQuizMode) com.hanif.smartstudy.util.QuizMovedMarkStore.mark(ctx, newSubject, newSubTopic)
             onConfirm(newSubject, newSubTopic)
         }
         onDismiss()   // move হোক বা না হোক (একই জায়গা হলে), dialog সবসময় বন্ধ হয়ে যাবে
@@ -1953,7 +1955,9 @@ internal fun AdminMoveQuestionsPickerDialog(
                     // ── শুধু Subject গ্রিড (বেশি ব্যবহৃত আগে) ──
                     val subjectCells = buildList {
                         sortedSubjects.forEach { subj ->
-                            add(MoveCell(subj, selected = subj == pickedSubject) {
+                            val subjMarked = copyToQuizMode && com.hanif.smartstudy.util.QuizMovedMarkStore.isSubjectMarked(ctx, subj)
+                            add(MoveCell(if (subjMarked) "✅ $subj" else subj, selected = subj == pickedSubject,
+                                accent = if (subjMarked) Color(0xFF16A34A) else null) {
                                 if (subj != pickedSubject) {
                                     pickedSubject = subj
                                     pickedTopic = null
@@ -1987,6 +1991,7 @@ internal fun AdminMoveQuestionsPickerDialog(
                                     allSubjects = allSubjects.map { if (it == old) nn else it }.distinct()
                                     topicsCache.remove(old)?.let { topicsCache[nn] = it }
                                     if (pickedSubject == old) pickedSubject = nn
+                                    if (copyToQuizMode) com.hanif.smartstudy.util.QuizMovedMarkStore.renameSubject(ctx, old, nn)
                                     onRenameSubject?.invoke(old, nn)
                                 }
                                 renaming = null
@@ -2048,7 +2053,9 @@ internal fun AdminMoveQuestionsPickerDialog(
                     }
                     val topicCells = buildList {
                         topics.forEach { topic ->
-                            add(MoveCell(topic, selected = topic == pickedTopic) {
+                            val topicMarked = copyToQuizMode && com.hanif.smartstudy.util.QuizMovedMarkStore.isTopicMarked(ctx, pickedSubject, topic)
+                            add(MoveCell(if (topicMarked) "✅ $topic" else topic, selected = topic == pickedTopic,
+                                accent = if (topicMarked) Color(0xFF16A34A) else null) {
                                 pickedTopic = topic
                                 finishMove(pickedSubject, topic)
                             })
@@ -2076,6 +2083,7 @@ internal fun AdminMoveQuestionsPickerDialog(
                                 if (nn.isNotBlank() && nn != old) {
                                     // ── instant: Topic তালিকায় সাথে সাথে নতুন নাম ──
                                     topicsCache[pickedSubject] = topics.map { if (it == old) nn else it }.distinct()
+                                    if (copyToQuizMode) com.hanif.smartstudy.util.QuizMovedMarkStore.renameTopic(ctx, pickedSubject, old, nn)
                                     onRenameTopic?.invoke(pickedSubject, old, nn)
                                 }
                                 renaming = null
@@ -2141,9 +2149,11 @@ internal fun AdminMoveQuestionsPickerDialog(
                         allSubjects = allSubjects - target
                         topicsCache.remove(target)
                         if (pickedSubject == target) { pickedSubject = ""; pickedTopic = null }
+                        if (copyToQuizMode) com.hanif.smartstudy.util.QuizMovedMarkStore.deleteSubject(ctx, target)
                         onDeleteSubject?.invoke(target)
                     } else {
                         topicsCache[pickedSubject] = topicsCache[pickedSubject].orEmpty().filter { it != target }
+                        if (copyToQuizMode) com.hanif.smartstudy.util.QuizMovedMarkStore.deleteTopic(ctx, pickedSubject, target)
                         onDeleteTopic?.invoke(pickedSubject, target)
                     }
                     deleteTarget = null
