@@ -569,6 +569,48 @@ object GasContentService {
         }
     }
 
+    /** QBank → Quiz কপির ফলাফল (GAS moveQuestions, sheet=QBank) */
+    data class QBankCopyResult(val copied: Int, val skippedDuplicate: Int, val skippedNonMcq: Int)
+
+    /**
+     * QBank-এ "Move" = Quiz-এ কপি। QBank-এর প্রশ্ন যেমন ছিল তেমনই থাকে (লুকায় না);
+     * শুধু MCQ প্রশ্নগুলো Quiz-এর নির্বাচিত Subject/Topic-এ যোগ হয়, Quiz-এ আগে থেকে
+     * একই প্রশ্ন থাকলে সেটা স্কিপ হয়। একই GAS action (moveQuestions) — GAS নিজেই
+     * sheet=QBank দেখে কপি-মোডে চলে, তাই pending-queue/SyncWorker-এর পথও অপরিবর্তিত।
+     */
+    suspend fun copyQBankToQuiz(
+        ids          : List<String>,
+        newSubject   : String,
+        newSubjectId : String,
+        newSubTopic  : String,
+        newTopicId   : String
+    ): ApiResult<QBankCopyResult> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext ApiResult.Error("Google Sheet মোড কনফিগার নেই")
+        if (ids.isEmpty()) return@withContext ApiResult.Error("কোনো প্রশ্ন সিলেক্ট করা হয়নি")
+        try {
+            val obj = callGetActionRaw(mapOf(
+                "action"       to "moveQuestions",
+                "sheet"        to "QBank",
+                "ids"          to ids.joinToString(","),
+                "newSubject"   to newSubject,
+                "newSubjectId" to newSubjectId,
+                "newSubTopic"  to newSubTopic,
+                "newTopicId"   to newTopicId
+            )) ?: return@withContext ApiResult.Error("Network error")
+            if (obj.get("result")?.asString == "success") {
+                ApiResult.Success(QBankCopyResult(
+                    copied           = obj.get("copied")?.asInt ?: obj.get("moved")?.asInt ?: 0,
+                    skippedDuplicate = obj.get("skippedDuplicate")?.asInt ?: 0,
+                    skippedNonMcq    = obj.get("skippedNonMcq")?.asInt ?: 0
+                ))
+            } else {
+                ApiResult.Error(obj.get("message")?.asString ?: "Quiz-এ কপি ব্যর্থ হয়েছে")
+            }
+        } catch (e: Exception) {
+            ApiResult.Error(e.message ?: "Network error")
+        }
+    }
+
     /**
      * adminMoveTopic() এর জন্য — একটা পুরো Topic (তার আন্ডারের সব প্রশ্নসহ) অন্য
      * Subject-এ move করে (GAS action=moveTopic)। mergeTopicId দেওয়া থাকলে destination-এ
