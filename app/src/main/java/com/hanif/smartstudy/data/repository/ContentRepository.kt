@@ -339,6 +339,7 @@ class ContentRepository(private val context: Context) {
             posts        = posts?.map { it.toEntity() } ?: refDao.getAllPosts(),
             institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
         )
+        reapplyLocalReferenceOverrides()   // ← Move-এ নতুন বানানো Subject/Topic CDN-এর পুরনো তালিকায় হারিয়ে না যাক
         reapplyTopicOrderOverrides()
         // ── QBank পদবী/প্রতিষ্ঠান সিরিয়াল (CDN-এর sort_order) — সাধারণ ইউজারদের জন্য সংরক্ষণ;
         // admin-এর লোকাল ক্রম (QBankOrderStore LOCAL) সবসময় এর ওপরে থাকে ──
@@ -393,6 +394,96 @@ class ContentRepository(private val context: Context) {
         ed.apply()
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🆕 লোকালি বানানো Subject/Topic-এর "override" (Move-এর সময় নতুন Topic/Subject)।
+    // ROOT CAUSE ("Move-এ নতুন টপিক বানালে হচ্ছে না / কিছুক্ষণ পর হারিয়ে যায়"): নতুন Topic
+    // Sheet-এ ঠিকই তৈরি হয় ও Room-এ বসে, কিন্তু syncReferenceData() প্রতিবার Room-এর
+    // Topics/Subjects মুছে CDN-এর reference/topics.json দিয়ে পুরোটা replaceAll() করে —
+    // আর CDN-এর ওই ফাইল নতুন হয় কেবল "Publish Now"-এর পর। তাই পরের sync-এই নতুন Topic
+    // অ্যাপ থেকে উধাও হতো (প্রশ্ন Room-এ থেকে গেলেও তালিকায় Topic দেখা যেত না)।
+    // এখন প্রতিটা নতুন Subject/Topic একটা ছোট SharedPreferences-এ রাখা হয় এবং প্রতিটা
+    // sync-এর পর (CDN-এ না থাকলে) আবার বসানো হয়; CDN ধরে ফেললে (id বা নাম মিললে) বা ৩০
+    // দিন পার হলে মুছে যায়। Admin ডিলিট করলে/নাম বদলালে এখানেও সেটা প্রতিফলিত হয়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val localRefPrefs get() = context.getSharedPreferences("local_reference_overrides", Context.MODE_PRIVATE)
+    private val LR_SEP = "\u241F"
+    private val LR_TTL_MS = 30L * 24 * 3600_000L
+
+    private fun rememberLocalSubject(id: String, name: String, sheet: String) {
+        try { localRefPrefs.edit().putString("S|$id", listOf(name, sheet, System.currentTimeMillis()).joinToString(LR_SEP)).apply() } catch (_: Exception) { }
+    }
+    private fun rememberLocalTopic(id: String, subjectId: String, name: String) {
+        try { localRefPrefs.edit().putString("T|$id", listOf(subjectId, name, System.currentTimeMillis()).joinToString(LR_SEP)).apply() } catch (_: Exception) { }
+    }
+    private fun forgetLocalRef(kind: String, id: String) {
+        try { localRefPrefs.edit().remove("$kind|$id").apply() } catch (_: Exception) { }
+    }
+    /** অস্থায়ী "-local…" id → আসল id হলে রেকর্ডও নতুন id-তে সরে যায় (বাকি তথ্য অপরিবর্তিত) */
+    private fun migrateLocalRefId(kind: String, oldId: String, newId: String) {
+        try {
+            val p = localRefPrefs
+            val raw = p.getString("$kind|$oldId", null) ?: return
+            val ed = p.edit().remove("$kind|$oldId").putString("$kind|$newId", raw)
+            if (kind == "S") {   // এই Subject-এর আন্ডারে রাখা নতুন Topic-গুলোর subjectId-ও বদলাও
+                p.all.forEach { (k, v) ->
+                    if (!k.startsWith("T|")) return@forEach
+                    val parts = (v as? String)?.split(LR_SEP) ?: return@forEach
+                    if (parts.getOrNull(0) == oldId) ed.putString(k, (listOf(newId) + parts.drop(1)).joinToString(LR_SEP))
+                }
+            }
+            ed.apply()
+        } catch (_: Exception) { }
+    }
+    private fun renameLocalRef(kind: String, id: String, newName: String) {
+        try {
+            val p = localRefPrefs
+            val raw = p.getString("$kind|$id", null) ?: return
+            val parts = raw.split(LR_SEP).toMutableList()
+            val nameIdx = if (kind == "S") 0 else 1
+            if (parts.size <= nameIdx) return
+            parts[nameIdx] = newName
+            p.edit().putString("$kind|$id", parts.joinToString(LR_SEP)).apply()
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun reapplyLocalReferenceOverrides() {
+        val prefs = localRefPrefs
+        val all = prefs.all
+        if (all.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val ed = prefs.edit()
+        val subjects = refDao.getAllSubjects()
+        val topics = refDao.getAllTopics()
+        val subjIds = subjects.map { it.subjectId }.toHashSet()
+        val subjNames = subjects.map { normName(it.name) }.toHashSet()
+        val topicIds = topics.map { it.topicId }.toHashSet()
+        val topicKeys = topics.map { it.subjectId + LR_SEP + normName(it.name) }.toHashSet()
+        val touchedTopics = ArrayList<String>()
+        for ((k, raw) in all) {
+            val parts = (raw as? String)?.split(LR_SEP) ?: run { ed.remove(k); null } ?: continue
+            val at = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+            if (now - at > LR_TTL_MS) { ed.remove(k); continue }
+            val id = k.substring(2)
+            if (k.startsWith("S|")) {
+                val name = parts.getOrElse(0) { "" }; val sheet = parts.getOrElse(1) { "" }
+                if (id in subjIds || normName(name) in subjNames) { ed.remove(k); continue }   // CDN ধরে ফেলেছে
+                try { refDao.upsertSubjects(listOf(com.hanif.smartstudy.data.local.SubjectEntity(subjectId = id, name = name, sheet = sheet, tagId = ""))) } catch (_: Exception) { }
+            } else if (k.startsWith("T|")) {
+                val subjectId = parts.getOrElse(0) { "" }; val name = parts.getOrElse(1) { "" }
+                if (id in topicIds || (subjectId + LR_SEP + normName(name)) in topicKeys) { ed.remove(k); continue }
+                try {
+                    refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(topicId = id, subjectId = subjectId, name = name)))
+                    touchedTopics.add(id)
+                } catch (_: Exception) { }
+            }
+        }
+        ed.apply()
+        // replaceAll() rowCount শূন্য করে দিয়েছে — Room-এর প্রশ্ন গুনে আবার ঠিক করো, নাহলে খালি ভেবে লুকিয়ে যাবে
+        touchedTopics.forEach { tid ->
+            for (sh in listOf("Quiz", "QBank", "Study")) { try { refreshTopicRowCount(sh, tid) } catch (_: Exception) { } }
+        }
+    }
+
     // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
     suspend fun getRoomSubjectsRef()                     = refDao.getAllSubjects()
     suspend fun getRoomSubjectsRefBySheet(sheet: String)  = refDao.getSubjectsBySheet(sheet)
@@ -413,8 +504,8 @@ class ContentRepository(private val context: Context) {
             .associate { it.fbKey to it.questionType.trim().equals("written", ignoreCase = true) }
     }
     // Move ডায়ালগে সব Subject/Topic দেখাতে — প্রশ্নের টেবিল থেকে distinct (reference-এ না থাকলেও)
-    suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet)
-    suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet, subject)
+    suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet.uppercase())
+    suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet.uppercase(), subject)
     // ── PERF/UX FIX ("Subject list এ প্রশ্নসংখ্যা/প্রগ্রেস দেখানো দরকার, কিন্তু পুরো
     // content ডাউনলোড না করেই"): Topics reference-টেবিলে প্রতিটা topic-এর rowCount
     // (Quiz/QBank/Study — mode অনুযায়ী আলাদা কলাম, দেখো TopicEntity-এর কমেন্ট)
@@ -499,6 +590,7 @@ class ContentRepository(private val context: Context) {
     suspend fun applyRenameById(sheet: String, refType: String, id: String, name: String) =
         withContext(Dispatchers.IO) {
             val roomSheet = sheet.uppercase()
+            renameLocalRef(if (refType == "topics") "T" else "S", id, name)
             if (refType == "topics") {
                 refDao.renameTopicById(id, name)
                 dao.renameSubTopicInQuestions(roomSheet, id, name)
@@ -1682,10 +1774,12 @@ class ContentRepository(private val context: Context) {
         val subjectEntity = refDao.getSubjectByName(sheet, subject) ?: return@withContext null
         if (!deleteSubTopic) {
             refDao.deleteSubjectCascade(subjectEntity.subjectId)
+            forgetLocalRef("S", subjectEntity.subjectId)
             subjectEntity.subjectId
         } else {
             val topicEntity = refDao.getTopicByName(subjectEntity.subjectId, subTopic) ?: return@withContext null
             refDao.deleteTopicCascade(topicEntity.topicId)
+            forgetLocalRef("T", topicEntity.topicId)
             topicEntity.topicId
         }
     }
@@ -1829,12 +1923,14 @@ class ContentRepository(private val context: Context) {
     /** নতুন Subject (GAS থেকে আসল id পাওয়ার পর) লোকাল reference-এ সাথে সাথে যোগ — tagId ফাঁকা = সবার জন্য */
     suspend fun addRoomSubjectLocal(subjectId: String, name: String, sheet: String) = withContext(Dispatchers.IO) {
         refDao.upsertSubjects(listOf(com.hanif.smartstudy.data.local.SubjectEntity(subjectId = subjectId, name = name, sheet = sheet, tagId = "")))
+        rememberLocalSubject(subjectId, name, sheet)
     }
 
     suspend fun addRoomTopicLocal(topicId: String, subjectId: String, name: String) = withContext(Dispatchers.IO) {
         refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(
             topicId = topicId, subjectId = subjectId, name = name
         )))
+        rememberLocalTopic(topicId, subjectId, name)
     }
 
     /** অস্থায়ী লোকাল topicId-কে GAS-এর দেওয়া আসল topicId দিয়ে বদলে দেয় (Topics
@@ -1843,6 +1939,7 @@ class ContentRepository(private val context: Context) {
      *  কোনো id হিসেবে সংরক্ষিত থাকে না, শুধু নাম হিসেবে)। */
     suspend fun replaceRoomTopicId(oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
         refDao.replaceTopicId(oldTopicId, newTopicId)
+        migrateLocalRefId("T", oldTopicId, newTopicId)
     }
 
     suspend fun replaceRoomQuestionsTopicId(sheet: String, oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
@@ -1852,6 +1949,7 @@ class ContentRepository(private val context: Context) {
     suspend fun replaceRoomSubjectId(sheet: String, oldSubjectId: String, newSubjectId: String) = withContext(Dispatchers.IO) {
         refDao.replaceSubjectId(oldSubjectId, newSubjectId)
         dao.replaceSubjectId(sheet.uppercase(), oldSubjectId, newSubjectId)
+        migrateLocalRefId("S", oldSubjectId, newSubjectId)
     }
 
     /** ── Move-এর destination-এর অস্থায়ী ("-local...") Subject/Topic id গুলো GAS থেকে আসল id বানিয়ে
