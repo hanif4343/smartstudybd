@@ -403,7 +403,10 @@ fun QuestionCard(
                                 .background(GreenOk.copy(alpha = 0.15f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
-                            Text(item.year, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk)
+                            Text(
+                                item.year.trim().map { c -> if (c in '0'..'9') ('\u09E6' + (c - '0')) else c }.joinToString(""),
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GreenOk
+                            )
                         }
                     }
                 }
