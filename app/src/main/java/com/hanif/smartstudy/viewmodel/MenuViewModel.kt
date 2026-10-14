@@ -2111,6 +2111,108 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🔀 Admin "Merge To"
+    //  • অধ্যায় (Topic): adminMoveTopic-এর merge পথ — target অধ্যায়ের নামেই move হয়, তাই
+    //    GAS/Room আগে থেকেই একই নামের Topic-এর সাথে merge করে আর source Topic মুছে ফেলে।
+    //  • বিষয় (Subject): source-এর প্রতিটা অধ্যায় target বিষয়ে move/merge, তারপর source বিষয় মুছে যায়।
+    //    একাধিক ধাপ বলে সার্ভার-আগে (server-first) চলে; অফলাইনে শুরুই হয় না, মাঝপথে ব্যর্থ হলে
+    //    আবার চালালে বাকিটুকু সম্পন্ন হয় (যা সরেছে তা আর source-এ নেই)।
+    // ═════════════════════════════════════════════════════════════════════════
+    fun adminMergeSubTopic(sheet: String, subject: String, oldSubTopic: String, targetSubject: String, targetTopic: String) {
+        if (!_state.value.isAdmin) return
+        if (subject.isBlank() || oldSubTopic.isBlank() || targetSubject.isBlank() || targetTopic.isBlank()) return
+        if (subject.trim().equals(targetSubject.trim(), true) && oldSubTopic.trim().equals(targetTopic.trim(), true)) {
+            _state.update { it.copy(moveContentMsg = "ℹ️ নিজের সাথে নিজেকে মার্জ করা যায় না") }
+            return
+        }
+        adminMoveTopic(sheet, subject, oldSubTopic, targetSubject, targetTopic)
+    }
+
+    fun adminMergeSubject(sheet: String, sourceSubject: String, targetSubject: String) {
+        if (!_state.value.isAdmin) return
+        if (sourceSubject.isBlank() || targetSubject.isBlank()) return
+        if (sourceSubject.trim().equals(targetSubject.trim(), true)) {
+            _state.update { it.copy(moveContentMsg = "ℹ️ নিজের সাথে নিজেকে মার্জ করা যায় না") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
+            fun fail(msg: String) {
+                _state.update { it.copy(isMovingContent = false, moveContentMsg = msg, toast = msg,
+                    contentEditVersion = it.contentEditVersion + 1) }
+            }
+            val repo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            try {
+                if (!isReallyOnline()) { fail("❌ বিষয় মার্জ করতে ইন্টারনেট লাগবে — নেট থাকা অবস্থায় আবার চেষ্টা করুন"); return@launch }
+                val srcId = repo.resolveSubjectId(sheet, sourceSubject)
+                val dstId = repo.resolveSubjectId(sheet, targetSubject)
+                if (srcId == null || dstId == null) {
+                    fail("❌ \"$sourceSubject\" বা \"$targetSubject\" রিজলভ করা যায়নি — একবার রিফ্রেশ করে আবার চেষ্টা করুন"); return@launch
+                }
+                if (srcId == dstId) { fail("ℹ️ দুটো একই বিষয়"); return@launch }
+
+                val topics = repo.topicsOfSubject(srcId)
+                var moved = 0
+                for ((tid, tname) in topics) {
+                    val mergeTid = repo.resolveTopicId(dstId, tname)?.takeIf { it != tid }
+                    val eff = mergeTid ?: tid
+                    when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                        .moveTopic(tid, dstId, targetSubject, tname, mergeTid)) {
+                        is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                            fail("❌ মার্জ মাঝপথে থেমেছে ($moved/${topics.size} অধ্যায় সরেছে): ${r.message} — আবার চালালে বাকিটা হবে")
+                            return@launch
+                        }
+                        is com.hanif.smartstudy.data.remote.ApiResult.Success -> Unit
+                    }
+                    // সার্ভারে হয়ে গেছে — এবার লোকাল (bulk cache + Room প্রশ্ন + Room reference)
+                    for (sh in listOf("Quiz", "QBank", "Study")) {
+                        try { repo.moveContentByTopicAndPersist(sh, sourceSubject, tname, targetSubject, tname) } catch (e: Exception) {
+                            android.util.Log.w("AdminMerge", "cache move $sh failed: ${e.message}")
+                        }
+                        try { repo.moveRoomQuestionsByTopic(sh, tid, targetSubject, tname, dstId, eff) } catch (e: Exception) {
+                            android.util.Log.w("AdminMerge", "room move $sh failed: ${e.message}")
+                        }
+                    }
+                    try { repo.moveRoomTopicReference(tid, dstId, mergeTid, sheet) } catch (e: Exception) {
+                        android.util.Log.w("AdminMerge", "room topic ref failed: ${e.message}")
+                    }
+                    moved++
+                }
+
+                // সব অধ্যায় সরে গেছে — এবার source বিষয়টা সার্ভার ও লোকাল দুই জায়গা থেকে মুছি
+                when (val r = com.hanif.smartstudy.data.remote.GasContentService.deleteReferenceItem("subjects", srcId)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        fail("⚠️ অধ্যায়গুলো সরেছে, কিন্তু \"$sourceSubject\" বিষয় মোছা যায়নি: ${r.message} — আবার চালান")
+                        return@launch
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> Unit
+                }
+                try { repo.removeRoomReferenceForSubjectOrTopic(sheet, sourceSubject, "", false) } catch (e: Exception) {
+                    android.util.Log.w("AdminMerge", "room subject delete failed: ${e.message}")
+                }
+                try {
+                    cache.clearCache()
+                    com.hanif.smartstudy.data.repository.ContentRepository.clearMemCache()
+                    repo.syncReferenceData(force = true)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminMerge", "resync failed (non-fatal): ${e.message}")
+                }
+                com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication()).recordDirect(
+                    type = "admin_merge_subject",
+                    summary = "\"$sourceSubject\" → \"$targetSubject\" মার্জ (${topics.size}টি অধ্যায়)",
+                    sheet = sheet, success = true)
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "✅ \"$sourceSubject\" মার্জ হয়ে \"$targetSubject\"-এ এসেছে (${topics.size}টি অধ্যায়)",
+                    toast = "🔀 \"$sourceSubject\" → \"$targetSubject\" মার্জ হয়েছে",
+                    contentEditVersion = it.contentEditVersion + 1) }
+            } catch (e: Exception) {
+                android.util.Log.e("AdminMerge", "merge subject failed: ${e.message}", e)
+                fail("❌ মার্জ ব্যর্থ: ${e.message ?: "unknown"}")
+            }
+        }
+    }
+
     // ── Toast clear ───────────────────────────────────────────
 
     fun clearToast() {
