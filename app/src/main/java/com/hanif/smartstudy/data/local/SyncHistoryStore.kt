@@ -53,7 +53,7 @@ class SyncHistoryStore(private val context: Context) {
             "admin_delete_subject_topic" -> "🗑️ বিষয়/অধ্যায় ডিলিট"
             "admin_move_questions"       -> "📦 প্রশ্ন Move"
             "admin_move_topic"           -> "📦 অধ্যায় Move"
-            "admin_rename"               -> "🏷️ Rename"
+            "admin_rename", "admin_rename_reference" -> "🏷️ Rename"
             "admin_qbank_move"           -> "📦 QBank Move/merge"
             "admin_qbank_delete"         -> "🗑️ QBank ডিলিট"
             "admin_reorder_subject", "admin_reorder_subtopic", "admin_set_topic_order",
@@ -76,6 +76,7 @@ class SyncHistoryStore(private val context: Context) {
                     val merge = payload["mergeTopicId"]?.toString()?.isNotBlank() == true
                     "\"${payload["newSubTopicName"] ?: ""}\" অধ্যায় → \"${payload["newSubjectName"] ?: ""}\"" + (if (merge) " (merge)" else "")
                 }
+                "admin_rename_reference" -> "\"${payload["oldName"] ?: ""}\" → \"${payload["newName"] ?: ""}\""
                 "admin_delete_subject_topic" -> {
                     val subj = payload["subject"]?.toString().orEmpty()
                     val subT = payload["subTopic"]?.toString().orEmpty()
