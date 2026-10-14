@@ -458,8 +458,12 @@ class SyncWorker(
             // ── অফলাইনে \"নতুন Subject/Topic যোগ করে Move\" queue হয়ে থাকলে — retry-এর সময়
             // প্রথমে GAS থেকে আসল id বানিয়ে (এবং Room-এও বদলে) নিতে হবে ──
             val repo = com.hanif.smartstudy.data.repository.ContentRepository(applicationContext)
+            // ── QBank-এ "Move" = Quiz-এ কপি। অফলাইন retry-তেও আসল move হবে না — QBank-এর প্রশ্ন
+            // যেখানে ছিল সেখানেই থাকবে; গন্তব্য Subject/Topic Quiz-এর ──
+            val isQBankCopy = sheet.equals("QBank", ignoreCase = true)
             val (realSubjectId, realTopicId) = when (val t = repo.resolveMoveTargets(
-                sheet, newSubject, newSubjectId, newSubTopic, newTopicId, createSubject, createIfMissing)) {
+                if (isQBankCopy) "Quiz" else sheet,
+                newSubject, newSubjectId, newSubTopic, newTopicId, createSubject, createIfMissing)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> t.data
                 is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
                     Log.w(TAG, "syncAdminMoveQuestions: target create failed: ${t.message}")
@@ -467,7 +471,19 @@ class SyncWorker(
                 }
             }
 
-            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+            if (isQBankCopy) {
+                when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                    .copyQBankToQuiz(ids, newSubject, realSubjectId, newSubTopic, realTopicId)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        Log.i(TAG, "syncAdminMoveQuestions QBank→Quiz ${ids.size}টি কপি success")
+                        true
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        Log.w(TAG, "syncAdminMoveQuestions QBank copy failed: ${r.message}")
+                        false
+                    }
+                }
+            } else when (val r = com.hanif.smartstudy.data.remote.GasContentService
                 .moveQuestions(sheet, ids, newSubject, realSubjectId, newSubTopic, realTopicId)) {
                 is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                     Log.i(TAG, "syncAdminMoveQuestions $sheet/${ids.size}টি → $newSubject/$newSubTopic success")
