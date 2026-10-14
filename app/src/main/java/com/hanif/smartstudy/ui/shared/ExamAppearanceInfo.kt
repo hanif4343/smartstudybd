@@ -47,6 +47,14 @@ private fun bnToLatin(s: String): String = buildString {
     for (c in s) append(if (c in '\u09E6'..'\u09EF') ('0' + (c - '\u09E6')) else c)
 }
 
+/** সাল ডাটাবেসে বাংলা বা ইংরেজি যেভাবেই থাকুক — UI-তে সবসময় বাংলা অঙ্কে দেখানো হয় */
+private fun toBnDigits(s: String): String = buildString {
+    for (c in s.trim()) append(if (c in '0'..'9') ('\u09E6' + (c - '0')) else c)
+}
+
+/** শুধু "-", "--", ".." ইত্যাদি হলে সাল ধরা হয় না */
+private fun cleanYear(s: String): String = s.trim().takeIf { y -> y.any { it.isDigit() } }?.let { toBnDigits(it) } ?: ""
+
 private fun norm(s: String?): String = (s ?: "").trim().lowercase()
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -89,7 +97,7 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
                             }
                             else -> false
                         }
-                        AppearanceLine(instName, postName, it.year, isCurrent)
+                        AppearanceLine(instName, postName, cleanYear(it.year), isCurrent)
                     }
             }
         } catch (e: Exception) {
@@ -126,7 +134,8 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
         }
         return
     }
-    val showInst = com.hanif.smartstudy.util.QBankCategory.selected == com.hanif.smartstudy.util.QBankCategory.GRADE
+    val showInst = false
+    val isPrimaryCat = com.hanif.smartstudy.util.QBankCategory.selected == "প্রাথমিক"
 
     Column(
         modifier
@@ -146,8 +155,11 @@ fun ExamAppearanceInfo(questionId: String, modifier: Modifier = Modifier) {
             // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
             // (প্রতিষ্ঠান বাদ; একই পদবী+সাল একাধিক প্রতিষ্ঠান থেকে এলে একবারই দেখায়)
             shown.map { l ->
-                listOf(if (showInst) l.institution else "", l.post, l.year)
-                    .filter { it.isNotBlank() }.joinToString(if (showInst) " — " else ", ")
+                // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
+                val postLabel = if (isPrimaryCat && l.institution.isNotBlank() &&
+                    !l.post.contains(l.institution) && !l.post.contains("(")
+                ) "${l.post} (${l.institution})" else l.post
+                listOf(postLabel, l.year).filter { it.isNotBlank() }.joinToString(", ")
             }.distinct().forEach { chipText ->
                 Text(
                     text = chipText,
