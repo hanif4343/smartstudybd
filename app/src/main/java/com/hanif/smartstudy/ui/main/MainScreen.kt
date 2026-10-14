@@ -516,6 +516,12 @@ fun MainScreen(
                     onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
                     },
+                    onAdminMergeSubject = { sheet, src, tgt ->
+                        menuViewModel.adminMergeSubject(sheet, src, tgt)
+                    },
+                    onAdminMergeSubTopic = { sheet, subject, old, tSubject, tTopic ->
+                        menuViewModel.adminMergeSubTopic(sheet, subject, old, tSubject, tTopic)
+                    },
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
                         quizViewModel.removeQuestionsLocally(ids)
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
@@ -547,6 +553,12 @@ fun MainScreen(
                     },
                     onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
+                    },
+                    onAdminMergeSubject = { sheet, src, tgt ->
+                        menuViewModel.adminMergeSubject(sheet, src, tgt)
+                    },
+                    onAdminMergeSubTopic = { sheet, subject, old, tSubject, tTopic ->
+                        menuViewModel.adminMergeSubTopic(sheet, subject, old, tSubject, tTopic)
                     },
                     // QBank-এ Move = Quiz-এ কপি — প্রশ্ন QBank লিস্টে একই জায়গায় থাকে,
                     // তাই এখানে removeQuestionsLocally() ইচ্ছাকৃতভাবে কল করা হয় না
@@ -613,6 +625,12 @@ fun MainScreen(
                     },
                     onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
+                    },
+                    onAdminMergeSubject = { sheet, src, tgt ->
+                        menuViewModel.adminMergeSubject(sheet, src, tgt)
+                    },
+                    onAdminMergeSubTopic = { sheet, subject, old, tSubject, tTopic ->
+                        menuViewModel.adminMergeSubTopic(sheet, subject, old, tSubject, tTopic)
                     },
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
                         studyViewModel.removeQuestionsLocally(ids)
