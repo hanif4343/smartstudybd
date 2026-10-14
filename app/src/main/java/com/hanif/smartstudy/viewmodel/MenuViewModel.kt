@@ -1355,6 +1355,19 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                                 }
                             }
                         }
+                        "admin_rename_reference" -> {
+                            val refType = payload["refType"]?.toString() ?: continue
+                            val id = payload["id"]?.toString() ?: continue
+                            val newName = payload["newName"]?.toString() ?: continue
+                            when (com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem(refType, id, newName)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    q.remove(action.id); successCount++
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                    q.incrementRetry(action.id); failCount++
+                                }
+                            }
+                        }
                         else -> continue
                     }
                 } catch (e: Exception) {
@@ -1461,35 +1474,45 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             // UI সাথে সাথে নতুন নাম দেখাক (MainScreen: contentEditVersion → adminRefreshContent)
-            _state.update { it.copy(contentEditVersion = it.contentEditVersion + 1) }
+            // — Sheet-এর জন্য অপেক্ষা না করেই; spinner বন্ধ, কাজ ব্যাকগ্রাউন্ডে চলবে ──
+            _state.update { it.copy(isRenaming = false,
+                renameMsg = "✅ $what \"$cleanNew\" এ পরিবর্তিত হয়েছে",
+                toast = "✏️ Rename হয়েছে",
+                contentEditVersion = it.contentEditVersion + 1) }
 
-            // ── ধাপ ২: Sheet-এর reference-রো (id দিয়ে, ঠিক ১টা রো) ──
-            var failMsg: String? = null
-            for ((sheet, target) in done) {
-                when (val r = com.hanif.smartstudy.data.remote.GasContentService
-                        .renameReferenceItem(target.refType, target.id, cleanNew)) {
-                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {}
-                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
-                        failMsg = r.message
-                        try { contentRepo.applyRenameById(sheet, target.refType, target.id, target.oldName) } catch (_: Exception) {}
-                        try { contentRepo.renameContentAndPersist(sheet, if (renameSubTopic) oldSubject else cleanNew, cleanNew, target.oldName, renameSubTopic) } catch (_: Exception) {}
+            // ── ধাপ ২ (ব্যাকগ্রাউন্ড, UI ব্লক করে না): Sheet-এর reference-রো (id দিয়ে, ঠিক ১টা রো) ──
+            // ব্যর্থ/অফলাইন হলে আর revert করা হয় না — নতুন নামই থাকে, pending queue-তে ঢুকে নেট ফিরলে
+            // নিজে থেকে সেভ হয়ে যায়। আর rename-override (ContentRepository) থাকায় CDN-এর পুরনো
+            // নাম দেরিতে এলেও আবার পুরনো নাম ফিরে আসে না। ──
+            launch {
+                val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+                var failMsg: String? = null
+                for ((sheet, target) in done) {
+                    try {
+                        if (!isReallyOnline()) {
+                            q.enqueueAdminRenameReference(target.refType, target.id, cleanNew, target.oldName, sheet)
+                            failMsg = "অফলাইন"
+                            continue
+                        }
+                        when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                                .renameReferenceItem(target.refType, target.id, cleanNew)) {
+                            is com.hanif.smartstudy.data.remote.ApiResult.Success -> {}
+                            is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                                failMsg = r.message
+                                q.enqueueAdminRenameReference(target.refType, target.id, cleanNew, target.oldName, sheet)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        failMsg = e.message ?: "unknown"
+                        try { q.enqueueAdminRenameReference(target.refType, target.id, cleanNew, target.oldName, sheet) } catch (_: Exception) { }
                     }
                 }
-            }
+                if (failMsg != null) loadPendingEdits()
 
-            com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication()).recordDirect(
-                type = "admin_rename",
-                summary = "$what: \"${if (renameSubTopic) oldSubTopic else oldSubject}\" → \"$cleanNew\"",
-                sheet = sheets.joinToString("+"), success = failMsg == null, reason = failMsg)
-
-            if (failMsg == null) {
-                _state.update { it.copy(isRenaming = false,
-                    renameMsg = "✅ $what \"$cleanNew\" এ পরিবর্তিত হয়েছে",
-                    toast = "✏️ Rename হয়েছে") }
-            } else {
-                _state.update { it.copy(isRenaming = false,
-                    renameMsg = "❌ Sheet-এ rename হয়নি ($failMsg) — আগের নামই থাকল",
-                    contentEditVersion = it.contentEditVersion + 1) }
+                com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication()).recordDirect(
+                    type = "admin_rename",
+                    summary = "$what: \"${if (renameSubTopic) oldSubTopic else oldSubject}\" → \"$cleanNew\"",
+                    sheet = sheets.joinToString("+"), success = failMsg == null, reason = failMsg)
             }
         }
     }
@@ -1651,6 +1674,16 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty() || newSubjectName.isBlank() || newSubTopicName.isBlank()) return
         // ── QBank-এ "Move" = Quiz-এ কপি (QBank-এর প্রশ্ন একই জায়গায় থাকে, লুকায় না) ──
         if (sheet.equals("QBank", ignoreCase = true)) {
+            // ── "আনমুভ টপিক ফিল্টার": এই প্রশ্নগুলোর QBank টপিক এখন থেকে "মুভ হয়েছে" (সাথে সাথে) ──
+            viewModelScope.launch {
+                try {
+                    val tids = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+                        .qbankTopicIdsOfQuestions(ids)
+                    com.hanif.smartstudy.util.QBankMovedStore.markMoved(getApplication(), tids)
+                } catch (e: Exception) {
+                    android.util.Log.w("AdminQBankCopy", "mark moved failed (non-fatal): ${e.message}")
+                }
+            }
             adminCopyQBankToQuiz(ids, newSubjectName, newSubTopicName)
             return
         }
@@ -1867,6 +1900,107 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.e("AdminQBankCopy", "EXCEPTION: ${e.message}", e)
                 try { queueIt("সমস্যা হয়েছে") } catch (_: Exception) {
                     _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ Quiz-এ কপি ব্যর্থ: ${e.message ?: "unknown"}") }
+                }
+            }
+        }
+    }
+
+    /**
+     * ── শুধু QBank: "মার্জ টু" — একটা QBank টপিকের সব MCQ একবারে Quiz-এর বেছে-নেওয়া Subject › Topic-এ
+     * যোগ হয় (গন্তব্যে একই প্রশ্ন আগে থাকলে GAS স্কিপ করে — ডুপ্লিকেট হয় না)। ──
+     * • QBank-এর কোনো প্রশ্ন সরে না/মুছে না/লুকায় না — যেখানে ছিল সেখানেই থাকে।
+     * • টপিকটা সাথে সাথে "মুভ হয়েছে" মার্ক হয় (আনমুভ ফিল্টার থেকে বেরিয়ে যায়)।
+     * • বড় টপিকে URL লম্বা না হয় বলে ১০০টা করে ব্যাচে যায়; যে ব্যাচ ব্যর্থ/অফলাইন, সেটা
+     *   pending queue-তে থাকে — নেট ফিরলে নিজে থেকে হয়ে যায়।
+     */
+    fun adminMergeQBankTopicToQuiz(
+        topicId        : String,
+        topicLabel     : String,
+        newSubjectName : String,
+        newSubTopicName: String
+    ) {
+        if (!_state.value.isAdmin) return
+        if (topicId.isBlank() || newSubjectName.isBlank() || newSubTopicName.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isMovingContent = true, moveContentMsg = null) }
+            val contentRepo = com.hanif.smartstudy.data.repository.ContentRepository(getApplication())
+            val q = com.hanif.smartstudy.data.local.PendingQueue(getApplication())
+
+            val ids = try { contentRepo.fetchQBankTopicQuestionIds(topicId) } catch (e: Exception) { emptyList() }
+            if (ids.isEmpty()) {
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "❌ \"$topicLabel\"-এর প্রশ্ন আনা যায়নি — নেট চেক করে আবার চেষ্টা করুন") }
+                return@launch
+            }
+
+            // টপিকটা সাথে সাথে "মুভ হয়েছে" — UI-তে আনমুভ ফিল্টার থেকে তখনই সরে যায়
+            com.hanif.smartstudy.util.QBankMovedStore.markMoved(getApplication(), listOf(topicId))
+
+            val existingSid = contentRepo.resolveSubjectId("Quiz", newSubjectName)?.takeIf { !it.startsWith("-local") }
+            val existingTid = existingSid
+                ?.let { contentRepo.resolveTopicId(it, newSubTopicName) }
+                ?.takeIf { !it.startsWith("-local") }
+            val isNewSubject = existingSid == null
+            val isNewTopic = existingTid == null
+            val chunks = ids.chunked(100)
+
+            suspend fun queueChunks(list: List<List<String>>, sid: String, tid: String, createT: Boolean, createS: Boolean, reason: String) {
+                list.forEach { part ->
+                    q.enqueueAdminMoveQuestions("QBank", part, newSubjectName, sid, newSubTopicName, tid,
+                        createIfMissing = createT, createSubjectIfMissing = createS)
+                }
+                loadPendingEdits()
+                _state.update { it.copy(isMovingContent = false,
+                    moveContentMsg = "📴 $reason — \"$topicLabel\"-এর ${ids.size}টি প্রশ্ন নেট ফিরলে Quiz-এ \"$newSubjectName\" › \"$newSubTopicName\"-এ যোগ হবে",
+                    toast = "⏳ Quiz-এ মার্জ অপেক্ষমাণ") }
+            }
+
+            try {
+                if (!isReallyOnline()) {
+                    queueChunks(chunks, existingSid ?: "", existingTid ?: "", isNewTopic, isNewSubject, "অফলাইন")
+                    return@launch
+                }
+                when (val t = contentRepo.resolveMoveTargets(
+                    "Quiz", newSubjectName, existingSid ?: "", newSubTopicName, existingTid ?: "",
+                    createSubject = isNewSubject, createTopic = isNewTopic)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                        queueChunks(chunks, existingSid ?: "", existingTid ?: "", isNewTopic, isNewSubject, "Subject/Topic তৈরি ব্যর্থ")
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val (realSid, realTid) = t.data
+                        var copied = 0; var dup = 0; var nonMcq = 0
+                        val failed = ArrayList<List<String>>()
+                        for (part in chunks) {
+                            when (val r = com.hanif.smartstudy.data.remote.GasContentService
+                                .copyQBankToQuiz(part, newSubjectName, realSid, newSubTopicName, realTid)) {
+                                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                                    copied += r.data.copied; dup += r.data.skippedDuplicate; nonMcq += r.data.skippedNonMcq
+                                }
+                                is com.hanif.smartstudy.data.remote.ApiResult.Error -> failed += part
+                            }
+                        }
+                        failed.forEach { part ->
+                            q.enqueueAdminMoveQuestions("QBank", part, newSubjectName, realSid, newSubTopicName, realTid)
+                        }
+                        if (failed.isNotEmpty()) loadPendingEdits()
+                        val note = buildString {
+                            if (dup > 0) append(" • ${dup}টি Quiz-এ আগে থেকেই আছে")
+                            if (nonMcq > 0) append(" • ${nonMcq}টি MCQ নয়")
+                            if (failed.isNotEmpty()) append(" • ${failed.sumOf { it.size }}টি পরে নিজে থেকে হবে")
+                        }
+                        _state.update { it.copy(isMovingContent = false,
+                            moveContentMsg = "✅ \"$topicLabel\" → ${copied}টি MCQ Quiz-এ \"$newSubjectName\" › \"$newSubTopicName\"-এ যোগ হয়েছে$note",
+                            toast = "🔀 \"$topicLabel\" মার্জ হয়েছে (${copied}টি যোগ)") }
+                        com.hanif.smartstudy.data.local.SyncHistoryStore(getApplication()).recordDirect(
+                            type = "admin_move_questions",
+                            summary = "QBank টপিক \"$topicLabel\" → Quiz: ${copied}টি কপি → \"$newSubjectName\" › \"$newSubTopicName\"$note",
+                            sheet = "QBank", success = failed.isEmpty())
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AdminQBankMerge", "EXCEPTION: ${e.message}", e)
+                try { queueChunks(chunks, existingSid ?: "", existingTid ?: "", isNewTopic, isNewSubject, "সমস্যা হয়েছে") } catch (_: Exception) {
+                    _state.update { it.copy(isMovingContent = false, moveContentMsg = "❌ মার্জ ব্যর্থ: ${e.message ?: "unknown"}") }
                 }
             }
         }
