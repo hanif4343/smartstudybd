@@ -1143,6 +1143,96 @@ function isDuplicate(sheet, subject, questionText, sub_topic) {
   return false;
 }
 
+/* ══ QBank → Quiz COPY (Admin "Move" শুধু QBank-এর জন্য) ══════════════════════
+   QBank-এ প্রশ্ন "Move" করলে এখন আর QBank-এর রো বদলায় না/লুকায় না — প্রশ্নটা
+   QBank-এ ঠিক আগের জায়গাতেই থাকে। বদলে শুধু MCQ প্রশ্নগুলোর একটা কপি Quiz শিটে
+   (Admin-এর বেছে দেওয়া Subject/Topic-এ) যোগ হয়। QBank-এর নিজের subject/topic
+   (বাল্ক আপলোডের সময় শুধু ফরম্যাট মেলানোর জন্য দেওয়া) অপরিবর্তিত থাকে।
+   • written/study টাইপ প্রশ্ন কপি হয় না (Quiz-এ শুধু MCQ থাকে)।
+   • Quiz-এ একই প্রশ্ন (টেক্সট মিললেই, যেকোনো Subject/Topic-এ) আগে থেকে থাকলে
+     স্কিপ হয় — তাই একই প্রশ্নে বারবার Move করলেও ডুপ্লিকেট তৈরি হয় না।
+   • কলাম নাম মিলিয়ে কপি হয় (কলামের অর্ডার যা-ই হোক) — Quiz-এ যে কলাম নেই তা বাদ। ══ */
+function copyQBankMcqToQuiz_(ids, subject, subjectId, subTopic, topicId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var qbSh = ss.getSheetByName("QBank"), qzSh = ss.getSheetByName("Quiz");
+  if (!qbSh) return {status:"error", result:"error", message:"sheet not found: QBank"};
+  if (!qzSh) return {status:"error", result:"error", message:"sheet not found: Quiz"};
+  if (qbSh.getLastRow() < 2) return {status:"error", result:"error", message:"QBank sheet খালি"};
+
+  var kn = function(s){ return (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,""); };
+  var qnorm = function(s){ return (s||"").toString().toLowerCase().replace(/\s+/g," ").trim(); };
+
+  var qbData = qbSh.getDataRange().getValues(), qbHdr = qbData[0], qbCol = {};
+  for (var a=0; a<qbHdr.length; a++){ var ka=kn(qbHdr[a]); if (ka && qbCol[ka]===undefined) qbCol[ka]=a; }
+  var qzData = qzSh.getDataRange().getValues(), qzHdr = qzData.length ? qzData[0] : [], qzCol = {};
+  for (var b=0; b<qzHdr.length; b++){ var kb=kn(qzHdr[b]); if (kb && qzCol[kb]===undefined) qzCol[kb]=b; }
+
+  var qbIdCol = qbCol["id"], qbQCol = qbCol["question"], qbTypeCol = qbCol["questiontype"];
+  var qzIdCol = qzCol["id"], qzQCol = qzCol["question"];
+  var qzSubCol = qzCol["subject"], qzSubIdCol = qzCol["subjectid"], qzTopicIdCol = qzCol["topicid"];
+  var qzSTCol = qzCol["subtopic"]; if (qzSTCol === undefined) qzSTCol = qzCol["topic"];
+  if (qbIdCol===undefined || qbQCol===undefined) return {status:"error", result:"error", message:"QBank-এ id/question কলাম পাওয়া যায়নি"};
+  if (qzIdCol===undefined || qzQCol===undefined || qzSubCol===undefined || qzSTCol===undefined)
+    return {status:"error", result:"error", message:"Quiz-এ id/question/subject/sub_topic কলাম পাওয়া যায়নি"};
+
+  // Quiz-এ আগে থেকে থাকা সব প্রশ্ন + সর্বোচ্চ QZ-নম্বর
+  var existing = {}, maxNum = 0, prefix = "QZ-";
+  for (var r=1; r<qzData.length; r++){
+    var qt = qnorm(qzData[r][qzQCol]); if (qt) existing[qt] = 1;
+    var idv = (qzData[r][qzIdCol]||"").toString();
+    if (idv.indexOf(prefix)===0){ var n=parseInt(idv.substring(prefix.length),10); if(!isNaN(n)&&n>maxNum) maxNum=n; }
+  }
+
+  // এই কলামগুলো QBank থেকে কপি হবে না — নিচে নতুন করে বসানো হয় (বা Quiz-এর জন্য অপ্রযোজ্য)
+  var SKIP = {id:1, subject:1, subjectid:1, subtopic:1, topic:1, topicid:1, updatedat:1, notfirebase:1,
+              addedby:1, editedby:1, review:1, reviewstatus:1, timestamp:1};
+  var idSet = {}; ids.forEach(function(x){ idSet[x]=1; });
+
+  var newRows = [], now = Date.now(), nowStr = new Date().toLocaleString('bn-BD');
+  var found = 0, skippedDup = 0, skippedNonMcq = 0, cur = maxNum;
+  for (var i=1; i<qbData.length; i++){
+    var row = qbData[i];
+    var rid = (row[qbIdCol]||"").toString().trim();
+    if (!idSet[rid]) continue;
+    found++;
+    var typ = qbTypeCol!==undefined ? (row[qbTypeCol]||"").toString().toLowerCase().trim() : "";
+    if (typ==="written" || typ==="study") { skippedNonMcq++; continue; }
+    var qText = qnorm(row[qbQCol]);
+    if (!qText) { skippedNonMcq++; continue; }
+    if (existing[qText]) { skippedDup++; continue; }
+
+    cur++;
+    var newId = prefix + (cur<10000 ? ("0000"+cur).slice(-5) : cur);
+    var arr = new Array(qzHdr.length).fill("");
+    for (var c=0; c<qzHdr.length; c++){
+      var kc = kn(qzHdr[c]);
+      if (!kc || SKIP[kc]) continue;
+      var src = qbCol[kc];
+      if (src!==undefined) arr[c] = row[src];
+    }
+    arr[qzIdCol] = newId;
+    arr[qzSubCol] = subject;
+    arr[qzSTCol] = subTopic;
+    if (qzSubIdCol!==undefined) arr[qzSubIdCol] = subjectId;
+    if (qzTopicIdCol!==undefined) arr[qzTopicIdCol] = topicId;
+    if (qzCol["updatedat"]!==undefined) arr[qzCol["updatedat"]] = now;
+    if (qzCol["notfirebase"]!==undefined) arr[qzCol["notfirebase"]] = "NF";
+    if (qzCol["addedby"]!==undefined) arr[qzCol["addedby"]] = "QB-Move";
+    if (qzCol["timestamp"]!==undefined) arr[qzCol["timestamp"]] = nowStr;
+    newRows.push(arr);
+    existing[qText] = 1;   // একই সিলেকশনের ভেতরের ডুপ্লিকেটও আটকাতে
+  }
+  if (!found) return {status:"error", result:"error", message:"কোনো matching প্রশ্ন পাওয়া যায়নি"};
+
+  if (newRows.length) {
+    qzSh.getRange(qzSh.getLastRow()+1, 1, newRows.length, qzHdr.length).setValues(newRows);
+    markTopicDirty(topicId);
+    markReindexNeeded_();
+  }
+  return {status:"success", result:"success", moved:newRows.length, copied:newRows.length,
+          skippedDuplicate:skippedDup, skippedNonMcq:skippedNonMcq, sheet:"Quiz", mode:"copy"};
+}
+
 /* ══ FIREBASE SYNC ══ */
 // ⛔ HARD NO-FIREBASE LIST — Quiz/QBank/Study এখন সম্পূর্ণভাবে Google Sheet-only।
 // User App (student-facing app)-ও এখন Sheet থেকেই ডেটা পড়ে, তাই এই ৩ ট্যাবের জন্য
@@ -2945,6 +3035,12 @@ function doGet(e) {
     if (!mqIds.length) return json({status:"error",result:"error",message:"ids প্রয়োজন"});
     if (!mqNewSubject||!mqNewSubjectId||!mqNewSubTopic||!mqNewTopicId)
       return json({status:"error",result:"error",message:"newSubject/newSubjectId/newSubTopic/newTopicId প্রয়োজন"});
+
+    // ── 🆕 QBank-এর জন্য "Move" = মুভ না, Quiz-এ কপি। QBank-এর রো যেমন আছে তেমনই থাকে
+    // (লুকায় না), শুধু MCQ প্রশ্নগুলো Quiz-এর বেছে-দেওয়া Subject/Topic-এ যোগ হয়
+    // (Quiz-এ আগে থেকে থাকলে স্কিপ)। Quiz/Study-র move আগের মতোই। ──
+    if (mqShName==="QBank")
+      return json(copyQBankMcqToQuiz_(mqIds, mqNewSubject, mqNewSubjectId, mqNewSubTopic, mqNewTopicId));
 
     var mqSs=SpreadsheetApp.getActiveSpreadsheet(), mqSh=mqSs.getSheetByName(mqShName);
     if (!mqSh) return json({status:"error",result:"error",message:"sheet not found: "+mqShName});
