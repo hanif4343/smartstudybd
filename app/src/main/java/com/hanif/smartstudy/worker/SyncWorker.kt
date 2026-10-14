@@ -156,6 +156,7 @@ class SyncWorker(
             "admin_delete_subject_topic" -> syncAdminDeleteSubjectTopic(payload)
             "admin_move_questions" -> syncAdminMoveQuestions(payload)
             "admin_move_topic" -> syncAdminMoveTopic(payload)
+            "admin_rename_reference" -> syncAdminRenameReference(payload)
             else -> false
         }
     }
@@ -409,6 +410,30 @@ class SyncWorker(
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncAdminDeleteSubjectTopic error: ${e.message}")
+            false
+        }
+    }
+
+    // ── অফলাইনে/ব্যর্থ হওয়া Subject/Topic Rename — নেট আসলে ব্যাকগ্রাউন্ডে Sheet-এর
+    //    reference-রো (id ধরে, ঠিক ১টা রো) নতুন নামে সেভ করে। UI-তে নতুন নাম আগেই দেখাচ্ছিল। ──
+    private suspend fun syncAdminRenameReference(payload: Map<*, *>): Boolean {
+        return try {
+            val refType = payload["refType"]?.toString() ?: return false
+            val id = payload["id"]?.toString() ?: return false
+            val newName = payload["newName"]?.toString() ?: return false
+            if (id.isBlank() || newName.isBlank()) return false
+            when (val r = com.hanif.smartstudy.data.remote.GasContentService.renameReferenceItem(refType, id, newName)) {
+                is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                    Log.i(TAG, "syncAdminRenameReference $refType/$id → success")
+                    true
+                }
+                is com.hanif.smartstudy.data.remote.ApiResult.Error -> {
+                    Log.w(TAG, "syncAdminRenameReference failed: ${r.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncAdminRenameReference error: ${e.message}")
             false
         }
     }
