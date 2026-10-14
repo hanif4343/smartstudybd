@@ -31,7 +31,15 @@ object QBankSortStore {
         if (prefs == null) prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    fun get(scope: String): QBankSort = QBankSort.fromKey(prefs?.getString("sort_$scope", null))
+    /**
+     * ইউজার/অ্যাডমিন নিজে কিছু না বাছলে ডিফল্ট: "প্রাথমিক" = সাল (নতুন আগে, শেষের সাল ধরে),
+     * বাকি ক্যাটাগরি = আগের ডিফল্ট ক্রম। নিজে বাছলে সেটাই স্থায়ী থাকে।
+     */
+    fun get(scope: String): QBankSort {
+        val saved = prefs?.getString("sort_$scope", null)
+        if (saved != null) return QBankSort.fromKey(saved)
+        return if (scope == "প্রাথমিক") QBankSort.YEAR_DESC else QBankSort.DEFAULT
+    }
 
     fun set(scope: String, sort: QBankSort) {
         prefs?.edit()?.putString("sort_$scope", sort.key)?.apply()
@@ -57,28 +65,55 @@ object QBankSortStore {
     }
 
     private val YEAR = Regex("(19|20)\\d{2}")
+    private val YEAR_RANGE = Regex("(?<!\\d)((?:19|20)\\d{2})\\s*[-–/]\\s*(\\d{2,4})(?!\\d)")
 
-    /** নাম(গুলো) থেকে ৪-অঙ্কের সাল; না পেলে 0 */
+    /** এক স্ট্রিং-এর সবচেয়ে শেষের (বড়) সাল — "২০২৩-২৪" হলে ২০২৪; না পেলে 0 */
+    private fun lastYearIn(raw: String): Int {
+        val s = normDigits(raw)
+        var best = 0
+        for (m in YEAR.findAll(s)) best = maxOf(best, m.value.toInt())
+        for (m in YEAR_RANGE.findAll(s)) {
+            val start = m.groupValues[1]
+            val end = m.groupValues[2]
+            val endYear = if (end.length == 4) end.toIntOrNull() ?: 0
+                          else ((start.take(2) + end).toIntOrNull() ?: 0)
+            best = maxOf(best, endYear)
+        }
+        return best
+    }
+
+    /**
+     * নাম(গুলো) থেকে সাল; না পেলে 0। প্রথম যে স্ট্রিং-এ সাল পাওয়া যায় সেটার সবচেয়ে শেষের
+     * (বড়) সালটাই ধরা হয়। কল করার সময় আগে `years` তালিকা (কার্ডে যে সাল দেখায়), তারপর নাম।
+     */
     fun extractYear(vararg names: String): Int {
         for (n in names) {
-            val m = YEAR.find(normDigits(n))
-            if (m != null) return m.value.toInt()
+            val y = lastYearIn(n)
+            if (y > 0) return y
         }
         return 0
+    }
+
+    /** কার্ডের "শেষের সাল": কার্ডে দেখানো সালগুলোর মধ্যে সবচেয়ে বড়; না থাকলে নাম/সাব-নাম থেকে */
+    fun cardYear(years: List<String>, name: String, subNames: List<String>): Int {
+        val fromYears = years.maxOfOrNull { lastYearIn(it) } ?: 0
+        if (fromYears > 0) return fromYears
+        return extractYear(name, *subNames.toTypedArray())
     }
 
     /** stable sort — একই মানের আইটেমের আগের আপেক্ষিক ক্রম অক্ষুণ্ণ */
     fun <T> apply(
         items: List<T>, sort: QBankSort,
         name: (T) -> String, subNames: (T) -> List<String>,
-        totalQ: (T) -> Int, progressPct: (T) -> Int
+        totalQ: (T) -> Int, progressPct: (T) -> Int,
+        years: (T) -> List<String> = { emptyList() }
     ): List<T> = when (sort) {
         QBankSort.DEFAULT   -> items
         QBankSort.NAME_ASC  -> items.sortedWith { a, b -> naturalCompare(name(a), name(b)) }
         QBankSort.NAME_DESC -> items.sortedWith { a, b -> naturalCompare(name(b), name(a)) }
-        QBankSort.YEAR_DESC -> items.sortedByDescending { extractYear(name(it), *subNames(it).toTypedArray()) }
-        QBankSort.YEAR_ASC  -> items.sortedWith(compareBy<T> { extractYear(name(it), *subNames(it).toTypedArray()) == 0 }
-            .thenBy { extractYear(name(it), *subNames(it).toTypedArray()) })
+        QBankSort.YEAR_DESC -> items.sortedByDescending { cardYear(years(it), name(it), subNames(it)) }
+        QBankSort.YEAR_ASC  -> items.sortedWith(compareBy<T> { cardYear(years(it), name(it), subNames(it)) == 0 }
+            .thenBy { cardYear(years(it), name(it), subNames(it)) })
         QBankSort.Q_DESC    -> items.sortedByDescending { totalQ(it) }
         QBankSort.PROG_ASC  -> items.sortedBy { progressPct(it) }
         QBankSort.PROG_DESC -> items.sortedByDescending { progressPct(it) }
