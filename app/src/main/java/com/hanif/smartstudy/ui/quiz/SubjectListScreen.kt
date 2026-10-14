@@ -543,7 +543,10 @@ fun SubjectListScreen(
     // বাছা বিষয়ের কার্ডে ট্যাপ → সেই বিষয়ের ডেটা খোলে (শুধু ওই বিষয়, মূল Quiz grid অপরিবর্তিত)
     onOwnPickOpen   : (() -> Unit)? = null,
     // true = এখন "নিজের বিষয়" স্কোপের ভেতরে আছি (ব্যাক করলে মূল Quiz-এ ফেরে)
-    ownScopeActive  : Boolean = false
+    ownScopeActive  : Boolean = false,
+    // ── শুধু QBank + Admin: "QBank টপিক ম্যানেজার" (আনমুভ ফিল্টার + মার্জ টু) খোলার কলব্যাক।
+    // null হলে (Quiz/Study বা student) Admin মেনুতে এই অপশন আসে না ──
+    onOpenQBankTopicManager : (() -> Unit)? = null
 ) {
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
@@ -661,7 +664,8 @@ fun SubjectListScreen(
                                     onToggleReorder = onToggleReorder,
                                     onRenameClick   = { showRenameDialog = true },
                                     onDeleteClick   = { showDeleteDialog = true },
-                                    onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
+                                    onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null,
+                                    onOpenQBankTopicManager = onOpenQBankTopicManager
                                 )
                             }
                             if (showSortInHeader) {
@@ -1045,7 +1049,9 @@ private fun AdminMenuButton(
     onForceResyncClick: (() -> Unit)? = null,
     // ── Phase 4 (Serial Manager): ড্র্যাগ করে সাজানোর বদলে সরাসরি প্রতিটার পাশে
     // নাম্বার বসিয়ে ক্রম ঠিক করার শর্টকাট — দেখো SerialManagerDialog ──
-    onOpenSerialManager: (() -> Unit)? = null
+    onOpenSerialManager: (() -> Unit)? = null,
+    // ── শুধু QBank: আনমুভ টপিক ফিল্টার + "মার্জ টু" (QBank-এর প্রশ্ন Quiz-এ কপি) ──
+    onOpenQBankTopicManager: (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -1079,6 +1085,13 @@ private fun AdminMenuButton(
                     text = { Text("🔢 সরাসরি নাম্বার বসান", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
                         color = Color(0xFF4F46E5)) },
                     onClick = { expanded = false; onOpenSerialManager() }
+                )
+            }
+            if (onOpenQBankTopicManager != null) {
+                DropdownMenuItem(
+                    text = { Text("🧩 QBank টপিক ম্যানেজার (আনমুভ · মার্জ)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0891B2)) },
+                    onClick = { expanded = false; onOpenQBankTopicManager() }
                 )
             }
             DropdownMenuItem(
@@ -1406,13 +1419,79 @@ private fun AdminMoveTopicPickerDialog(
     items           : List<String>,
     otherSubjects   : List<String>,
     onConfirm       : (oldTopic: String, newSubject: String, newTopicName: String) -> Unit,
-    onDismiss       : () -> Unit
+    onDismiss       : () -> Unit,
+    // ── Rename/Delete (Topic ও Subject — দুটো তালিকাতেই) — null হলে সেই বাটন দেখায় না।
+    // তালিকা সাথে সাথে (instant) বদলায়; আসল ডাটাবেজ সেভ ব্যাকগ্রাউন্ডে হয়, আর দেরিতে হলেও
+    // মুছে-ফেলা/পুরনো-নাম আর ফিরে আসে না (দেখো ContentRepository-র tombstone/override) ──
+    onRenameTopic   : ((old: String, new: String) -> Unit)? = null,
+    onDeleteTopic   : ((name: String) -> Unit)? = null,
+    onRenameSubject : ((old: String, new: String) -> Unit)? = null,
+    onDeleteSubject : ((name: String) -> Unit)? = null
 ) {
+    // স্থানীয় (instant) কপি — rename/delete করলে ডায়ালগের তালিকা সাথে সাথে বদলে যায়
+    var localTopics   by remember { mutableStateOf(items) }
+    var localSubjects by remember { mutableStateOf(otherSubjects) }
     var selectedTopic   by remember { mutableStateOf(items.firstOrNull() ?: "") }
     var selectedSubject by remember { mutableStateOf(otherSubjects.firstOrNull() ?: "") }
     var newTopicName    by remember { mutableStateOf(selectedTopic) }
+    // কোনটা rename হচ্ছে: "T|নাম" (Topic) বা "S|নাম" (Subject)
+    var renaming   by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    // ডিলিট কনফার্মের অপেক্ষায়: "T|নাম" বা "S|নাম"
+    var deleting   by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(selectedTopic) { newTopicName = selectedTopic }
+
+    @Composable
+    fun EditButtons(kind: String, name: String, canRename: Boolean, canDelete: Boolean) {
+        if (canRename) {
+            TextButton(
+                onClick = { renaming = "$kind|$name"; renameText = name },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("✏️", fontSize = 15.sp) }
+        }
+        if (canDelete) {
+            TextButton(
+                onClick = { deleting = "$kind|$name" },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("🗑", fontSize = 15.sp) }
+        }
+    }
+
+    @Composable
+    fun RenameBox(kind: String, name: String) {
+        if (renaming != "$kind|$name") return
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            OutlinedTextField(
+                value = renameText, onValueChange = { renameText = it },
+                label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                singleLine = true, modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = {
+                    val nn = renameText.trim()
+                    if (nn.isNotBlank() && nn != name) {
+                        if (kind == "T") {
+                            localTopics = localTopics.map { if (it == name) nn else it }.distinct()
+                            if (selectedTopic == name) selectedTopic = nn
+                            onRenameTopic?.invoke(name, nn)
+                        } else {
+                            localSubjects = localSubjects.map { if (it == name) nn else it }.distinct()
+                            if (selectedSubject == name) selectedSubject = nn
+                            onRenameSubject?.invoke(name, nn)
+                        }
+                    }
+                    renaming = null
+                },
+                enabled = renameText.trim().isNotBlank() && renameText.trim() != name
+            ) { Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF16A34A)) }
+            TextButton(onClick = { renaming = null }) { Text("✕", fontSize = 18.sp, color = Color(0xFF9CA3AF)) }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1423,18 +1502,20 @@ private fun AdminMoveTopicPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("📦 কোন অধ্যায় (Topic) move করবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                if (items.isEmpty()) {
+                if (localTopics.isEmpty()) {
                     Text("⚠️ কোনো Topic পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
-                items.forEach { name ->
+                localTopics.forEach { name ->
                     Row(
                         Modifier.fillMaxWidth().clickable { selectedTopic = name }.padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = selectedTopic == name, onClick = { selectedTopic = name },
                             colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
-                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        EditButtons("T", name, onRenameTopic != null, onDeleteTopic != null)
                     }
+                    RenameBox("T", name)
                     // ── নাম বদলানোর বক্স সিলেক্ট করা টপিকের ঠিক নিচেই (নিচে স্ক্রল করতে হয় না) ──
                     if (selectedTopic == name) {
                         OutlinedTextField(
@@ -1447,18 +1528,20 @@ private fun AdminMoveTopicPickerDialog(
 
                 Divider(Modifier.padding(vertical = 4.dp))
                 Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                if (otherSubjects.isEmpty()) {
+                if (localSubjects.isEmpty()) {
                     Text("⚠️ move করার মতো অন্য কোনো Subject নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
                 }
-                otherSubjects.forEach { name ->
+                localSubjects.forEach { name ->
                     Row(
                         Modifier.fillMaxWidth().clickable { selectedSubject = name }.padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = selectedSubject == name, onClick = { selectedSubject = name },
                             colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
-                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        EditButtons("S", name, onRenameSubject != null, onDeleteSubject != null)
                     }
+                    RenameBox("S", name)
                 }
 
                 Divider(Modifier.padding(vertical = 4.dp))
@@ -1477,6 +1560,38 @@ private fun AdminMoveTopicPickerDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
     )
+
+    // ── ডিলিট কনফার্ম — হ্যাঁ চাপলেই তালিকা থেকে সাথে সাথে সরে যায়; আসল ডিলিট ব্যাকগ্রাউন্ডে ──
+    deleting?.let { key ->
+        val kind = key.substringBefore('|')
+        val name = key.substringAfter('|')
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("🗑 ডিলিট করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Text(
+                    if (kind == "S") "\"$name\" বিষয় এবং তার সব Topic ও প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!"
+                    else "\"$name\" Topic-এর সব প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (kind == "T") {
+                        localTopics = localTopics.filter { it != name }
+                        if (selectedTopic == name) selectedTopic = localTopics.firstOrNull() ?: ""
+                        onDeleteTopic?.invoke(name)
+                    } else {
+                        localSubjects = localSubjects.filter { it != name }
+                        if (selectedSubject == name) selectedSubject = localSubjects.firstOrNull() ?: ""
+                        onDeleteSubject?.invoke(name)
+                    }
+                    deleting = null
+                }) { Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
 }
 
 @Composable
@@ -1845,6 +1960,10 @@ fun SubTopicListScreen(
     onDeleteSubTopic: (name: String) -> Unit = {},
     otherSubjectsForMove : List<String> = emptyList(),
     onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
+    // ── "Move to Subject" ডায়ালগের Subject তালিকায় Rename/Delete (অন্য Subject-এর জন্য)।
+    // null হলে সেই বাটন দেখায় না। Topic-এর Rename/Delete আগের onRenameSubTopic/onDeleteSubTopic-ই ব্যবহার করে ──
+    onRenameOtherSubject: ((old: String, new: String) -> Unit)? = null,
+    onDeleteOtherSubject: ((name: String) -> Unit)? = null,
     // ── Phase 4 (Serial Manager) — দেখো SubjectListScreen-এর একই প্যারামিটারের কমেন্ট ──
     enableSerialManager: Boolean = false,
     onSaveSerialOrder: (List<String>) -> Unit = {},
@@ -2021,7 +2140,11 @@ fun SubTopicListScreen(
             items         = subTopics.filterNot { it.isModelTest }.map { it.name },
             otherSubjects = otherSubjectsForMove,
             onConfirm     = { oldTopic, newSubject, newTopicName -> onMoveSubTopicToSubject(oldTopic, newSubject, newTopicName) },
-            onDismiss     = { showMoveDialog = false }
+            onDismiss     = { showMoveDialog = false },
+            onRenameTopic   = { old, new -> onRenameSubTopic(old, new) },
+            onDeleteTopic   = { name -> onDeleteSubTopic(name) },
+            onRenameSubject = onRenameOtherSubject,
+            onDeleteSubject = onDeleteOtherSubject
         )
     }
     // ── Phase 4: Serial Manager — subTopics এখানে ইতিমধ্যে বর্তমান display-ক্রমেই
