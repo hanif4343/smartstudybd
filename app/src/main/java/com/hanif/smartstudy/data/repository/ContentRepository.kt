@@ -1962,19 +1962,22 @@ class ContentRepository(private val context: Context) {
         createSubject: Boolean, createTopic: Boolean
     ): com.hanif.smartstudy.data.remote.ApiResult<Pair<String, String>> {
         val gas = com.hanif.smartstudy.data.remote.GasContentService
+        // ── QBank-এর "Move" আসলে Quiz-এ কপি (দেখো MenuViewModel.adminCopyQBankToQuiz) —
+        // তাই destination Subject/Topic সবসময় Quiz-এর reference হিসেবে রিজলভ/তৈরি হয় ──
+        val refSheet = if (sheet.equals("QBank", ignoreCase = true)) "Quiz" else sheet
         var sid = newSubjectId
         if (createSubject || sid.isBlank() || sid.startsWith("-local")) {
-            val existing = resolveSubjectId(sheet, newSubject)?.takeIf { !it.startsWith("-local") }
+            val existing = resolveSubjectId(refSheet, newSubject)?.takeIf { !it.startsWith("-local") }
             if (existing != null) {
                 sid = existing
             } else {
-                when (val r = gas.addReferenceItem("subjects", newSubject, sheet = sheet)) {
+                when (val r = gas.addReferenceItem("subjects", newSubject, sheet = refSheet)) {
                     is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
                         val old = sid
                         sid = r.data
                         try {
-                            if (old.isNotBlank() && old.startsWith("-local")) replaceRoomSubjectId(sheet, old, sid)
-                            else addRoomSubjectLocal(sid, newSubject, sheet)
+                            if (old.isNotBlank() && old.startsWith("-local")) replaceRoomSubjectId(refSheet, old, sid)
+                            else addRoomSubjectLocal(sid, newSubject, refSheet)
                         } catch (_: Exception) { }
                     }
                     is com.hanif.smartstudy.data.remote.ApiResult.Error ->
@@ -1995,7 +1998,7 @@ class ContentRepository(private val context: Context) {
                         try {
                             if (old.isNotBlank() && old.startsWith("-local")) {
                                 replaceRoomTopicId(old, tid)
-                                replaceRoomQuestionsTopicId(sheet, old, tid)
+                                replaceRoomQuestionsTopicId(refSheet, old, tid)
                             } else addRoomTopicLocal(tid, sid, newSubTopic)
                         } catch (_: Exception) { }
                     }
