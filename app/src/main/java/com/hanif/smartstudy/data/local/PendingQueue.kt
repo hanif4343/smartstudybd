@@ -163,6 +163,35 @@ class PendingQueue(private val context: Context) {
         ))
     }
 
+    // ── Admin: Subject/Topic Rename (reference-টেবিলের id ধরে) — Sheet-এ সেভ ব্যর্থ/অফলাইন হলে
+    //    queue-তে থাকে; UI-তে নতুন নামই দেখায়, নেট আসলে ব্যাকগ্রাউন্ডে নিজে থেকে সেভ হয়ে যায় ──
+    suspend fun enqueueAdminRenameReference(
+        refType : String,   // "subjects" | "topics"
+        id      : String,
+        newName : String,
+        oldName : String,
+        sheet   : String
+    ) {
+        // একই আইটেমের আগের pending rename থাকলে বাদ — শুধু সবশেষ নামটাই যথেষ্ট
+        val rest = getAll().filterNot { a ->
+            a.type == "admin_rename_reference" && try {
+                val m: Map<String, Any> = gson.fromJson(a.payload, object : TypeToken<Map<String, Any>>() {}.type)
+                m["id"] == id && m["refType"] == refType
+            } catch (e: Exception) { false }
+        }
+        if (rest.size != getAll().size) save(rest)
+        enqueue(PendingAction(
+            type    = "admin_rename_reference",
+            payload = gson.toJson(mapOf(
+                "refType" to refType,
+                "id"      to id,
+                "newName" to newName,
+                "oldName" to oldName,
+                "sheet"   to sheet
+            ))
+        ))
+    }
+
     // ── Admin "Move" (ফাইল ম্যানেজারের মতো) — অফলাইন/ব্যর্থ হলে queue এ রাখা হয়, নেট
     //    আসলে Sheet-এ (প্রশ্ন + সম্ভব হলে reference টেবিল) সরিয়ে দেবে ──
     suspend fun enqueueAdminMoveQuestions(
