@@ -548,8 +548,9 @@ fun MainScreen(
                     onAdminMoveSubTopic = { sheet, subject, old, newSubject, newTopicName ->
                         menuViewModel.adminMoveTopic(sheet, subject, old, newSubject, newTopicName)
                     },
+                    // QBank-এ Move = Quiz-এ কপি — প্রশ্ন QBank লিস্টে একই জায়গায় থাকে,
+                    // তাই এখানে removeQuestionsLocally() ইচ্ছাকৃতভাবে কল করা হয় না
                     onAdminMoveQuestions = { sheet, ids, newSubject, newSubTopic ->
-                        qbankViewModel.removeQuestionsLocally(ids)
                         menuViewModel.adminMoveQuestions(sheet, ids, newSubject, newSubTopic)
                     }
                 )
