@@ -44,6 +44,9 @@ fun CoreScreen(
     // ── শুধু QBank: "QBank টপিক ম্যানেজার"-এর "🔀 মার্জ টু" — একটা QBank টপিকের সব MCQ Quiz-এর বেছে-নেওয়া
     // Subject › Topic-এ কপি (QBank-এর প্রশ্ন যেখানে ছিল সেখানেই থাকে)। null হলে ম্যানেজারে বাটন আসে না ──
     onAdminMergeQBankTopic: ((topicId: String, topicLabel: String, newSubject: String, newSubTopic: String) -> Unit)? = null,
+    // ── 🔀 Merge To: বিষয়/অধ্যায় অন্যটার সাথে মার্জ (source আর থাকে না) — Rename/Delete/Move-এর পাশে ──
+    onAdminMergeSubject   : ((sheet: String, source: String, target: String) -> Unit)? = null,
+    onAdminMergeSubTopic  : ((sheet: String, subject: String, oldName: String, targetSubject: String, targetTopic: String) -> Unit)? = null,
     // ── Study Nav Phase 4: Study টুলবার থেকে Quiz/Wrong Review-তে যাওয়া — MainScreen হ্যান্ডেল করে ──
     onStudyAction         : ((StudyAction) -> Unit)? = null
 ) {
@@ -498,7 +501,13 @@ fun CoreScreen(
                 // ── Move ডায়ালগের Subject তালিকায় Rename/Delete — ডায়ালগে সাথে সাথে দেখায়,
                 // ডাটাবেজ সেভ ব্যাকগ্রাউন্ডে (দেরিতে হলেও মুছে-ফেলা/পুরনো নাম আর ফিরে আসে না) ──
                 onRenameOtherSubject = if (onAdminRenameSubject != null) { { old: String, new: String -> onAdminRenameSubject.invoke(sheetKey, old, new) } } else null,
-                onDeleteOtherSubject = if (onAdminDeleteSubject != null) { { name: String -> onAdminDeleteSubject.invoke(sheetKey, name) } } else null
+                onDeleteOtherSubject = if (onAdminDeleteSubject != null) { { name: String -> onAdminDeleteSubject.invoke(sheetKey, name) } } else null,
+                onMergeSubTopic = if (onAdminMergeSubTopic != null) { { old: String, tSubject: String, tTopic: String ->
+                    onAdminMergeSubTopic.invoke(sheetKey, state.navPath.subject ?: "", old, tSubject, tTopic)
+                } } else null,
+                onMergeOtherSubject = if (onAdminMergeSubject != null) { { src: String, tgt: String -> onAdminMergeSubject.invoke(sheetKey, src, tgt) } } else null,
+                topicsBySubject = state.subjects.associate { sj -> sj.name to sj.subTopics.filterNot { it.isModelTest }.map { it.name } }
+                    .filterValues { it.isNotEmpty() }
             )
         }
 
@@ -536,6 +545,10 @@ fun CoreScreen(
                 onDeleteSubject = { name ->
                     val id = state.qbankInstitutions.find { it.name == name }?.subjectId
                     if (!id.isNullOrBlank()) viewModel.adminDeleteQBankInstitution(id)
+                },
+                onMergeSubject  = { src, tgt ->
+                    val id = state.qbankInstitutions.find { it.name == src }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminMoveQBankInstitution(id, tgt)
                 },
                 emojiOverrides  = state.emojiOverrides,
                 refType         = "institutions",
@@ -677,6 +690,11 @@ fun CoreScreen(
                     val id = state.qbankPosts.find { it.name == name }?.subjectId
                     if (!id.isNullOrBlank()) viewModel.adminDeleteQBankPost(id)
                 },
+                // 🔀 Merge To: পদবীর সব প্রশ্ন-লিংক অন্য পদবীতে, এটা আর থাকে না
+                onMergeSubject  = { src, tgt ->
+                    val id = state.qbankPosts.find { it.name == src }?.subjectId
+                    if (!id.isNullOrBlank()) viewModel.adminMoveQBankPost(id, tgt)
+                },
                 emojiOverrides  = state.emojiOverrides,
                 refType         = "posts",
                 onEmojiChange   = { id, emoji -> viewModel.adminSetEmoji("posts", id, emoji) },
@@ -766,6 +784,7 @@ fun CoreScreen(
                 onSaveSerialOrder = { viewModel.applySubjectSerialOrder(it) },
                 onRenameSubject = { old, new -> onAdminRenameSubject?.invoke(sheetKey, old, new) },
                 onDeleteSubject = { name -> onAdminDeleteSubject?.invoke(sheetKey, name) },
+                onMergeSubject  = if (onAdminMergeSubject != null) { { src: String, tgt: String -> onAdminMergeSubject.invoke(sheetKey, src, tgt) } } else null,
                 // ── App feature request ৪: Subject-এরও ইমুজি বদলানো যাবে (Quiz/Study/QBank
                 // তিন মোডেই — একই "Subjects" শিট, subject_id প্রিফিক্স দিয়ে মোড আলাদা থাকে) ──
                 emojiOverrides  = state.emojiOverrides,
