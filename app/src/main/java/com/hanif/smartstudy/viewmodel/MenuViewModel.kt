@@ -1686,6 +1686,8 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
                     android.util.Log.w("AdminQBankCopy", "mark moved failed (non-fatal): ${e.message}")
                 }
             }
+            // ── কার্ডে/ডায়ালগে স্থায়ী ✅ মার্ক: কোন প্রশ্ন Quiz-এর কোন Subject › Topic-এ গেছে ──
+            com.hanif.smartstudy.util.QuizMovedMarkStore.markQuestions(getApplication(), ids, newSubjectName, newSubTopicName)
             adminCopyQBankToQuiz(ids, newSubjectName, newSubTopicName)
             return
         }
@@ -1937,6 +1939,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
 
             // টপিকটা সাথে সাথে "মুভ হয়েছে" — UI-তে আনমুভ ফিল্টার থেকে তখনই সরে যায়
             com.hanif.smartstudy.util.QBankMovedStore.markMoved(getApplication(), listOf(topicId))
+            com.hanif.smartstudy.util.QuizMovedMarkStore.markQuestions(getApplication(), ids, newSubjectName, newSubTopicName)
 
             val existingSid = contentRepo.resolveSubjectId("Quiz", newSubjectName)?.takeIf { !it.startsWith("-local") }
             val existingTid = existingSid
