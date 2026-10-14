@@ -85,4 +85,36 @@ object QuizMovedMarkStore {
         p(ctx).edit().remove(tKey(subject, topic)).apply()
         version++
     }
+
+    // ── প্রশ্ন-ভিত্তিক মার্ক: QBank-এর কোন প্রশ্ন Quiz-এর কোন Subject › Topic-এ পাঠানো হয়েছে ──
+    private const val DEST_SEP = "\u0002"
+    private fun qKey(id: String) = "Q$SEP${id.trim()}"
+
+    /** QBank প্রশ্নগুলো গন্তব্য Subject › Topic-এ পাঠানো হয়েছে — কার্ডে স্থায়ীভাবে দেখাবে (একাধিক গন্তব্য জমা থাকে) */
+    fun markQuestions(ctx: Context, ids: Collection<String>, subject: String, topic: String) {
+        if (subject.isBlank() || topic.isBlank()) return
+        val clean = ids.filter { it.isNotBlank() }
+        if (clean.isEmpty()) return
+        val dest = "${subject.trim()}$SEP${topic.trim()}"
+        val sp = p(ctx)
+        val ed = sp.edit()
+        clean.forEach { id ->
+            val cur = sp.getString(qKey(id), "").orEmpty().split(DEST_SEP).filter { it.isNotBlank() }
+            if (dest !in cur) ed.putString(qKey(id), (cur + dest).joinToString(DEST_SEP))
+        }
+        ed.putLong(sKey(subject), System.currentTimeMillis()).putLong(tKey(subject, topic), System.currentTimeMillis())
+        ed.apply()
+        version++
+    }
+
+    /** এই প্রশ্ন যেসব (Subject, Topic)-এ পাঠানো হয়েছে */
+    @Suppress("UNUSED_VARIABLE")
+    fun destinationsOf(ctx: Context, id: String): List<Pair<String, String>> {
+        val v = version
+        if (id.isBlank()) return emptyList()
+        return p(ctx).getString(qKey(id), "").orEmpty().split(DEST_SEP).mapNotNull {
+            val parts = it.split(SEP)
+            if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) parts[0] to parts[1] else null
+        }
+    }
 }
