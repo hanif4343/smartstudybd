@@ -650,6 +650,35 @@ fun QuestionCard(
                 }
             }
 
+            // ── QBank: এই প্রশ্ন Quiz-এর কোন Subject › Topic-এ পাঠানো হয়েছে — স্থায়ীভাবে দেখায় ──
+            if (mode == StudyMode.QBANK) {
+                val ctxMoved = LocalContext.current
+                val movedTo = com.hanif.smartstudy.util.QuizMovedMarkStore.destinationsOf(ctxMoved, item.id)
+                if (movedTo.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        movedTo.forEach { (ms, mt) ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF16A34A).copy(alpha = 0.10f))
+                                    .border(1.dp, Color(0xFF16A34A).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "✅ Quiz-এ পাঠানো: $ms › $mt",
+                                    fontSize = 11.sp, fontFamily = NotoSansBengali,
+                                    fontWeight = FontWeight.Bold, color = Color(0xFF15803D),
+                                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // imageUrl field — comma separated multiple images support
             if (item.imageUrl.isNotBlank()) {
                 val imgUrls = item.imageUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
