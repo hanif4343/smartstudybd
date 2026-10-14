@@ -401,6 +401,11 @@ fun QuestionListScreen(
         StudyMode.QBANK -> "QBank"
         StudyMode.STUDY -> "Study"
     }
+    // ── QBank-এ "Move" = Quiz-এ কপি: QBank প্রশ্ন একই জায়গায় থাকে, আর destination
+    // Subject/Topic তালিকা আসে Quiz থেকে (QBank-এর subject/topic বাল্ক আপলোডের সময়
+    // শুধু ফরম্যাট মেলানোর জন্য দেওয়া — সেটা এখানে ব্যবহার হয় না) ──
+    val isQBankCopyMode = mode == StudyMode.QBANK
+    val movePickerSheetKey = if (isQBankCopyMode) "Quiz" else moveSheetKey
     // ── Move এখন সাথে সাথেই (dialog-এ confirm বাটন ছাড়াই) হয়ে যায় — ভুল ট্যাপে
     // move হয়ে গেলে ফেরানোর জন্য নিচে ৫ সেকেন্ডের "Undo" স্ন্যাকবার দেখানো হয়। ──
     val moveSnackbarHostState = remember { SnackbarHostState() }
@@ -1527,15 +1532,18 @@ fun QuestionListScreen(
     // ── Admin "Move" — destination Subject/Topic ডায়ালগ ──
     if (showMoveQuestionsDialog && onAdminMoveQuestions != null) {
         AdminMoveQuestionsPickerDialog(
-            subjects        = vmState.subjects.map { it.name },
-            onLoadSubjects  = { viewModel.adminSubjectsForMove(moveSheetKey) },
+            subjects        = if (isQBankCopyMode) emptyList() else vmState.subjects.map { it.name },
+            onLoadSubjects  = { viewModel.adminSubjectsForMove(movePickerSheetKey) },
             selectedCount   = moveTargetIds.size,
+            copyToQuizMode  = isQBankCopyMode,
             // ── QBank-এ navPath-এর subject/subTopic আসলে পদবী/প্রতিষ্ঠান/সাল হতে পারে,
             // তাই প্রশ্নের নিজের আসল Subject/Topic ব্যবহার হয় ──
-            currentSubject  = moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subject?.takeIf { it.isNotBlank() } } ?: subject,
-            currentSubTopic = moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subTopic?.takeIf { it.isNotBlank() } } ?: subTopic,
-            openTopicFirst  = moveDialogOpenTopicFirst,
-            onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(moveSheetKey, subj) },
+            // QBank-কপি মোডে "বর্তমান" Subject/Topic ফাঁকা — যাতে Quiz-এর কোনো Subject/Topic
+            // QBank-এর (ফরম্যাট-মেলানো) নামের সাথে মিলে গেলেও কপি আটকে না যায়
+            currentSubject  = if (isQBankCopyMode) "" else (moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subject?.takeIf { it.isNotBlank() } } ?: subject),
+            currentSubTopic = if (isQBankCopyMode) "" else (moveTargetIds.firstOrNull()?.let { id -> allQuestions.firstOrNull { it.id == id }?.subTopic?.takeIf { it.isNotBlank() } } ?: subTopic),
+            openTopicFirst  = moveDialogOpenTopicFirst && !isQBankCopyMode,
+            onLoadTopics    = { subj -> viewModel.adminTopicsForSubject(movePickerSheetKey, subj) },
             onConfirm = { newSubject, newSubTopic ->
                 // ── সবচেয়ে বেশি ব্যবহৃত Topic উপরে দেখানোর জন্য প্রতিবার move
                 // করার সময় সিলেকশন-কাউন্ট বাড়ানো হয় (ডিভাইস-লোকাল, SharedPreferences) ──
@@ -1548,8 +1556,13 @@ fun QuestionListScreen(
                     val pm = positions.maxOrNull() ?: return@run
                     val movedSet = movedIds.toSet()
                     val nextId = pagedQuestions.drop(pm + 1).firstOrNull { it.id !in movedSet }?.id.orEmpty()
-                    val prevId = pagedQuestions.take(pm).lastOrNull { it.id !in movedSet }?.id.orEmpty()
-                    val pos = (pageOffset + pm + 1 - positions.size).coerceAtLeast(0)
+                    // QBank-এ প্রশ্ন লিস্ট থেকে সরে না (Quiz-এ কপি হয়), তাই শেষ কপি করা প্রশ্নটাই
+                    // prevId, আর পজিশন = তার ঠিক পরের প্রশ্ন (সরে-যাওয়ার হিসাব বাদ) — লাস্ট মুভ চাপলে
+                    // এখান থেকেই কাজ চালিয়ে যাওয়া যাবে। অন্য মোডে আগের হিসাবই থাকে।
+                    val prevId = if (isQBankCopyMode) pagedQuestions.getOrNull(pm)?.id.orEmpty()
+                                 else pagedQuestions.take(pm).lastOrNull { it.id !in movedSet }?.id.orEmpty()
+                    val pos = if (isQBankCopyMode) (pageOffset + pm + 1)
+                              else (pageOffset + pm + 1 - positions.size).coerceAtLeast(0)
                     val raw = listOf(qbankTypeTab.toString(), pos.toString(), nextId, prevId).joinToString(LM_SEP)
                     writeLastMoveRaw(ctxForPrefs, lastMoveKey, raw)
                     lastMoveRaw = raw
@@ -1572,8 +1585,12 @@ fun QuestionListScreen(
                         moveSnackbarHostState.currentSnackbarData?.dismiss()
                     }
                     val result = moveSnackbarHostState.showSnackbar(
-                        message     = "সরানো হয়েছে (${movedIds.size}টি) ➜ $newSubject / $newSubTopic",
-                        actionLabel = "Undo",
+                        message     = if (isQBankCopyMode)
+                            "Quiz-এ পাঠানো হচ্ছে (${movedIds.size}টি) ➜ $newSubject / $newSubTopic"
+                        else
+                            "সরানো হয়েছে (${movedIds.size}টি) ➜ $newSubject / $newSubTopic",
+                        // QBank-এ কপি হয় বলে Undo নেই (QBank-এর প্রশ্ন তো সরেইনি)
+                        actionLabel = if (isQBankCopyMode) null else "Undo",
                         duration    = SnackbarDuration.Indefinite
                     )
                     autoDismiss.cancel()
@@ -1824,6 +1841,8 @@ private fun AdminMoveQuestionsPickerDialog(
     // এই মোডের সব Subject (খালি/নতুনসহ) — লোড হলে `subjects`-এর জায়গা নেয়; ব্যর্থ/খালি হলে আগেরটাই
     onLoadSubjects  : suspend () -> List<String> = { emptyList() },
     selectedCount   : Int,
+    // ── QBank-এর জন্য true: প্রশ্ন Move হয় না, Quiz-এ কপি হয় (শুধু টাইটেল/হিন্ট বদলায়) ──
+    copyToQuizMode  : Boolean = false,
     currentSubject  : String,
     currentSubTopic : String,
     // ── true হলে ডায়ালগ খোলার সাথে সাথেই বর্তমান Subject-এর Topic dropdown
@@ -1892,7 +1911,7 @@ private fun AdminMoveQuestionsPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
+        title = { Text(if (copyToQuizMode) "📦 ${selectedCount}টি প্রশ্ন Quiz-এ পাঠান" else "📦 ${selectedCount}টি প্রশ্ন Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
         text = {
             val sortedSubjects = remember(allSubjects) { sortSubjectsByUsage(ctx, allSubjects) }
             Column(
@@ -1960,7 +1979,7 @@ private fun AdminMoveQuestionsPickerDialog(
                     }
                 } else {
                     Text(
-                        "Topic-এ ট্যাপ করলেই সাথে সাথে Move হবে",
+                        if (copyToQuizMode) "Topic-এ ট্যাপ করলেই MCQ-গুলো Quiz-এ যোগ হবে (QBank-এ প্রশ্ন যেমন আছে তেমনই থাকবে)" else "Topic-এ ট্যাপ করলেই সাথে সাথে Move হবে",
                         fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFF6B7280)
                     )
 
