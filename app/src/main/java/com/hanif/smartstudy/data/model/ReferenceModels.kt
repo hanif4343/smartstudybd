@@ -83,7 +83,9 @@ data class ExamAppearanceRef(
     @SerializedName("question_id")    val questionId    : String? = null,
     @SerializedName("post_id")        val postId        : String? = null,
     @SerializedName("institution_id") val institutionId : String? = null,
-    @SerializedName("year")           val year          : String? = null
+    // ⚠️ CdnService.fetchReferenceJson CaseInsensitiveGson ব্যবহার করে, যেটা "year" কী-কে "Year" বানিয়ে
+    // দেয় (QBank-এর কলামের জন্য) — তাই alternate না থাকলে সাল সবসময় null হয়ে যেত।
+    @SerializedName("year", alternate = ["Year", "YEAR"]) val year : String? = null
 )
 
 /** GAS action=getReferenceData → {"status":"success","data":{...}} এর "data" অংশ */
