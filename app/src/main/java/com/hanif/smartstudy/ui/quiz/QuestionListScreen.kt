@@ -204,20 +204,25 @@ private fun recordMoveSubjectUsage(ctx: Context, subject: String) {
     } catch (_: Exception) { }
 }
 
-private fun sortSubjectsByUsage(ctx: Context, subjects: List<String>): List<String> {
-    return try {
-        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
-        subjects.sortedByDescending { prefs.getInt(moveSubjectUsageKey(it), 0) }
-    } catch (_: Exception) { subjects }
+// ── Move ডায়ালগের Subject তালিকা এখন সবসময় এই নির্দিষ্ট সিরিয়ালে — "বেশি ব্যবহৃত আগে" লজিক
+// বাদ, কারণ তাতে বারবার পজিশন বদলে যেত। তালিকায় নেই এমন Subject (নতুন/অন্য) এর পরে আসে, নিজেদের
+// আগের ক্রমেই। Topic তালিকাও কোনো ব্যবহার-ভিত্তিক সর্টিং ছাড়াই স্থির ক্রমে (VM-এর ক্রম) থাকে। ──
+private val MOVE_SUBJECT_ORDER = listOf(
+    "বাংলা সাহিত্য", "বাংলা ব্যাকরণ", "English Literature", "English Grammar", "পাটিগণিত",
+    "বীজগণিত", "জ্যামিতি", "বাংলাদেশ বিষয়াবলি", "আন্তর্জাতিক বিষয়াবলি", "সাধারণ জ্ঞান"
+)
+
+private fun moveSubjectNorm(s: String): String =
+    s.replace(Regex("[\\u200B-\\u200D\\uFEFF\\u00A0\\s]"), "").lowercase().replace("litterature", "literature")
+
+private fun sortSubjectsByUsage(@Suppress("UNUSED_PARAMETER") ctx: Context, subjects: List<String>): List<String> {
+    val order = MOVE_SUBJECT_ORDER.map { moveSubjectNorm(it) }
+    // sortedBy স্টেবল — তালিকার বাইরের Subject-গুলো আগের ক্রমেই শেষে থাকে
+    return subjects.sortedBy { val i = order.indexOf(moveSubjectNorm(it)); if (i >= 0) i else Int.MAX_VALUE }
 }
 
-/** বেশি ব্যবহৃত Topic উপরে — কাউন্ট বেশি থেকে কমে (সমান হলে আগের ক্রম অক্ষুণ্ণ থাকে) */
-private fun sortTopicsByUsage(ctx: Context, subject: String, topics: List<String>): List<String> {
-    return try {
-        val prefs = ctx.getSharedPreferences(MOVE_TOPIC_USAGE_PREFS, Context.MODE_PRIVATE)
-        topics.sortedByDescending { prefs.getInt(moveTopicUsageKey(subject, it), 0) }
-    } catch (_: Exception) { topics }
-}
+/** Topic-এর ক্রম আর বদলায় না — যে ক্রমে এসেছে সেটাই থাকে */
+private fun sortTopicsByUsage(@Suppress("UNUSED_PARAMETER") ctx: Context, @Suppress("UNUSED_PARAMETER") subject: String, topics: List<String>): List<String> = topics
 
 // ── 📍 লাস্ট মুভ — প্রতিটা প্রশ্নপত্রে (sheet + subject + topic + পদবী/প্রতিষ্ঠান) সর্বশেষ
 // কোন জায়গায় Move করা হয়েছিল সেটা SharedPreferences-এ সেভ থাকে। অ্যাপ বন্ধ করে পরে
@@ -1534,8 +1539,6 @@ fun QuestionListScreen(
             onConfirm = { newSubject, newSubTopic ->
                 // ── সবচেয়ে বেশি ব্যবহৃত Topic উপরে দেখানোর জন্য প্রতিবার move
                 // করার সময় সিলেকশন-কাউন্ট বাড়ানো হয় (ডিভাইস-লোকাল, SharedPreferences) ──
-                recordMoveTopicUsage(ctxForPrefs, newSubject, newSubTopic)
-                recordMoveSubjectUsage(ctxForPrefs, newSubject)
                 val movedIds    = moveTargetIds
                 val wasSingleMove = singleMoveQuestionId != null
                 // ── 📍 লাস্ট মুভ পজিশন সেভ (Undo করলে আগেরটা ফেরত আসে) ──
