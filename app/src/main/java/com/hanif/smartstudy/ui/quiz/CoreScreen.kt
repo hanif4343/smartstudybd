@@ -363,7 +363,11 @@ fun CoreScreen(
                 // MCQ গুলো এই এক্সাম-পেপার ভিউতে দেখাবে না (কুইজ-স্ক্রিনে আলাদা দেখা যাবে না
                 // এখানে যেহেতু একটাই স্ক্রিন-স্লট — বর্তমানে প্রতি institution সাধারণত
                 // এক টাইপেরই হয়, তবে ভবিষ্যতে মিশ্র হলে MCQ অংশও এখানেই যোগ করা যাবে) ──
-                questions       = state.questions.filter { it.questionType.equals("written", ignoreCase = true) },
+                // Written + পেপার-টেমপ্লেটের গ্রুপ-করা MCQ (Replace/Choose — Admin PaperComposer): ছাপা পেপারের মতো একসাথে দেখাতে
+                questions       = state.questions.filter {
+                    it.questionType.equals("written", ignoreCase = true) ||
+                        (it.isGrouped() && paperIsMcqHeading(it.groupHeading))
+                },
                 isAdmin         = state.isAdmin,
                 onBack          = {
                     val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null
