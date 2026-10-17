@@ -343,6 +343,16 @@ fun QBankExamPaperScreen(
         Divider(color = GoldAccent, thickness = 1.dp)
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            // ── ছাপা পেপারের শীর্ষ ব্যানার (হলুদ/কমলা/নেভি) ──
+            item {
+                val bannerTop = if (showInstitution && institutionName.isNotBlank() && postName.isNotBlank()) institutionName
+                                else postName.ifBlank { institutionName }
+                val bannerMid = if (showInstitution && institutionName.isNotBlank() && postName.isNotBlank()) postName else ""
+                PaperBanner(
+                    top = bannerTop, mid = bannerMid, count = serials.size,
+                    year = subjectQuestions.firstOrNull { it.year.isNotBlank() }?.year.orEmpty()
+                )
+            }
             itemsIndexed(shownSerials, key = { _, s -> s.key }) { idx, serial ->
                 ExamSerialCard(
                     serialNo     = if (sortReversed) serials.size - idx else idx + 1,
@@ -369,7 +379,8 @@ fun QBankExamPaperScreen(
     }
 }
 
-/** একটা "সিরিয়াল" — হয় একটা একক প্রশ্ন, অথবা একই groupId-এর একগুচ্ছ sub-part (ক/খ/গ...) */
+/** একটা "সিরিয়াল" — হয় একটা একক প্রশ্ন, অথবা একই groupId-এর একগুচ্ছ sub-part (ক/খ/গ...)
+ *  ছাপা পেপারের মতো: "০১।" ক্রমিক + শিরোনাম, তারপর শিরোনামের টেমপ্লেট অনুযায়ী লেআউট (PaperLayouts.kt) */
 @Composable
 private fun ExamSerialCard(
     serialNo    : Int,
@@ -380,93 +391,224 @@ private fun ExamSerialCard(
     onReportTap : (QuestionItem) -> Unit
 ) {
     val labels = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ")
-    // 🔬 DIAG (২০২৬-০৮-২৯ — "group heading Sheet-এ ভরা আছে, তাও দেখাচ্ছে না" রিপোর্টের
-    // রুট কারণ ধরার জন্য সাময়িক): শুধু Admin-কে দেখানো হয় — এই serial-টা multi-part
-    // (size>1) হলে সরাসরি বলে দেয় runtime-এ QuestionItem.groupHeading আসলে কী মান
-    // নিয়ে এসেছে (ফাঁকা স্ট্রিং হলে "<EMPTY>", নাহলে আসল টেক্সট)। এতে এক নজরেই বোঝা
-    // যাবে সমস্যাটা (ক) নেটওয়ার্ক/Room-এ ডেটা না পৌঁছানো, নাকি (খ) UI রেন্ডারিং-এর কোনো
-    // আলাদা বাগ — root cause কনফার্ম হয়ে গেলে এই ব্লক ফেরত মুছে ফেলা উচিত। ──
+    val first = serial.first()
+    val heading = first.groupHeading
+    val hasHeading = serial.size > 1 || heading.isNotBlank()
+    val isEnglish = subjectLabelOf(first) == "ইংরেজি"
+    val isMath = subjectLabelOf(first) == "গণিত"
+    val layout = remember(heading, first.formatStyle, first.id) {
+        resolvePaperLayout(heading, first.formatStyle, first.optionA.isNotBlank(), isEnglish)
+    }
+    val serialText = paperBn(serialNo) + "।"
+
     if (isAdmin && serial.size > 1) {
         Text(
-            "🔬 DIAG groupId=${serial.first().groupId} groupHeading=" +
-                (serial.first().groupHeading.ifBlank { "<EMPTY>" }) +
-                " formatStyle=${serial.first().formatStyle.ifBlank { "<none>" }}",
+            "▸ DIAG groupId=${first.groupId} groupHeading=" +
+                (heading.ifBlank { "<EMPTY>" }) +
+                " formatStyle=${first.formatStyle.ifBlank { "<none>" }} layout=${layout.kind}",
             fontSize = 8.sp, color = Color(0xFFB00020),
             modifier = Modifier.padding(horizontal = 16.dp)
         )
     }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        // ── সিরিয়াল-নম্বর ব্যাজ — একক প্রশ্ন হোক বা মাল্টি-পার্ট গ্রুপ, সবসময় থাকে
-        // (গণিত/সাধারণ জ্ঞানে হেডিং না থাকলেও অন্তত এই নম্বরটা দিয়ে প্রশ্ন শুরু হয়) ──
-        Box(
-            Modifier
-                .size(24.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(HeaderBg),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = "$serialNo", color = HeaderCream, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        if (!hasHeading) {
+            // ── একক প্রশ্ন: "০১।  প্রশ্ন … উত্তর"
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    text = serialText, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                    modifier = Modifier.width(36.dp)
+                )
+                Column(Modifier.weight(1f)) {
+                    ExamQAItem(
+                        prefixLabel = null, q = first, inlineSolution = isMath,
+                        onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap
+                    )
+                }
+            }
+            return@Column
         }
-        Spacer(Modifier.width(8.dp))
-        if (serial.size == 1) {
-            // ── একক প্রশ্ন — নাম্বার + প্রশ্ন + উত্তর সরাসরি ──
-            val q = serial[0]
-            Column(Modifier.weight(1f)) {
-                ExamQAItem(prefixLabel = null, q = q, onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap)
-            }
-        } else if (serial.first().formatStyle == "table") {
-            // ── PAPER COMPOSER "Table" ফরম্যাট (যেমন সন্ধি বিচ্ছেদ) — ক/খ/গ স্ট্যাক না
-            // করে সত্যিকারের দুই-কলাম টেবিল: শব্দ | ব্যাখ্যা/বিচ্ছেদ ──
-            Column(Modifier.weight(1f)) {
-                if (serial.first().groupHeading.isNotBlank()) {
-                    Text(
-                        text = serial.first().groupHeading,
-                        fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                    Text("শব্দ", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = TextMuted, modifier = Modifier.weight(0.38f))
-                    Text("ব্যাখ্যা / বিচ্ছেদ", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = TextMuted, modifier = Modifier.weight(0.62f))
-                }
-                serial.forEachIndexed { idx, sub ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-                        Text(text = sub.question, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextMain, modifier = Modifier.weight(0.38f))
-                        Text(text = sub.answer, fontSize = 12.5.sp, color = AnswerText, modifier = Modifier.weight(0.62f))
-                    }
-                    if (idx < serial.lastIndex) Divider(color = DashedLine, thickness = 0.7.dp)
-                }
-            }
-        } else {
-            // ── multi-part গ্রুপ — একটা গ্রুপ-হেডিং লাইনের নিচে ক/খ/গ... ──
-            Column(Modifier.weight(1f)) {
-                // ── SIMPLIFIED ("হেডিং অন করে টেক্সট বসালেই তো হবে"): আগে প্রথম sub-
-                // question-এর নিজের question টেক্সট হেডিং হিসেবে (ভুলভাবে) রিইউজ করা
-                // হতো, প্লাস একটা আলাদা showGroupHeading বুলিয়ান থাকতো — এখন Admin
-                // App-এ যা টাইপ করা হয়েছে (groupHeading) সেটাই সরাসরি এখানে বসে, খালি
-                // থাকলে (থিওরিটে হওয়ার কথা না — গ্রুপ থাকা মানেই হেডিং টাইপ করা হয়েছে,
-                // কারণ group_id নিজেই Admin App-এ groupHeading টাইপ করলে তবেই বসে) কোনো
-                // হেডিং-লাইন দেখাবে না, নিরাপত্তার জন্য fallback হিসেবে। ──
-                if (serial.first().groupHeading.isNotBlank()) {
-                    Text(
-                        text = serial.first().groupHeading,
-                        fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                serial.forEachIndexed { idx, sub ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-                        Text(
-                            text = (labels.getOrNull(idx) ?: "${idx + 1}") + ")",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF8A6D1D),
-                            modifier = Modifier.width(24.dp)
+
+        // ── শিরোনাম লাইন: "০১।  সন্ধি বিচ্ছেদ করুন:"
+        val title = paperHeadingBase(heading)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Text(
+                text = serialText, fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                modifier = Modifier.width(36.dp)
+            )
+            Text(
+                text = title, fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+
+        Column(Modifier.fillMaxWidth().padding(start = 4.dp)) {
+            when (layout.kind) {
+
+                // ── শব্দ-বাক্স + অনুচ্ছেদ + "Answer: (i) … (ii) …"
+                "cloze" -> {
+                    val parts = paperClozeParts(heading)
+                    if (parts.words.isNotEmpty()) PaperWordBox(parts.words)
+                    if (parts.passage.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        com.hanif.smartstudy.ui.shared.MathText(
+                            text = parts.passage, fontSize = 13.8.sp, lineHeight = 22.sp, color = TextMain
                         )
-                        Column(Modifier.weight(1f)) {
-                            ExamQAItem(prefixLabel = null, q = sub, compact = true, onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val answerLine = "Answer: " + serial.joinToString("   ") { "${it.question.trim()} ${it.answer.trim()}" }
+                    Box(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)).background(AnswerBg)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Text(text = answerLine, fontSize = 13.sp, color = AnswerText, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+                    }
+                }
+
+                // ── দুই কলামের টেবিল (অশুদ্ধ | শুদ্ধ ইত্যাদি)
+                "tbl" -> {
+                    val c0 = layout.cols.getOrNull(0) ?: ""
+                    val c1 = layout.cols.getOrNull(1) ?: ""
+                    Column(Modifier.fillMaxWidth().border(androidx.compose.foundation.BorderStroke(1.dp, TextMain))) {
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(TabInactiveBg)) {
+                            PaperCell(c0, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                            PaperCell(c1, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                        }
+                        serial.forEach { sub ->
+                            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                PaperCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
+                                PaperCell(sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                            }
                         }
                     }
                 }
+
+                // ── "ক) বাম  =  ডান" (সন্ধি/এক কথায়/বাগধারা/সমাস…)
+                "pair" -> {
+                    serial.forEachIndexed { idx, sub ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                                Text(
+                                    text = (labels.getOrNull(idx) ?: "${idx + 1}") + ")",
+                                    fontWeight = FontWeight.Bold, color = Color(0xFF8A6D1D),
+                                    modifier = Modifier.width(26.dp)
+                                )
+                                Text(
+                                    text = if (layout.highlight) buildHighlightedText(sub.question) else AnnotatedString(sub.question),
+                                    fontSize = 13.8.sp, lineHeight = 20.sp, color = TextMain,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "  ${layout.sep}  ", fontSize = 13.8.sp, fontWeight = FontWeight.Bold, color = TextMain
+                                )
+                                Text(
+                                    text = sub.answer, fontSize = 13.5.sp, lineHeight = 20.sp,
+                                    color = AnswerText, fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            val third = layout.thirdPre
+                            if (third != null && sub.explanation.isNotBlank()) {
+                                Text(
+                                    text = "$third${sub.explanation}${layout.thirdSuf}",
+                                    fontSize = 12.sp, color = TextMuted, lineHeight = 18.sp,
+                                    modifier = Modifier.padding(start = 26.dp, top = 1.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── প্রশ্ন + "Ans:/উত্তর:" লাইন (stack), MCQ-লেআউট (Options + Answer), ফাঁকা-পূরণ, অথবা সাধারণ ক) খ) তালিকা
+                else -> {
+                    serial.forEachIndexed { idx, sub ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                            Text(
+                                text = (labels.getOrNull(idx) ?: "${idx + 1}") + ")",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF8A6D1D),
+                                modifier = Modifier.width(26.dp)
+                            )
+                            Column(Modifier.weight(1f)) {
+                                ExamQAItem(
+                                    prefixLabel = null, q = sub, compact = true,
+                                    answerLabel = when {
+                                        layout.kind == "mcq" -> "Answer: "
+                                        layout.kind == "stack" && layout.pre.isNotBlank() -> layout.pre
+                                        else -> null
+                                    },
+                                    optionsLine = if (layout.kind == "mcq") paperOptionsLine(sub) else null,
+                                    inlineSolution = isMath,
+                                    onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** টেবিলের একটা ঘর (বর্ডারসহ) */
+@Composable
+private fun PaperCell(text: String, bold: Boolean = false, color: Color = TextMain, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .border(androidx.compose.foundation.BorderStroke(0.6.dp, TextMain))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        com.hanif.smartstudy.ui.shared.MathText(
+            text = text, fontSize = 13.sp, lineHeight = 19.sp, color = color,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+/** cloze-এর শব্দ-বাক্স: প্রতি সারিতে ৩ ঘর, বর্ডারসহ (ছাপা পেপারের মতো) */
+@Composable
+private fun PaperWordBox(words: List<String>) {
+    Column(Modifier.fillMaxWidth().border(androidx.compose.foundation.BorderStroke(1.dp, TextMain))) {
+        words.chunked(3).forEach { rowWords ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                rowWords.forEach { w ->
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .border(androidx.compose.foundation.BorderStroke(0.6.dp, TextMain))
+                            .padding(horizontal = 6.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) { Text(text = w, fontSize = 13.sp, color = TextMain) }
+                }
+                repeat(3 - rowWords.size) {
+                    Box(Modifier.weight(1f).fillMaxHeight().border(androidx.compose.foundation.BorderStroke(0.6.dp, TextMain))) {}
+                }
+            }
+        }
+    }
+}
+
+/** ছাপা পেপারের শীর্ষ ব্যানার: হলুদ (প্রতিষ্ঠান) / কমলা (পদ) / নেভি (প্রশ্নসংখ্যা · সাল) */
+@Composable
+private fun PaperBanner(top: String, mid: String, count: Int, year: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        if (top.isNotBlank()) {
+            Box(Modifier.fillMaxWidth().background(Color(0xFFFFEB00)).padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
+                Text(text = top, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
+            }
+        }
+        if (mid.isNotBlank()) {
+            Box(Modifier.fillMaxWidth().background(Color(0xFFE8710A)).padding(vertical = 3.dp), contentAlignment = Alignment.Center) {
+                Text(text = mid, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().background(Color(0xFF1F2A6B)).padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = "প্রশ্ন: ${paperBn(count, 1)}টি", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            if (year.isNotBlank()) {
+                Text(text = "সাল: $year", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
             }
         }
     }
@@ -477,12 +619,17 @@ private fun ExamQAItem(
     prefixLabel : String?,
     q           : QuestionItem,
     compact     : Boolean = false,
+    // ── পেপার-লেআউট (PaperLayouts.kt): null হলে আগের আচরণ ──
+    answerLabel : String? = null,      // যেমন "Ans: ", "উত্তর: ", "Answer: "
+    optionsLine : String? = null,      // "are/is/were/be" → "Options: …" লাইন
+    inlineSolution : Boolean = false,  // গণিত: "সমাধান" বাক্স সরাসরি দেখানো (ছাপা পেপারের মতো)
     onBookmark  : (String) -> Unit,
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit
 ) {
+    val showSolutionInline = inlineSolution && q.explanation.isNotBlank()
     var detailOpen by remember(q.id) { mutableStateOf(false) }
-    var detailKind by remember(q.id) { mutableStateOf("explain") } // "explain" | "technique"
+    var detailKind by remember(q.id) { mutableStateOf(if (showSolutionInline) "technique" else "explain") } // "explain" | "technique"
     var bookmarked by remember(q.id, q.isBookmarked) { mutableStateOf(q.isBookmarked) }
 
     Column {
@@ -497,6 +644,26 @@ private fun ExamQAItem(
             q.formatStyle == "highlight" -> Text(text = buildHighlightedText(q.question), fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
             else -> com.hanif.smartstudy.ui.shared.MathText(text = q.question, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
         }
+        if (optionsLine != null) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = "Options: $optionsLine",
+                fontSize = if (compact) 12.5.sp else 13.sp, color = TextMuted, lineHeight = 18.sp
+            )
+        }
+        if (showSolutionInline) {
+            Spacer(Modifier.height(5.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(ExplainPanel)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+                Text(text = "সমাধান", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = HeaderTop)
+                Spacer(Modifier.height(2.dp))
+                com.hanif.smartstudy.ui.shared.MathText(
+                    text = q.explanation, fontSize = 13.sp, lineHeight = 20.sp, color = TextMain
+                )
+            }
+        }
         Spacer(Modifier.height(4.dp))
         // ── উত্তর — সরাসরি সঠিক উত্তরের টেক্সট (MCQ হলে answer ফিল্ডে টেক্সট থাকে,
         // Written হলেও answer ফিল্ডই মডেল-উত্তর ধরে নেওয়া হচ্ছে)।
@@ -507,7 +674,7 @@ private fun ExamQAItem(
         // ── inlineFillBlank != null হলে উত্তর ইতিমধ্যে বাক্যের ভিতরেই দেখানো হয়ে গেছে,
         // তাই নিচে আবার আলাদা বক্সে দেখানো হয় না (ডুপ্লিকেট এড়াতে)। ──
         if (q.answer.isNotBlank() && inlineFillBlank == null) {
-            val labelPrefix = if (subjectLabelOf(q) == "ইংরেজি") "" else "উত্তর: "
+            val labelPrefix = answerLabel ?: (if (subjectLabelOf(q) == "ইংরেজি") "" else "উত্তর: ")
             Box(
                 Modifier.clip(RoundedCornerShape(3.dp)).background(AnswerBg).padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
@@ -555,7 +722,7 @@ private fun ExamQAItem(
         if (detailOpen) {
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                DetailTab("ব্যাখ্যা", detailKind == "explain") { detailKind = "explain" }
+                if (!showSolutionInline) DetailTab("ব্যাখ্যা", detailKind == "explain") { detailKind = "explain" }
                 DetailTab("কৌশল", detailKind == "technique") { detailKind = "technique" }
             }
             Spacer(Modifier.height(4.dp))
