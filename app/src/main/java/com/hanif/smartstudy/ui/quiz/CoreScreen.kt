@@ -159,7 +159,9 @@ fun CoreScreen(
     }
 
     // ── QBank প্রতিষ্ঠান/পদবী: MCQ + লিখিত দুটোই থাকলে "দুই-ভাগ" (আগে লিখিত থাকলে MCQ লুকিয়ে যেত) ──
-    val qbankTwoPart = mode == StudyMode.QBANK &&
+    // MCQ | লিখিত কলাম থেকে ঢুকলে (QBankTypeScope) ভেতরে ভাগের বার নেই — শুধু সেই ধরন: 0 = MCQ, 1 = লিখিত, null = দুটোই (আগের আচরণ)
+    val qbankTypeScope: Int? = if (mode == StudyMode.QBANK) com.hanif.smartstudy.util.QBankTypeScope.part else null
+    val qbankTwoPart = mode == StudyMode.QBANK && qbankTypeScope == null &&
         (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION ||
          state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
         state.navPath.depth() == 2 &&
@@ -344,7 +346,7 @@ fun CoreScreen(
              state.qbankFilterMode == QBankFilterMode.INSTITUTION) &&
             state.navPath.depth() == 2 &&
             state.questions.any { it.questionType.equals("written", ignoreCase = true) } &&
-            !(qbankTwoPart && qbankPart == 0) -> {
+            !(qbankTwoPart && qbankPart == 0) && qbankTypeScope != 0 -> {
             val institutionOrSubject = when (state.qbankFilterMode) {
                 QBankFilterMode.INSTITUTION -> state.navPath.subject ?: ""   // প্রতিষ্ঠান-মোডে navPath = (institution, designation)
                 else -> state.navPath.subTopic ?: ""                        // পদবী-মোডে navPath = ("পদ", institution) placeholder
@@ -455,7 +457,7 @@ fun CoreScreen(
                 onAdminDeleteSubject  = onAdminDeleteSubject,
                 onAdminRenameSubTopic = onAdminRenameSubTopic,
                 onAdminDeleteSubTopic = onAdminDeleteSubTopic,
-                forceTypeTab        = if (qbankTwoPart) 0 else null
+                forceTypeTab        = if (qbankTwoPart) 0 else qbankTypeScope
             )
             }
             }
