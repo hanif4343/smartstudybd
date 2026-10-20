@@ -416,17 +416,58 @@ private fun qbankTypeCount(e: SubjectEntry, part: Int): Int =
     if (e.subTopics.isEmpty()) (if (part == 0) e.totalQ else 0)
     else e.subTopics.sumOf { qbankTypeCountSt(it, part) }
 
-/** দুই কলামের মাথার রঙিন শিরোনাম: "MCQ · ৫৬" / "লিখিত · ১২" */
+/** ডিজাইন ২: নাম + দুই চিপ (MCQ | লিখিত)। অ্যাডমিনে কার্ডে লং-প্রেস = ইমোজি বদল (আগের মতো) */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QBankTypeColumnHeader(label: String, count: Int, color: Color) {
-    Box(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(color).padding(vertical = 9.dp),
-        contentAlignment = Alignment.Center
+private fun QBankDualChipCard(
+    title: String, icon: String?, subLabel: String,
+    mcq: Int, written: Int, showMcq: Boolean, showWritten: Boolean,
+    onMcq: () -> Unit, onWritten: () -> Unit, onLongPress: (() -> Unit)?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .then(if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress) else Modifier),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
     ) {
-        Text(
-            text = "$label · ${bnDigits(count)}",
-            color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, fontFamily = NotoSansBengali
-        )
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (icon != null) { Text(icon, fontSize = 20.sp); Spacer(Modifier.width(8.dp)) }
+                Text(
+                    title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (subLabel.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(subLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (showMcq)     QBankTypeChip("MCQ",   mcq,     Color(0xFF0E7490), mcq > 0,     onMcq,     Modifier.weight(1f))
+                if (showWritten) QBankTypeChip("লিখিত", written, Color(0xFF6D28D9), written > 0, onWritten, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** একটা চিপ: বামে ধরন, ডানে সংখ্যা। সংখ্যা ০ হলে ম্লান ও বন্ধ */
+@Composable
+private fun QBankTypeChip(label: String, count: Int, accent: Color, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val bg = if (enabled) accent.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (enabled) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    Row(
+        modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(bg)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = fg, fontFamily = NotoSansBengali)
+        Text(bnDigits(count), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = fg, fontFamily = NotoSansBengali)
     }
 }
 
@@ -587,6 +628,8 @@ fun SubjectListScreen(
     // null হলে মেনুতে অপশন আসে না ──
     onMergeSubject : ((source: String, target: String) -> Unit)? = null
 ) {
+    // এই তালিকা দেখা গেলেই আগের MCQ/লিখিত কলাম-স্কোপ মুছে ফেলা (একক গ্রিডেও যাতে পুরনো স্কোপ না থাকে)
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (mode == StudyMode.QBANK) com.hanif.smartstudy.util.QBankTypeScope.part = null }
     val modeLabel = when (mode) {
         StudyMode.QUIZ  -> "Quiz"
         StudyMode.QBANK -> "Question Bank"
@@ -822,12 +865,13 @@ fun SubjectListScreen(
         }
 
         // Subject cards — QBank এ ২-কলাম গ্রিড (সাবটপিক কাউন্ট দেখায়), Quiz/Study এ আগের মতো সিঙ্গল-কলাম লিস্ট
+        // দুই কলাম শুধু তখনই যখন তালিকায় MCQ-ও আছে আর লিখিতও আছে; একটাই ধরন থাকলে আগের মতো একক গ্রিড (কলাম-ভাগ অকারণ)
+        val qbankHasMcq     = mode == StudyMode.QBANK && displaySubjects.any { qbankTypeCount(it, 0) > 0 }
+        val qbankHasWritten = mode == StudyMode.QBANK && displaySubjects.any { qbankTypeCount(it, 1) > 0 }
         if (mode == StudyMode.QBANK && !(isAdmin && isReorderMode)) {
             // ── MCQ | লিখিত দুই কলাম: বাম কলামে শুধু MCQ-সহ কার্ড (MCQ সংখ্যা), ডান কলামে শুধু লিখিত-সহ কার্ড (লিখিত সংখ্যা) ──
             // কোন কলাম থেকে ট্যাপ হলো সেটা QBankTypeScope-এ রেখে ভেতরে ঢোকা হয়; ভেতরের স্ক্রিন সেই ধরনই দেখায়।
             // অ্যাডমিন রি-অর্ডার মোডে আগের এক-গ্রিডই থাকে (ক্রম বদলানোর জন্য)।
-            val mcqSide = displaySubjects.filter { qbankTypeCount(it, 0) > 0 }
-            val wrSide  = displaySubjects.filter { qbankTypeCount(it, 1) > 0 }
             val titleFor: (SubjectEntry) -> String? = { subject ->
                 if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
                                 val insts = subject.subTopics.map { it.name.trim() }
@@ -845,67 +889,40 @@ fun SubjectListScreen(
                                     (if (subject.years.size > 3) " +${subject.years.size - 3}" else "")
                             } else null
             }
+            // ── ডিজাইন ২: প্রতিটা কার্ডে দুই চিপ ("MCQ ৫৬" | "লিখিত ১২") — চিপে ট্যাপ করলে সেই ধরনেই ঢোকে ──
+            // তালিকায় লিখিত একেবারেই না থাকলে (বা MCQ না থাকলে) শুধু যেটা আছে সেই চিপ; কার্ডে যে ধরন নেই সেই চিপ ম্লান ও বন্ধ।
             item {
-                // তালিকা আবার দেখা গেলে (ভেতর থেকে ফিরে এলে) আগের কলাম-স্কোপ মুছে ফেলা
+                // তালিকা আবার দেখা গেলে (ভেতর থেকে ফিরে এলে) আগের চিপ-স্কোপ মুছে ফেলা
                 androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankTypeScope.part = null }
-                LazyVerticalGrid(
-                    columns                = GridCells.Fixed(2),
-                    modifier               = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
-                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
-                    verticalArrangement    = Arrangement.spacedBy(8.dp)
-                ) {
-                    item(span = { GridItemSpan(1) }) { QBankTypeColumnHeader("MCQ", mcqSide.size, Color(0xFF0891B2)) }
-                    item(span = { GridItemSpan(1) }) { QBankTypeColumnHeader("লিখিত", wrSide.size, Color(0xFF7C3AED)) }
-                    // সারি ধরে জোড়া: বাম = MCQ, ডান = লিখিত (এক পাশ ছোট হলে ফাঁকা ঘর)
-                    val rowsN = maxOf(mcqSide.size, wrSide.size)
-                    for (r in 0 until rowsN) {
-                        for (part in 0..1) {
-                            val subject = (if (part == 0) mcqSide else wrSide).getOrNull(r)
-                            item {
-                                if (subject == null) {
-                                    Spacer(Modifier.height(1.dp))
-                                } else {
-                                    val cnt = qbankTypeCount(subject, part)
-                                    // কার্ডে শুধু এই কলামের ধরনের সংখ্যা ও পদ/প্রতিষ্ঠান-তালিকা দেখাতে প্রতিলিপি
-                                    val view = subject.copy(
-                                        totalQ    = cnt,
-                                        doneQ     = if (subject.totalQ > 0) minOf(cnt, (subject.doneQ.toLong() * cnt / subject.totalQ).toInt()) else 0,
-                                        subTopics = subject.subTopics.filter { qbankTypeCountSt(it, part) > 0 }
-                                    )
-                                    QBankSubjectCard(
-                                        subject = view,
-                                        onClick = {
-                                            com.hanif.smartstudy.util.QBankTypeScope.part = part
-                                            val direct = onSubjectDirect
-                                            if (direct != null && selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) direct(subject.name)
-                                            else onSubject(subject.name)
-                                        },
-                                        reorderEnabled = false,
-                                        isFirst = r == 0,
-                                        isLast  = r == rowsN - 1,
-                                        onMoveUp   = {},
-                                        onMoveDown = {},
-                                        reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
-                                        emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
-                                        isAdmin = isAdmin && !isReorderMode,
-                                        onEmojiClick = {
-                                            emojiEditTargetId = subject.subjectId
-                                            emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
-                                        },
-                                        titleOverride = titleFor(view),
-                                        hideSubLabel = selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE,
-                                        subLabelOverride = when (qbankFilterMode) {
-                                            QBankFilterMode.INSTITUTION -> totalQLabel(cnt)
-                                            QBankFilterMode.YEAR        -> totalQLabel(cnt)
-                                            QBankFilterMode.POST        -> "${view.subTopics.size} টি প্রতিষ্ঠান"
-                                            QBankFilterMode.DESIGNATION -> "${view.subTopics.size} টি প্রতিষ্ঠান"
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
+            }
+            itemsIndexed(displaySubjects) { _, subject ->
+                val mcqN = qbankTypeCount(subject, 0)
+                val wrN  = qbankTypeCount(subject, 1)
+                val icon = emojiOverrides["$refType:${subject.subjectId}"]?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                val papers = subject.subTopics.count { it.hasQuestions() }
+                val subLabel = if (selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) "" else when (qbankFilterMode) {
+                    QBankFilterMode.INSTITUTION, QBankFilterMode.YEAR -> "${bnDigits(papers)}টি পেপার · মোট ${bnDigits(mcqN + wrN)}টি প্রশ্ন"
+                    QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> "${bnDigits(papers)}টি প্রতিষ্ঠান · মোট ${bnDigits(mcqN + wrN)}টি প্রশ্ন"
                 }
+                val openType = { part: Int ->
+                    com.hanif.smartstudy.util.QBankTypeScope.part = part
+                    val direct = onSubjectDirect
+                    if (direct != null && selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) direct(subject.name)
+                    else onSubject(subject.name)
+                }
+                QBankDualChipCard(
+                    title = titleFor(subject) ?: subject.name,
+                    icon = icon,
+                    subLabel = subLabel,
+                    mcq = mcqN, written = wrN,
+                    showMcq = qbankHasMcq, showWritten = qbankHasWritten,
+                    onMcq = { openType(0) },
+                    onWritten = { openType(1) },
+                    onLongPress = if (isAdmin && subject.subjectId.isNotBlank()) ({
+                        emojiEditTargetId = subject.subjectId
+                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                    }) else null
+                )
             }
         } else if (mode == StudyMode.QBANK) {
             item {
