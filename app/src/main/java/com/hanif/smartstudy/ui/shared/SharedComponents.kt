@@ -1037,6 +1037,11 @@ fun QuestionCard(
             // ── UX ফিচার: AI ব্যাখ্যা — MCQ-তে অপশন সিলেক্ট করার সাথে সাথে অটো-লোড
             // হয় (উপরের LaunchedEffect), admin-এর static ব্যাখ্যার নিচে আলাদা বক্সে
             // দেখা যায় (দুটো গুলিয়ে না যায়, তাই "🤖 AI ব্যাখ্যা" লেবেল দেওয়া) ──
+            // ✍ হাতে লেখা সমাধান (টাচপেন) — লেখা থাকলে সবাই দেখে; অ্যাডমিন এখান থেকেই লেখে/এডিট করে
+            if (showAnswerBox && canSeeExplanation) {
+                com.hanif.smartstudy.ui.ink.InkSection(item.id, "explanation", isAdminUser)
+            }
+
             if (item.isMcq() && item.answerState !is AnswerState.Unanswered && onRequestAiExplanation != null) {
                 Spacer(Modifier.height(8.dp))
                 val aiShape = RoundedCornerShape(14.dp)
@@ -1187,6 +1192,11 @@ fun QuestionCard(
                     isAdmin = true,
                     reader  = reader
                 )
+            }
+
+            // ✍ হাতে লেখা কৌশল
+            if (showAnswerBox) {
+                com.hanif.smartstudy.ui.ink.InkSection(item.id, "technique", isAdminUser)
             }
 
             if (showAnswerBox || openTechniqueSignal) {
