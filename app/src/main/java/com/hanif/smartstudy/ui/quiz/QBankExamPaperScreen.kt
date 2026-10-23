@@ -421,7 +421,7 @@ private fun ExamSerialCard(
                 )
                 Column(Modifier.weight(1f)) {
                     ExamQAItem(
-                        prefixLabel = null, q = first, inlineSolution = isMath,
+                        prefixLabel = null, q = first, inlineSolution = isMath, isAdmin = isAdmin,
                         onBookmark = onBookmark, onSpeak = onSpeak, onReportTap = onReportTap
                     )
                 }
@@ -532,7 +532,7 @@ private fun ExamSerialCard(
                             )
                             Column(Modifier.weight(1f)) {
                                 ExamQAItem(
-                                    prefixLabel = null, q = sub, compact = true,
+                                    prefixLabel = null, q = sub, compact = true, isAdmin = isAdmin,
                                     answerLabel = when {
                                         layout.kind == "mcq" -> "Answer: "
                                         layout.kind == "stack" && layout.pre.isNotBlank() -> layout.pre
@@ -623,6 +623,7 @@ private fun ExamQAItem(
     answerLabel : String? = null,      // যেমন "Ans: ", "উত্তর: ", "Answer: "
     optionsLine : String? = null,      // "are/is/were/be" → "Options: …" লাইন
     inlineSolution : Boolean = false,  // গণিত: "সমাধান" বাক্স সরাসরি দেখানো (ছাপা পেপারের মতো)
+    isAdmin     : Boolean = false,     // অ্যাডমিনের জন্য ✍ হাতে লেখার বাটন
     onBookmark  : (String) -> Unit,
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit
@@ -744,6 +745,8 @@ private fun ExamQAItem(
                     fontStyle = if (panelText.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
                 )
             }
+            // ✍ হাতে লেখা (টাচপেন) — ব্যাখ্যা/কৌশল ট্যাব অনুযায়ী
+            com.hanif.smartstudy.ui.ink.InkSection(q.id, if (detailKind == "explain") "explanation" else "technique", isAdmin)
         }
     }
 }
