@@ -463,6 +463,12 @@ fun MainScreen(
                     onOpenMenuPage = { page -> menuInitialPage = page; currentTab = BottomTab.MENU },
                     onOpenQuizTab  = { currentTab = BottomTab.QUIZ },
                     onOpenQBankTab = { currentTab = BottomTab.QBANK },
+                    // Home-এর ক্যাটাগরি চিপ: ক্যাটাগরি সেট + QBank নেভিগেশন রুটে রিসেট (ভেতরের কোনো প্রশ্নপত্রে আটকে না থাকে)
+                    onOpenQBankCategory = { cat ->
+                        com.hanif.smartstudy.util.QBankCategory.selected = cat
+                        qbankViewModel.setMode(StudyMode.QBANK)
+                        currentTab = BottomTab.QBANK
+                    },
                     onOpenStudyTab = { currentTab = BottomTab.STUDY },
                     onOpenTyping   = { openTypingWithFocusCheck() },
                     onOpenMockTest = { isQBank ->
