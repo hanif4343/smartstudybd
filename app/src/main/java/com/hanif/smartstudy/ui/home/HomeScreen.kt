@@ -140,6 +140,7 @@ fun HomeScreen(
     onOpenMenuPage : (String) -> Unit = {},               // Menu ট্যাব + নির্দিষ্ট sub-page
     onOpenQuizTab  : () -> Unit = {},
     onOpenQBankTab : () -> Unit = {},
+    onOpenQBankCategory : (String) -> Unit = {},   // Home-এর ক্যাটাগরি চিপ → QBank ট্যাব + সেই ক্যাটাগরি
     onOpenStudyTab : () -> Unit = {},
     onOpenTyping   : () -> Unit = {},
     onOpenMockTest : (Boolean) -> Unit = {},   // true = QBank মোডে Mock Test, false = Quiz মোডে Mock Test
@@ -240,6 +241,34 @@ fun HomeScreen(
                 buddyEnabled = buddyEnabled,
                 onOpenBuddy  = onOpenBuddyTab,
                 onOpenStreak = { onOpenMenuPage("stats") }
+            )
+
+            // ── এখন কী করব? — চালিয়ে যান + দ্রুত অ্যাকশন + প্রশ্নব্যাংক ক্যাটাগরি ──
+            HomeContinueCard(
+                recent       = state.recentActivity,
+                onContinue   = { r ->
+                    when {
+                        r.isModelTest     -> onOpenMenuPage("testhistory")
+                        r.mode == "QBANK" -> onOpenQBankTab()
+                        r.mode == "QUIZ"  -> onOpenQuizTab()
+                        r.mode == "STUDY" -> onOpenStudyTab()
+                        r.mode == "VIVA"  -> onOpenViva()
+                        else              -> onOpenMenuPage("testhistory")
+                    }
+                },
+                onStartFresh = onOpenQBankTab
+            )
+            HomeQuickActionsRow(
+                onWrongReview = { onOpenMenuPage("wrongreview") },
+                onModelTest   = { onOpenMockTest(true) },   // সরাসরি QBank মডেল টেস্ট (Quiz/QBank প্রশ্ন নেই)
+                onSaved       = { onOpenMenuPage("bookmarks") },
+                onRoutine     = { onOpenMenuPage("routine") }
+            )
+            HomeQBankCategoriesRow(
+                categories  = com.hanif.smartstudy.util.QBankCategory.ALL,
+                onPick      = onOpenQBankCategory,
+                onOpenAll   = onOpenQBankTab,
+                onOpenStudy = onOpenStudyTab
             )
 
             // মোট অগ্রগতি (Quiz-এর গড় সঠিক %) + পড়াশোনা / কুইজ / মডেল টেস্ট
