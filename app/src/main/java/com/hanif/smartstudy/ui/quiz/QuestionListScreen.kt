@@ -335,6 +335,7 @@ fun QuestionListScreen(
     val scrollScope = rememberCoroutineScope()
     var reportIdx by remember { mutableStateOf(-1) }
     var showSubmitDialog by remember { mutableStateOf(false) }
+    var showNumberSheet by remember { mutableStateOf(false) }   // প্রশ্ন-নম্বর গ্রিড (১০টার বেশি প্রশ্নে)
     var activeHighlightId by remember { mutableStateOf<String?>(null) }
     // ── 🤖 প্রশ্ন-ভিত্তিক ভয়েস AI চ্যাট — কোন প্রশ্ন (local index, pagedQuestions-এর
     // ভেতরে) নিয়ে চ্যাট খোলা আছে। null মানে বন্ধ। "পরের প্রশ্ন" চাপলে/বললে +1 হয়ে
@@ -858,6 +859,25 @@ fun QuestionListScreen(
 
                 // Reading progress bar
                 ReadingProgressBar(current = readingIdx + 1, total = effectiveTotal)
+
+                // ── নম্বর-গ্রিড: ১০টার বেশি প্রশ্ন থাকলে যেকোনো নম্বরে লাফ + সঠিক/ভুল/বাকি এক নজরে ──
+                if (pagedQuestions.size > 10) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            "▦ সব নম্বর · ${readingIdx + 1}/$effectiveTotal",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                                .clickable { showNumberSheet = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
 
                 // ── QBank: MCQ / Written আলাদা ট্যাব ──
                 if (qbankSplit && forceTypeTab == null) {
@@ -1613,6 +1633,19 @@ fun QuestionListScreen(
                 }
             },
             onDismiss = { showMoveQuestionsDialog = false; singleMoveQuestionId = null }
+        )
+    }
+
+    // ── প্রশ্ন-নম্বর গ্রিড শিট ──
+    if (showNumberSheet) {
+        QuestionNumberSheet(
+            cells     = pagedQuestions.map { it.toNumCell() },
+            current   = listState.firstVisibleItemIndex,
+            onPick    = { idx ->
+                showNumberSheet = false
+                scrollScope.launch { listState.animateScrollToItem(idx) }
+            },
+            onDismiss = { showNumberSheet = false }
         )
     }
 
