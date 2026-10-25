@@ -440,7 +440,7 @@ function doPublish_() {
     // refDiag action ফেরত মুছে ফেলা উচিত। ──
     var refDiag = { at: new Date().toString(), files: {} };
 
-    var refPublishOne_ = function (label, sheetName, filePath, commitMsg) {
+    var refPublishOne_ = function (label, sheetName, filePath, commitMsg, transform) {
       var sh = ss.getSheetByName(sheetName);
       if (!sh) {
         refDiag.files[label] = { skipped: true, reason: "sheet '" + sheetName + "' not found" };
@@ -448,6 +448,11 @@ function doPublish_() {
       }
       try {
         var data = sheetToJsonArray_(sh);
+        // optional transform (যেমন exam-appearances-এ qtype যোগ) — ব্যর্থ হলে মূল ডেটাই publish হয়, আগের মতো
+        if (transform) {
+          try { data = transform(data) || data; }
+          catch (tErr) { logError_("refPublishOne_/transform/" + label, String(tErr)); }
+        }
         var jsonStr = JSON.stringify(data);
         var result = ghPutFile_(ghOwner, ghRepo, ghBranch, filePath, jsonStr, ghToken, commitMsg);
         refDiag.files[label] = { rows: data.length, bytes: jsonStr.length, result: result };
@@ -462,7 +467,16 @@ function doPublish_() {
     refPublishOne_("tags", "Tags", "reference/tags.json", "Update reference/tags.json");
     refPublishOne_("posts", "Posts", "reference/posts.json", "Update reference/posts.json");
     refPublishOne_("institutions", "Institutions", "reference/institutions.json", "Update reference/institutions.json");
-    refPublishOne_("examAppearances", (qEaSheet_(ss) ? qEaSheet_(ss).getName() : "Exam_Appearances"), "exam-appearances.json", "Update exam-appearances.json");
+    refPublishOne_("examAppearances", (qEaSheet_(ss) ? qEaSheet_(ss).getName() : "Exam_Appearances"), "exam-appearances.json", "Update exam-appearances.json",
+      function (rows) {
+        // প্রতিটা appearance-রো-তে প্রশ্নের ধরন (qtype: "W"/"M") — অ্যাপের QBank কার্ড-কাউন্টের জন্য
+        var tm = qEaTypeMap_(ss);
+        for (var ri = 0; ri < rows.length; ri++) {
+          var t = tm[String(rows[ri].question_id == null ? "" : rows[ri].question_id).trim()];
+          if (t) rows[ri].qtype = t;
+        }
+        return rows;
+      });
 
     try {
       PropertiesService.getScriptProperties().setProperty("LAST_REFERENCE_DIAG", JSON.stringify(refDiag));
@@ -1768,6 +1782,34 @@ function qUnified_(ss) { ss = ss || SpreadsheetApp.getActiveSpreadsheet(); retur
 function qIsView_(name) { return name === "Quiz" || name === "QBank"; }
 /** Exam Appearances: v2 (নতুন আইডি) থাকলে সেটা, নাহলে পুরনোটা */
 function qEaSheet_(ss) { ss = ss || SpreadsheetApp.getActiveSpreadsheet(); return ss.getSheetByName(Q_EA_V2_SHEET_) || ss.getSheetByName("Exam_Appearances"); }
+
+/** exam-appearances.json publish-এর জন্য: প্রশ্ন-আইডি → "W" (Written) বা "M" (বাকি সব)।
+ *  অ্যাপ এটা দিয়ে QBank কার্ডের MCQ/লিখিত সংখ্যা Room-এ প্রশ্ন ডাউনলোড ছাড়াই ঠিক দেখায়।
+ *  `Questions` (unified) শিট থাকলে সেটা, নাহলে পুরনো `QBank` শিট। শুধু দুটো কলাম (id, Question Type) পড়ে — হালকা।
+ *  শিট/কলাম না পাওয়া গেলে খালি ম্যাপ ফেরত দেয় (তখন JSON আগের মতোই, qtype ছাড়া যায়)। */
+function qEaTypeMap_(ss) {
+  var map = {};
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(Q_UNIFIED_SHEET_) || ss.getSheetByName("QBank");
+  if (!sh || sh.getLastRow() < 2) return map;
+  var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var cI = 0, cT = 0;
+  for (var c = 0; c < hdr.length; c++) {
+    var h = String(hdr[c]).trim().toLowerCase();
+    if (!cI && h === "id") cI = c + 1;
+    if (!cT && h === "question type") cT = c + 1;
+  }
+  if (!cI || !cT) return map;
+  var n = sh.getLastRow() - 1;
+  var ids = sh.getRange(2, cI, n, 1).getValues();
+  var ts  = sh.getRange(2, cT, n, 1).getValues();
+  for (var i = 0; i < n; i++) {
+    var id = String(ids[i][0] == null ? "" : ids[i][0]).trim();
+    if (!id) continue;
+    map[id] = String(ts[i][0] == null ? "" : ts[i][0]).trim().toLowerCase() === "written" ? "W" : "M";
+  }
+  return map;
+}
 
 function qRowInView_(viewName, inQuiz, legacy, inQbank, hasQbankCol) {
   if (!viewName) return true;

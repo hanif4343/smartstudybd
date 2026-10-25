@@ -641,6 +641,20 @@ class ContentRepository(private val context: Context) {
             .filter { !it.questionType.trim().equals("study", ignoreCase = true) }
             .associate { it.fbKey to it.questionType.trim().equals("written", ignoreCase = true) }
     }
+    /**
+     * QBank কার্ডের MCQ/লিখিত গণনার জন্য (fbKey → isWritten)। আগে শুধু Room-এর প্রশ্ন ধরা হতো, ফলে
+     * ডাউনলোড-না-হওয়া প্রশ্ন কোনো দিকেই গোনা হতো না (লিখিত ০ দেখাতো)। এখন GAS-এর exam-appearances
+     * থেকে পাওয়া ধরনকে ভিত্তি ধরে, তার ওপর Room-এর (আসল, ডাউনলোড-করা) ধরন বসানো হয় — তাই Room-এ
+     * যা আছে সেটাই প্রাধান্য পায়, বাকিগুলোর জন্য appearance-এর ধরন কাজে লাগে। qtype না থাকলে ফল
+     * আগের আচরণের (শুধু Room) সমান।
+     */
+    suspend fun getQBankTypeMap(): Map<String, Boolean> = withContext(Dispatchers.IO) {
+        val room = getRoomQuestionTypeMap("QBANK")
+        val fromAppearances = try {
+            com.hanif.smartstudy.util.QBankTypeStore.all(context)
+        } catch (e: Exception) { emptyMap() }
+        if (fromAppearances.isEmpty()) room else HashMap(fromAppearances).apply { putAll(room) }
+    }
     // Move ডায়ালগে সব Subject/Topic দেখাতে — প্রশ্নের টেবিল থেকে distinct (reference-এ না থাকলেও)
     suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet.uppercase())
     suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet.uppercase(), subject)
@@ -792,6 +806,16 @@ class ContentRepository(private val context: Context) {
         refDao.deleteAllExamAppearances()
         if (appearances.isNotEmpty()) {
             refDao.upsertExamAppearances(appearances.map { it.toEntity() })
+        }
+        // ── QBank কার্ডের MCQ/লিখিত সংখ্যা: GAS-এর JSON-এ থাকা qtype ("W"/"M") আলাদা ফাইলে রাখো,
+        // যাতে Room-এ প্রশ্ন ডাউনলোড না থাকলেও সংখ্যা ঠিক আসে। qtype না থাকলে (পুরনো JSON) কিছু বদলায় না।
+        // এখানে কোনো ব্যর্থতা মূল sync-কে আটকাবে না। ──
+        try {
+            com.hanif.smartstudy.util.QBankTypeStore.replaceAll(
+                context, appearances.map { (it.questionId ?: "") to it.qtype }
+            )
+        } catch (e: Exception) {
+            Log.w("Repo", "QBankTypeStore update failed: ${e.message}")
         }
         Log.d("Repo", "syncExamAppearances (CDN): ${appearances.size}")
         true

@@ -44,7 +44,16 @@ object QBankCategory {
         val ownCategory = NAMED.firstOrNull { nameMatches(ownName, it) }
         return when (category) {
             in NAMED -> if (ownCategory != null) ownCategory == category else hit(category)
-            GRADE    -> NAMED.none { hit(it) }
+            // ── FIX: আগে GRADE = "কোনো নামযুক্ত ক্যাটাগরিতেই মেলেনি"। ফলে একটা বড় পদবীর (যেমন "অফিস সহকারী কাম
+            // কম্পিউটার অপারেটর", ১১ প্রতিষ্ঠান) শুধু একটা প্রতিষ্ঠানের নামে "প্রাথমিক ও গণশিক্ষা মন্ত্রণালয়"
+            // থাকলেই পুরো পদবী "প্রাথমিক" চিপে চলে যেত, "১৬-২০ গ্রেড"-এ আর আসত না (৬২৩টা লিখিত প্রশ্নসহ গায়েব)।
+            // এখন: কার্ডের নিজের নামে কোনো নামযুক্ত ক্যাটাগরি না মিললে এবং অন্তত একটা নেস্টেড নাম (প্রতিষ্ঠান)
+            // কোনো নামযুক্ত ক্যাটাগরিতেই না পড়লে (বা নেস্টেড নামই না থাকলে) কার্ডটা GRADE-এও আসে।
+            // বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক চিপের নিয়ম আগের মতোই — তাই আগের কোনো কার্ড কোনো চিপ থেকে সরে না,
+            // শুধু GRADE-এ আরও কিছু যোগ হতে পারে (GRADE-এর আগের সব কার্ড এখনও থাকে)। ──
+            GRADE    -> ownCategory == null && names.drop(1).let { nested ->
+                nested.isEmpty() || nested.any { n -> NAMED.none { nameMatches(n, it) } }
+            }
             else     -> true
         }
     }

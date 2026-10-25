@@ -202,18 +202,21 @@ fun QBankExamPaperScreen(
     // ── এই সাবজেক্টের প্রশ্নগুলোকে groupId অনুযায়ী "সিরিয়াল" (একটা করে কার্ড) এ ভাগ করা —
     // একই groupId হলে সবগুলো sub-part একটা কার্ডে, না হলে প্রতিটা নিজের একটা কার্ড ──
     data class Serial(val key: String, val items: List<QuestionItem>)
+    // ── FIX (লিখিত প্রশ্ন কম/ডুপ্লিকেট দেখানোর বাগ): আগের লুপ `i += mates.size` ধরে নিত একই গ্রুপের
+    // প্রশ্নগুলো লিস্টে পাশাপাশি আছে। কিন্তু ViewModel মাস্টার্ড/স্টাডি-ডান প্রশ্ন শেষে সরিয়ে দেয়, তাই
+    // গ্রুপের সদস্য ছড়িয়ে গেলে কিছু প্রশ্ন বাদ পড়ত আর কিছু গ্রুপ দু'বার দেখাত। এখন প্রতিটা গ্রুপ
+    // ঠিক একবার (প্রথম সদস্য যেখানে আছে সেই জায়গায়) বসে, আর কোনো প্রশ্নই বাদ পড়ে না। ──
     val serials = remember(subjectQuestions) {
+        val groups = subjectQuestions.filter { it.isGrouped() }.groupBy { it.groupId }
+        val seen = HashSet<String>()
         val out = mutableListOf<Serial>()
-        var i = 0
-        while (i < subjectQuestions.size) {
-            val q = subjectQuestions[i]
+        for (q in subjectQuestions) {
             if (q.isGrouped()) {
-                val mates = subjectQuestions.filter { it.groupId == q.groupId }
-                out.add(Serial(q.groupId, mates.sortedBy { it.subIndex }))
-                i += mates.size
+                if (seen.add(q.groupId)) {
+                    out.add(Serial(q.groupId, (groups[q.groupId] ?: listOf(q)).sortedBy { it.subIndex }))
+                }
             } else {
                 out.add(Serial(q.id, listOf(q)))
-                i += 1
             }
         }
         out

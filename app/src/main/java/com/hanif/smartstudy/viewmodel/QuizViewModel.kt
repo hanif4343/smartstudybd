@@ -2431,7 +2431,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val posts        = repo.getRoomPosts().associateBy { it.postId }
         val progressMap  = loadProgressMap()
         val mode = StudyMode.QBANK
-        val typeMap = repo.getRoomQuestionTypeMap("QBANK")   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য
+        val typeMap = repo.getQBankTypeMap()   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য (Room + Exam_Appearances qtype)
 
         val entries = institutions.map { inst ->
             val appearances = repo.getRoomAppearancesForInstitution(inst.institutionId)
@@ -2677,7 +2677,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val institutions = repo.getRoomInstitutions().associateBy { it.institutionId }
         val progressMap  = loadProgressMap()
         val mode = StudyMode.QBANK
-        val typeMap = repo.getRoomQuestionTypeMap("QBANK")   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য
+        val typeMap = repo.getQBankTypeMap()   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য (Room + Exam_Appearances qtype)
 
         val entries = posts.map { post ->
             val appearances   = repo.getRoomAppearancesForPost(post.postId)

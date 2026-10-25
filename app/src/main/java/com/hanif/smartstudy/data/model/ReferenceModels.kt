@@ -85,7 +85,11 @@ data class ExamAppearanceRef(
     @SerializedName("institution_id") val institutionId : String? = null,
     // ⚠️ CdnService.fetchReferenceJson CaseInsensitiveGson ব্যবহার করে, যেটা "year" কী-কে "Year" বানিয়ে
     // দেয় (QBank-এর কলামের জন্য) — তাই alternate না থাকলে সাল সবসময় null হয়ে যেত।
-    @SerializedName("year", alternate = ["Year", "YEAR"]) val year : String? = null
+    @SerializedName("year", alternate = ["Year", "YEAR"]) val year : String? = null,
+    // ── QBank কার্ডের MCQ/লিখিত সংখ্যা ঠিক রাখতে (GAS publish এই কী যোগ করে): "W" = লিখিত, "M" = MCQ।
+    // Room-এ প্রশ্ন ডাউনলোড না থাকলেও ধরন জানা যায়। পুরনো JSON-এ এই কী না থাকলে null — কোনো সমস্যা নেই।
+    // (Room schema বদলায়নি — ধরনগুলো util/QBankTypeStore-এ আলাদা ফাইলে থাকে) ──
+    @SerializedName("qtype", alternate = ["Qtype", "QTYPE"]) val qtype : String? = null
 )
 
 /** GAS action=getReferenceData → {"status":"success","data":{...}} এর "data" অংশ */
