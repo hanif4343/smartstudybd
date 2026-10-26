@@ -50,6 +50,8 @@ import com.hanif.smartstudy.ui.theme.NordicClayTint
 import com.hanif.smartstudy.ui.theme.NordicInk
 import com.hanif.smartstudy.ui.theme.NordicMuted
 import kotlin.math.ceil
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 // subject icon map
 private val subjectIcons = mapOf(
@@ -393,7 +395,7 @@ private val EXAM_CATEGORIES = com.hanif.smartstudy.util.QBankCategory.ALL
 
 private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolean =
     com.hanif.smartstudy.util.QBankCategory.matches(
-        listOf(subject.name) + subject.subTopics.map { it.name }, category
+        listOf(subject.name) + subject.subTopics.map { it.instLabel() }.distinct(), category
     )
 
 // ইংরেজি অঙ্ক → বাংলা অঙ্ক (৭০, ৮০, ৯০ …)
@@ -415,6 +417,163 @@ private fun qbankTypeCountSt(st: SubTopicEntry, part: Int): Int {
 private fun qbankTypeCount(e: SubjectEntry, part: Int): Int =
     if (e.subTopics.isEmpty()) (if (part == 0) e.totalQ else 0)
     else e.subTopics.sumOf { qbankTypeCountSt(it, part) }
+
+/** প্রশ্নপত্রের (SubTopicEntry) প্রতিষ্ঠান/পদবী-লেবেল — সাল ছাড়া (ক্যাটাগরি-মিল ও শিরোনামের জন্য) */
+private fun SubTopicEntry.instLabel(): String = paperInst.ifBlank { name }
+
+/** একটা কার্ড (SubjectEntry)-এর নির্দিষ্ট ধরনের প্রশ্নপত্র-সংখ্যা। part: 0 = MCQ, 1 = লিখিত।
+ *  প্রশ্নপত্র-ভাগ না থাকলে (পুরনো ডাটা) ধরনের প্রশ্ন থাকলে ১টা ধরা হয়। */
+private fun qbankPaperCount(e: SubjectEntry, part: Int): Int =
+    if (e.subTopics.any { it.paperType >= 0 }) e.subTopics.count { it.paperType == part }
+    else if (qbankTypeCount(e, part) > 0) 1 else 0
+
+private val QBankMcqColor     = Color(0xFF0E7490)
+private val QBankWrittenColor = Color(0xFF6D28D9)
+
+/** লিস্ট ☰ | গ্রিড ▦ — পছন্দ স্থায়ী (QBankViewStyle) */
+@Composable
+private fun QBankLayoutToggle(showLabels: Boolean, modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankViewStyle.init(ctx) }
+    val grid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val line = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    Row(
+        modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, line, RoundedCornerShape(12.dp))
+    ) {
+        listOf(false to ("☰" to "লিস্ট"), true to ("▦" to "গ্রিড")).forEach { (isGrid, p) ->
+            val on = grid == isGrid
+            Box(
+                Modifier
+                    .background(if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent)
+                    .clickable { com.hanif.smartstudy.util.QBankViewStyle.set(ctx, isGrid) }
+                    .heightIn(min = 36.dp).padding(horizontal = if (showLabels) 12.dp else 11.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (showLabels) "${p.first} ${p.second}" else p.first,
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    color = if (on) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** উপরের "MCQ | লিখিত" ট্যাব (প্রশ্নপত্রের তালিকা)। selected: 0 = MCQ, 1 = লিখিত */
+@Composable
+private fun QBankTypeTabs(selected: Int, mcqPapers: Int, writtenPapers: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        listOf(
+            Triple(0, "🔘 MCQ · ${bnDigits(mcqPapers)}টি", QBankMcqColor),
+            Triple(1, "✍️ লিখিত · ${bnDigits(writtenPapers)}টি", QBankWrittenColor)
+        ).forEach { (part, label, accent) ->
+            val on = selected == part
+            Box(
+                Modifier.weight(1f).heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (on) accent else Color.Transparent)
+                    .border(1.5.dp, if (on) accent else accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    .clickable { onSelect(part) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(label, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                    color = if (on) Color.White else accent)
+            }
+        }
+    }
+}
+
+/** একটা প্রশ্নপত্রের কার্ড — যেমন "বিদ্যুৎ বিভাগ - ২০২৬"। compact = গ্রিড-কলাম */
+@Composable
+private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val accent = if (st.paperType == 1) QBankWrittenColor else QBankMcqColor
+    val frac = if (st.totalQ > 0) (st.doneQ.toFloat() / st.totalQ).coerceIn(0f, 1f) else 0f
+    Card(
+        modifier  = modifier.fillMaxWidth().clickable { onClick() },
+        shape     = RoundedCornerShape(if (compact) 16.dp else 18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp),
+        border    = BorderStroke(1.dp, accent.copy(alpha = 0.16f))
+    ) {
+        Column(Modifier.padding(if (compact) 12.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                st.name, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${bnDigits(st.totalQ)}টি প্রশ্ন", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    color = accent, fontFamily = NotoSansBengali,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(accent.copy(alpha = 0.14f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+                if (st.doneQ > 0) Text("${st.progressPct}% সম্পন্ন", fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            LinearProgressIndicator(
+                progress = { frac },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(99.dp)),
+                color = GreenOk,
+                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            )
+        }
+    }
+}
+
+/** প্রথম স্ক্রিনের কার্ড (পদবী/প্রতিষ্ঠান): এক ট্যাপে ভেতরে ঢোকে; MCQ/লিখিত শুধু ছোট ব্যাজ (প্রশ্নপত্র-সংখ্যা)।
+ *  অ্যাডমিনে লং-প্রেস = ইমোজি বদল (আগের মতো) */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QBankEntryCard(
+    title: String, icon: String?, subLabel: String, totalQ: Int, progressFrac: Float,
+    mcqPapers: Int, writtenPapers: Int, compact: Boolean,
+    onClick: () -> Unit, onLongPress: (() -> Unit)?, modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(if (compact) 12.dp else 14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (icon != null) { Text(icon, fontSize = if (compact) 16.sp else 20.sp); Spacer(Modifier.width(6.dp)) }
+                Text(
+                    title, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
+                )
+            }
+            if (subLabel.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(subLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            Spacer(Modifier.height(9.dp))
+            Text("মোট ${bnDigits(totalQ)} প্রশ্ন", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (mcqPapers > 0) Text("🔘 MCQ ${bnDigits(mcqPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                    color = QBankMcqColor, fontFamily = NotoSansBengali, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankMcqColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
+                if (writtenPapers > 0) Text("✍️ লিখিত ${bnDigits(writtenPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                    color = QBankWrittenColor, fontFamily = NotoSansBengali, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankWrittenColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
+            }
+            Spacer(Modifier.height(9.dp))
+            LinearProgressIndicator(
+                progress = { progressFrac.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(99.dp)),
+                color = GreenOk,
+                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            )
+        }
+    }
+}
 
 /** ডিজাইন ২: নাম + দুই চিপ (MCQ | লিখিত)। অ্যাডমিনে কার্ডে লং-প্রেস = ইমোজি বদল (আগের মতো) */
 @OptIn(ExperimentalFoundationApi::class)
@@ -663,6 +822,7 @@ fun SubjectListScreen(
     // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
     // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
     val selectedExamCategory = com.hanif.smartstudy.util.QBankCategory.selected
+    val qbankGridStyle = com.hanif.smartstudy.util.QBankViewStyle.grid   // লিস্ট/গ্রিড পছন্দ (স্থায়ী)
     // ── ক্যাটাগরি-ফিল্টার ক্রম-সাজানোর সময়ও প্রযোজ্য (শুধু সিলেক্টেড ক্যাটাগরির কার্ড দেখা যায়);
     // ▲▼ ও সিরিয়াল-ম্যানেজার নিচে গ্লোবাল লিস্টের সাথে ম্যাপ করা হয়, তাই অন্য ক্যাটাগরির ক্রম নষ্ট হয় না ──
     val categorySubjects = if (showQBankFilterBar)
@@ -874,7 +1034,7 @@ fun SubjectListScreen(
             // অ্যাডমিন রি-অর্ডার মোডে আগের এক-গ্রিডই থাকে (ক্রম বদলানোর জন্য)।
             val titleFor: (SubjectEntry) -> String? = { subject ->
                 if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
-                                val insts = subject.subTopics.map { it.name.trim() }
+                                val insts = subject.subTopics.map { it.instLabel().trim() }.distinct()
                                     .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) && !subject.name.contains(it) }.distinct()
                                 when {
                                     insts.isEmpty() -> null
@@ -895,6 +1055,68 @@ fun SubjectListScreen(
                 // তালিকা আবার দেখা গেলে (ভেতর থেকে ফিরে এলে) আগের চিপ-স্কোপ মুছে ফেলা
                 androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankTypeScope.part = null }
             }
+            if (qbankFilterMode != QBankFilterMode.YEAR) {
+                // ── প্রশ্নপত্র-ভিত্তিক তালিকা: কার্ডে ট্যাপ → প্রশ্নপত্রের তালিকা (উপরে MCQ | লিখিত ট্যাব);
+                // মাত্র ১টা প্রশ্নপত্র থাকলে সরাসরি সেটা খোলে। লিস্ট/গ্রিড পছন্দ স্থায়ী। ──
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
+                        QBankLayoutToggle(showLabels = true)
+                    }
+                }
+                val cardFor: @Composable (SubjectEntry, Boolean) -> Unit = { subject, compact ->
+                    val mcqN = qbankTypeCount(subject, 0)
+                    val wrN  = qbankTypeCount(subject, 1)
+                    val icon = emojiOverrides["$refType:${subject.subjectId}"]?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                    val institutions = subject.subTopics.map { it.topicId.ifBlank { it.name } }.distinct().size
+                    val papers = subject.subTopics.count { it.hasQuestions() }
+                    val subLabel = if (selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) "" else when (qbankFilterMode) {
+                        QBankFilterMode.INSTITUTION, QBankFilterMode.YEAR -> "${bnDigits(institutions)}টি পদবী · ${bnDigits(papers)}টি প্রশ্নপত্র"
+                        QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> "${bnDigits(institutions)}টি প্রতিষ্ঠান · ${bnDigits(papers)}টি প্রশ্নপত্র"
+                    }
+                    QBankEntryCard(
+                        title = titleFor(subject) ?: subject.name,
+                        icon = icon,
+                        subLabel = subLabel,
+                        totalQ = mcqN + wrN,
+                        progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f,
+                        mcqPapers = qbankPaperCount(subject, 0),
+                        writtenPapers = qbankPaperCount(subject, 1),
+                        compact = compact,
+                        onClick = {
+                            val direct = onSubjectDirect
+                            val only = subject.subTopics.singleOrNull()
+                            if (direct != null && only != null) {
+                                // একটাই প্রশ্নপত্র → সরাসরি খোলো, সেই ধরনেই (MCQ/লিখিত)
+                                com.hanif.smartstudy.util.QBankTypeScope.part = only.paperType.takeIf { it >= 0 }
+                                direct(subject.name)
+                            } else {
+                                // প্রশ্নপত্রের তালিকা: ট্যাব নিজেই ডিফল্ট (MCQ) ঠিক করে নেবে
+                                com.hanif.smartstudy.util.QBankTypeScope.part = null
+                                onSubject(subject.name)
+                            }
+                        },
+                        onLongPress = if (isAdmin && subject.subjectId.isNotBlank()) ({
+                            emojiEditTargetId = subject.subjectId
+                            emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                        }) else null,
+                        modifier = if (compact) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+                if (qbankGridStyle) {
+                    item {
+                        LazyVerticalGrid(
+                            columns               = GridCells.Fixed(2),
+                            modifier              = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement   = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(displaySubjects) { _, subject -> cardFor(subject, true) }
+                        }
+                    }
+                } else {
+                    itemsIndexed(displaySubjects) { _, subject -> cardFor(subject, false) }
+                }
+            } else
             itemsIndexed(displaySubjects) { _, subject ->
                 val mcqN = qbankTypeCount(subject, 0)
                 val wrN  = qbankTypeCount(subject, 1)
@@ -955,7 +1177,7 @@ fun SubjectListScreen(
                             },
                             // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান" — প্রতিষ্ঠানের নামও কার্ডে দেখায়
                             titleOverride = if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
-                                val insts = subject.subTopics.map { it.name.trim() }
+                                val insts = subject.subTopics.map { it.instLabel().trim() }.distinct()
                                     .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) && !subject.name.contains(it) }.distinct()
                                 when {
                                     insts.isEmpty() -> null
@@ -2333,7 +2555,21 @@ fun SubTopicListScreen(
     // একই TopicOrdering.serialOrder() ব্যবহার করে, তাই এখানকার index আর ওখানকার index সবসময় মেলে ──
     // MCQ | লিখিত কলাম থেকে ঢুকলে (QBankTypeScope) শুধু সেই ধরনের প্রশ্ন আছে এমন কার্ড, সেই ধরনের সংখ্যাসহ
     val typeScope = if (mode == StudyMode.QBANK && !(isAdmin && isReorderMode)) com.hanif.smartstudy.util.QBankTypeScope.part else null
+    // ── প্রশ্নপত্র-ভাগ (paperType ≥ 0): উপরে "MCQ | লিখিত" ট্যাব — ডিফল্ট MCQ (MCQ না থাকলে লিখিত);
+    // ট্যাবে ট্যাপ করলে বা ডানে-বামে স্লাইড করলে বদলায়। প্রতিটা প্রশ্নপত্র (প্রতিষ্ঠান+সাল+ধরন) আলাদা কার্ড। ──
+    val papersMode = isQBank && !(isAdmin && isReorderMode) && subTopics.any { it.paperType >= 0 }
+    val mcqPapers  = subTopics.count { it.paperType == 0 }
+    val writtenPapers = subTopics.count { it.paperType == 1 }
+    val defaultPart = if (mcqPapers > 0 || writtenPapers == 0) 0 else 1
+    val tabPart = if (papersMode) (com.hanif.smartstudy.util.QBankTypeScope.part ?: defaultPart) else 0
+    androidx.compose.runtime.LaunchedEffect(papersMode, subTopics) {
+        if (papersMode && com.hanif.smartstudy.util.QBankTypeScope.part == null)
+            com.hanif.smartstudy.util.QBankTypeScope.part = defaultPart
+    }
+    val paperGrid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val swipeThresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
     val visibleSubTopics = if (isAdmin && isReorderMode) com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics)
+                            else if (papersMode) subTopics.filter { it.paperType == tabPart && it.hasQuestions() }
                             else if (typeScope != null) subTopics.filter { !it.isModelTest }.mapNotNull { st ->
                                 val c = qbankTypeCountSt(st, typeScope)
                                 if (c <= 0) null else st.copy(
@@ -2359,7 +2595,20 @@ fun SubTopicListScreen(
 
     LazyColumn(
         state          = listState,
-        modifier       = Modifier.fillMaxSize(),
+        modifier       = Modifier.fillMaxSize().then(
+            if (papersMode) Modifier.pointerInput(tabPart) {
+                // ডানে-বামে স্লাইড: বামে টানলে লিখিত, ডানে টানলে MCQ (উল্লম্ব স্ক্রলে বাধা দেয় না)
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
+                    onHorizontalDrag = { _, dx -> total += dx },
+                    onDragEnd = {
+                        if (total < -swipeThresholdPx && tabPart == 0) com.hanif.smartstudy.util.QBankTypeScope.part = 1
+                        else if (total > swipeThresholdPx && tabPart == 1) com.hanif.smartstudy.util.QBankTypeScope.part = 0
+                    }
+                )
+            } else Modifier
+        ),
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
         item {
@@ -2376,7 +2625,9 @@ fun SubTopicListScreen(
                         Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
                             color = Color.White, fontFamily = NotoSansBengali)
                         Text(
-                            if (isLoading && visibleSubTopics.isEmpty()) "লোড হচ্ছে…" else "${visibleSubTopics.size} টি অধ্যায়",
+                            if (isLoading && visibleSubTopics.isEmpty()) "লোড হচ্ছে…"
+                            else if (papersMode) "${bnDigits(subTopics.map { it.topicId.ifBlank { it.name } }.distinct().size)}টি প্রতিষ্ঠান · ${bnDigits(subTopics.size)}টি প্রশ্নপত্র"
+                            else "${visibleSubTopics.size} টি অধ্যায়",
                             fontSize = 11.sp, color = Color.White.copy(0.65f),
                             fontFamily = NotoSansBengali
                         )
@@ -2419,7 +2670,66 @@ fun SubTopicListScreen(
             }
         }
 
-        if (isQBank) {
+        if (papersMode) {
+            item {
+                QBankTypeTabs(
+                    selected = tabPart, mcqPapers = mcqPapers, writtenPapers = writtenPapers,
+                    onSelect = { com.hanif.smartstudy.util.QBankTypeScope.part = it }
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("${bnDigits(visibleSubTopics.size)}টি প্রশ্নপত্র", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    QBankLayoutToggle(showLabels = true)
+                }
+            }
+            if (visibleSubTopics.isEmpty()) {
+                if (!isLoading) item {
+                    Column(
+                        Modifier.fillMaxWidth().padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("এই ধরনের প্রশ্নপত্র নেই", fontSize = 14.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val other = 1 - tabPart
+                        if ((if (other == 0) mcqPapers else writtenPapers) > 0) {
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { com.hanif.smartstudy.util.QBankTypeScope.part = other }) {
+                                Text(if (other == 0) "🔘 MCQ দেখুন →" else "✍️ লিখিত দেখুন →", fontFamily = NotoSansBengali)
+                            }
+                        }
+                    }
+                }
+            } else if (paperGrid) {
+                item {
+                    LazyVerticalGrid(
+                        columns               = GridCells.Fixed(2),
+                        modifier              = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement   = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(visibleSubTopics) { _, st ->
+                            QBankPaperCard(st, compact = true, onClick = {
+                                com.hanif.smartstudy.util.QBankTypeScope.part = tabPart
+                                onSubTopic(st.name)
+                            })
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(visibleSubTopics) { _, st ->
+                    QBankPaperCard(st, compact = false, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), onClick = {
+                        com.hanif.smartstudy.util.QBankTypeScope.part = tabPart
+                        onSubTopic(st.name)
+                    })
+                }
+            }
+        } else if (isQBank) {
             item {
                 LazyVerticalGrid(
                     columns            = GridCells.Fixed(2),

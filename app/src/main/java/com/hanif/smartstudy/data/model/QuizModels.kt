@@ -248,7 +248,13 @@ data class SubTopicEntry(
     // ── Admin-সেট টপিক-সিরিয়াল (Topics.sortOrder; ≤০ = দেওয়া নেই) — দেখো util/TopicOrdering ──
     val sortOrder    : Int = 0,
     // ── QBank \"প্রাথমিক\": এই (পদ+প্রতিষ্ঠান) জোড়ার প্রশ্ন যে সালগুলোতে এসেছে (নতুন থেকে পুরনো) ──
-    val years        : List<String> = emptyList()
+    val years        : List<String> = emptyList(),
+    // ── QBank প্রশ্নপত্র (পদবী/প্রতিষ্ঠান মোড): একটা প্রশ্নপত্র = প্রতিষ্ঠান + সাল + ধরন। প্রতিটা আলাদা কার্ড।
+    //   paperType: 0 = MCQ, 1 = লিখিত, -1 = প্রশ্নপত্র-ভাগ নেই (পুরনো/অন্য মোডের এন্ট্রি, আগের আচরণ)
+    //   paperYear: কার্ডের সাল (বাংলা অঙ্কে), paperInst: প্রশ্নপত্রের নামের প্রথম অংশ (প্রতিষ্ঠান/পদবী — সাল ছাড়া)
+    val paperType    : Int    = -1,
+    val paperYear    : String = "",
+    val paperInst    : String = ""
 ) {
     val progressPct: Int get() = if (totalQ > 0) ((doneQ * 100) / totalQ).coerceAtMost(100) else 0
 

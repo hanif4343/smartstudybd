@@ -1614,7 +1614,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         qbmtPoolCache[category]?.let { return it }
         if (_state.value.qbankPosts.isEmpty()) rebuildQBankPosts()
         val ids = _state.value.qbankPosts
-            .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name) + it.subTopics.map { st -> st.name }, category) }
+            .filter { com.hanif.smartstudy.util.QBankCategory.matches(listOf(it.name) + it.subTopics.map { st -> st.paperInst.ifBlank { st.name } }.distinct(), category) }
             .flatMap { e -> e.subTopics.flatMap { it.linkedQuestionIds } }
             .distinct()
         if (ids.isEmpty()) return emptyList()
@@ -2430,28 +2430,16 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val institutions = repo.getRoomInstitutions()
         val posts        = repo.getRoomPosts().associateBy { it.postId }
         val progressMap  = loadProgressMap()
-        val mode = StudyMode.QBANK
         val typeMap = repo.getQBankTypeMap()   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য (Room + Exam_Appearances qtype)
 
         val entries = institutions.map { inst ->
             val appearances = repo.getRoomAppearancesForInstitution(inst.institutionId)
             val byPost = appearances.groupBy { it.postId }
-            val subTopics = byPost.mapNotNull { (postId, apps) ->
-                val postName = posts[postId]?.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val qIds = apps.map { it.questionId }.distinct()
-                SubTopicEntry(
-                    name              = postName,
-                    subject           = inst.name,
-                    totalQ            = qIds.size,
-                    doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
-                    subjectId         = inst.institutionId,
-                    topicId           = postId,
-                    linkedQuestionIds = qIds,
-                    mcqCount          = qIds.count { typeMap[it] == false },
-                    writtenCount      = qIds.count { typeMap[it] == true }
-                )
-            }.sortedBy { it.name }
-                .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.POST, l) { it.topicId }) }
+            // ── প্রশ্নপত্র-ভিত্তিক: পদবী × সাল × ধরন প্রতিটা আলাদা কার্ড ("পদবী - সাল") ──
+            val subTopics = byPost.flatMap { (postId, apps) ->
+                val postName = posts[postId]?.name?.takeIf { it.isNotBlank() } ?: return@flatMap emptyList<SubTopicEntry>()
+                qbankPapers(apps, postName, inst.name, postId, inst.institutionId, typeMap, progressMap)
+            }.sortedWith(qbankPaperOrder).let { l -> qbankSerial(l) }
             SubjectEntry(
                 name      = inst.name,
                 totalQ    = subTopics.sumOf { it.totalQ },
@@ -2487,7 +2475,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      * রিইউজ হতো, যেটা এখন আর সেই কলামগুলো না থাকায় কখনো মেলে না — তাই "প্রশ্ন ০"।
      */
     fun selectQBankDesignationUnderInstitution(designation: String) {
-        val entry = _state.value.qbankDesignationsUnderInstitution.find { it.name == designation } ?: return
+        val entry = _state.value.qbankDesignationsUnderInstitution.findPaper(designation) ?: return
         val institution = _state.value.qbankSelectedInstitution ?: return
         timerJob?.cancel()
         // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ৪-৫ সেকেন্ড 'ডেটা আসেনি' দেখায়, তারপর
@@ -2671,34 +2659,87 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             .sortedByDescending { y -> y.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
             .map { com.hanif.smartstudy.util.YearFormat.toBn(it) }
 
+    /**
+     * QBank প্রশ্নপত্র ভাগ: একটা (পদবী+প্রতিষ্ঠান) জোড়ার (বা প্রতিষ্ঠান-মোডে (প্রতিষ্ঠান+পদবী) জোড়ার) সব
+     * Exam_Appearances-রো থেকে আলাদা আলাদা প্রশ্নপত্র বানায় — প্রশ্নপত্র = সাল + ধরন (MCQ/লিখিত)।
+     * যেমন "বিদ্যুৎ বিভাগ - ২০২৪" (MCQ), "বিদ্যুৎ বিভাগ - ২০২৫" (লিখিত), "বিদ্যুৎ বিভাগ - ২০২৬" (MCQ + লিখিত দুটো আলাদা)।
+     *
+     * ধরন-না-জানা প্রশ্ন (typeMap-এ নেই, যেমন CDN-এ এখনো প্রকাশ হয়নি) একই সালের টাইপ-জানা প্রশ্নের
+     * সংখ্যাগরিষ্ঠ ধরনে যায়; সেটাও না থাকলে পুরো জোড়ার সংখ্যাগরিষ্ঠে; কোথাও ধরন জানা না থাকলে MCQ
+     * (আগের আচরণ — ধরন-তথ্য ছাড়া সবটাই MCQ ধরা হতো)।
+     */
+    private fun qbankPapers(
+        apps: List<com.hanif.smartstudy.data.local.ExamAppearanceEntity>,
+        parentLabel: String,
+        subjectName: String,
+        otherId: String,
+        subjectId: String,
+        typeMap: Map<String, Boolean>,
+        progressMap: Set<String>
+    ): List<SubTopicEntry> {
+        fun majority(ids: List<String>): Boolean? {
+            val t = ids.mapNotNull { typeMap[it] }
+            if (t.isEmpty()) return null
+            val w = t.count { it }
+            return w > t.size - w          // সমান সমান হলে MCQ
+        }
+        val groupMajority = majority(apps.map { it.questionId }.distinct())
+        return apps.groupBy { com.hanif.smartstudy.util.YearFormat.latin(it.year) }.flatMap { (yLatin, yApps) ->
+            val ids      = yApps.map { it.questionId }.distinct()
+            val fallback = majority(ids) ?: groupMajority ?: false
+            val written  = ids.filter { typeMap[it] ?: fallback }
+            val mcq      = ids.filter { !(typeMap[it] ?: fallback) }
+            val yBn      = if (yLatin.isBlank()) "" else com.hanif.smartstudy.util.YearFormat.toBn(yLatin)
+            val title    = if (yBn.isBlank()) parentLabel else "$parentLabel - $yBn"
+            listOf(0 to mcq, 1 to written).filter { it.second.isNotEmpty() }.map { (type, q) ->
+                SubTopicEntry(
+                    name              = title,
+                    subject           = subjectName,
+                    totalQ            = q.size,
+                    doneQ             = q.count { progressMap.contains("${StudyMode.QBANK.name}:$it") },
+                    subjectId         = subjectId,
+                    topicId           = otherId,
+                    linkedQuestionIds = q,
+                    mcqCount          = if (type == 0) q.size else 0,
+                    writtenCount      = if (type == 1) q.size else 0,
+                    years             = if (yBn.isBlank()) emptyList() else listOf(yBn),
+                    paperType         = type,
+                    paperYear         = yBn,
+                    paperInst         = parentLabel
+                )
+            }
+        }
+    }
+
+    /** প্রশ্নপত্রের ক্রম: নতুন সাল আগে → নাম → MCQ আগে, লিখিত পরে */
+    private val qbankPaperOrder: Comparator<SubTopicEntry>
+        get() = compareByDescending<SubTopicEntry> {
+            com.hanif.smartstudy.util.YearFormat.latin(it.paperYear).takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0
+        }.thenBy { it.paperInst }.thenBy { it.paperType }
+
+    /** প্রশ্নপত্রের নাম একই হতে পারে (একই প্রতিষ্ঠান+সাল, MCQ ও লিখিত দুটো) — তাই ট্যাবের ধরন
+     *  (QBankTypeScope.part) দিয়ে সঠিকটা বাছা হয়; ধরন-ভাগ না থাকলে আগের মতো শুধু নাম মেলে */
+    private fun List<SubTopicEntry>.findPaper(name: String): SubTopicEntry? {
+        val part = com.hanif.smartstudy.util.QBankTypeScope.part
+        return firstOrNull { it.name == name && (part == null || it.paperType < 0 || it.paperType == part) }
+            ?: firstOrNull { it.name == name }
+    }
+
     private suspend fun rebuildQBankPosts() {
         repo.syncExamAppearances()   // idempotent — ব্যর্থ হলে Room-এর পুরনো/খালি ডেটাই থাকবে, exception ছোঁড়ে না
         val posts        = repo.getRoomPosts()
         val institutions = repo.getRoomInstitutions().associateBy { it.institutionId }
         val progressMap  = loadProgressMap()
-        val mode = StudyMode.QBANK
         val typeMap = repo.getQBankTypeMap()   // কার্ডে MCQ/লিখিত আলাদা গোনার জন্য (Room + Exam_Appearances qtype)
 
         val entries = posts.map { post ->
             val appearances   = repo.getRoomAppearancesForPost(post.postId)
             val byInstitution = appearances.groupBy { it.institutionId }
-            val subTopics = byInstitution.mapNotNull { (instId, apps) ->
-                val instName = institutions[instId]?.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val qIds = apps.map { it.questionId }.distinct()
-                SubTopicEntry(
-                    name              = instName,
-                    subject           = post.name,
-                    totalQ            = qIds.size,
-                    doneQ             = qIds.count { progressMap.contains("${mode.name}:$it") },
-                    subjectId         = post.postId,
-                    topicId           = instId,
-                    linkedQuestionIds = qIds,
-                    mcqCount          = qIds.count { typeMap[it] == false },
-                    writtenCount      = qIds.count { typeMap[it] == true },
-                    years             = yearsNewestFirst(apps.map { it.year })
-                )
-            }.sortedBy { it.name }
-                .let { l -> qbankSerial(com.hanif.smartstudy.util.QBankOrderStore.apply(com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION, l) { it.topicId }) }
+            // ── প্রশ্নপত্র-ভিত্তিক: প্রতিষ্ঠান × সাল × ধরন (MCQ/লিখিত) প্রতিটা আলাদা কার্ড — দেখো qbankPapers() ──
+            val subTopics = byInstitution.flatMap { (instId, apps) ->
+                val instName = institutions[instId]?.name?.takeIf { it.isNotBlank() } ?: return@flatMap emptyList<SubTopicEntry>()
+                qbankPapers(apps, instName, post.name, instId, post.postId, typeMap, progressMap)
+            }.sortedWith(qbankPaperOrder).let { l -> qbankSerial(l) }
             SubjectEntry(
                 name      = post.name,
                 totalQ    = subTopics.sumOf { it.totalQ },
@@ -2723,16 +2764,18 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *  subjectId = আসল postId-ই থাকে, যাতে Admin Rename/Delete/Move আগের মতোই পদবীর ওপর কাজ করে। */
     private fun splitNibondhonByInstitution(e: SubjectEntry): List<SubjectEntry> {
         val isNibondhon = com.hanif.smartstudy.util.QBankCategory.matches(
-            listOf(e.name) + e.subTopics.map { it.name }, "নিবন্ধন"
+            listOf(e.name) + e.subTopics.map { it.paperInst.ifBlank { it.name } }, "নিবন্ধন"
         )
         if (!isNibondhon || e.subTopics.isEmpty()) return listOf(e)
-        return e.subTopics.map { st ->
-            val sameName = st.name.trim().equals(e.name.trim(), ignoreCase = true)
+        // প্রশ্নপত্র (প্রতিষ্ঠান×সাল×ধরন) এখন subTopics — তাই প্রতিষ্ঠান ধরে (topicId = instId) গ্রুপ করে কার্ড ভাঙা হয়
+        return e.subTopics.groupBy { it.topicId }.values.map { grp ->
+            val instLabel = grp.first().paperInst.ifBlank { grp.first().name }
+            val sameName = instLabel.trim().equals(e.name.trim(), ignoreCase = true)
             SubjectEntry(
-                name      = if (sameName) e.name else e.name + ", " + st.name,
-                totalQ    = st.totalQ,
-                doneQ     = st.doneQ,
-                subTopics = listOf(st),
+                name      = if (sameName) e.name else e.name + ", " + instLabel,
+                totalQ    = grp.sumOf { it.totalQ },
+                doneQ     = grp.sumOf { it.doneQ },
+                subTopics = grp,
                 subjectId = e.subjectId
             )
         }
@@ -2771,7 +2814,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
      *  এই ডেটার জন্য কোনো raw subject/sub_topic টেক্সট ম্যাচ নেই, শুধু Exam_Appearances-এর
      *  questionId লিংক আছে — ঠিক selectQBankYear()-এর মতোই সরাসরি ফ্ল্যাট-লোড প্যাটার্ন। */
     fun selectQBankInstitutionUnderPost(institutionName: String) {
-        val entry = _state.value.qbankInstitutionsUnderPost.find { it.name == institutionName } ?: return
+        val entry = _state.value.qbankInstitutionsUnderPost.findPaper(institutionName) ?: return
         timerJob?.cancel()
         // ── FIX ("প্রতিষ্ঠান/পদের ভিতর ঢুকলে ৪-৫ সেকেন্ড 'ডেটা আসেনি' দেখায়, তারপর
         // নিজে থেকেই ঠিক হয়ে যায়" — দেখো selectQBankDesignationUnderInstitution/
