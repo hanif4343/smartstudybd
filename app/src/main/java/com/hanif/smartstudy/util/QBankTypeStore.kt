@@ -75,10 +75,15 @@ object QBankTypeStore {
                     for ((k, v) in fresh) { w.write(k); w.write("\t"); w.write(if (v) "W" else "M"); w.write("\n") }
                 }
                 val f = file(ctx)
-                if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+                val renamed = tmp.renameTo(f)
+                if (!renamed) {
+                    f.delete()
+                    tmp.renameTo(f)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "save failed (memory cache still valid): ${e.message}")
             }
+            Unit   // synchronized-এর শেষ এক্সপ্রেশন Unit — try/if কে এক্সপ্রেশন ধরা হবে না
         }
         return true
     }
