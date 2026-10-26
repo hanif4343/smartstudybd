@@ -1,0 +1,2258 @@
+package com.hanif.smartstudy.data.repository
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.util.Log
+import com.hanif.smartstudy.BuildConfig
+import com.hanif.smartstudy.data.local.ContentCache
+import com.hanif.smartstudy.data.local.PendingQueue
+import com.hanif.smartstudy.data.local.AppDatabase
+import com.hanif.smartstudy.data.local.TopicSyncEntity
+import com.hanif.smartstudy.data.local.toEntity
+import com.hanif.smartstudy.data.local.isUsable
+import com.hanif.smartstudy.data.local.toQuestionItem
+import com.hanif.smartstudy.data.local.toQuizItem
+import com.hanif.smartstudy.data.local.toQBankItem
+import com.hanif.smartstudy.data.local.toStudyItem
+import com.hanif.smartstudy.data.model.AppContent
+import com.hanif.smartstudy.data.model.ExamCountdown
+import com.hanif.smartstudy.data.model.GoalProgress
+import com.hanif.smartstudy.data.model.HomeOverview
+import com.hanif.smartstudy.data.model.StreakDay
+import com.hanif.smartstudy.data.model.StreakInfo
+import com.hanif.smartstudy.data.model.StudyStats
+import com.hanif.smartstudy.data.model.XpInfo
+import com.hanif.smartstudy.data.remote.ContentFetchService
+import com.hanif.smartstudy.data.remote.ContentResult
+import com.hanif.smartstudy.util.SessionManager
+import com.hanif.smartstudy.worker.SyncWorker
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+
+class ContentRepository(private val context: Context) {
+
+    private val cache   = ContentCache(context)
+    private val queue   = PendingQueue(context)
+    private val session = SessionManager(context)
+    private val db      = AppDatabase.getInstance(context)
+    private val dao     = db.questionDao()
+    private val refDao  = db.referenceDao()   // Phase 6 — Subjects/Topics/SubTopics/Tags/Posts/Institutions
+    private val topicSyncDao = db.topicSyncDao()  // প্রতিটা Topic-এ কতদূর আনা হয়েছে (progressive fill)
+    private val progressDao = db.questionProgressDao()  // প্রশ্ন-ভিত্তিক সঠিক/ভুল — accuracy % এর source of truth
+    private val deletedDao  = db.deletedQuestionDao()    // "delete মানে delete" — tombstone, কখনো ফিরে আসবে না
+
+    // ── In-memory cache — একবার fetch হলে সব VM শেয়ার করে ──
+    companion object {
+        @Volatile private var _memCache: AppContent? = null
+        fun getMemCache(): AppContent? = _memCache
+        fun clearMemCache() { _memCache = null }
+
+        // ⚠️ BUG FIX ("subject list ashte onek slow"): syncReferenceData() আগে
+        // rebuildSubjectsLazy() (মানে setMode()/প্রতিবার Quiz-QBank-Study খোলার সময়)
+        // থেকে unconditionally কল হতো — মানে প্রতিটা visit-এই GAS-এর getReferenceData
+        // action-এ একটা লাইভ নেটওয়ার্ক রাউন্ড-ট্রিপ হতো, Room-এ আগে থেকেই ডেটা থাকলেও।
+        // Apps Script Web App-এর নিজস্ব ল্যাটেন্সি (cold start ইত্যাদি) থাকায় এটাই
+        // "সাবজেক্ট লিস্ট প্রতিবার স্লো" সমস্যার মূল কারণ ছিল — content sync-এর জন্য
+        // আগে থেকেই থাকা BG_REFRESH_MIN_GAP_MS প্যাটার্নটাই এখানে প্রয়োগ করা হলো।
+        @Volatile private var _lastRefSyncAt: Long = 0L
+        private const val REF_SYNC_MIN_GAP_MS = 10 * 60_000L // ১০ মিনিটে একবারের বেশি না
+
+        // ── FIX (Speed Plan Task 3): CDN manifest.json-এর জন্য ৫-মিনিট TTL
+        // in-memory cache — একই ধরনের প্যাটার্ন যেভাবে উপরে reference sync-এর
+        // জন্য REF_SYNC_MIN_GAP_MS ব্যবহার হয়েছে, শুধু ছোট TTL (CDN সস্তা/দ্রুত,
+        // GAS-এর মতো cold-start নেই) ──
+        @Volatile private var _manifestCache: com.hanif.smartstudy.data.remote.CdnService.Manifest? = null
+        @Volatile private var _manifestCachedAt: Long = 0L
+        private const val MANIFEST_TTL_MS = 5 * 60_000L
+    }
+
+    /**
+     * FAST PATH — Subject list দেখানোর জন্য।
+     * শুধু SubjectOrder + SubTopicOrder fetch করে — questions আসে না।
+     * Questions background-এ আলাদাভাবে আসবে।
+     */
+    suspend fun getSubjectsQuick(): DataState<AppContent> {
+        // Cache-এ subjects থাকলে সেটাই দাও (questions থাকুক বা না থাকুক)
+        _memCache?.let { mem ->
+            if (mem.subjectOrder.isNotEmpty() || mem.subTopicOrder.isNotEmpty()) {
+                Log.d("Repo", "getSubjectsQuick: cache hit")
+                return DataState.Success(mem, fromCache = true)
+            }
+        }
+        if (!isOnline()) {
+            val cached = cache.loadContent() ?: _memCache
+            return if (cached != null) DataState.Success(cached, fromCache = true, isOffline = true)
+            else DataState.Error("ইন্টারনেট সংযোগ নেই")
+        }
+        return when (val result = ContentFetchService.fetchSubjectsOnly(context)) {
+            is ContentResult.Success -> {
+                // ── FIX ("সিরিয়াল কখনো দেখা যায় কখনো যায় না" — getContent()-এর
+                // পাশাপাশি এই দ্বিতীয় কারণ): এই fetch শুধু subjectOrder/subTopicOrder
+                // আনে (questions না)। আগে এখানে `_memCache = partial` দিয়ে *পুরো*
+                // cache-টাই replace হয়ে যেত — অন্য কোনো flow যদি ইতিমধ্যে quiz/qbank/
+                // study প্রশ্ন লোড করে রেখে থাকে, সেটা মুছে যেত এই কলেই। এখন আগের
+                // memCache-এর questions ঠিক রেখে শুধু order/modelTests অংশটুকু merge
+                // করা হচ্ছে। ──
+                val prev = _memCache
+                val merged = (prev ?: AppContent()).copy(
+                    subjectOrder  = result.data.subjectOrder,
+                    subTopicOrder = result.data.subTopicOrder,
+                    modelTests    = if (result.data.modelTests.isNotEmpty()) result.data.modelTests else (prev?.modelTests ?: emptyMap()),
+                    fetchedAt     = result.data.fetchedAt,
+                    remoteUpdatedAt = result.data.remoteUpdatedAt
+                )
+                _memCache = merged
+                Log.d("Repo", "getSubjectsQuick: Firebase OK (merged, prevQuestions=${prev?.quiz?.size ?: 0}+${prev?.qbank?.size ?: 0}+${prev?.study?.size ?: 0})")
+                DataState.Success(merged)
+            }
+            is ContentResult.Error -> DataState.Error(result.message)
+        }
+    }
+
+    // ── Room-based fast methods ──────────────────────────────────────────────
+
+    /** Room DB তে কোনো প্রশ্ন আছে কিনা */
+    suspend fun hasRoomData(): Boolean =
+        dao.countAll("QUIZ") > 0 || dao.countAll("STUDY") > 0 || dao.countAll("QBANK") > 0
+
+    /** Room থেকে subject count list — instant */
+    suspend fun getRoomSubjectCounts(sheet: String) = dao.getSubjectCounts(sheet)
+
+    /** Room থেকে subTopic count list — instant */
+    suspend fun getRoomSubTopicCounts(sheet: String, subject: String) =
+        dao.getSubTopicCounts(sheet, subject)
+
+    // ── QBank "প্রতিষ্ঠান-ভিত্তিক" ও "সাল-ভিত্তিক" ফিল্টার — subject/subTopic
+    // হায়ারার্কি উল্টে/পাশ কাটিয়ে দেখার জন্য নতুন Room helper গুলো ──
+
+    /** Room থেকে প্রতিষ্ঠান (Institution) তালিকা — subject-নিরপেক্ষ, সব ডিজিগনেশন মিলিয়ে */
+    suspend fun getRoomInstitutionCounts(sheet: String) = dao.getInstitutionCounts(sheet)
+
+    /** Room থেকে একটা প্রতিষ্ঠানের আন্ডারে যত পদবী (Designation) আছে */
+    suspend fun getRoomDesignationsUnderInstitution(sheet: String, institution: String) =
+        dao.getDesignationsUnderInstitution(sheet, institution)
+
+    /** Room থেকে সালের তালিকা — subject/subTopic নির্বিশেষে */
+    suspend fun getRoomYearCounts(sheet: String) = dao.getYearCounts(sheet)
+
+    /** Room থেকে একটা নির্দিষ্ট সালের সব প্রশ্ন — পেজিনেটেড, subject/subTopic নির্বিশেষে */
+    suspend fun getRoomPagedQuestionsByYear(
+        sheet: String, year: String, tag: String, page: Int, pageSize: Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return if (tag.isBlank() || tag == "all") {
+            dao.getPagedByYear(sheet, year, pageSize, offset)
+        } else {
+            dao.getPagedByYearFiltered(sheet, year, tag, pageSize, offset)
+        }.map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা সালের মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomYearTotalCount(sheet: String, year: String, tag: String): Int =
+        if (tag.isBlank() || tag == "all") {
+            dao.countByYear(sheet, year)
+        } else {
+            dao.countByYearFiltered(sheet, year, tag)
+        }
+
+    /**
+     * Room থেকে paginated questions — instant, Firebase লাগে না।
+     * audienceTag="" হলে সব দেখাবে, নইলে filter হবে।
+     */
+    suspend fun getRoomPagedQuestions(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String,
+        page     : Int,
+        pageSize : Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return if (tag.isBlank() || tag == "all") {
+            dao.getPagedQuestions(sheet, subject, subTopic, pageSize, offset)
+        } else {
+            dao.getPagedQuestionsFiltered(sheet, subject, subTopic, tag, pageSize, offset)
+        }.map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা subTopic-এর মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomTotalCount(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String
+    ): Int = if (tag.isBlank() || tag == "all") {
+        dao.countBySubTopic(sheet, subject, subTopic)
+    } else {
+        dao.countFiltered(sheet, subject, subTopic, tag)
+    }
+
+    // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন" বাগ) — Phase 6 লেজি টপিক সিস্টেমের সাথে
+    // সামঞ্জস্যপূর্ণ পেজিনেশন: topicId দিয়ে (subject/subTopic টেক্সট না) ──
+    // ⚠️⚠️ CRITICAL FIX ("প্রশ্নই পাওয়া যাচ্ছে না" — সব টপিকে হঠাৎ ০ প্রশ্ন হয়ে যাওয়ার
+    // আসল কারণ): এখানে sheet প্যারামিটার ".uppercase()" ছাড়াই সরাসরি dao-তে পাঠানো
+    // হচ্ছিল ("Quiz"/"QBank"/"Study" — মিশ্র-কেস), কিন্তু Room-এ প্রতিটা রো সবসময়
+    // uppercase sheet ("QUIZ"/"QBANK"/"STUDY") দিয়ে সেভ হয় (দেখো cacheNextTopicBatch,
+    // getRoomQuestionsForTopic — ওখানে ঠিকই .uppercase() করা হয়)। SQLite-এর টেক্সট
+    // তুলনা case-sensitive, তাই "QBank" ≠ "QBANK" — ফলে এই দুটো নতুন ফাংশন *সবসময়*
+    // ০ রো রিটার্ন করছিল, যেকোনো tag/audience-নির্বিশেষে। এটাই ছিল সেই ভয়াবহ
+    // রিগ্রেশন যেখানে হঠাৎ কোনো টপিকেই প্রশ্ন পাওয়া যাচ্ছিল না। এখন ঠিক হলো। ──
+    suspend fun getRoomPagedQuestionsByTopic(
+        sheet    : String,
+        topicId  : String,
+        tag      : String,
+        page     : Int,
+        pageSize : Int
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> {
+        val offset = page * pageSize
+        return dao.getByTopicIdPaged(sheet.uppercase(), topicId, tag, pageSize, offset).map { it.toQuestionItem() }
+    }
+
+    /** Room থেকে একটা topicId-এর (audience-filtered) মোট প্রশ্ন সংখ্যা */
+    suspend fun getRoomTotalCountByTopic(sheet: String, topicId: String, tag: String): Int =
+        dao.countByTopicIdFiltered(sheet.uppercase(), topicId, tag)
+
+    // ── FIX ("সঠিক উত্তর দেওয়া প্রশ্ন পরে আর নিচে যায় না" বাগ) — এই দুটো নতুন
+    // ফাংশন topic/subTopic-এর *সব* প্রশ্ন একসাথে আনে (LIMIT/OFFSET ছাড়া), যাতে
+    // QuizViewModel পুরো লিস্ট গ্লোবালি sort করে *তারপর* পেজ কাটতে পারে — আগের
+    // getRoomPagedQuestions*/ফাংশনগুলো অপরিবর্তিত রইলো, অন্য কোথাও ব্যবহৃত হলে
+    // ভাঙবে না। ──
+    suspend fun getRoomAllQuestionsByTopic(sheet: String, topicId: String, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        dao.getByTopicId(sheet.uppercase(), topicId, tag).map { it.toQuestionItem() }
+
+    suspend fun getRoomAllQuestions(
+        sheet    : String,
+        subject  : String,
+        subTopic : String,
+        tag      : String
+    ): List<com.hanif.smartstudy.data.model.QuestionItem> = if (tag.isBlank() || tag == "all") {
+        dao.getAllForSubTopic(sheet, subject, subTopic)
+    } else {
+        dao.getAllForSubTopicFiltered(sheet, subject, subTopic, tag)
+    }.map { it.toQuestionItem() }
+
+    /**
+     * Firebase থেকে fetch করে Room-এ save করো।
+     * Online sync — background-এ চলে।
+     */
+    suspend fun syncToRoom(content: AppContent) {
+        val now = System.currentTimeMillis()
+        Log.d("Repo", "syncToRoom: quiz=${content.quiz.size} study=${content.study.size} qbank=${content.qbank.size}")
+        // ── FIX ("delete মানে delete — কখনো ফিরে আসবে না"): সার্ভার থেকে fresh
+        // fetch করা এই কন্টেন্টে যদি এমন কোনো প্রশ্ন থাকে যেটা এই ডিভাইস থেকে
+        // ইতিমধ্যে delete করা হয়েছে (কিন্তু Firebase-এ delete তখনো propagate
+        // হয়নি — network delay/queue এর কারণে দেরি হতেই পারে), সেটা যেন কোনোভাবেই
+        // আবার Room-এ upsert না হয়ে যায়, তাই তিনটা sheet-এর tombstone id গুলো
+        // আগেই বাদ দেওয়া হচ্ছে। ──
+        val deletedQuiz  = deletedDao.idsForSheet("QUIZ").toSet()
+        val deletedQbank = deletedDao.idsForSheet("QBANK").toSet()
+        val deletedStudy = deletedDao.idsForSheet("STUDY").toSet()
+        val quizToSave  = if (deletedQuiz.isEmpty())  content.quiz  else content.quiz.filterNot  { it.id in deletedQuiz }
+        val qbankToSave = if (deletedQbank.isEmpty()) content.qbank else content.qbank.filterNot { it.id in deletedQbank }
+        val studyToSave = if (deletedStudy.isEmpty()) content.study else content.study.filterNot { it.id in deletedStudy }
+        if (quizToSave.isNotEmpty())  dao.upsertAll(quizToSave.map  { it.toEntity(now) })
+        if (qbankToSave.isNotEmpty()) dao.upsertAll(qbankToSave.map { it.toEntity(now) })
+        if (studyToSave.isNotEmpty()) dao.upsertAll(studyToSave.map { it.toEntity(now) })
+        Log.d("Repo", "syncToRoom: done")
+    }
+
+    // ── Phase 6: Reference data (Subjects/Topics/SubTopics/Tags/Posts/Institutions) ──
+
+    /**
+     * GAS `getReferenceData` থেকে Subjects/Topics/SubTopics/Tags/Posts/Institutions টেনে
+     * Room-এ পুরো replace করে (ছোট টেবিল বলে delete-then-insert নিরাপদ, delta লাগে না)।
+     * শুধু Google Sheet ডেটা-সোর্স মোডে কাজ করে — Firebase মোডে Phase 4 এখনো deferred, তাই
+     * ওই মোডে এই reference টেবিলগুলো ফাঁকাই থাকবে (কল করলে false রিটার্ন করে, কিছু ভাঙে না)।
+     * ব্যর্থ হলে চুপচাপ (Room-এর পুরনো ডেটা অপরিবর্তিত থাকে) — non-critical background sync,
+     * এখনো কোনো ViewModel থেকে auto-call হয় না, প্রয়োজনমতো explicitly call করতে হবে।
+     */
+    /**
+     * force=false (ডিফল্ট) হলে — Room-এ ইতিমধ্যে subjects/topics ডেটা থাকলে ও শেষ সফল
+     * sync REF_SYNC_MIN_GAP_MS-এর মধ্যে হয়ে থাকলে নতুন GAS কল স্কিপ করে সরাসরি true
+     * রিটার্ন করে (Room-এর ডেটাই "যথেষ্ট ফ্রেশ" ধরা হয়) — এটাই মূল ফিক্স যেটা প্রতিটা
+     * Subject-list visit-কে ব্লকিং নেটওয়ার্ক কল থেকে বাঁচায়। force=true দিলে (যেমন
+     * pull-to-refresh) গ্যাপ উপেক্ষা করে সবসময় GAS থেকে টাটকা ডেটা আনবে।
+     */
+    /**
+     * force=false (ডিফল্ট) হলে — Room-এ ইতিমধ্যে subjects/topics ডেটা থাকলে ও শেষ সফল
+     * sync REF_SYNC_MIN_GAP_MS-এর মধ্যে হয়ে থাকলে নতুন CDN কল স্কিপ করে সরাসরি true
+     * রিটার্ন করে (Room-এর ডেটাই "যথেষ্ট ফ্রেশ" ধরা হয়)। force=true দিলে (যেমন
+     * pull-to-refresh) গ্যাপ উপেক্ষা করে সবসময় CDN থেকে টাটকা ডেটা আনবে।
+     *
+     * FIX (Speed Plan Task 3, "Gas diye kuno read noy — never"): আগে GAS
+     * `getReferenceData` কল হতো (cold-start/latency-প্রবণ)। এখন সম্পূর্ণ CDN-only —
+     * ব্যর্থ হলে (network/CDN down) কোনো GAS fallback হয় না, Room-এর পুরনো ডেটা
+     * অপরিবর্তিত থাকে + local notification দেখানো হয়।
+     */
+    suspend fun syncReferenceData(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!force && (now - _lastRefSyncAt) < REF_SYNC_MIN_GAP_MS) {
+            val hasCached = refDao.getAllSubjects().isNotEmpty()
+            if (hasCached) {
+                Log.d("Repo", "syncReferenceData: skip (fresh within ${REF_SYNC_MIN_GAP_MS}ms), using Room cache")
+                return@withContext true
+            }
+            // Room এখনো খালি — গ্যাপের মধ্যে থাকলেও প্রথমবারের জন্য fetch করতেই হবে
+        }
+        if (!isOnline()) return@withContext false
+
+        val subjects = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.SubjectRef>("reference/subjects.json")
+        if (subjects == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Subjects আনা যায়নি [${com.hanif.smartstudy.data.remote.CdnService.lastDiag}]")
+            return@withContext false
+        }
+        val topics = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.TopicRef>("reference/topics.json")
+            ?: run {
+                com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Topics আনা যায়নি [${com.hanif.smartstudy.data.remote.CdnService.lastDiag}]")
+                return@withContext false
+            }
+        // ── tags/posts/institutions ছোট, non-critical reference — একটার fetch
+        // ব্যর্থ হলেও পুরো sync আটকে দেওয়ার দরকার নেই, শুধু সেই অংশটা Room-এ
+        // আগের মতোই থেকে যাবে (খালি লিস্টে ওভাররাইট না করে) ──
+        val tags = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.TagRef>("reference/tags.json")
+        val posts = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.PostRef>("reference/posts.json")
+        val institutions = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.InstitutionRef>("reference/institutions.json")
+        if (tags == null || posts == null || institutions == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "কিছু reference তালিকা (tags/posts/institutions) আনা যায়নি")
+        }
+
+        refDao.replaceAll(
+            subjects     = subjects.map { it.toEntity() },
+            topics       = topics.map { it.toEntity() },
+            subtopics    = emptyList(), // GAS-এ কখনো আলাদা "Subtopics" শিট ছিলই না (REF_TABS দেখো) — topics-ই সাব-টপিক লেভেল
+            tags         = tags?.map { it.toEntity() } ?: refDao.getAllTags(),
+            posts        = posts?.map { it.toEntity() } ?: refDao.getAllPosts(),
+            institutions = institutions?.map { it.toEntity() } ?: refDao.getAllInstitutions()
+        )
+        reapplyLocalReferenceOverrides()   // ← Move-এ নতুন বানানো Subject/Topic CDN-এর পুরনো তালিকায় হারিয়ে না যাক
+        reapplyDeletedAndRenamedReferences()   // ← ডিলিট/rename করা আইটেম CDN-এর পুরনো তালিকা থেকে ফিরে না আসুক (late sync-এও)
+        reapplyTopicOrderOverrides()
+        // ── QBank পদবী/প্রতিষ্ঠান সিরিয়াল (CDN-এর sort_order) — সাধারণ ইউজারদের জন্য সংরক্ষণ;
+        // admin-এর লোকাল ক্রম (QBankOrderStore LOCAL) সবসময় এর ওপরে থাকে ──
+        try {
+            com.hanif.smartstudy.util.QBankOrderStore.init(context)
+            fun numOf(a: Any?): Int? = (a as? Number)?.toInt() ?: a?.toString()?.trim()?.toDoubleOrNull()?.toInt()
+            posts?.let { l -> com.hanif.smartstudy.util.QBankOrderStore.setServer(
+                com.hanif.smartstudy.util.QBankOrderStore.POST,
+                l.mapNotNull { r -> val id = r.postId; val n = numOf(r.sortOrder); if (!id.isNullOrBlank() && n != null && n > 0) id to n else null }.toMap()) }
+            institutions?.let { l -> com.hanif.smartstudy.util.QBankOrderStore.setServer(
+                com.hanif.smartstudy.util.QBankOrderStore.INSTITUTION,
+                l.mapNotNull { r -> val id = r.institutionId; val n = numOf(r.sortOrder); if (!id.isNullOrBlank() && n != null && n > 0) id to n else null }.toMap()) }
+        } catch (_: Exception) { }
+        _lastRefSyncAt = now
+        Log.d("Repo", "syncReferenceData (CDN): subjects=${subjects.size} topics=${topics.size}")
+        true
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin টপিক-সিরিয়াল — লোকাল instant + "override" (CDN ধরার আগ পর্যন্ত)।
+    // Admin সেভ করার পর CDN-এর reference/topics.json নতুন হতে কিছু সময় (পরের publish) লাগে;
+    // তার আগে যদি syncReferenceData() চলে, Room-এর replaceAll() পুরনো সিরিয়াল ফিরিয়ে আনত
+    // — admin-এর নিজের ক্রম "লাফিয়ে" পুরনোতে ফিরত। তাই সেভ করা সিরিয়ালগুলো একটা ছোট
+    // SharedPreferences-এ (topicId → ক্রম, সময়) রাখা হয় এবং প্রতিটা reference-sync-এর
+    // পর আবার বসানো হয়; CDN-এর মান মিলে গেলে (বা ৪৮ ঘণ্টা পার হলে) override মুছে যায়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val topicOrderPrefs get() = context.getSharedPreferences("topic_order_overrides", Context.MODE_PRIVATE)
+
+    suspend fun saveTopicOrderLocal(order: Map<String, Int>) = withContext(Dispatchers.IO) {
+        refDao.setTopicSortOrders(order)
+        val now = System.currentTimeMillis()
+        val ed = topicOrderPrefs.edit()
+        order.forEach { (id, n) -> ed.putString(id, "$n|$now") }
+        ed.apply()
+    }
+
+    private suspend fun reapplyTopicOrderOverrides() {
+        val all = topicOrderPrefs.all
+        if (all.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val ed = topicOrderPrefs.edit()
+        val byId = refDao.getAllTopics().associateBy { it.topicId }
+        for ((id, raw) in all) {
+            val parts = (raw as? String)?.split("|")
+            val n  = parts?.getOrNull(0)?.toIntOrNull()
+            val at = parts?.getOrNull(1)?.toLongOrNull() ?: 0L
+            val cur = byId[id]
+            if (n == null || cur == null || now - at > 48L * 3600_000L) { ed.remove(id); continue }
+            if (cur.sortOrder == n) { ed.remove(id); continue }      // CDN ধরে ফেলেছে
+            refDao.setTopicSortOrder(id, n)                          // এখনো পুরনো — admin-এর মান বসাও
+        }
+        ed.apply()
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🆕 লোকালি বানানো Subject/Topic-এর "override" (Move-এর সময় নতুন Topic/Subject)।
+    // ROOT CAUSE ("Move-এ নতুন টপিক বানালে হচ্ছে না / কিছুক্ষণ পর হারিয়ে যায়"): নতুন Topic
+    // Sheet-এ ঠিকই তৈরি হয় ও Room-এ বসে, কিন্তু syncReferenceData() প্রতিবার Room-এর
+    // Topics/Subjects মুছে CDN-এর reference/topics.json দিয়ে পুরোটা replaceAll() করে —
+    // আর CDN-এর ওই ফাইল নতুন হয় কেবল "Publish Now"-এর পর। তাই পরের sync-এই নতুন Topic
+    // অ্যাপ থেকে উধাও হতো (প্রশ্ন Room-এ থেকে গেলেও তালিকায় Topic দেখা যেত না)।
+    // এখন প্রতিটা নতুন Subject/Topic একটা ছোট SharedPreferences-এ রাখা হয় এবং প্রতিটা
+    // sync-এর পর (CDN-এ না থাকলে) আবার বসানো হয়; CDN ধরে ফেললে (id বা নাম মিললে) বা ৩০
+    // দিন পার হলে মুছে যায়। Admin ডিলিট করলে/নাম বদলালে এখানেও সেটা প্রতিফলিত হয়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val localRefPrefs get() = context.getSharedPreferences("local_reference_overrides", Context.MODE_PRIVATE)
+    private val LR_SEP = "\u241F"
+    private val LR_TTL_MS = 30L * 24 * 3600_000L
+
+    private fun rememberLocalSubject(id: String, name: String, sheet: String) {
+        try { localRefPrefs.edit().putString("S|$id", listOf(name, sheet, System.currentTimeMillis()).joinToString(LR_SEP)).apply() } catch (_: Exception) { }
+    }
+    private fun rememberLocalTopic(id: String, subjectId: String, name: String) {
+        try { localRefPrefs.edit().putString("T|$id", listOf(subjectId, name, System.currentTimeMillis()).joinToString(LR_SEP)).apply() } catch (_: Exception) { }
+    }
+    private fun forgetLocalRef(kind: String, id: String) {
+        try { localRefPrefs.edit().remove("$kind|$id").apply() } catch (_: Exception) { }
+    }
+    /** অস্থায়ী "-local…" id → আসল id হলে রেকর্ডও নতুন id-তে সরে যায় (বাকি তথ্য অপরিবর্তিত) */
+    private fun migrateLocalRefId(kind: String, oldId: String, newId: String) {
+        try {
+            val p = localRefPrefs
+            val raw = p.getString("$kind|$oldId", null) ?: return
+            val ed = p.edit().remove("$kind|$oldId").putString("$kind|$newId", raw)
+            if (kind == "S") {   // এই Subject-এর আন্ডারে রাখা নতুন Topic-গুলোর subjectId-ও বদলাও
+                p.all.forEach { (k, v) ->
+                    if (!k.startsWith("T|")) return@forEach
+                    val parts = (v as? String)?.split(LR_SEP) ?: return@forEach
+                    if (parts.getOrNull(0) == oldId) ed.putString(k, (listOf(newId) + parts.drop(1)).joinToString(LR_SEP))
+                }
+            }
+            ed.apply()
+        } catch (_: Exception) { }
+    }
+    private fun renameLocalRef(kind: String, id: String, newName: String) {
+        try {
+            val p = localRefPrefs
+            val raw = p.getString("$kind|$id", null) ?: return
+            val parts = raw.split(LR_SEP).toMutableList()
+            val nameIdx = if (kind == "S") 0 else 1
+            if (parts.size <= nameIdx) return
+            parts[nameIdx] = newName
+            p.edit().putString("$kind|$id", parts.joinToString(LR_SEP)).apply()
+        } catch (_: Exception) { }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // ডিলিট (tombstone) + rename (override) — "লেট হলেও যেন পুনরায় দেখা না যায়"
+    //
+    // সমস্যা: Admin Subject/Topic ডিলিট বা rename করলে Room-এ সাথে সাথে বদলায়, Sheet-এ
+    // বদলায় ব্যাকগ্রাউন্ডে। কিন্তু CDN-এর reference/subjects.json ও topics.json নতুন হয় কেবল
+    // পরের "Publish"-এর পর। এর মধ্যে syncReferenceData() চললে Room-এর replaceAll() CDN-এর
+    // পুরনো তালিকা দিয়ে সব ওভাররাইট করত — ফলে ডিলিট করা আইটেম আবার ফিরে আসত আর rename করা
+    // নাম আবার পুরনো হয়ে যেত।
+    //
+    // সমাধান: ডিলিট করা id-গুলো "tombstone" হিসেবে, আর নতুন নামগুলো "override" হিসেবে একটা
+    // ছোট SharedPreferences-এ রাখা হয়; প্রতিটা reference-sync-এর পর আবার প্রয়োগ হয়।
+    // CDN ধরে ফেললে (ডিলিটের ক্ষেত্রে id আর নেই / rename-এর ক্ষেত্রে নাম মিলে গেছে) অথবা
+    // ৩০ দিন পার হলে এন্ট্রি নিজে থেকেই মুছে যায়।
+    // ═════════════════════════════════════════════════════════════════════════
+    private val refTombPrefs   get() = context.getSharedPreferences("ref_delete_tombstones", Context.MODE_PRIVATE)
+    private val refRenamePrefs get() = context.getSharedPreferences("ref_rename_overrides", Context.MODE_PRIVATE)
+
+    private fun rememberDeletedRef(kind: String, id: String) {
+        if (id.isBlank() || id.startsWith("-local")) return
+        try { refTombPrefs.edit().putLong("$kind|$id", System.currentTimeMillis()).apply() } catch (_: Exception) { }
+    }
+
+    private fun rememberRenamedRef(kind: String, id: String, name: String) {
+        if (id.isBlank() || id.startsWith("-local") || name.isBlank()) return
+        try {
+            refRenamePrefs.edit().putString("$kind|$id", name + LR_SEP + System.currentTimeMillis()).apply()
+        } catch (_: Exception) { }
+    }
+
+    private suspend fun reapplyDeletedAndRenamedReferences() {
+        val tombs   = refTombPrefs
+        val renames = refRenamePrefs
+        val tAll = tombs.all
+        val rAll = renames.all
+        if (tAll.isEmpty() && rAll.isEmpty()) return
+        val now = System.currentTimeMillis()
+
+        // ── ১) ডিলিট: CDN যদি এখনো আইটেমটা রেখে থাকে, আবার সরাও; না থাকলে কাজ শেষ — tombstone মুছে দাও ──
+        if (tAll.isNotEmpty()) {
+            val tEd = tombs.edit()
+            val subjIds  = refDao.getAllSubjects().map { it.subjectId }.toHashSet()
+            val topicIds = refDao.getAllTopics().map { it.topicId }.toHashSet()
+            for ((k, v) in tAll) {
+                val at = (v as? Long) ?: 0L
+                if (now - at > LR_TTL_MS || k.length < 3) { tEd.remove(k); continue }
+                val id = k.substring(2)
+                try {
+                    if (k.startsWith("S|")) {
+                        if (id in subjIds) refDao.deleteSubjectCascade(id) else tEd.remove(k)
+                    } else if (k.startsWith("T|")) {
+                        if (id in topicIds) refDao.deleteTopicCascade(id) else tEd.remove(k)
+                    } else tEd.remove(k)
+                } catch (_: Exception) { }
+            }
+            tEd.apply()
+        }
+
+        // ── ২) rename: CDN-এর নাম এখনো পুরনো হলে নতুন নামটা আবার বসাও; মিলে গেলে override মুছে দাও ──
+        if (rAll.isNotEmpty()) {
+            val rEd = renames.edit()
+            val subjById  = refDao.getAllSubjects().associateBy { it.subjectId }
+            val topicById = refDao.getAllTopics().associateBy { it.topicId }
+            for ((k, v) in rAll) {
+                val parts = (v as? String)?.split(LR_SEP)
+                val name  = parts?.getOrNull(0).orEmpty()
+                val at    = parts?.getOrNull(1)?.toLongOrNull() ?: 0L
+                if (name.isBlank() || now - at > LR_TTL_MS || k.length < 3) { rEd.remove(k); continue }
+                val id = k.substring(2)
+                try {
+                    if (k.startsWith("S|")) {
+                        val cur = subjById[id]
+                        if (cur == null || normName(cur.name) == normName(name)) rEd.remove(k)
+                        else refDao.renameSubjectById(id, name)
+                    } else if (k.startsWith("T|")) {
+                        val cur = topicById[id]
+                        if (cur == null || normName(cur.name) == normName(name)) rEd.remove(k)
+                        else refDao.renameTopicById(id, name)
+                    } else rEd.remove(k)
+                } catch (_: Exception) { }
+            }
+            rEd.apply()
+        }
+    }
+
+    private suspend fun reapplyLocalReferenceOverrides() {
+        val prefs = localRefPrefs
+        val all = prefs.all
+        if (all.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val ed = prefs.edit()
+        val subjects = refDao.getAllSubjects()
+        val topics = refDao.getAllTopics()
+        val subjIds = subjects.map { it.subjectId }.toHashSet()
+        val subjNames = subjects.map { normName(it.name) }.toHashSet()
+        val topicIds = topics.map { it.topicId }.toHashSet()
+        val topicKeys = topics.map { it.subjectId + LR_SEP + normName(it.name) }.toHashSet()
+        val touchedTopics = ArrayList<String>()
+        for ((k, raw) in all) {
+            val parts = (raw as? String)?.split(LR_SEP) ?: run { ed.remove(k); null } ?: continue
+            val at = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+            if (now - at > LR_TTL_MS) { ed.remove(k); continue }
+            val id = k.substring(2)
+            if (k.startsWith("S|")) {
+                val name = parts.getOrElse(0) { "" }; val sheet = parts.getOrElse(1) { "" }
+                if (id in subjIds || normName(name) in subjNames) { ed.remove(k); continue }   // CDN ধরে ফেলেছে
+                try { refDao.upsertSubjects(listOf(com.hanif.smartstudy.data.local.SubjectEntity(subjectId = id, name = name, sheet = sheet, tagId = ""))) } catch (_: Exception) { }
+            } else if (k.startsWith("T|")) {
+                val subjectId = parts.getOrElse(0) { "" }; val name = parts.getOrElse(1) { "" }
+                if (id in topicIds || (subjectId + LR_SEP + normName(name)) in topicKeys) { ed.remove(k); continue }
+                try {
+                    refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(topicId = id, subjectId = subjectId, name = name)))
+                    touchedTopics.add(id)
+                } catch (_: Exception) { }
+            }
+        }
+        ed.apply()
+        // replaceAll() rowCount শূন্য করে দিয়েছে — Room-এর প্রশ্ন গুনে আবার ঠিক করো, নাহলে খালি ভেবে লুকিয়ে যাবে
+        touchedTopics.forEach { tid ->
+            for (sh in listOf("Quiz", "QBank", "Study")) { try { refreshTopicRowCount(sh, tid) } catch (_: Exception) { } }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // QBank টপিক ম্যানেজার (Admin) — বাল্ক আপলোডে আসা QBank-এর নিজস্ব Subject › Topic তালিকা,
+    // "আনমুভ" ফিল্টার আর "মার্জ টু" (পুরো টপিকের MCQ Quiz-এ কপি) এর ডেটা-সোর্স।
+    // QBank-এর প্রশ্ন কখনো সরে না/মুছে না — "মুভ" = Quiz-এ কপি (দেখো MenuViewModel.adminCopyQBankToQuiz)।
+    // ═════════════════════════════════════════════════════════════════════════
+    data class QBankTopicRow(
+        val subjectId: String, val subject: String,
+        val topicId: String,   val topic: String,
+        val count: Int
+    )
+
+    /** Room reference-টেবিল থেকে QBank-এর সব Subject › Topic (নেটওয়ার্ক লাগে না) */
+    suspend fun getQBankTopicRows(): List<QBankTopicRow> = withContext(Dispatchers.IO) {
+        val out = ArrayList<QBankTopicRow>()
+        for (s in refDao.getSubjectsBySheet("QBank")) {
+            for (t in refDao.getTopicsForSubject(s.subjectId)) {
+                val n = if (t.rowCountQbank > 0) t.rowCountQbank else t.rowCount
+                out += QBankTopicRow(s.subjectId, s.name, t.topicId, t.name, n)
+            }
+        }
+        out
+    }
+
+    /** একটা QBank Topic-এর সব প্রশ্নের id — GAS-এর পেজ ধরে ধরে (Room-এ সব না-ও থাকতে পারে);
+     *  অফলাইন/ব্যর্থ হলে Room-এ যতটুকু cache আছে সেটাই। */
+    suspend fun fetchQBankTopicQuestionIds(topicId: String): List<String> = withContext(Dispatchers.IO) {
+        val ids = LinkedHashSet<String>()
+        var cursor: String? = null
+        var pages = 0
+        var anyOk = false
+        while (pages++ < 200) {
+            val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, null, cursor, 100)
+            if (!page.ok) break
+            anyOk = true
+            page.items.forEach { q -> q.id?.takeIf { it.isNotBlank() }?.let { ids.add(it) } }
+            cursor = page.nextCursor
+            if (!page.hasMore || cursor.isNullOrBlank()) break
+        }
+        if (!anyOk || ids.isEmpty()) {
+            try { dao.getByTopicId("QBANK", topicId, "").forEach { ids.add(it.fbKey) } } catch (_: Exception) { }
+        }
+        ids.toList()
+    }
+
+    /** প্রশ্ন-id → তাদের QBank topicId-গুলো (Room cache থেকে) — "মুভ করা হয়েছে" মার্ক করার জন্য */
+    suspend fun qbankTopicIdsOfQuestions(ids: List<String>): Set<String> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptySet()
+        try {
+            ids.chunked(500).flatMap { part -> dao.getByFbKeysFiltered("QBANK", part, "") }
+                .mapNotNull { it.topicId.takeIf { t -> t.isNotBlank() } }.toSet()
+        } catch (_: Exception) { emptySet() }
+    }
+
+    // ── Room-cached reference data — instant, কোনো নেটওয়ার্ক কল ছাড়াই ──
+    suspend fun getRoomSubjectsRef()                     = refDao.getAllSubjects()
+    suspend fun getRoomSubjectsRefBySheet(sheet: String)  = refDao.getSubjectsBySheet(sheet)
+    // ── FIX ("ফাঁকা টপিক/সাবজেক্ট দেখানোর দরকার কী?") — দেখো ReferenceDao-এর
+    // getSubjectIdsWithContentQuiz/Qbank/Study এর নোট। sheet স্ট্রিং ("Quiz"/"QBank"/
+    // "Study") অনুযায়ী সঠিক কোয়েরিটা বেছে নেওয়া হয় এখানে। ──
+    suspend fun getRoomSubjectIdsWithContent(sheet: String): Set<String> = when (sheet) {
+        "Quiz"  -> refDao.getSubjectIdsWithContentQuiz()
+        "QBank" -> refDao.getSubjectIdsWithContentQbank()
+        "Study" -> refDao.getSubjectIdsWithContentStudy()
+        else    -> emptyList()
+    }.toSet()
+    suspend fun getRoomTopicsForSubject(subjectId: String) = refDao.getTopicsForSubject(subjectId)
+    /** fbKey → isWritten (true = লিখিত, false = MCQ); Study টাইপ বাদ। Room-এ নেই এমন id এখানে থাকে না। */
+    suspend fun getRoomQuestionTypeMap(sheet: String): Map<String, Boolean> = withContext(Dispatchers.IO) {
+        dao.getAllTypes(sheet.uppercase())
+            .filter { !it.questionType.trim().equals("study", ignoreCase = true) }
+            .associate { it.fbKey to it.questionType.trim().equals("written", ignoreCase = true) }
+    }
+    /**
+     * QBank কার্ডের MCQ/লিখিত গণনার জন্য (fbKey → isWritten)। আগে শুধু Room-এর প্রশ্ন ধরা হতো, ফলে
+     * ডাউনলোড-না-হওয়া প্রশ্ন কোনো দিকেই গোনা হতো না (লিখিত ০ দেখাতো)। এখন GAS-এর exam-appearances
+     * থেকে পাওয়া ধরনকে ভিত্তি ধরে, তার ওপর Room-এর (আসল, ডাউনলোড-করা) ধরন বসানো হয় — তাই Room-এ
+     * যা আছে সেটাই প্রাধান্য পায়, বাকিগুলোর জন্য appearance-এর ধরন কাজে লাগে। qtype না থাকলে ফল
+     * আগের আচরণের (শুধু Room) সমান।
+     */
+    suspend fun getQBankTypeMap(): Map<String, Boolean> = withContext(Dispatchers.IO) {
+        val room = getRoomQuestionTypeMap("QBANK")
+        val fromAppearances = try {
+            com.hanif.smartstudy.util.QBankTypeStore.all(context)
+        } catch (e: Exception) { emptyMap() }
+        if (fromAppearances.isEmpty()) room else HashMap(fromAppearances).apply { putAll(room) }
+    }
+    // Move ডায়ালগে সব Subject/Topic দেখাতে — প্রশ্নের টেবিল থেকে distinct (reference-এ না থাকলেও)
+    suspend fun getRoomQuestionSubjects(sheet: String): List<String> = dao.getSubjects(sheet.uppercase())
+    suspend fun getRoomQuestionSubTopics(sheet: String, subject: String): List<String> = dao.getSubTopics(sheet.uppercase(), subject)
+    // ── PERF/UX FIX ("Subject list এ প্রশ্নসংখ্যা/প্রগ্রেস দেখানো দরকার, কিন্তু পুরো
+    // content ডাউনলোড না করেই"): Topics reference-টেবিলে প্রতিটা topic-এর rowCount
+    // (Quiz/QBank/Study — mode অনুযায়ী আলাদা কলাম, দেখো TopicEntity-এর কমেন্ট)
+    // আগে থেকেই আছে — এখানে শুধু subjectId ধরে যোগফল করা হচ্ছে, কোনো নতুন নেটওয়ার্ক
+    // কল বা প্রশ্ন-ডাউনলোড লাগছে না (Room-only, তাৎক্ষণিক)। ──
+    suspend fun getRoomSubjectQuestionCounts(sheet: String): Map<String, Int> {
+        val topics = refDao.getAllTopics()
+        return topics.groupBy { it.subjectId }
+            .mapValues { (_, ts) ->
+                ts.sumOf { t ->
+                    val perSheet = when (sheet) {
+                        "Quiz"  -> t.rowCountQuiz
+                        "QBank" -> t.rowCountQbank
+                        "Study" -> t.rowCountStudy
+                        else    -> 0
+                    }
+                    if (perSheet > 0) perSheet else if (t.rowCountQuiz == 0 && t.rowCountQbank == 0 && t.rowCountStudy == 0) t.rowCount else 0
+                }
+            }
+    }
+    suspend fun getRoomSubTopicsForTopic(topicId: String)  = refDao.getSubTopicsForTopic(topicId)
+    suspend fun getRoomTags()                             = refDao.getAllTags()
+    suspend fun getRoomPosts()                            = refDao.getAllPosts()
+    suspend fun getRoomInstitutions()                     = refDao.getAllInstitutions()
+    suspend fun getRoomAppearancesForQuestion(questionId: String) = refDao.getAppearancesForQuestion(questionId)
+    suspend fun getRoomAppearancesForPost(postId: String)          = refDao.getAppearancesForPost(postId)
+    suspend fun getRoomAppearancesForInstitution(institutionId: String) = refDao.getAppearancesForInstitution(institutionId)
+    // ── FIX ("সাল ট্যাবে ডেটা আসেনি") — দেখো ReferenceDao.getAppearanceYearCounts এর নোট ──
+    suspend fun getRoomAppearancesWithYear()                      = refDao.getAllAppearancesWithYear()
+    suspend fun getRoomAppearanceYearCounts()                     = refDao.getAppearanceYearCounts()
+    suspend fun getRoomAppearanceQuestionIdsForYear(year: String) = refDao.getAppearanceQuestionIdsForYear(year)
+
+    // ── Admin "Move" ডায়ালগে Subject/Topic নাম বেছে/টাইপ করলে, ব্যাকগ্রাউন্ড sync কলের
+    // আগে আসল id বের করতে লাগে (GAS action-গুলো id-ভিত্তিক, নাম-ভিত্তিক না) ──
+    // ── FIX ("Move/Rename কাজ করছে না" — "রিজলভ করা যায়নি"): আগে শুধু হুবহু নাম-মিল
+    // (SQL =) ছিল — নামে বাড়তি space/invisible char (zero-width, nbsp) থাকলে কখনো মিলত
+    // না। এখন হুবহু মিল না পেলে normalize (trim + invisible-char বাদ + lowercase) করে খোঁজে ──
+    private fun normName(s: String?): String =
+        (s ?: "").replace(Regex("[\\u200B-\\u200D\\uFEFF\\u00A0]"), " ")
+            .trim().replace(Regex("\\s+"), " ").lowercase()
+
+    private suspend fun findSubjectEntity(sheet: String, subjectName: String) =
+        refDao.getSubjectByName(sheet, subjectName)
+            ?: refDao.getSubjectsBySheet(sheet).firstOrNull { normName(it.name) == normName(subjectName) }
+
+    private suspend fun findTopicEntity(subjectId: String, topicName: String) =
+        refDao.getTopicByName(subjectId, topicName)
+            ?: refDao.getTopicsForSubject(subjectId).firstOrNull { normName(it.name) == normName(topicName) }
+
+    suspend fun resolveSubjectId(sheet: String, subjectName: String): String? =
+        findSubjectEntity(sheet, subjectName)?.subjectId
+
+    suspend fun resolveTopicId(subjectId: String, topicName: String): String? =
+        findTopicEntity(subjectId, topicName)?.topicId
+
+    /** একটা Subject-এর সব Topic (topicId to name) — "Merge To"-তে বিষয়ের সব অধ্যায় সরাতে লাগে */
+    suspend fun topicsOfSubject(subjectId: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        refDao.getTopicsForSubject(subjectId).map { it.topicId to it.name }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin Rename (Subject/Topic) — instant-local। আগে rename শুধু Sheet-এর প্রশ্ন-রো বদলাত
+    // (পুরনো নাম-ভিত্তিক renameField), কিন্তু UI পড়ে Room-এর Subjects/Topics reference
+    // টেবিল থেকে — সেটা কখনো বদলাত না, তাই rename "হচ্ছে না" মনে হতো।
+    // ═════════════════════════════════════════════════════════════════════════
+    data class RenameTarget(val refType: String, val id: String, val oldName: String)
+
+    /** Room reference-টেবিল + Room questions-এর denormalized নাম + bulk cache — সব একসাথে
+     *  বদলায়। id রিজলভ না হলে (পুরনো/sync-না-হওয়া ডেটা) null রিটার্ন করে। */
+    suspend fun renameLocal(
+        sheet: String, subject: String, subTopic: String, newName: String, renameSubTopic: Boolean
+    ): RenameTarget? = withContext(Dispatchers.IO) {
+        val target: RenameTarget = if (renameSubTopic) {
+            val subj  = findSubjectEntity(sheet, subject) ?: return@withContext null
+            val topic = findTopicEntity(subj.subjectId, subTopic) ?: return@withContext null
+            RenameTarget("topics", topic.topicId, topic.name)
+        } else {
+            val subj = findSubjectEntity(sheet, subject) ?: return@withContext null
+            RenameTarget("subjects", subj.subjectId, subj.name)
+        }
+        applyRenameById(sheet, target.refType, target.id, newName)
+        renameContentAndPersist(sheet, subject, subTopic, newName, renameSubTopic)
+        target
+    }
+
+    /** id দিয়ে সরাসরি Room-এর নাম সেট করে (rename + Sheet ব্যর্থ হলে revert — দুটোতেই ব্যবহৃত) */
+    suspend fun applyRenameById(sheet: String, refType: String, id: String, name: String) =
+        withContext(Dispatchers.IO) {
+            val roomSheet = sheet.uppercase()
+            renameLocalRef(if (refType == "topics") "T" else "S", id, name)
+            rememberRenamedRef(if (refType == "topics") "T" else "S", id, name)   // CDN পুরনো নাম ফেরাতে পারবে না
+            if (refType == "topics") {
+                refDao.renameTopicById(id, name)
+                dao.renameSubTopicInQuestions(roomSheet, id, name)
+            } else {
+                refDao.renameSubjectById(id, name)
+                dao.renameSubjectInQuestions(roomSheet, id, name)
+            }
+        }
+
+    /** bulk cache-এও (নাম-ভিত্তিক legacy content) নতুন নাম বসায় — moveContentByTopicAndPersist-এর
+     *  একই প্যাটার্ন। Topic rename হলে subject মিলিয়ে scope করা হয় (অন্য subject-এর একই নামের
+     *  Topic ছোঁয়া হয় না)। */
+    suspend fun renameContentAndPersist(
+        sheet: String, oldSubject: String, oldSubTopic: String, newName: String, renameSubTopic: Boolean
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val oSubjN = normName(oldSubject); val oSubTN = normName(oldSubTopic)
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, subjOf: (T) -> String?, subTOf: (T) -> String?): T {
+            if (normName(subjOf(item)) != oSubjN) return item
+            if (renameSubTopic && normName(subTOf(item)) != oSubTN) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty(if (renameSubTopic) "sub_topic" else "subject", newName)
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it, { s -> s.subject }, { s -> s.subTopic }) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            else    -> base
+        }
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /**
+     * "পদ অনুযায়ী ব্রাউজ" ফ্লো-র ডেটা: CDN-এর বাল্ক `exam-appearances.json`
+     * থেকে পুরো Exam_Appearances টেবিল টেনে Room-এ replace করে।
+     *
+     * FIX (Speed Plan Task 3): আগে GAS `getAllExamAppearances` ব্যবহার হতো —
+     * এখন CDN-only, কোনো GAS fallback নেই। ব্যর্থ হলে Room-এর পুরনো টেবিল
+     * অপরিবর্তিত থাকে + local notification।
+     */
+    suspend fun syncExamAppearances(): Boolean = withContext(Dispatchers.IO) {
+        if (!isOnline()) return@withContext false
+        val appearances = com.hanif.smartstudy.data.remote.CdnService
+            .fetchReferenceJson<com.hanif.smartstudy.data.model.ExamAppearanceRef>("exam-appearances.json")
+        if (appearances == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Exam Appearances তালিকা আনা যায়নি")
+            return@withContext false
+        }
+        refDao.deleteAllExamAppearances()
+        if (appearances.isNotEmpty()) {
+            refDao.upsertExamAppearances(appearances.map { it.toEntity() })
+        }
+        // ── QBank কার্ডের MCQ/লিখিত সংখ্যা: GAS-এর JSON-এ থাকা qtype ("W"/"M") আলাদা ফাইলে রাখো,
+        // যাতে Room-এ প্রশ্ন ডাউনলোড না থাকলেও সংখ্যা ঠিক আসে। qtype না থাকলে (পুরনো JSON) কিছু বদলায় না।
+        // এখানে কোনো ব্যর্থতা মূল sync-কে আটকাবে না। ──
+        try {
+            com.hanif.smartstudy.util.QBankTypeStore.replaceAll(
+                context, appearances.map { (it.questionId ?: "") to it.qtype }
+            )
+        } catch (e: Exception) {
+            Log.w("Repo", "QBankTypeStore update failed: ${e.message}")
+        }
+        Log.d("Repo", "syncExamAppearances (CDN): ${appearances.size}")
+        true
+    }
+
+    /**
+     * ── Admin-only "🔄 Force Full Resync" — দেখো QuizViewModel.forceFullResync()।
+     * সাধারণ ইউজারের pull-to-refresh (syncReferenceData(force=true)) শুধু reference
+     * টেবিল (subjects/topics/tags/posts/institutions) রিফ্রেশ করে — আসল প্রশ্নের
+     * কনটেন্ট (Room `questions` টেবিল) স্পর্শ করে না, কারণ ensureRoomQuestionsByIds/
+     * cacheNextTopicBatch শুধু "Room-এ নেই" এমন id-ই নতুন করে আনে — একবার ক্যাশ হয়ে
+     * গেলে সেই প্রশ্নের কনটেন্ট (groupHeading-এর মতো নতুন যোগ হওয়া ফিল্ড সহ) আর
+     * রিফ্রেশ হয় না, স্কিমা-মাইগ্রেশনের পরও পুরনো ক্যাশড রো stale থেকে যেতে পারে।
+     *
+     * এই ফাংশন `questions` টেবিল (পুরোটা) + `topic_sync` কার্সার/হ্যাশ টেবিল
+     * (নাহলে hash-based skip-fetch লজিক "কিছু বদলায়নি" ধরে নিয়ে আবার স্কিপ করে
+     * দিতে পারে) + সব reference টেবিল — সব খালি করে, তারপর reference/exam-appearances
+     * পুনরায় fetch করে। প্রশ্নগুলো নিজে-নিজে আর ফেচ হয় না (ভারী/সব-সাবজেক্ট) —
+     * পরের বার যেই Topic/Post/Institution/Year খোলা হবে, স্বাভাবিক
+     * progressive-fill/getQuestionsByIds পথেই আবার টাটকা আসবে।
+     *
+     * ⚠️ ভারী/ধীর হতে পারে (পুরো reference + exam-appearances পুনরায় ডাউনলোড) —
+     * তাই এটা শুধু Admin-কে (debug/support প্রয়োজনে) দেখানো উচিত, সাধারণ ইউজারকে না।
+     */
+    suspend fun forceFullResync(): Boolean = withContext(Dispatchers.IO) {
+        dao.deleteAll()
+        topicSyncDao.clearAll()
+        val refOk = syncReferenceData(force = true)
+        val appOk = syncExamAppearances()
+        Log.d("Repo", "forceFullResync: refOk=$refOk appOk=$appOk")
+        refOk
+    }
+
+    /** Settings → "সব প্রশ্ন ডাউনলোড" বাটনের ফলাফল — কতগুলো topic সফল/ব্যর্থ হলো তা UI-তে দেখানোর জন্য */
+    data class DownloadAllResult(
+        val startedOk : Boolean,   // false হলে শুরুই হয়নি (অফলাইন)
+        val total     : Int = 0,
+        val failed    : Int = 0
+    )
+
+    /**
+     * ── Settings → "📥 সব প্রশ্ন ডাউনলোড করুন" ──
+     * সব subject/topic-এর প্রশ্ন এক-দুই মিনিটে Room-এ নামিয়ে রাখে, যাতে অফলাইনেও পুরো
+     * অ্যাপ ব্যবহার করা যায়। এটা cacheNextTopicBatch()-এরই বাল্ক ভার্সন — একই hash-check
+     * লজিক ব্যবহার করে, তাই যেই topic ইতিমধ্যে Room-এ আছে ও অপরিবর্তিত, সেটা আবার
+     * নেটওয়ার্কে ফেচ করে না (দ্বিতীয়বার চাপলে শুধু নতুন/পরিবর্তিত topic-ই আসবে) —
+     * ফলে বারবার চাপলেও CDN Worker-এ অহেতুক লোড পড়ে না।
+     *
+     * Concurrency ইচ্ছাকৃতভাবে সীমিত (৬টা topic একসাথে) — একসাথে শত শত request পাঠিয়ে
+     * CDN Worker/GitHub API rate-limit-এ ধাক্কা দেওয়ার বদলে ধীরে-সুস্থে ব্যাচে ব্যাচে আনা।
+     *
+     * @param onProgress (doneCount, totalCount) — UI progress bar আপডেট করতে
+     */
+    suspend fun downloadAllContent(
+        onProgress: suspend (done: Int, total: Int) -> Unit
+    ): DownloadAllResult = withContext(Dispatchers.IO) {
+        if (!isOnline()) return@withContext DownloadAllResult(startedOk = false)
+
+        // সবার আগে reference (subjects/topics) ফ্রেশ করে নেওয়া — নাহলে নতুন যোগ হওয়া
+        // subject/topic Room-এ না থাকলে ডাউনলোড-লিস্টেই বাদ পড়ে যাবে
+        syncReferenceData(force = true)
+        syncExamAppearances()
+
+        val topics = refDao.getAllTopics()
+        // 🆕 Unified: subject.sheet এখন কমা-লিস্ট ("Quiz,QBank,Study")। আগে পুরো স্ট্রিংটাই
+        // cacheNextTopicBatch-এ যেত (→ "অজানা sheet" ধরে skip হতো)। এখন প্রতিটা topic-এর
+        // জন্য শুধু সেই sheet-গুলোতেই ডাউনলোড চলে যেগুলোতে ওই topic-এ সত্যিই প্রশ্ন আছে।
+        val sheetBySubjectId = refDao.getAllSubjects().associate { it.subjectId to it.sheet }
+        fun sheetsForTopic(t: com.hanif.smartstudy.data.local.TopicEntity): List<String> {
+            val declared = (sheetBySubjectId[t.subjectId] ?: "").split(',', ';', '|')
+                .map { it.trim() }.filter { it == "Quiz" || it == "QBank" || it == "Study" }
+            val withContent = buildList {
+                if (t.rowCountQuiz  > 0) add("Quiz")
+                if (t.rowCountQbank > 0) add("QBank")
+                if (t.rowCountStudy > 0) add("Study")
+            }
+            // row count এখনো না বসে থাকলে (rebuildIndex চলেনি) subject-এ ঘোষিত sheet-গুলোই চেষ্টা করা হয়
+            return if (withContent.isNotEmpty()) withContent else declared
+        }
+        val total = topics.size
+        var done = 0
+        var failed = 0
+        onProgress(0, total)
+
+        // ── FIX ("ডাউনলোডের পর কোনো নতুন প্রশ্নই আর আসছিল না"): আগে ৬টা করে ব্যাচে
+        // বিরতিহীনভাবে সব topic-এ একসাথে GitHub Contents API কল যেত। GitHub-এর
+        // normal ৫০০০/ঘণ্টা limit-এর বাইরেও আলাদা একটা "secondary/burst rate
+        // limit" আছে যেটা অল্প সময়ে অনেক request দেখলে token-টাকে সাময়িকভাবে
+        // ব্লক করে দেয় — এরপর manifest.json সহ *সব* content fetch (নতুন প্রশ্নও)
+        // ৫০২ দিতে শুরু করে, যতক্ষণ না GitHub-এর block নিজে থেকে উঠে যায়। তাই
+        // এখন concurrency কমিয়ে ৩ আর প্রতি ব্যাচের পর ৩৫০ms বিরতি — পুরো ডাউনলোড
+        // কিছুটা ধীর হবে, কিন্তু GitHub-কে burst মনে হবে না, ভবিষ্যতে আবার এই
+        // সমস্যা হবে না।
+        topics.chunked(3).forEach { batch ->
+            coroutineScope {
+                batch.map { topic ->
+                    async {
+                        val sheets = sheetsForTopic(topic)
+                        if (sheets.isEmpty()) return@async
+                        sheets.forEach { sheet ->
+                            try {
+                                cacheNextTopicBatch(sheet, topic.topicId)
+                            } catch (e: Exception) {
+                                Log.w("Repo", "downloadAllContent: ${topic.topicId}/$sheet failed: ${e.message}")
+                                failed++
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+            kotlinx.coroutines.delay(350)
+            done += batch.size
+            onProgress(done.coerceAtMost(total), total)
+        }
+        Log.d("Repo", "downloadAllContent: total=$total failed=$failed")
+        DownloadAllResult(startedOk = true, total = total, failed = failed)
+    }
+
+    /**
+     * একগুচ্ছ questionId (Exam_Appearances থেকে পাওয়া) দিয়ে সরাসরি সেই নির্দিষ্ট প্রশ্নগুলো
+     * Room থেকে টেনে আনে (audience-filtered) — "পদ অনুযায়ী ব্রাউজ"-এ Post+Institution
+     * বাছাইয়ের পর ফ্ল্যাট প্রশ্ন-লিস্ট দেখানোর জন্য।
+     */
+    suspend fun getRoomQuestionsByIds(sheet: String, ids: List<String>, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext emptyList()
+            val entities = dao.getByFbKeysFiltered(sheet, ids, tag)
+            entities.map { it.toQuestionItem() }
+        }
+
+    /**
+     * ── FIX ("পদবী/প্রতিষ্ঠান-মোডে প্রশ্ন ০/০" বাগ) ──
+     * getRoomQuestionsByIds() শুধু Room-এ যা আছে তাই ফেরত দেয় — Exam_Appearances
+     * যেই questionId-গুলো লিংক করে সেগুলো যদি কখনো স্বাভাবিক Subject→Topic পথে
+     * ব্রাউজ করে ডাউনলোড না হয়ে থাকে, Room-এ তারা থাকেই না, ফলে "০/০ প্রশ্ন" দেখাতো।
+     * এই ফাংশন আগে চেক করে কোন id-গুলো Room-এ নেই, শুধু সেগুলো GAS-এর নতুন
+     * getQuestionsByIds action দিয়ে টার্গেটেড এনে upsert করে দেয় — তারপর
+     * getRoomQuestionsByIds() ঠিকঠাক সব প্রশ্ন খুঁজে পাবে। selectQBankInstitution
+     * UnderPost()/selectQBankDesignationUnderInstitution()-এর ঠিক আগে কল করা হয়।
+     */
+    suspend fun ensureRoomQuestionsByIds(sheet: String, ids: List<String>): Unit =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext
+            val roomSheet = sheet.uppercase()
+            val existing  = dao.getExistingFbKeys(roomSheet, ids).toSet()
+            val missing   = ids.filterNot { existing.contains(it) }
+            if (missing.isEmpty()) return@withContext
+            val now = System.currentTimeMillis()
+            try {
+                // ── FIX ("Exam_Appearances-এর question_id মেলে না" বাগ, root cause):
+                // Exam_Appearances শীটের question_id আসলে "new_id" ফরম্যাট (QB-00002),
+                // কিন্তু .toEntity() সবসময় fbKey = plain "id" (যেমন "2") বসায়। ফলে
+                // GAS থেকে সঠিক প্রশ্ন এনে upsert হলেও, Room-এ সেটা fbKey="2" দিয়ে সেভ
+                // হতো — অথচ পরের getRoomQuestionsByIds() কল করা হতো fbKey="QB-00002"
+                // দিয়ে খুঁজতে (linkedQuestionIds যা Exam_Appearances থেকে এসেছে) —
+                // কখনো মেলেনি, তাই "কোনো প্রশ্ন পাওয়া যায়নি" + খালি রেজাল্ট-কার্ড।
+                // এখন যেই key (id বা new_id) দিয়ে আসলে রিকোয়েস্ট করা হয়েছিল (missing
+                // লিস্টে যা ছিল), ঠিক সেই ভ্যালুটাকেই fbKey হিসেবে বসানো হচ্ছে — তাই
+                // পরের read ঠিক একই key দিয়ে মিলে যাবে। ──
+                suspend fun <T> upsertMatched(list: List<T>?, idOf: (T) -> String?, newIdOf: (T) -> String?, toEnt: (T) -> com.hanif.smartstudy.data.local.QuestionEntity) {
+                    if (list.isNullOrEmpty()) return
+                    val entities = list.mapNotNull { item ->
+                        val requestedKey = missing.firstOrNull { it == idOf(item) || it == newIdOf(item) }
+                            ?: idOf(item) ?: return@mapNotNull null
+                        toEnt(item).copy(fbKey = requestedKey)
+                    }
+                    if (entities.isNotEmpty()) dao.upsertAll(entities)
+                }
+                when (sheet.uppercase()) {
+                    "QUIZ" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchQuizByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
+                    "QBANK" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchQBankByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
+                    "STUDY" -> upsertMatched(
+                        com.hanif.smartstudy.data.remote.GasContentService.fetchStudyByIds(missing),
+                        { it.id }, { it.newId }, { it.toEntity(now) }
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w("ContentRepository", "ensureRoomQuestionsByIds($sheet) failed: ${e.message}")
+            }
+        }
+
+    // ── Review System (Admin-only) ────────────────────────────────────────
+
+    /**
+     * GAS `getReviewProgress` থেকে একটা sheet-এর subject/topic-ভিত্তিক reviewed-percentage
+     * — SubjectListScreen/SubTopicListScreen-এ progress bar দেখানোর জন্য। শুধু Google Sheet
+     * মোডে কাজ করে, ব্যর্থ হলে খালি map রিটার্ন করে (progress bar দেখাবে না, crash করবে না)।
+     */
+    suspend fun getReviewProgress(sheet: String): com.hanif.smartstudy.data.remote.GasContentService.ReviewProgress {
+        return com.hanif.smartstudy.data.remote.GasContentService.fetchReviewProgress(sheet)
+    }
+
+    /**
+     * একটা প্রশ্নকে "রিভিউ করা হয়েছে" মার্ক করে — GAS-এ লেখে (source of truth) এবং সফল
+     * হলে Room cache-ও সাথে সাথে আপডেট করে (fresh fetch ছাড়াই local state নির্ভুল থাকে)।
+     * reviewed=false পাঠিয়ে আনমার্কও করা যায় (ভুলে টিক পড়লে undo করার জন্য)।
+     */
+    suspend fun markQuestionReviewed(sheet: String, rowKey: String, reviewed: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (!com.hanif.smartstudy.data.remote.GasContentService.isConfigured()) return@withContext false
+        val now = System.currentTimeMillis()
+        val fields = mapOf(
+            "reviewed"   to reviewed.toString(),
+            "reviewedAt" to if (reviewed) now.toString() else "0"
+        )
+        val result = com.hanif.smartstudy.data.remote.GasContentService.updateFields(sheet, rowKey, fields)
+        if (result is com.hanif.smartstudy.data.remote.ApiResult.Success) {
+            dao.updateReviewed(sheet.uppercase(), rowKey, reviewed, if (reviewed) now else 0L)
+            true
+        } else false
+    }
+
+    // ── Progressive topic-fill (অফলাইন-সক্ষম, ব্যাচ-ব্যাচ ক্যাশিং) ────────────────
+
+    /**
+     * একটা Topic-এর পরের ৫০-প্রশ্নের ব্যাচ (আগেরটা না, নতুনটা — TopicSyncEntity-তে
+     * সেভ করা cursor থেকে) GAS `getQuestionsPage` দিয়ে এনে Room-এ যোগ করে। ইতিমধ্যে
+     * পুরো Topic লোকালি থাকলে (hasMore==false) নেটওয়ার্ক কলই করে না — instant false।
+     * অফলাইনে exception ছুঁড়তে পারে — caller-কে try/catch করে চুপচাপ উপেক্ষা করতে হবে
+     * (Room-এ যা আছে তাই দেখানো হবে)।
+     *
+     * @return নতুন প্রশ্ন যোগ হয়েছে কিনা
+     */
+    /**
+     * একটা Topic-এর পুরো প্রশ্ন-সেট CDN থেকে এনে Room-এ upsert করে।
+     *
+     * FIX (Speed Plan Task 3, "Gas diye kuno read noy — never"): আগে GAS
+     * `getQuestionsPage` দিয়ে ৫০-৫০ ব্যাচে (cursor-ভিত্তিক pagination) আনা হতো —
+     * এখন CDN-এ প্রতিটা topic-এর পুরো JSON একটাই ফাইলে থাকে বলে পুরোটা একবারেই
+     * আসে, pagination আর দরকার নেই। manifest-এর hash Room-এ (`lastHash`) সেভ করা
+     * hash-এর সাথে মিললে network call-ই স্কিপ হয় (CDN ফাইল immutable-per-hash)।
+     *
+     * CDN fetch ব্যর্থ হলে (network/timeout/misconfigured) — **কোনো GAS fallback
+     * নেই** — Room-এ যা আছে তাই থেকে যায় (caller সেটাই দেখাবে), শুধু local
+     * notification দেখানো হয়।
+     *
+     * @return নতুন প্রশ্ন যোগ হয়েছে কিনা
+     */
+    suspend fun cacheNextTopicBatch(sheet: String, topicId: String): Boolean = withContext(Dispatchers.IO) {
+        val sheetPath = when (sheet) {
+            "Quiz" -> "quiz"; "QBank" -> "qbank"; "Study" -> "study"
+            else -> return@withContext false
+        }
+        val sync = topicSyncDao.get(topicId)
+        val cachedCount = dao.countByTopicId(sheet.uppercase(), topicId)
+        // ── FIX ("QBank group_heading মাঝে মাঝে দেখায় না" — dev-notes/DIAGNOSTIC_NOTES.md
+        // Active #2 — root cause কনফার্ম): আগে এখানে
+        // `if (sync != null && !sync.hasMore && cachedCount > 0) return@withContext false`
+        // ছিল — এই গার্ডটা hash-check-এর *আগেই* unconditionally skip করে দিত, যেহেতু
+        // `hasMore` প্রতিটা সফল ফুল-টপিক ফেচের পরে সবসময় `false` বসানো হয় (নিচের
+        // `TopicSyncEntity(topicId, null, false, now, hash)`)। ফলে একবার কোনো topic
+        // Room-এ ক্যাশ হয়ে গেলে, নিচের hash-comparison কোডটা (যেটা আসলে staleness
+        // ধরার জন্য বানানো হয়েছিল) কখনোই রান হতো না — dead code। মানে admin কোনো
+        // প্রশ্ন এডিট করে CDN-এ রিপাবলিশ করলেও (group_heading, প্রশ্নের টেক্সট,
+        // উত্তর — যা-ই বদলাক), যেই ছাত্র আগে একবার ওই topic খুলে ফেলেছে, তার
+        // ফোনে *কখনোই* আপডেট আসত না — Admin-only "Force Full Resync" ছাড়া কোনো
+        // উপায় ছিল না। এখন `hasMore`-ভিত্তিক এই প্রি-ম্যাচিওর গার্ড সরিয়ে,
+        // hash-comparison-কেই একমাত্র সিদ্ধান্ত নেওয়ার জায়গা বানানো হলো (নিচে) ──
+        if (!isOnline()) return@withContext false
+
+        val manifest = getCachedManifest()
+        if (manifest == null) {
+            // Manifest আনা যায়নি (নেট আছে কিন্তু fetch fail) — staleness যাচাই করা
+            // সম্ভব না, তাই ক্যাশড থাকলে সেটাই বিশ্বাস করি (safe fallback, ইউজারকে
+            // ভুল করে খালি স্ক্রিন দেখানো এড়াতে)
+            if (cachedCount > 0) return@withContext false
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "Manifest আনা যায়নি")
+            return@withContext false
+        }
+        val entry = manifest.topics[topicId]
+        if (entry == null) {
+            // manifest-এ এই topicId নেই — হয় সত্যিই কোনো প্রশ্ন নেই (delete/move হয়ে
+            // গেছে), অথবা এখনো publish হয়নি। কোনো error না — শুধু কিছু cache হয়নি।
+            return@withContext false
+        }
+        // ── FIX (optimistic move/delete/edit যেন refresh-এ পুরনো অবস্থায় ফিরে না
+        // যায়): এই topicId-তে এখনো sync-অপেক্ষারত "move topic" action থাকলে এই
+        // topic-টা পুরনো জায়গা থেকে সরে যাচ্ছে — পুরনো CDN কনটেন্ট দিয়ে এখন রিফ্রেশ
+        // করলে সেটা আবার ভরে উঠবে, তাই পুরোপুরি স্কিপ ──
+        if (queue.getPendingMovedTopicIds().contains(topicId)) return@withContext false
+        // 🆕 Unified topic (S01_T01): একই topic_id তিন sheet-এ থাকতে পারে, manifest-এ প্রতিটা
+        // sheet-এর আলাদা hash আসে (entry.sheets). sheets আছে অথচ এই sheet-এর এন্ট্রি নেই =
+        // এই sheet-এ এই topic-এ কোনো প্রশ্ন নেই → কিছু ফেচ করার নেই। sheets না থাকলে (পুরনো
+        // QZ_/QB/ST_ id-র ফরম্যাট) আগের মতো entry.hash।
+        val sheetEntry = entry.sheets?.get(sheetPath)
+        if (entry.sheets != null && sheetEntry == null) return@withContext false
+        val hash = (sheetEntry?.hash ?: entry.hash) ?: ""
+        // TopicSyncEntity.lastHash-এ topicId-প্রতি একটাই মান থাকে (Room schema বদলানো হয়নি), তাই
+        // unified topic-এর জন্য "quiz=abc;qbank=def" আকারে sheet-ভিত্তিক hash জমা রাখা হয় —
+        // নাহলে Quiz ক্যাশ হলে QBank-এর পুরনো ডেটা "hash মিলেছে" ধরে আর আপডেট হতো না।
+        val storedHash: String? = if (entry.sheets != null) sheetHashFromStored(sync?.lastHash, sheetPath) else sync?.lastHash
+        // ── hash অপরিবর্তিত + Room-এ ইতিমধ্যে প্রশ্ন আছে মানে এই ভার্সন আগেই
+        // cache করা — network call স্কিপ। hash ফাঁকা (পুরনো/legacy manifest) হলে
+        // staleness ধরার উপায় নেই, cachedCount থাকলে বিশ্বাস করে স্কিপ করি (নাহলে
+        // প্রতিবার নেটওয়ার্ক কল হতো, offline-first ডিজাইনের বিরুদ্ধে) ──
+        if (cachedCount > 0 && (hash.isBlank() || storedHash == hash)) {
+            if (hash.isNotBlank() && sync?.hasMore == true) topicSyncDao.upsert(sync.copy(hasMore = false))
+            return@withContext false
+        }
+        // ── এখানে পৌঁছালে মানে: হয় এই topic প্রথমবার ক্যাশ হচ্ছে, নয়তো hash বদলে
+        // গেছে (admin কনটেন্ট আপডেট করেছে) — দুই ক্ষেত্রেই নিচে ফ্রেশ ফেচ হবে,
+        // পুরনো row upsert দিয়ে ওভাররাইট হবে (fbKey/id একই থাকে বলে নতুন row না
+        // বেড়ে existing row-ই আপডেট হয়) ──
+
+        val now = System.currentTimeMillis()
+        val items: List<*>? = when (sheet) {
+            "Quiz"  -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.QuizItem>(sheetPath, topicId, hash)
+            "QBank" -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.QBankItem>(sheetPath, topicId, hash)
+            "Study" -> com.hanif.smartstudy.data.remote.CdnService.fetchTopicJson<com.hanif.smartstudy.data.model.StudyItem>(sheetPath, topicId, hash)
+            else    -> null
+        }
+        if (items == null) {
+            com.hanif.smartstudy.util.CdnFailureNotifier.notify(context, "$topicId আনা যায়নি")
+            return@withContext false
+        }
+        val entitiesRaw = when (sheet) {
+            "Quiz"  -> (items as List<com.hanif.smartstudy.data.model.QuizItem>).map { it.toEntity(now) }
+            "QBank" -> (items as List<com.hanif.smartstudy.data.model.QBankItem>).map { it.toEntity(now) }
+            "Study" -> (items as List<com.hanif.smartstudy.data.model.StudyItem>).map { it.toEntity(now) }
+            else    -> emptyList()
+        }
+        // ── FIX ("edit/delete/move এর পর net slow হলে refresh-এ পুরনো অবস্থা ফিরে
+        // আসে"): CDN থেকে fresh আসা এই লিস্টে যদি এমন কোনো প্রশ্ন থাকে যেটা (ক)
+        // এই ডিভাইস থেকে delete করা হয়েছে (tombstone) বা (খ) edit/move করা হয়েছে
+        // কিন্তু এখনো Sheet-এ sync হয়নি (PendingQueue-তে এখনো আছে) — সেটা বাদ
+        // দেওয়া হচ্ছে, যাতে optimistic local change-টা পুরনো CDN ডেটা দিয়ে
+        // ওভাররাইট না হয়ে যায়। sync সফল হয়ে গেলে queue থেকে entry সরে যায়,
+        // তখন পরের refetch স্বাভাবিকভাবেই নতুন (সার্ভার-কনফার্মড) অবস্থা আনবে। ──
+        val protectedIds = deletedDao.idsForSheet(sheet.uppercase()).toSet() + queue.getPendingQuestionIds()
+        // FIX (build error "Unresolved reference: id"): entitiesRaw এখানে Room-এর
+        // QuestionEntity (Quiz/QBank/Study — সব toEntity() আসলে একই QuestionEntity
+        // রিটার্ন করে), যেটার "id" নামে কোনো ফিল্ড নেই — unique identifier এখানে
+        // "fbKey"। protectedIds-ও (deletedDao.idsForSheet + getPendingQuestionIds)
+        // আসলে fbKey/questionId ভ্যালুরই সেট।
+        // Phase 10: ব্যবহার-অযোগ্য (আইডি/প্রশ্ন নেই) সারি বাদ — বাকি topic ঠিকমতো cache হয়
+        val usableEntities = entitiesRaw.filter { it.isUsable() }
+        if (usableEntities.size != entitiesRaw.size) {
+            Log.w("Repo", "cacheNextTopicBatch($topicId): ${entitiesRaw.size - usableEntities.size}টা নষ্ট সারি বাদ")
+        }
+        val entities = if (protectedIds.isEmpty()) usableEntities else usableEntities.filterNot { it.fbKey in protectedIds }
+        if (entities.isNotEmpty()) dao.upsertAll(entities)
+        val newLastHash = if (entry.sheets != null) mergeSheetHash(sync?.lastHash, sheetPath, hash) else hash
+        topicSyncDao.upsert(TopicSyncEntity(topicId, null, false, now, newLastHash))
+        entities.isNotEmpty()
+    }
+
+    // ── unified topic-এর sheet-ভিত্তিক hash ("quiz=abc;qbank=def") পড়া/লেখা। পুরনো সরল
+    // hash (কোনো '=' নেই) → এই sheet-এর জন্য "অজানা" (null) ধরা হয়, ফলে একবার রিফ্রেশ হয়ে নতুন
+    // ফরম্যাটে চলে আসে। ──
+    private fun sheetHashFromStored(stored: String?, sheetKey: String): String? {
+        if (stored.isNullOrBlank() || !stored.contains('=')) return null
+        return stored.split(';').firstNotNullOfOrNull { part ->
+            val i = part.indexOf('=')
+            if (i > 0 && part.substring(0, i) == sheetKey) part.substring(i + 1) else null
+        }
+    }
+
+    private fun mergeSheetHash(stored: String?, sheetKey: String, hash: String): String {
+        val map = linkedMapOf<String, String>()
+        if (!stored.isNullOrBlank() && stored.contains('=')) {
+            stored.split(';').forEach { part ->
+                val i = part.indexOf('=')
+                if (i > 0) map[part.substring(0, i)] = part.substring(i + 1)
+            }
+        }
+        map[sheetKey] = hash
+        return map.entries.joinToString(";") { it.key + "=" + it.value }
+    }
+
+    // ── CDN manifest — ৫-মিনিট TTL in-memory cache, একাধিক topic-এর জন্য বারবার
+    // নেটওয়ার্ক কল না করে একবারই আনা হয় (App খোলা/pull-to-refresh/periodic নীতি
+    // অনুযায়ী)। ব্যর্থ হলে null রিটার্ন করে, পুরনো cached manifest থাকলেও সেটা
+    // stale হতে পারে বলে reuse না করে caller-কে জানানো হয় (caller Room cache
+    // থেকে দেখাবে) ──
+    private suspend fun getCachedManifest(): com.hanif.smartstudy.data.remote.CdnService.Manifest? {
+        val now = System.currentTimeMillis()
+        _manifestCache?.let { if (now - _manifestCachedAt < MANIFEST_TTL_MS) return it }
+        val fresh = com.hanif.smartstudy.data.remote.CdnService.fetchManifest() ?: return _manifestCache
+        _manifestCache = fresh
+        _manifestCachedAt = now
+        return fresh
+    }
+
+    /** এই মুহূর্তে Topic-টা লোকালি ১০০% আছে কিনা (hasMore==false মানে আর ফেচ করার কিছু নেই) */
+    suspend fun isTopicFullySynced(topicId: String): Boolean = withContext(Dispatchers.IO) {
+        topicSyncDao.get(topicId)?.hasMore == false
+    }
+
+    /** একটা Topic-এ Room-এ এখন পর্যন্ত যতটুকু cache হয়েছে সব (audience-filtered) — cacheNextTopicBatch()-এর পরে কল করো */
+    suspend fun getRoomQuestionsForTopic(sheet: String, topicId: String, tag: String): List<com.hanif.smartstudy.data.model.QuestionItem> =
+        withContext(Dispatchers.IO) {
+            dao.getByTopicId(sheet.uppercase(), topicId, tag).map { it.toQuestionItem() }
+        }
+
+
+    /** GAS getQuestionsPage-এর ফলাফল — এই page-এর প্রশ্নগুলো + পরের page-এর cursor */
+    data class QuestionsPage(
+        val items      : List<com.hanif.smartstudy.data.model.QuestionItem>,
+        val nextCursor : String?,
+        val hasMore    : Boolean
+    )
+
+    /**
+     * Phase 6 — GAS-এর নতুন paginated `getQuestionsPage` endpoint কল করে (শুধু Google Sheet
+     * মোডে; Firebase মোডে Phase 4 deferred বলে সমতুল্য pagination নেই)। topicId Room-এর
+     * TopicEntity থেকে আসে (subject/topic-এর নাম দিয়ে না, topic_id দিয়ে) — caller আগে
+     * getRoomTopicsForSubject() দিয়ে topicId বের করে নেবে।
+     *
+     * ⚠️ এটা এখনো UI (QuestionListScreen/QuizViewModel) থেকে call হয় না — সেই wiring পরের
+     * ধাপে ("Infinite-scroll wiring") হবে। এই মেথড শুধু নেটওয়ার্ক-লেয়ার প্রস্তুত রাখে,
+     * আর UI wire করার আগে GAS response-এর ঠিক ফিল্ড-নাম verify করে নেওয়া উচিত
+     * (দেখো GasContentService.fetchQuestionsPage-এর কমেন্ট)।
+     */
+    suspend fun getQuestionsPage(
+        sheet      : String,             // "Quiz" | "QBank" | "Study"
+        topicId    : String,
+        subtopicId : String? = null,     // শুধু QBank-এ ব্যবহৃত (ঐচ্ছিক)
+        cursor     : String? = null,
+        limit      : Int = 50
+    ): DataState<QuestionsPage> {
+        return withContext(Dispatchers.IO) {
+            try {
+                when (sheet) {
+                    "Quiz" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQuizPage(topicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromQuizItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    "QBank" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchQBankPage(topicId, subtopicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromQBankItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    "Study" -> {
+                        val page = com.hanif.smartstudy.data.remote.GasContentService.fetchStudyPage(topicId, cursor, limit)
+                        DataState.Success(QuestionsPage(
+                            items = page.items.map { com.hanif.smartstudy.data.model.QuestionItem.fromStudyItem(it) },
+                            nextCursor = page.nextCursor, hasMore = page.hasMore
+                        ))
+                    }
+                    else -> DataState.Error("Unknown sheet: $sheet")
+                }
+            } catch (e: Exception) {
+                DataState.Error(e.message ?: "getQuestionsPage failed")
+            }
+        }
+    }
+
+    // ── FIX (Speed Plan Task 3.5): আগে এখানে applyIncrementalOrFullSync()/mergeById()
+    // ফাংশন ছিল — GAS delta/full-resync লজিক, শুধু getContent()-এর পুরনো
+    // background-refresh পাথ থেকেই কল হতো। getContent() এখন Room-only (উপরে দেখো),
+    // এই ফাংশনগুলোর আর কোনো caller নেই বলে সরিয়ে ফেলা হলো (dead code, GAS
+    // fetchAllContent/fetchIncrementalContent রেফারেন্স করত যেটা "কখনো GAS read
+    // না" নিয়মের সাথে সাংঘর্ষিক ছিল)।
+
+    // ── Stale-While-Revalidate ─────────────────────────────────────────────────
+    // FIX (Speed Plan Task 3.5, "Room a o same korbe — topic by topic"):
+    // আগে এই ফাংশন প্রথমবার GAS দিয়ে ~১৪,০০০ রো (Quiz+QBank+Study পুরো sheet)
+    // একবারে টেনে আনত, তারপর ডিস্ক/মেমরি-cache করত। এখন সম্পূর্ণ ভিন্ন মডেল —
+    // GAS/CDN-এ কোনো "bulk fetch" নেই, শুধু Room-এ **এখন পর্যন্ত যতটুকু cache
+    // হয়েছে** (ইউজার যেসব topic ভিজিট করেছে, cacheNextTopicBatch() দিয়ে CDN
+    // থেকে ধীরে ধীরে জমা হয়েছে) সেটাই রিটার্ন করে। ব্লকিং নেই, নেটওয়ার্ক কল নেই —
+    // Room read সবসময় instant।
+    //
+    // ⚠️ Trade-off (ইচ্ছাকৃত, ব্যবহারকারীর সিদ্ধান্ত অনুযায়ী): Search/Weak-topics/
+    // Random-quiz-এর মতো ফিচার যেগুলো "সব প্রশ্ন" আশা করে, সেগুলো এখন শুধু
+    // এখনো-cache-হওয়া topic-গুলোর প্রশ্নই দেখবে — নতুন install-এ শুরুতে খালি/কম
+    // থাকবে, ইউজার যত বেশি টপিক ব্রাউজ করবে তত সম্পূর্ণ হতে থাকবে। এটা প্রথম
+    // দেখায় "silent incomplete result" মনে হতে পারে বলেই এই ট্রেড-অফটা এখানে
+    // স্পষ্ট করে লেখা হলো — কিন্তু এটাই ইচ্ছাকৃত সিদ্ধান্ত: আগেভাগে সব একসাথে
+    // আনলে app স্লো হয়ে যেত, যেটা এড়ানোর জন্যই পুরো এই মাইগ্রেশন।
+    //
+    // `forceRefresh`/`onBackgroundUpdate` প্যারামিটার দুটো signature-compatibility-র
+    // জন্য রাখা হয়েছে (caller-দের কোড না বদলাতে) — কিন্তু এখন আর কোনো effect নেই,
+    // কারণ background network refresh-এর ধারণাটাই আর নেই (Room read synchronous)।
+    suspend fun getContent(
+        forceRefresh: Boolean = false,
+        onBackgroundUpdate: ((AppContent) -> Unit)? = null
+    ): DataState<AppContent> = withContext(Dispatchers.IO) {
+        val quiz  = dao.getAll("QUIZ").map  { it.toQuizItem() }
+        val qbank = dao.getAll("QBANK").map { it.toQBankItem() }
+        val study = dao.getAll("STUDY").map { it.toStudyItem() }
+        val now = System.currentTimeMillis()
+        // ── FIX ("সাবজেক্ট/টপিক সিরিয়াল কখনো দেখা যায় কখনো যায় না"): Room-এ
+        // subjectOrder/subTopicOrder/modelTests কিছুই সেভ থাকে না (এই তিনটে শুধু
+        // in-memory/disk AppContent cache-এই থাকে — getSubjectsQuick()/patch*
+        // ফাংশনগুলো দিয়ে ভরা হয়)। কিন্তু এই ফাংশন আগে একটা *একদম ফ্রেশ* AppContent(...)
+        // বানাত (ওই তিনটে ফিল্ড ডিফল্ট emptyMap() রেখেই), তারপর _memCache = content
+        // দিয়ে পুরো cache replace করত। এই ফাংশন app-জুড়ে (প্রতিটা subject/topic
+        // ভিজিট, pagination, ইত্যাদি) এত ঘনঘন কল হয় যে, getSubjectsQuick() কোনো
+        // এক মুহূর্তে order ভরে রাখলেও তার পরের getContent() কলেই সেটা মুছে
+        // যেত — কোনটা শেষে চলছে তার ওপর নির্ভর করে ক্রম "কখনো দেখা যেত, কখনো
+        // যেত না"। এখন আগের _memCache (না থাকলে disk cache) থেকে এই তিনটে
+        // ফিল্ড ক্যারি-ফরওয়ার্ড করা হচ্ছে, যাতে questions রিফ্রেশ হলেও order
+        // কখনো হারিয়ে না যায়। ──
+        val previous = _memCache ?: cache.loadContent()
+        val content = AppContent(
+            quiz            = quiz,
+            qbank           = qbank,
+            study           = study,
+            subjectOrder    = previous?.subjectOrder ?: emptyMap(),
+            subTopicOrder   = previous?.subTopicOrder ?: emptyMap(),
+            modelTests      = previous?.modelTests ?: emptyMap(),
+            fetchedAt       = now,
+            remoteUpdatedAt = now
+        )
+        _memCache = content
+        DataState.Success(content, fromCache = true)
+    }
+
+    fun getXpInfo(): XpInfo {
+        val user = session.getCurrentUser()
+        return XpInfo.fromXp(user?.xp ?: 0)
+    }
+
+    // ── XP award করা — Firebase Users REST API দিয়ে (SDK transaction নয়)
+    //    REST API consistent — বাকি সব Firebase write এভাবেই হয়।
+    //    Local session এও তাৎক্ষণিক update — Home screen সাথে সাথেই নতুন XP দেখায়।
+    suspend fun awardXp(phone: String, delta: Int) {
+        if (delta == 0 || phone.isBlank()) return
+
+        // ── Step 1: Local session তাৎক্ষণিক update ──
+        try {
+            val current = session.getCurrentUser()
+            if (current != null) {
+                val newXp = (current.xp + delta).coerceAtMost(999999)
+                session.saveUser(current.copy(xp = newXp))
+            }
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp local update failed: ${e.message}")
+        }
+
+        // ── Step 2: Firebase REST API দিয়ে XP update ──
+        // SDK transaction এর বদলে REST ব্যবহার — consistent, reliable
+        try {
+            val token = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            if (token.isBlank()) {
+                Log.w("ContentRepository", "awardXp: no auth token, skipping Firebase write")
+                return
+            }
+            val base  = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val auth  = "?auth=$token"
+            val httpClient = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val gson2 = com.google.gson.Gson()
+
+            // ── Step 2a: User এর Firebase key খুঁজে বের করো ──
+            val queryUrl = "$base/Users.json?orderBy=%22Phone%22&equalTo=%22${phone.trim()}%22$auth"
+            val queryResp = httpClient.newCall(
+                okhttp3.Request.Builder().url(queryUrl).get().build()
+            ).execute()
+            val queryBody = queryResp.body?.string() ?: ""
+            queryResp.close()
+
+            if (queryBody.isBlank() || queryBody == "null" || queryBody == "{}") {
+                Log.w("ContentRepository", "awardXp: user not found in Firebase for $phone")
+                return
+            }
+
+            val rootMap = gson2.fromJson(queryBody, Map::class.java) as? Map<String, Any> ?: return
+            val (userKey, userMap) = rootMap.entries.firstOrNull()
+                ?.let { it.key to (it.value as? Map<String, Any>) }
+                ?: run { Log.w("ContentRepository", "awardXp: malformed user data"); return }
+            if (userMap == null) return
+
+            // ── Step 2b: Current Firebase XP + delta ──
+            val firebaseXp = userMap["XP"]?.toString()?.toIntOrNull()
+                ?: userMap["xp"]?.toString()?.toIntOrNull() ?: 0
+            val newXp = (firebaseXp + delta).coerceAtMost(999999)
+
+            // ── Step 2c: PATCH করো — শুধু XP field, বাকি সব অপরিবর্তিত ──
+            val patchUrl  = "$base/Users/$userKey.json$auth"
+            val patchBody = com.google.gson.JsonObject().apply { addProperty("XP", newXp) }
+                .toString().toRequestBody("application/json".toMediaType())
+            val patchResp = httpClient.newCall(
+                okhttp3.Request.Builder().url(patchUrl).patch(patchBody).build()
+            ).execute()
+            val patchCode = patchResp.code
+            patchResp.close()
+
+            Log.d("ContentRepository", "awardXp: $phone +$delta → newXp=$newXp (Firebase HTTP $patchCode)")
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "awardXp Firebase write failed: ${e.message}")
+        }
+    }
+
+    suspend fun getStreakInfo(): StreakInfo {
+        val streakDays = cache.getStreak()
+        val daysBn     = listOf("শনি","রবি","সোম","মঙ্গল","বুধ","বৃহস্পতি","শুক্র")
+        val todayJS     = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) - 1
+        val jsToOurIdx  = intArrayOf(1,2,3,4,5,6,0)
+        val todayOurIdx = jsToOurIdx[todayJS]
+        val weekDays = daysBn.mapIndexed { i, label ->
+            val daysAgo = (todayOurIdx - i + 7) % 7
+            val isToday = i == todayOurIdx
+            val isDone  = !isToday && daysAgo in 1..streakDays
+            StreakDay(label, isToday, isDone)
+        }
+        return StreakInfo(streakDays, weekDays)
+    }
+
+    suspend fun markTodayActivity() { cache.updateStreak() }
+
+    suspend fun getGoalProgress(): GoalProgress {
+        val goalMin = session.getDailyGoal()
+        val doneMin = cache.getTodayStudyMinutes()
+        val pct     = if (goalMin > 0) minOf(100f, doneMin * 100f / goalMin) else 0f
+        return GoalProgress(goalMin, doneMin, pct)
+    }
+
+    // ── নতুন Home: "মোট অগ্রগতি" = Quiz মোডের সব উত্তরের গড় সঠিক %; কুইজ/মডেল-টেস্টের আজকের গণনা ──
+    suspend fun getHomeOverview(modelTestsToday: Int, modelTestsWeek: Int = modelTestsToday): HomeOverview {
+        val user   = session.getCurrentUser()
+        val userId = user?.phone ?: return HomeOverview(todayModelTests = modelTestsToday, weekModelTests = modelTestsWeek)
+        return try {
+            // ── Quiz + QBank মিলিয়ে আসল গণনা (Room: question_progress) ──
+            val q  = progressDao.overall(userId, "QUIZ")
+            val qb = progressDao.overall(userId, "QBANK")
+            val attempted = q.attempted + qb.attempted
+            val correct   = q.correct + qb.correct
+
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val today = progressDao.countSince(userId, "QUIZ", cal.timeInMillis) +
+                        progressDao.countSince(userId, "QBANK", cal.timeInMillis)
+
+            // ── আজকের লক্ষ্য: ইউজারের গত ৭ দিনের গড় থেকে (১.২৫ গুণ, ১০-র গুণিতকে, ন্যূনতম ২০) ──
+            val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+            val last7 = progressDao.countSince(userId, "QUIZ", weekAgo) + progressDao.countSince(userId, "QBANK", weekAgo)
+            val adaptive = (Math.ceil(maxOf(last7 / 7.0 * 1.25, 20.0) / 10.0) * 10).toInt().coerceIn(20, 300)
+            // ইউজার নিজে লক্ষ্য সেট করে থাকলে (home_prefs) সেটাই
+            val prefs = context.getSharedPreferences("home_prefs", Context.MODE_PRIVATE)
+            val quizTarget  = if (prefs.contains("quiz_daily_target")) prefs.getInt("quiz_daily_target", adaptive).coerceIn(5, 500) else adaptive
+            val modelTarget = prefs.getInt("model_test_target", 1).coerceIn(1, 20)
+
+            // ── মোট প্রশ্ন: ইউজারের audience-এর দেখার যোগ্য সব বিষয়ের (Topics টেবিলের row-count যোগফল) ──
+            val total = visibleQuestionTotal("Quiz", user) + visibleQuestionTotal("QBank", user)
+            val progress = if (total > 0) ((attempted * 100L) / total).toInt().coerceIn(0, 100) else 0
+
+            HomeOverview(
+                progressPct       = progress,
+                totalQuestions    = total,
+                quizAccuracyPct   = if (attempted > 0) (correct * 100) / attempted else 0,
+                quizAttempted     = attempted,
+                quizCorrect       = correct,
+                todayQuizAnswered = today,
+                quizDailyTarget   = quizTarget,
+                todayModelTests   = modelTestsToday,
+                weekModelTests    = modelTestsWeek,
+                modelTestTarget   = modelTarget
+            )
+        } catch (e: Exception) { HomeOverview(todayModelTests = modelTestsToday, weekModelTests = modelTestsWeek) }
+    }
+
+    /** একটা sheet-এ (Quiz/QBank) ইউজারের audience-এ দেখার যোগ্য সব বিষয়ের মোট প্রশ্ন */
+    private suspend fun visibleQuestionTotal(sheet: String, user: com.hanif.smartstudy.data.model.User?): Int {
+        val tagsById = refDao.getAllTags().associateBy({ it.tagId }, { it.name })
+        val counts   = getRoomSubjectQuestionCounts(sheet)
+        val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
+        return refDao.getSubjectsBySheet(sheet)
+            .filter { com.hanif.smartstudy.util.AudienceFilter.subjectVisibleForUser(it.tagId, tagsById, user, adminTag) }
+            .sumOf { counts[it.subjectId] ?: 0 }
+    }
+
+    // ── History: "প্রায় শেষ টপিক" — ৫০%+ প্রশ্নে উত্তর দেওয়া কিন্তু এখনো শেষ হয়নি এমন টপিক ──
+    suspend fun getAlmostCompletedTopics(limit: Int = 10): List<com.hanif.smartstudy.data.model.AlmostTopic> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyList()
+        return try {
+            val topics = refDao.getAllTopics().associateBy { it.topicId }
+            val out = ArrayList<com.hanif.smartstudy.data.model.AlmostTopic>()
+            for (mode in listOf("QUIZ", "QBANK", "STUDY")) {
+                for (st in progressDao.allTopicStats(userId, mode)) {
+                    val t = topics[st.topicId] ?: continue
+                    val total = when (mode) {
+                        "QUIZ"  -> t.rowCountQuiz
+                        "QBANK" -> t.rowCountQbank
+                        else    -> t.rowCountStudy
+                    }.let { if (it > 0) it else t.rowCount }
+                    if (total <= 0 || st.attempted <= 0 || st.attempted >= total) continue
+                    if (st.attempted * 100 / total < 50) continue
+                    out.add(
+                        com.hanif.smartstudy.data.model.AlmostTopic(
+                            name = t.name, mode = mode, attempted = st.attempted, total = total,
+                            accuracyPct = if (st.attempted > 0) st.correct * 100 / st.attempted else 0
+                        )
+                    )
+                }
+            }
+            out.sortedByDescending { it.progressPct }.take(limit)
+        } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun getStudyStats(): StudyStats {
+        val (today, week, total) = cache.getStudyStats()
+        val correct = cache.getCorrectCount()
+        val wrong   = cache.getWrongCount()
+        val total2  = correct + wrong
+        val acc     = if (total2 > 0) (correct * 100) / total2 else 0
+        return StudyStats(today, week, total, correct, wrong, acc)
+    }
+
+    fun getExamCountdown(): ExamCountdown {
+        return try {
+            val sharedPrefs = context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE)
+            val examDateStr = sharedPrefs.getString("exam_date", null) ?: return ExamCountdown()
+            val examName    = sharedPrefs.getString("exam_name", "পরীক্ষা") ?: "পরীক্ষা"
+            val sdf         = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            val examDate    = sdf.parse(examDateStr) ?: return ExamCountdown()
+            val diff        = examDate.time - System.currentTimeMillis()
+            if (diff <= 0) return ExamCountdown(examName, 0, 0, 0, 0, true)
+            ExamCountdown(examName,
+                diff / (1000*60*60*24),
+                (diff % (1000*60*60*24)) / (1000*60*60),
+                (diff % (1000*60*60)) / (1000*60),
+                (diff % (1000*60)) / 1000, true)
+        } catch (e: Exception) { ExamCountdown() }
+    }
+
+    fun saveExamDate(date: String, name: String) {
+        context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE).edit()
+            .putString("exam_date", date)
+            .putString("exam_name", name)
+            .apply()
+    }
+
+    fun clearExamDate() {
+        context.getSharedPreferences("exam_prefs", Context.MODE_PRIVATE).edit()
+            .remove("exam_date")
+            .remove("exam_name")
+            .apply()
+    }
+
+    // ── FIX ("progress bar একবার দেখায়, পরে দেখায় না" / "% আসলে attempted, correct
+    // না"): আগে এখানে শুধু global correct/wrong counter (ContentCache, aggregate,
+    // topic-নিরপেক্ষ) বাড়ত, আর online থাকলে কোথাও কিছুই persist হতো না (queue-তে
+    // শুধু offline এ যোগ হতো, online branch শুধু SyncWorker.scheduleOneTime() কল
+    // করত যেটার queue-তে তখন কিছুই থাকত না — কার্যত no-op)। এখন প্রতিটা উত্তর
+    // subjectId/topicId সহ Room-এ সরাসরি, সাথে সাথে, ১০০% offline-safe সেভ হয়
+    // (Firebase-এর ওপর নির্ভর করে না) — accuracy % এখান থেকেই তাৎক্ষণিক বের হয়।
+    // Firebase-এ backup যায় আলাদাভাবে ব্যাচ করে (দেখো flushProgressToFirebase),
+    // UI progress এর জন্য Firebase কল লাগেই না, quota-safe। ──
+    suspend fun recordQuestionAnswer(
+        questionId: String,
+        subjectId : String,
+        topicId   : String,
+        mode      : String,   // StudyMode.name
+        isCorrect : Boolean
+    ) {
+        val userId = session.getCurrentUser()?.phone ?: return
+        if (questionId.isBlank()) return
+        val existing = progressDao.get(userId, mode, questionId)
+        progressDao.upsert(
+            com.hanif.smartstudy.data.local.QuestionProgressEntity(
+                userId     = userId,
+                mode       = mode,
+                questionId = questionId,
+                subjectId  = subjectId,
+                topicId    = topicId,
+                isCorrect  = isCorrect,
+                attempts   = (existing?.attempts ?: 0) + 1,
+                updatedAt  = System.currentTimeMillis(),
+                synced     = false
+            )
+        )
+        if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
+        // ব্যাকআপ — best-effort, ব্যাচ করা, প্রতি উত্তরে network কল না
+        if (!isOnline()) queue.enqueueQuizAnswer(questionId, isCorrect, userId)
+        else SyncWorker.scheduleOneTime(context)
+    }
+
+    /** @deprecated topicId/subjectId ছাড়া পুরনো কল-সাইট — নতুন কোড recordQuestionAnswer() ব্যবহার করবে */
+    suspend fun submitQuizAnswer(questionId: String, isCorrect: Boolean) {
+        val phone = session.getCurrentUser()?.phone ?: return
+        if (isCorrect) cache.incrementCorrect() else cache.incrementWrong()
+        if (isOnline()) SyncWorker.scheduleOneTime(context)
+        else queue.enqueueQuizAnswer(questionId, isCorrect, phone)
+    }
+
+    /** টপিক-ভিত্তিক accuracy % (correct/total, attempted % না) — এক Room aggregate query, instant */
+    suspend fun getTopicAccuracy(mode: String, topicIds: List<String>): Map<String, Pair<Int, Int>> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyMap()
+        if (topicIds.isEmpty()) return emptyMap()
+        return progressDao.statsForTopics(userId, mode, topicIds)
+            .associate { it.topicId to (it.correct to it.attempted) }  // (correct, attempted)
+    }
+
+    suspend fun getSubjectAccuracy(mode: String, subjectIds: List<String>): Map<String, Pair<Int, Int>> {
+        val userId = session.getCurrentUser()?.phone ?: return emptyMap()
+        if (subjectIds.isEmpty()) return emptyMap()
+        return progressDao.statsForSubjects(userId, mode, subjectIds)
+            .associate { it.subjectId to (it.correct to it.attempted) }
+    }
+
+    suspend fun getWrongQuestionIds(mode: String): Set<String> {
+        val userId = session.getCurrentUser()?.phone ?: return emptySet()
+        return progressDao.wrongQuestionIds(userId, mode).toSet()
+    }
+
+    /**
+     * Study Nav Phase 4 — "এই Topic-এ তোমার N টি ভুল": Quiz/QBank/Study তিন sheet-এর
+     * একই-নামের Topic (প্রতি sheet-এর আলাদা subjectId/topicId নাম দিয়ে রিজলভ করে) মিলিয়ে।
+     * Room-only, instant; রিজলভ না হলে ওই sheet বাদ।
+     */
+    suspend fun getTopicWrongCountAllModes(subject: String, topic: String): Int {
+        val userId = session.getCurrentUser()?.phone ?: return 0
+        var total = 0
+        for ((sheet, mode) in listOf("Quiz" to "QUIZ", "QBank" to "QBANK", "Study" to "STUDY")) {
+            val sid = resolveSubjectId(sheet, subject)?.takeIf { it.isNotBlank() } ?: continue
+            val tid = resolveTopicId(sid, topic)?.takeIf { it.isNotBlank() } ?: continue
+            total += progressDao.wrongCountForTopic(userId, mode, tid)
+        }
+        return total
+    }
+
+    /**
+     * Study Nav Phase 5 — একটা Topic-এর (attempted, correct): Quiz/QBank/Study তিন sheet-এর
+     * একই-নামের Topic মিলিয়ে। Topic-status (Weak/Strong/Practicing...) হিসাবের ভিত্তি। Room-only।
+     */
+    suspend fun getTopicStatsAllModes(subject: String, topic: String): Pair<Int, Int> {
+        val userId = session.getCurrentUser()?.phone ?: return 0 to 0
+        var attempted = 0
+        var correct = 0
+        for ((sheet, mode) in listOf("Quiz" to "QUIZ", "QBank" to "QBANK", "Study" to "STUDY")) {
+            val sid = resolveSubjectId(sheet, subject)?.takeIf { it.isNotBlank() } ?: continue
+            val tid = resolveTopicId(sid, topic)?.takeIf { it.isNotBlank() } ?: continue
+            progressDao.statsForTopics(userId, mode, listOf(tid)).forEach {
+                attempted += it.attempted
+                correct   += it.correct
+            }
+        }
+        return attempted to correct
+    }
+
+    suspend fun getAttemptedQuestionIds(mode: String): Set<String> {
+        val userId = session.getCurrentUser()?.phone ?: return emptySet()
+        return progressDao.attemptedQuestionIds(userId, mode).toSet()
+    }
+
+    /**
+     * অনলাইনে থাকলে মাঝেমধ্যে (SyncWorker periodic run থেকে) sync-না-হওয়া রো
+     * ব্যাচে Firebase-এ backup পাঠায় — এটা শুধু multi-device backup-এর জন্য, UI
+     * progress % এটার ওপর নির্ভর করে না, তাই fail হলেও app-flow ব্লক হয় না।
+     */
+    suspend fun flushProgressToFirebase(batchSize: Int = 30): Boolean {
+        val userId = session.getCurrentUser()?.phone ?: return true
+        if (!isOnline()) return true
+        val pending = progressDao.getUnsynced(userId, batchSize)
+        if (pending.isEmpty()) return true
+        return try {
+            val safePhone = userId.replace("+", "").trim()
+            val secret = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+            val base   = BuildConfig.FIREBASE_URL.trimEnd('/')
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            var allOk = true
+            for (p in pending) {
+                val url = "$base/QuestionProgress/$safePhone/${p.mode}/${p.questionId}.json?auth=$secret"
+                val obj = com.google.gson.JsonObject().apply {
+                    addProperty("subjectId", p.subjectId)
+                    addProperty("topicId", p.topicId)
+                    addProperty("isCorrect", p.isCorrect)
+                    addProperty("attempts", p.attempts)
+                    addProperty("updatedAt", p.updatedAt)
+                }
+                val resp = client.newCall(
+                    okhttp3.Request.Builder().url(url)
+                        .put(obj.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute()
+                val ok = resp.isSuccessful
+                resp.close()
+                if (ok) progressDao.markSynced(userId, p.mode, p.questionId) else allOk = false
+            }
+            allOk
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "flushProgressToFirebase error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun submitStudyProgress(minutes: Int, topic: String) {
+        val phone = session.getCurrentUser()?.phone ?: return
+        cache.addStudyMinutes(minutes)
+        markTodayActivity()
+        if (!isOnline()) queue.enqueueStudyProgress(phone, minutes, topic)
+        SyncWorker.scheduleOneTime(context)
+    }
+
+    /**
+     * Model Test-এ written উত্তর অটো-চেক (matchPct) হয় না — ইউজার যেভাবে লিখেছে ঠিক সেভাবেই
+     * Firebase-এ সংরক্ষণ করা হয়, যাতে এডমিন "পরে" (আলাদা রিভিউ স্ক্রিন থেকে) নিজে যাচাই করে দেখতে পারে।
+     * best-effort write (offline queue নেই) — নেট না থাকলে/fail হলে silently skip করে, quiz flow ব্লক হয় না।
+     */
+    suspend fun saveModelTestWrittenAnswer(
+        subject: String, testNumber: Int, questionKey: String,
+        questionText: String, userText: String
+    ) {
+        val phone = session.getCurrentUser()?.phone ?: return
+        try {
+            withContext(Dispatchers.IO) {
+                val token = com.hanif.smartstudy.data.remote.FirebaseTokenProvider.getToken()
+                if (token.isBlank()) return@withContext
+                val base = BuildConfig.FIREBASE_URL.trimEnd('/')
+                val safeSubject = android.net.Uri.encode(subject)
+                val safePhone   = android.net.Uri.encode(phone)
+                val safeQKey    = android.net.Uri.encode(questionKey)
+                val url = "$base/ModelTestSubmissions/$safeSubject/$testNumber/$safePhone/$safeQKey.json?auth=$token"
+                val gson2 = com.google.gson.Gson()
+                val body = gson2.toJson(mapOf(
+                    "question"    to questionText,
+                    "userAnswer"  to userText,
+                    "submittedAt" to System.currentTimeMillis()
+                ))
+                val httpClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                httpClient.newCall(
+                    okhttp3.Request.Builder().url(url)
+                        .put(body.toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute().close()
+            }
+        } catch (e: Exception) {
+            Log.e("ContentRepository", "saveModelTestWrittenAnswer failed: ${e.message}")
+        }
+    }
+
+    // ── Admin edit এর পরে in-memory + disk cache সরাসরি patch করো ──
+    // পুরো cache invalidate/refetch করার বদলে শুধু matching row টাই বদলে দেয়,
+    // যাতে স্ক্রিন reload না হয়ে সাথে সাথে আপডেট দেখা যায় (RoutineFocusSheet/
+    // MenuViewModel.adminEditQuestion ও adminSwapOptions থেকে call হয়)।
+    suspend fun patchContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) != rowKey) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            fields.forEach { (k, v) -> obj.addProperty(k, v) }
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it) { q -> q.id } })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    // ── FIX ("QBank-এ এডিট করলে সাথে সাথে স্ক্রিনে দেখা যায় না" বাগ):
+    // patchContentAndPersist() উপরের পুরনো bulk "_memCache"/disk-cache প্যাচ করে —
+    // কিন্তু টপিক-স্ক্রিনে যা দেখানো হয় তা আসে Room-এর QuestionEntity টেবিল থেকে
+    // (cacheNextTopicBatch/getRoomQuestionsForTopic, Phase 6 lazy topic system)।
+    // এই দুটো আলাদা ক্যাশ — তাই পুরনোটা প্যাচ করলেও Room অস্পর্শিত থেকে যেত।
+    // QBank-এ তো plain "subject"/"subTopic" টেক্সট কলামই নেই, তাই ওই পুরনো
+    // নাম-ভিত্তিক refresh (refreshQuestionsInPlace) QBank-এ কখনোই কিছু মেলাতে
+    // পারতো না — ফলে QBank এডিট GAS-এ সেভ হতো ঠিকই, কিন্তু স্ক্রিনে কখনো
+    // সাথে সাথে দেখা যেত না। এই ফাংশন এখন সরাসরি Room-এর row-টা (fbKey দিয়ে,
+    // নাম না) প্যাচ করে দেয় — Quiz/QBank/Study সবগুলোতেই নির্ভরযোগ্যভাবে কাজ করে। ──
+    suspend fun patchRoomQuestion(sheet: String, rowKey: String, fields: Map<String, String>) =
+        withContext(Dispatchers.IO) {
+            val roomSheet = sheet.uppercase()
+            val existing  = dao.getById(roomSheet, rowKey) ?: return@withContext
+            val updated = existing.copy(
+                question    = fields["question"]    ?: existing.question,
+                optionA     = fields["option1"]      ?: existing.optionA,
+                optionB     = fields["option2"]      ?: existing.optionB,
+                optionC     = fields["option3"]      ?: existing.optionC,
+                optionD     = fields["option4"]      ?: existing.optionD,
+                // ── GAS-এ "correct" আর অ্যাপে "answer" — এডিট ডায়ালগ দুটোই পাঠায়,
+                // তাই যেকোনো একটা এলেই যথেষ্ট (correct-কে অগ্রাধিকার, GAS-এর সোর্স-অফ-ট্রুথ) ──
+                answer      = fields["correct"] ?: fields["answer"] ?: existing.answer,
+                explanation = fields["explanation"] ?: existing.explanation,
+                technique   = fields["technique"]    ?: existing.technique,
+                questionPaperUrls = fields["QuestionPaper"] ?: existing.questionPaperUrls
+            )
+            dao.upsert(updated)
+        }
+
+    // ── Admin নতুন প্রশ্ন যোগ করার পর (বা offline/fail হলেও) in-memory +
+    //    disk cache এ সরাসরি নতুন item যোগ করে দেয় — patchContentAndPersist এর
+    //    মতোই, কিন্তু existing row খোঁজার বদলে সম্পূর্ণ নতুন row append করে।
+    //    rowKey এখানে Firebase push-key (অনলাইন সফল হলে) অথবা একটা টেম্পোরারি
+    //    লোকাল আইডি (offline/fail হলে, পরে sync হওয়ার সময় আসল key দিয়ে বদলে যাবে)।
+    suspend fun addContentAndPersist(sheet: String, rowKey: String, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+        val obj  = com.google.gson.JsonObject()
+        fields.forEach { (k, v) -> obj.addProperty(k, v) }
+        obj.addProperty("id", rowKey)
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study + gson.fromJson(obj, com.hanif.smartstudy.data.model.StudyItem::class.java))
+            "Quiz"  -> base.copy(quiz  = base.quiz  + gson.fromJson(obj, com.hanif.smartstudy.data.model.QuizItem::class.java))
+            "QBank" -> base.copy(qbank = base.qbank + gson.fromJson(obj, com.hanif.smartstudy.data.model.QBankItem::class.java))
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    // ── Admin প্রশ্ন কার্ড ডিলিট করার পর in-memory + disk cache থেকে সেই
+    //    আইটেমটাই সরিয়ে দেয় — patchContentAndPersist এর মতোই প্যাটার্ন, কিন্তু
+    //    row বদলানোর বদলে পুরোপুরি বাদ দিয়ে দেয় (প্রশ্ন + অপশন + উত্তর + ব্যাখ্যা,
+    //    পুরো কার্ডটাই)।
+    suspend fun removeContentAndPersist(sheet: String, rowKey: String) {
+        val base = _memCache ?: cache.loadContent() ?: return
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.filter { it.id != rowKey })
+            "Quiz"  -> base.copy(quiz  = base.quiz.filter  { it.id != rowKey })
+            "QBank" -> base.copy(qbank = base.qbank.filter { it.id != rowKey })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    // ── FIX ("ডিলিট করলে অ্যাপে সাথে সাথে হারিয়ে যায় না" বাগ): Room-এর topicId-ভিত্তিক
+    // ক্যাশ থেকেও (আসল টপিক-স্ক্রিন যেটা পড়ে) সরাসরি মুছে দেয় — removeContentAndPersist()
+    // শুধু পুরনো bulk cache প্যাচ করে, এটা আলাদা এবং দুটোই দরকার।
+    // ── FIX ("delete মানে delete, database sync দেরি হলেও কখনো ফিরে আসবে না"):
+    // এখানেই সাথে সাথে tombstone মার্ক করা হয় (network কলের আগেই) — এরপর
+    // syncToRoom() কখনোই এই id আবার upsert করবে না, সার্ভার-সাইড delete যতই
+    // দেরিতে কনফার্ম হোক না কেন। ──
+    suspend fun removeRoomQuestion(sheet: String, rowKey: String) = withContext(Dispatchers.IO) {
+        val roomSheet = sheet.uppercase()
+        dao.deleteByFbKey(roomSheet, rowKey)
+        deletedDao.markDeleted(
+            com.hanif.smartstudy.data.local.DeletedQuestionEntity(
+                sheet      = roomSheet,
+                questionId = rowKey,
+                deletedAt  = System.currentTimeMillis()
+            )
+        )
+    }
+
+    /** Firebase-এ delete কনফার্ম (success) হলে tombstone আর দরকার নেই — housekeeping-only,
+     *  না ডাকলেও ভুল কিছু হয় না (শুধু tombstone টেবিলে অল্প কিছু পুরনো রো থেকে যাবে)। */
+    suspend fun clearDeleteTombstone(sheet: String, rowKey: String) = withContext(Dispatchers.IO) {
+        try { deletedDao.clear(sheet.uppercase(), rowKey) } catch (_: Exception) {}
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // FIX ("সাবজেক্ট/টপিক Delete হচ্ছে না" বাগ): adminDeleteSubjectOrTopic() আগে
+    // প্রথমে (network-এর আগেই) কোনো লোকাল ক্যাশ/Room touch করতো না — সরাসরি Sheet-এ
+    // পুরো sheet fetch + deleteByIds কল করে অপেক্ষা করত, তারপর তবেই UI বলত "ডিলিট
+    // হয়েছে"। GAS cold-start/বড় Sheet-এ এটা সহজেই কয়েক সেকেন্ড-মিনিট লাগতে পারত,
+    // ফলে ইউজার/এডমিনের মনে হতো ডিলিট "হচ্ছেই না"। এখন adminEditQuestion/
+    // adminDeleteQuestion-এর মতোই প্যাটার্ন: এই তিনটে ফাংশন দিয়ে সাথে সাথেই (network
+    // কলের আগে) লোকাল সব জায়গা (bulk cache + Room questions + Room reference টেবিল)
+    // থেকে subject/subTopic-এর সব প্রশ্ন ও নিজেই সরিয়ে দেওয়া হয়, আসল Sheet delete
+    // ব্যাকগ্রাউন্ডে (দেখো MenuViewModel.adminDeleteSubjectOrTopic) চলে।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** Admin Subject/SubTopic ডিলিট করার পর in-memory + disk cache থেকে সাথে সাথেই
+     *  matching সব প্রশ্ন বাদ দেয় — removeContentAndPersist()-এর মতোই প্যাটার্ন, কিন্তু
+     *  একটা id-এর বদলে subject(+subTopic) মিলিয়ে বাল্ক ফিল্টার করে। */
+    suspend fun removeContentBySubjectAndPersist(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        fun norm(s: String?) = s?.trim()?.lowercase().orEmpty()
+        val subjN  = norm(subject)
+        val subTpN = norm(subTopic)
+        fun matches(s: String?, st: String?): Boolean =
+            if (deleteSubTopic) norm(s) == subjN && norm(st) == subTpN else norm(s) == subjN
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.filterNot { matches(it.subject, it.subTopic) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.filterNot  { matches(it.subject, it.subTopic) })
+            "QBank" -> base.copy(qbank = base.qbank.filterNot { matches(it.subject, it.subTopic) })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /** removeRoomQuestion()-এর বাল্ক সংস্করণ — Subject/SubTopic-এর সব প্রশ্ন Room থেকে
+     *  একসাথে সরিয়ে দেয়, যাতে টপিক-স্ক্রিন (Room-নির্ভর) সাথে সাথে খালি দেখায়। */
+    suspend fun removeRoomQuestionsBySubject(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ) = withContext(Dispatchers.IO) {
+        val roomSheet = sheet.uppercase()
+        if (deleteSubTopic) dao.deleteBySubjectAndSubTopic(roomSheet, subject, subTopic)
+        else dao.deleteBySubject(roomSheet, subject)
+    }
+
+    /** Room-এর reference টেবিল (Subjects/Topics/SubTopics — SubjectListScreen/
+     *  SubTopicListScreen এখান থেকেই পড়ে) থেকে নিজে Subject/Topic এন্ট্রিটাও সাথে সাথে
+     *  সরিয়ে দেয়, নাহলে ভিতরের সব প্রশ্ন মুছে গেলেও Subject/Topic নিজেই (খালি অবস্থায়)
+     *  তালিকায় থেকে যেত। নাম দিয়ে subjectId/topicId রিজলভ করে রিটার্ন করে — পাওয়া গেলে
+     *  ব্যাকগ্রাউন্ডে Sheet-এর Subjects/Topics ট্যাব থেকেও (GasContentService.deleteReferenceItem)
+     *  একইভাবে ডিলিট করতে caller (MenuViewModel) এই id ব্যবহার করে। পুরনো/আগে থেকে
+     *  reference-টেবিলে sync না-হওয়া ডেটার জন্য null রিটার্ন করে (তখনও প্রশ্ন ঠিকই ডিলিট
+     *  হয়ে গেছে, শুধু id-ভিত্তিক reference cleanup skip হয়)। */
+    suspend fun removeRoomReferenceForSubjectOrTopic(
+        sheet: String, subject: String, subTopic: String, deleteSubTopic: Boolean
+    ): String? = withContext(Dispatchers.IO) {
+        val subjectEntity = refDao.getSubjectByName(sheet, subject) ?: return@withContext null
+        if (!deleteSubTopic) {
+            refDao.deleteSubjectCascade(subjectEntity.subjectId)
+            forgetLocalRef("S", subjectEntity.subjectId)
+            rememberDeletedRef("S", subjectEntity.subjectId)   // CDN-এর পুরনো তালিকা ফিরিয়ে আনতে পারবে না
+            subjectEntity.subjectId
+        } else {
+            val topicEntity = refDao.getTopicByName(subjectEntity.subjectId, subTopic) ?: return@withContext null
+            refDao.deleteTopicCascade(topicEntity.topicId)
+            forgetLocalRef("T", topicEntity.topicId)
+            rememberDeletedRef("T", topicEntity.topicId)   // CDN-এর পুরনো তালিকা ফিরিয়ে আনতে পারবে না
+            topicEntity.topicId
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Admin "Move" (ফাইল ম্যানেজারের মতো) — এক/একাধিক প্রশ্ন অথবা একটা গোটা Topic অন্য
+    // Subject/Topic-এ move করার instant-local helper। প্রশ্ন/টপিকের নিজের id
+    // (merge ছাড়া) অপরিবর্তিত থাকে — শুধু subject/subTopic/subjectId/topicId বদলায়,
+    // তাই bookmark/quiz-history/Exam_Appearances কিছুই ভাঙে না।
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /** নির্দিষ্ট কয়েকটা প্রশ্ন (id list) — bulk cache-এ একসাথে subject/subTopic বদলে দেয়
+     *  (patchContentAndPersist()-এর একই-fields-বহু-id সংস্করণ, single-pass)। */
+    suspend fun patchContentBulkAndPersist(sheet: String, rowKeys: Set<String>, fields: Map<String, String>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) !in rowKeys) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            fields.forEach { (k, v) -> obj.addProperty(k, v) }
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it) { q -> q.id } })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /** পুরো Topic-এর (subject+subTopic নাম মিলিয়ে) সব প্রশ্ন — bulk cache-এ
+     *  subject/subTopic বদলে দেয়। */
+    suspend fun moveContentByTopicAndPersist(
+        sheet: String, oldSubject: String, oldSubTopic: String, newSubject: String, newSubTopic: String
+    ) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        fun norm(s: String?) = s?.trim()?.lowercase().orEmpty()
+        val oSubjN = norm(oldSubject); val oSubTN = norm(oldSubTopic)
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> patchItem(item: T, subjOf: (T) -> String?, subTOf: (T) -> String?): T {
+            if (norm(subjOf(item)) != oSubjN || norm(subTOf(item)) != oSubTN) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty("subject", newSubject)
+            obj.addProperty("sub_topic", newSubTopic)
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { patchItem(it, { s -> s.subject }, { s -> s.subTopic }) })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            "QBank" -> base.copy(qbank = base.qbank.map { patchItem(it, { q -> q.subject }, { q -> q.subTopic }) })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    // ── FIX ("সাবজেক্টে টপিক-সংখ্যা / টপিকে প্রশ্ন-সংখ্যা বেমিল দেখাচ্ছে", "move করার পর
+    // কাউন্ট রিয়েল-টাইম আপডেট হয় না"): Topics reference-টেবিলের rowCount কলাম শুধু
+    // syncReferenceData() (GAS থেকে, পর্যায়ক্রমে/cache-gate সহ) দিয়ে বসে — কোনো move/
+    // delete-এর সময় local ভাবে এটা কখনো ছোঁয়াই হতো না। ফলে প্রশ্ন move হওয়ার পরও
+    // সোর্স/ডেস্টিনেশন দুই টপিকেরই দেখানো সংখ্যা পুরনো/ভুল থেকে যেত যতক্ষণ না পরের
+    // পর্যায়ক্রমিক reference sync আসত (মিনিট কয়েক লাগতে পারত)। এখন প্রতিটা move-এর
+    // সাথে সাথেই dao.countByTopicId() দিয়ে Room-এর প্রশ্ন-টেবিল থেকে আসল/লাইভ কাউন্ট
+    // গুনে সরাসরি Topics.rowCount আপডেট করে দেওয়া হয় — GAS sync-এর অপেক্ষা ছাড়াই,
+    // Room-ই একমাত্র সোর্স-অফ-ট্রুথ (local ও DB সবসময় সেম থাকে)। ──
+    // ── FIX ("Article: 74 প্রশ্ন" দেখাতো Quiz-এ ঢুকলে ভিতরে ২৩টা — মূল কারণ): rowCount
+    // মোড-নিরপেক্ষ একটাই generic কলাম ছিল, কিন্তু একই topic_id Quiz/QBank/Study তিন
+    // sheet-এই আলাদা প্রশ্ন-সংখ্যা রাখতে পারে। এখন live count যেই sheet-এ move হলো
+    // ঠিক তার নিজের per-sheet কলামেই বসে (+ legacy generic কলামও sync রাখা হয়, পুরনো
+    // কোনো UI path এখনো সেটা পড়লে অন্তত এই sheet-এর সঠিক সংখ্যাই পাবে)। ──
+    private suspend fun refreshTopicRowCount(sheet: String, topicId: String) {
+        if (topicId.isBlank()) return
+        val live = dao.countByTopicId(sheet.uppercase(), topicId)
+        refDao.updateTopicRowCount(topicId, live)   // legacy fallback column
+        when (sheet.uppercase()) {
+            "QUIZ"  -> refDao.updateTopicRowCountQuiz(topicId, live)
+            "QBANK" -> refDao.updateTopicRowCountQbank(topicId, live)
+            "STUDY" -> refDao.updateTopicRowCountStudy(topicId, live)
+        }
+    }
+
+    /** removeRoomQuestionsBySubject()-এর মতোই — নির্দিষ্ট কয়েকটা প্রশ্ন (fbKey list) Room-এ
+     *  move করে (subject/subTopic/subjectId/topicId আপডেট, fbKey/id অপরিবর্তিত)। move-এর
+     *  পরপরই সোর্স ও ডেস্টিনেশন — দুই Topic-এরই rowCount Room থেকে লাইভ গুনে আপডেট হয়।
+     *  oldTopicId ঐচ্ছিক (caller-এর কাছে সবসময় নাও থাকতে পারে) — দিলে সোর্স টপিকের কাউন্টও
+     *  সাথে সাথে ঠিক হয়ে যায়, না দিলে শুধু ডেস্টিনেশন টপিকের কাউন্ট আপডেট হবে। */
+    suspend fun moveRoomQuestionsByIds(
+        sheet: String, ids: List<String>, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String,
+        oldTopicId: String? = null
+    ) = withContext(Dispatchers.IO) {
+        dao.moveQuestionsByIds(sheet.uppercase(), ids, newSubject, newSubTopic, newSubjectId, newTopicId)
+        if (!oldTopicId.isNullOrBlank()) refreshTopicRowCount(sheet, oldTopicId)
+        refreshTopicRowCount(sheet, newTopicId)
+    }
+
+    /** পুরো Topic-এর (topicId মিলিয়ে) সব প্রশ্ন Room-এ move করে। move-এর পর সোর্স Topic-এর
+     *  rowCount ০-তে নেমে যায় (তাই লিস্টে আর দেখাবে না) আর ডেস্টিনেশন Topic-এর rowCount
+     *  Room থেকে লাইভ গুনে ঠিক হয়ে যায়। */
+    suspend fun moveRoomQuestionsByTopic(
+        sheet: String, oldTopicId: String, newSubject: String, newSubTopic: String, newSubjectId: String, newTopicId: String
+    ) = withContext(Dispatchers.IO) {
+        dao.moveQuestionsByTopicId(sheet.uppercase(), oldTopicId, newSubject, newSubTopic, newSubjectId, newTopicId)
+        refreshTopicRowCount(sheet, oldTopicId)
+        refreshTopicRowCount(sheet, newTopicId)
+    }
+
+    /** Room reference-টেবিলে (Topics) Topic-টা reparent করে — mergeTopicId দেওয়া থাকলে
+     *  destination-এর existing Topic-এর সাথে merge (সোর্স Topic-রো ডিলিট), নাহলে শুধু
+     *  subjectId কলাম বদলে reparent। merge হলে সব প্রশ্ন mergeTopicId-এর আন্ডারে চলে যায়,
+     *  তাই merge target-এর rowCount-ও সাথে সাথে লাইভ রিফ্রেশ হয়ে যায় — একটা sheet
+     *  প্যারামিটার লাগে (প্রশ্ন কোন Room টেবিলে আছে সেটা বলার জন্য); না দিলে (পুরনো
+     *  call site ভাঙবে না বলে ডিফল্ট null) rowCount রিফ্রেশ স্কিপ হবে, পরের পর্যায়ক্রমিক
+     *  reference sync-এই ঠিক হবে। */
+    suspend fun moveRoomTopicReference(
+        topicId: String, newSubjectId: String, mergeTopicId: String?, sheet: String? = null
+    ) = withContext(Dispatchers.IO) {
+        if (!mergeTopicId.isNullOrBlank()) {
+            refDao.mergeTopicCascade(topicId, mergeTopicId)
+            rememberDeletedRef("T", topicId)   // merge হয়ে যাওয়া সোর্স Topic CDN-এর পুরনো তালিকা থেকে ফিরবে না
+            if (!sheet.isNullOrBlank()) refreshTopicRowCount(sheet, mergeTopicId)
+        } else {
+            refDao.reparentTopic(topicId, newSubjectId)
+        }
+    }
+
+    // ── "নতুন Topic যোগ করে Move" — adminAddQuestion()-এর localId প্যাটার্নের মতোই,
+    // এখানে নতুন Topic-এর জন্য। ──
+
+    /** অস্থায়ী লোকাল topicId দিয়ে সাথে সাথে Room reference-এ (Topics টেবিলে) নতুন
+     *  Topic-এন্ট্রি যোগ করে — যাতে UI-তে সাথে সাথেই দেখা যায়, ব্যাকগ্রাউন্ডে GAS আসল
+     *  id দিলে replaceRoomTopicId() দিয়ে বদলে নিতে হবে। */
+    /** নতুন Subject (GAS থেকে আসল id পাওয়ার পর) লোকাল reference-এ সাথে সাথে যোগ — tagId ফাঁকা = সবার জন্য */
+    suspend fun addRoomSubjectLocal(subjectId: String, name: String, sheet: String) = withContext(Dispatchers.IO) {
+        refDao.upsertSubjects(listOf(com.hanif.smartstudy.data.local.SubjectEntity(subjectId = subjectId, name = name, sheet = sheet, tagId = "")))
+        rememberLocalSubject(subjectId, name, sheet)
+    }
+
+    suspend fun addRoomTopicLocal(topicId: String, subjectId: String, name: String) = withContext(Dispatchers.IO) {
+        refDao.upsertTopics(listOf(com.hanif.smartstudy.data.local.TopicEntity(
+            topicId = topicId, subjectId = subjectId, name = name
+        )))
+        rememberLocalTopic(topicId, subjectId, name)
+    }
+
+    /** অস্থায়ী লোকাল topicId-কে GAS-এর দেওয়া আসল topicId দিয়ে বদলে দেয় (Topics
+     *  reference টেবিল + questions টেবিল দুই জায়গাতেই) — replaceLocalIdAndPersist()-এর
+     *  মতোই কনসেপ্ট, শুধু bulk-cache patch এখানে দরকার নেই (Topic নিজে bulk cache-এ
+     *  কোনো id হিসেবে সংরক্ষিত থাকে না, শুধু নাম হিসেবে)। */
+    suspend fun replaceRoomTopicId(oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
+        refDao.replaceTopicId(oldTopicId, newTopicId)
+        migrateLocalRefId("T", oldTopicId, newTopicId)
+    }
+
+    suspend fun replaceRoomQuestionsTopicId(sheet: String, oldTopicId: String, newTopicId: String) = withContext(Dispatchers.IO) {
+        dao.replaceTopicId(sheet.uppercase(), oldTopicId, newTopicId)
+    }
+
+    suspend fun replaceRoomSubjectId(sheet: String, oldSubjectId: String, newSubjectId: String) = withContext(Dispatchers.IO) {
+        refDao.replaceSubjectId(oldSubjectId, newSubjectId)
+        dao.replaceSubjectId(sheet.uppercase(), oldSubjectId, newSubjectId)
+        migrateLocalRefId("S", oldSubjectId, newSubjectId)
+    }
+
+    /** ── Move-এর destination-এর অস্থায়ী ("-local...") Subject/Topic id গুলো GAS থেকে আসল id বানিয়ে
+     *  নেয় এবং Room-এ (reference + questions) বদলে দেয়। background sync, VM-এর Sync Now আর
+     *  SyncWorker — তিন জায়গা থেকেই এটা কল হয়। retry-তে আগের বার তৈরি হয়ে যাওয়া আসল
+     *  Subject/Topic (Room-এ ইতিমধ্যে বদলানো) থাকলে সেটাই ব্যবহার করে — ডুপ্লিকেট বানায় না।
+     *  সফল হলে (আসল subjectId, আসল topicId) ফেরত দেয়। */
+    suspend fun resolveMoveTargets(
+        sheet: String, newSubject: String, newSubjectId: String, newSubTopic: String, newTopicId: String,
+        createSubject: Boolean, createTopic: Boolean
+    ): com.hanif.smartstudy.data.remote.ApiResult<Pair<String, String>> {
+        val gas = com.hanif.smartstudy.data.remote.GasContentService
+        // ── QBank-এর "Move" আসলে Quiz-এ কপি (দেখো MenuViewModel.adminCopyQBankToQuiz) —
+        // তাই destination Subject/Topic সবসময় Quiz-এর reference হিসেবে রিজলভ/তৈরি হয় ──
+        val refSheet = if (sheet.equals("QBank", ignoreCase = true)) "Quiz" else sheet
+        var sid = newSubjectId
+        if (createSubject || sid.isBlank() || sid.startsWith("-local")) {
+            val existing = resolveSubjectId(refSheet, newSubject)?.takeIf { !it.startsWith("-local") }
+            if (existing != null) {
+                sid = existing
+            } else {
+                when (val r = gas.addReferenceItem("subjects", newSubject, sheet = refSheet)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val old = sid
+                        sid = r.data
+                        try {
+                            if (old.isNotBlank() && old.startsWith("-local")) replaceRoomSubjectId(refSheet, old, sid)
+                            else addRoomSubjectLocal(sid, newSubject, refSheet)
+                        } catch (_: Exception) { }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                        return com.hanif.smartstudy.data.remote.ApiResult.Error("নতুন Subject \"$newSubject\" তৈরি ব্যর্থ: ${r.message}")
+                }
+            }
+        }
+        var tid = newTopicId
+        if (createTopic || tid.isBlank() || tid.startsWith("-local")) {
+            val existing = resolveTopicId(sid, newSubTopic)?.takeIf { !it.startsWith("-local") }
+            if (existing != null) {
+                tid = existing
+            } else {
+                when (val r = gas.addReferenceItem("topics", newSubTopic, sid)) {
+                    is com.hanif.smartstudy.data.remote.ApiResult.Success -> {
+                        val old = tid
+                        tid = r.data
+                        try {
+                            if (old.isNotBlank() && old.startsWith("-local")) {
+                                replaceRoomTopicId(old, tid)
+                                replaceRoomQuestionsTopicId(refSheet, old, tid)
+                            } else addRoomTopicLocal(tid, sid, newSubTopic)
+                        } catch (_: Exception) { }
+                    }
+                    is com.hanif.smartstudy.data.remote.ApiResult.Error ->
+                        return com.hanif.smartstudy.data.remote.ApiResult.Error("নতুন Topic \"$newSubTopic\" তৈরি ব্যর্থ: ${r.message}")
+                }
+            }
+        }
+        return com.hanif.smartstudy.data.remote.ApiResult.Success(sid to tid)
+    }
+
+    // ── offline/fail অবস্থায় temp id দিয়ে যোগ করা row, sync সফল হয়ে আসল
+    //    Firebase key পেলে সেটা দিয়ে replace করে দেয় (id বদলে যায়, বাকি ফিল্ড অপরিবর্তিত)।
+    suspend fun replaceLocalIdAndPersist(sheet: String, oldId: String, newId: String) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val gson = com.hanif.smartstudy.data.model.CaseInsensitiveGson.instance
+
+        fun <T : Any> swapId(item: T, idOf: (T) -> String?): T {
+            if (idOf(item) != oldId) return item
+            val cls = item::class.java
+            val obj = gson.toJsonTree(item, cls).asJsonObject
+            obj.addProperty("id", newId)
+            return gson.fromJson(obj, cls)
+        }
+
+        val patched = when (sheet) {
+            "Study" -> base.copy(study = base.study.map { swapId(it) { s -> s.id } })
+            "Quiz"  -> base.copy(quiz  = base.quiz.map  { swapId(it) { q -> q.id } })
+            "QBank" -> base.copy(qbank = base.qbank.map { swapId(it) { q -> q.id } })
+            else    -> base
+        }
+
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /**
+     * Admin একটা mode + tag এর subject order সেভ করার পর in-memory + disk cache এ সরাসরি নতুন subject
+     * order বসিয়ে দেয় — পুরো content নতুন করে fetch না করেই।
+     * mode + tag উভয়ভিত্তিক — শুধু সেই mode+tag এর subject order replace হয়।
+     */
+    suspend fun patchSubjectOrderAndPersist(mode: String, tag: String, order: Map<String, Int>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val modeMap = (base.subjectOrder[mode] ?: emptyMap()).toMutableMap().apply { put(tag, order) }
+        val patched = base.copy(subjectOrder = base.subjectOrder.toMutableMap().apply { put(mode, modeMap) })
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    /**
+     * Admin একটা mode + tag + subject এর subTopic order সেভ করার পর in-memory + disk cache এ
+     * সরাসরি প্যাচ করে দেয় — শুধু সেই mode+tag+subject এর entry replace হয়, বাকি সব অপরিবর্তিত।
+     */
+    suspend fun patchSubTopicOrderAndPersist(mode: String, tag: String, subject: String, order: Map<String, Int>) {
+        val base = _memCache ?: cache.loadContent() ?: return
+        val tagMap    = (base.subTopicOrder[mode] ?: emptyMap()).toMutableMap()
+        val subjMap   = (tagMap[tag] ?: emptyMap()).toMutableMap().apply { put(subject, order) }
+        tagMap[tag]   = subjMap
+        val patched   = base.copy(subTopicOrder = base.subTopicOrder.toMutableMap().apply { put(mode, tagMap) })
+        _memCache = patched
+        cache.saveContent(patched)
+    }
+
+    fun getPendingQueueCount() = kotlinx.coroutines.flow.flow { emit(queue.count()) }
+
+    fun isOnline(): Boolean {
+        // ইউজার ম্যানুয়ালি "অফলাইন মোড" অন করলে — নেট থাকলেও Firebase-কে
+        // "অনলাইন নেই" হিসেবে ট্রিট করা হয়, ফলে সব read/write লোকাল
+        // cache/queue দিয়েই সার্ভ হয় (bandwidth/quota একদম বাঁচে)।
+        if (session.isOfflineMode()) return false
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+}
+
+sealed class DataState<out T> {
+    data class Success<T>(
+        val data      : T,
+        val fromCache : Boolean = false,
+        val isOffline : Boolean = false
+    ) : DataState<T>()
+    data class Error(val message: String) : DataState<Nothing>()
+    object Loading : DataState<Nothing>()
+}

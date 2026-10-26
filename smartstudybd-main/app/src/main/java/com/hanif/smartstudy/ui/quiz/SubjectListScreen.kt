@@ -1,0 +1,3052 @@
+package com.hanif.smartstudy.ui.quiz
+
+import androidx.compose.foundation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.annotation.DrawableRes
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import com.hanif.smartstudy.R
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.*
+import com.hanif.smartstudy.data.model.*
+import com.hanif.smartstudy.ui.ads.AdBannerView
+import com.hanif.smartstudy.ui.shared.*
+import com.hanif.smartstudy.ui.shared.SubjectListSkeleton
+import com.hanif.smartstudy.ui.shared.ErrorState
+import com.hanif.smartstudy.ui.shared.EmptyState
+import com.hanif.smartstudy.ui.theme.NotoSansBengali
+import com.hanif.smartstudy.ui.theme.AppTheme
+import com.hanif.smartstudy.ui.theme.LocalAppTheme
+import com.hanif.smartstudy.ui.theme.NordicSageTint
+import com.hanif.smartstudy.ui.theme.NordicBlueTint
+import com.hanif.smartstudy.ui.theme.NordicClayTint
+import com.hanif.smartstudy.ui.theme.NordicInk
+import com.hanif.smartstudy.ui.theme.NordicMuted
+import kotlin.math.ceil
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
+// subject icon map
+private val subjectIcons = mapOf(
+    "বাংলা"              to "📝",
+    "ইংরেজি"             to "🔤",
+    "গণিত"               to "🔢",
+    "বিজ্ঞান"            to "🔬",
+    "সাধারণ জ্ঞান"       to "🌍",
+    "তথ্য ও যোগাযোগ"    to "💻",
+    "ইতিহাস"             to "📜",
+    "ভূগোল"              to "🗺",
+    "পদার্থবিজ্ঞান"      to "⚛️",
+    "রসায়ন"              to "🧪",
+    "জীববিজ্ঞান"         to "🧬",
+    "অর্থনীতি"           to "💰",
+    "ধর্ম"               to "☪️"
+)
+
+private fun subjectIcon(rawName: String): String {
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    return subjectIcons.entries.firstOrNull { name.contains(java.text.Normalizer.normalize(it.key, java.text.Normalizer.Form.NFC)) }?.value ?: "📚"
+}
+
+/** কিওয়ার্ড মিললে আইকন, নাহলে null (QBank কার্ডে ডিফল্ট 📚 আর দেখানো হয় না) */
+private fun subjectIconOrNull(rawName: String): String? {
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    return subjectIcons.entries.firstOrNull { name.contains(java.text.Normalizer.normalize(it.key, java.text.Normalizer.Form.NFC)) }?.value
+}
+
+// ── Subject illustration ছবি ম্যাপ (Image/CDN Hosting Phase-এর মতোই "app-এর সাথে
+// hardcoded থাকা লাগবে" রিকোয়ারমেন্ট — এই ছবিগুলো res/drawable-এ বান্ডল করা,
+// CDN/নেটওয়ার্ক থেকে আসে না, তাই অফলাইনে/স্লো নেটেও instant লোড হয়) — শুধু
+// কারিকুলামের মূল সাবজেক্টগুলোর জন্যই কাস্টম ইলাস্ট্রেশন আছে; admin নতুন/কাস্টম
+// সাবজেক্ট বানালে (এই ম্যাচ কোনোটাতেই না পড়লে) null রিটার্ন হবে, তখন কলার emoji
+// ফলব্যাকে (subjectIcon() ফাংশন) চলে যাবে। ──
+@DrawableRes
+private fun subjectImageRes(rawName: String): Int? {
+    // 🐛 FIX ("বাংলাদেশ বিষয়াবলি-র ছবি আসছে না"): শিট/CDN থেকে আসা নামে "য়" অনেক সময়
+    // একক কোডপয়েন্ট (U+09DF), আর এই ফাইলের স্ট্রিং-লিটারেলে "য"+"়" (U+09AF U+09BC) —
+    // দেখতে হুবহু এক, কিন্তু contains() মেলে না। NFC দুই রূপকেই একই (য + ়) রূপে আনে।
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    val n = name.lowercase()
+    return when {
+        name.contains("বাংলা") && name.contains("সাহিত্য") -> R.drawable.subject_bangla_shahittya
+        name.contains("বাংলা") && (name.contains("ব্যাকরণ") || name.contains("গ্রামার")) -> R.drawable.subject_bangla_byakoron
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("সাহিত্য") || n.contains("literature")) -> R.drawable.subject_english_literature
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("ব্যাকরণ") || name.contains("গ্রামার") || n.contains("grammar")) -> R.drawable.subject_english_grammar
+        name.contains("পাটিগণিত") || n.contains("arithmetic") -> R.drawable.subject_patiganit
+        name.contains("বীজগণিত") || n.contains("algebra") -> R.drawable.subject_bijgonit
+        name.contains("জ্যামিতি") || n.contains("geometry") -> R.drawable.subject_geometry
+        name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> R.drawable.subject_computer
+        (name.contains("বাংলাদেশ") && name.contains("বিষয়")) || n.contains("bangladesh affairs") -> R.drawable.subject_bangladesh_bishoyabali
+        name.contains("আন্তর্জাতিক") -> R.drawable.subject_international_affairs
+        name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> R.drawable.subject_general_knowledge
+        // ── "Set Own Subject" তালিকার বিষয়গুলো (ছবি res/drawable/subject_*.webp) ──
+        // ⚠️ "য়" এড়াতে "রসায" (রসায়ন-এর য়-এর আগ পর্যন্ত) ব্যবহার করা হয়েছে
+        name.contains("পদার্থ") || n.contains("physics") -> R.drawable.subject_physics
+        name.contains("রসায") || n.contains("chemistry") -> R.drawable.subject_chemistry
+        name.contains("গণিত") || n.contains("math") -> R.drawable.subject_math
+        name.contains("মনোবিজ্ঞান") || n.contains("psychology") -> R.drawable.subject_psychology
+        name.contains("রাষ্ট্রবিজ্ঞান") || name.contains("পৌরনীতি") || n.contains("civics") || n.contains("political") -> R.drawable.subject_civics
+        name.contains("ভূগোল") || n.contains("geography") -> R.drawable.subject_geography
+        name.contains("ইতিহাস") || n.contains("history") -> R.drawable.subject_history
+        name.contains("ইসলাম") || n.contains("islam") -> R.drawable.subject_islamic_studies
+        name.contains("অর্থনীতি") || n.contains("economics") -> R.drawable.subject_economics
+        name.contains("সমাজবিজ্ঞান") || n.contains("sociology") -> R.drawable.subject_sociology
+        name.contains("আইন") || n == "law" || n.contains(" law") -> R.drawable.subject_law
+        name.contains("পরিবেশ") || n.contains("environment") -> R.drawable.subject_environment
+        name.contains("চারুকলা") || n.contains("fine arts") -> R.drawable.subject_fine_arts
+        name.contains("দর্শন") || n.contains("philosophy") -> R.drawable.subject_philosophy
+        name.contains("পশ্চিম বিজ্ঞান") || name.contains("মহাকাশ") || n.contains("astronomy") -> R.drawable.subject_astronomy
+        else -> null
+    }
+}
+
+/** ড্রপডাউন থাম্বনেইল — SSC/HSC-এর নিজস্ব ছবি, বাকিগুলো subjectImageRes()-এর ছবি */
+@DrawableRes
+private fun ownPickImageRes(opt: com.hanif.smartstudy.util.QuizOwnPick.Option): Int? = when (opt.key) {
+    "SSC" -> R.drawable.subject_ssc
+    "HSC" -> R.drawable.subject_hsc
+    else  -> subjectImageRes(opt.label)
+}
+
+/** বাছা বিষয়ের কার্ড (ছবিসহ) — ট্যাপ করলে শুধু সেই বিষয়ের ডেটা খোলে */
+@Composable
+private fun OwnPickCard(
+    modifier : Modifier,
+    opt      : com.hanif.smartstudy.util.QuizOwnPick.Option,
+    onReset  : (() -> Unit)? = null,   // লং-প্রেস করলে "বাছাই বাতিল" মেনু (+ কার্ড লুকানো থাকায় এটাই বদলানোর উপায়)
+    onClick  : () -> Unit
+) {
+    val res = ownPickImageRes(opt)
+    var menuOpen by remember { mutableStateOf(false) }
+    @OptIn(ExperimentalFoundationApi::class)
+    Box(modifier.clip(RoundedCornerShape(12.dp)).combinedClickable(
+        onClick = onClick,
+        onLongClick = if (onReset != null) ({ menuOpen = true }) else null
+    )) {
+        if (res != null) {
+            Image(
+                painter = painterResource(res), contentDescription = opt.label,
+                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(Modifier.fillMaxSize().background(Color(0xFF3157D5).copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                Text(opt.label, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        // ছোট ব্যাজ — এটা ইউজারের নিজের বাছা বিষয়
+        Box(
+            Modifier.align(Alignment.TopStart).padding(6.dp)
+                .clip(RoundedCornerShape(8.dp)).background(Color(0xFF3157D5))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) { Text("📌 আমার", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = NotoSansBengali) }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("↺  বাছাই বাতিল — সব বিষয় দেখান", fontSize = 13.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                onClick = { menuOpen = false; onReset?.invoke() }
+            )
+        }
+    }
+}
+
+/**
+ * Quiz গ্রিডের শেষ কার্ড: "+  Set Own Subject" — ট্যাপ করলে ড্রপডাউনে SSC, HSC ও ছবিসহ
+ * সব বিষয়ের তালিকা; বাছাই করলে Quiz-এ সেই অনুযায়ী ডেটা দেখায় (দেখো QuizViewModel.setOwnPick)।
+ */
+@Composable
+private fun OwnSubjectAddCard(
+    modifier : Modifier,
+    ownPick  : String?,
+    onPick   : (String?) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    val current = com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)
+    val accent = if (current != null) Color(0xFF3157D5) else Color(0xFF7C3AED)
+    Box(modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp))
+                .background(accent.copy(alpha = 0.07f))
+                .drawBehind {
+                    drawRoundRect(
+                        color = accent,
+                        style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))),
+                        cornerRadius = CornerRadius(12.dp.toPx())
+                    )
+                }
+                .clickable { open = true }
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                Modifier.size(42.dp).clip(androidx.compose.foundation.shape.CircleShape).background(accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Set Own Subject",
+                    tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Set Own Subject", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                color = accent, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2, lineHeight = 15.sp
+            )
+            if (current != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "✓ ${current.label}", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    fontFamily = NotoSansBengali, color = accent,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = 420.dp)
+        ) {
+            if (current != null) {
+                DropdownMenuItem(
+                    text = { Text("↺  সব বিষয় দেখান", fontSize = 13.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                    onClick = { open = false; onPick(null) }
+                )
+                HorizontalDivider()
+            }
+            com.hanif.smartstudy.util.QuizOwnPick.ALL.forEach { opt ->
+                val selected = opt.key == current?.key
+                val res = ownPickImageRes(opt)
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (res != null) {
+                                Image(
+                                    painter = painterResource(res),
+                                    contentDescription = opt.label,
+                                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(accent.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center) { Text("📚", fontSize = 20.sp) }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                opt.label, fontSize = 14.sp, fontFamily = NotoSansBengali,
+                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (selected) accent else Color.Unspecified
+                            )
+                            if (selected) { Spacer(Modifier.width(8.dp)); Text("✓", color = accent, fontWeight = FontWeight.Bold) }
+                        }
+                    },
+                    onClick = { open = false; onPick(opt.key) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Portrait ইলাস্ট্রেশন-কার্ড — ২-কলাম গ্রিডে দেখানোর জন্য। কাস্টম ছবি থাকলে সেটাই
+ * পুরো কার্ড জুড়ে দেখায় (ছবির ভেতরেই নাম আঁকা থাকে, তাই নিচে আলাদা করে আর নাম
+ * pill বসানো হয় না — আগে double দেখাচ্ছিল বলে সরানো হলো)। কাস্টম ছবি না থাকলে
+ * (emoji ফলব্যাক, যেখানে নাম ছবির ভেতরে নেই) নিচে নাম pill থেকে যায়, নাহলে সেই
+ * সাবজেক্টের নামই কোথাও দেখা যেত না। গ্রিড-সেলের ভেতর কার্ডটা ৮৫%-এ রাখা হয়েছে
+ * (~১৫% ছোট, কেন্দ্রে) — সাইজ কমানোর রিকোয়েস্ট অনুযায়ী।
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SubjectGridImageCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    modifier : Modifier = Modifier,
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {}
+) {
+    val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .combinedClickable(
+                onClick = onClick,
+                // ── কাস্টম ইলাস্ট্রেশন না থাকলে (emoji ফলব্যাক দেখাচ্ছে) admin
+                // লং-প্রেস করে emoji বদলাতে পারবে — ছোট গ্রিড-কার্ডে আলাদা
+                // ক্লিক-জোন রাখার বদলে long-press, tap এখনো normal navigate করে ──
+                onLongClick = if (isAdmin && imageRes == null) onEmojiClick else null
+            )
+    ) {
+            if (imageRes != null) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Image(
+                        painter = painterResource(imageRes),
+                        contentDescription = subject.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                // ছবির ভেতরেই নাম আঁকা আছে — নিচে আলাদা নাম pill নেই, শুধু প্রগ্রেস বার
+            } else {
+                Box(
+                    Modifier.weight(1f).fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 44.sp)
+                }
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(Indigo600)
+                        .padding(vertical = 7.dp, horizontal = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        subject.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, fontFamily = NotoSansBengali,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+            // ── প্রগ্রেস বার — subject.doneQ/totalQ অনুযায়ী কার্ডের একদম নিচে সংযুক্ত,
+            // দুই ধরনের কার্ডেই (ছবি/emoji) থাকে ──
+            val progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f
+            LinearProgressIndicator(
+                progress = { progressFrac },
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = GreenOk,
+                trackColor = Color.White.copy(alpha = 0.25f)
+            )
+    }
+}
+
+// ── এই ১১টা "কোর কারিকুলাম" সাবজেক্টের জন্য ক্রম **হার্ডকোড করা** — Firebase-এর
+// admin-configurable serial/order সিস্টেম এদের জন্য আর লাগবে না, তাই আর কখনো
+// এই সাবজেক্টগুলোর ক্রম ঠিক করতে হবে না। যে সাবজেক্ট এই তালিকার কোনোটার সাথেই
+// মেলে না (admin-এর নতুন/কাস্টম সাবজেক্ট), সেটা null পাবে — কলার তখন বিদ্যমান
+// (Firebase serial-ভিত্তিক) ক্রম অনুযায়ী এই ১১টার *পরে* বসাবে। ──
+private fun subjectHardcodedPriority(name: String): Int? {
+    val n = name.lowercase()
+    return when {
+        name.contains("বাংলা") && name.contains("সাহিত্য") -> 0
+        name.contains("বাংলা") && (name.contains("ব্যাকরণ") || name.contains("গ্রামার")) -> 1
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("সাহিত্য") || n.contains("literature")) -> 2
+        (name.contains("ইংরেজি") || n.contains("english")) && (name.contains("ব্যাকরণ") || name.contains("গ্রামার") || n.contains("grammar")) -> 3
+        name.contains("পাটিগণিত") || n.contains("arithmetic") -> 4
+        name.contains("বীজগণিত") || n.contains("algebra") -> 5
+        name.contains("জ্যামিতি") || n.contains("geometry") -> 6
+        (name.contains("বাংলাদেশ") && name.contains("বিষয়")) || n.contains("bangladesh affairs") -> 7
+        name.contains("আন্তর্জাতিক") -> 8
+        name.contains("কম্পিউটার") || name.contains("আইসিটি") || n.contains("computer") || n.contains(" ict") -> 9
+        name.contains("সাধারণ জ্ঞান") || n.contains("general knowledge") -> 10
+        else -> null
+    }
+}
+
+/**
+ * উপরের displaySubjects-কে হার্ডকোড করা ক্রম অনুযায়ী সাজায় — ১১টা কোর সাবজেক্ট
+ * সবার আগে (নির্দিষ্ট ক্রমে), বাকি (কাস্টম) সাবজেক্ট তাদের বিদ্যমান (Firebase
+ * serial) ক্রম অনুযায়ী তারপরে। এই sort **স্থিতিশীল (stable)** — একই priority
+ * বা both-null হলে আপেক্ষিক ক্রম অক্ষুণ্ণ থাকে। ──
+ */
+private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<SubjectEntry> =
+    subjects.sortedBy { subjectHardcodedPriority(it.name) ?: Int.MAX_VALUE }
+// সাবজেক্ট কার্ডে "X টি অধ্যায়" গোনা, দুই জায়গাতেই এই একই শর্ত ব্যবহার করতে হবে,
+// নাহলে সাবজেক্টে বলা টপিক-সংখ্যা আর আসল টপিক-লিস্টে দেখানো সংখ্যা বেমিল হয়ে যায়।
+// Model Test এন্ট্রি totalQ দিয়ে গোনা হয় না (ওটার প্রশ্ন modelTestCount দিয়ে গোনা হয়),
+// তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
+private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
+
+// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — নিয়মগুলো util/QBankCategory.kt-তে (ViewModel-ও ব্যবহার করে) ──
+private val EXAM_CATEGORIES = com.hanif.smartstudy.util.QBankCategory.ALL
+
+// ── সিলেক্টেড চিপ ফাইল-লেভেলে রাখা হয়েছে — প্রশ্নপত্র থেকে back করলে স্ক্রিন নতুন করে
+// compose হয়, তখন remember রিসেট হয়ে সবসময় প্রথম চিপে ফিরে যেত। ViewModel-ও পড়ে (সাল-মোড) ──
+
+private fun examCategoryMatches(subject: SubjectEntry, category: String): Boolean =
+    com.hanif.smartstudy.util.QBankCategory.matches(
+        listOf(subject.name) + subject.subTopics.map { it.instLabel() }.distinct(), category
+    )
+
+// ইংরেজি অঙ্ক → বাংলা অঙ্ক (৭০, ৮০, ৯০ …)
+private fun bnDigits(n: Int): String =
+    n.toString().map { if (it in '0'..'9') '০' + (it - '0') else it }.joinToString("")
+
+/** একটা পদ/প্রতিষ্ঠান-কার্ডের (SubTopicEntry) নির্দিষ্ট ধরনের প্রশ্নসংখ্যা। part: 0 = MCQ, 1 = লিখিত।
+ *  টাইপ-গণনা (mcqCount/writtenCount) না থাকলে (পুরনো ডাটা) সবটাকে MCQ ধরা হয়। */
+private fun qbankTypeCountSt(st: SubTopicEntry, part: Int): Int {
+    val typed = st.mcqCount + st.writtenCount
+    return when {
+        typed == 0 -> if (part == 0) st.totalQ else 0
+        part == 0  -> st.mcqCount
+        else       -> st.writtenCount
+    }
+}
+
+/** একটা কার্ডের (SubjectEntry) নির্দিষ্ট ধরনের মোট প্রশ্ন — ভেতরের তালিকা না থাকলে সবটা MCQ ধরা */
+private fun qbankTypeCount(e: SubjectEntry, part: Int): Int =
+    if (e.subTopics.isEmpty()) (if (part == 0) e.totalQ else 0)
+    else e.subTopics.sumOf { qbankTypeCountSt(it, part) }
+
+/** প্রশ্নপত্রের (SubTopicEntry) প্রতিষ্ঠান/পদবী-লেবেল — সাল ছাড়া (ক্যাটাগরি-মিল ও শিরোনামের জন্য) */
+private fun SubTopicEntry.instLabel(): String = paperInst.ifBlank { name }
+
+/** একটা কার্ড (SubjectEntry)-এর নির্দিষ্ট ধরনের প্রশ্নপত্র-সংখ্যা। part: 0 = MCQ, 1 = লিখিত।
+ *  প্রশ্নপত্র-ভাগ না থাকলে (পুরনো ডাটা) ধরনের প্রশ্ন থাকলে ১টা ধরা হয়। */
+private fun qbankPaperCount(e: SubjectEntry, part: Int): Int =
+    if (e.subTopics.any { it.paperType >= 0 }) e.subTopics.count { it.paperType == part }
+    else if (qbankTypeCount(e, part) > 0) 1 else 0
+
+private val QBankMcqColor     = Color(0xFF0E7490)
+private val QBankWrittenColor = Color(0xFF6D28D9)
+
+/** লিস্ট ☰ | গ্রিড ▦ — পছন্দ স্থায়ী (QBankViewStyle) */
+@Composable
+private fun QBankLayoutToggle(showLabels: Boolean, modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankViewStyle.init(ctx) }
+    val grid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val line = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    Row(
+        modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, line, RoundedCornerShape(12.dp))
+    ) {
+        listOf(false to ("☰" to "লিস্ট"), true to ("▦" to "গ্রিড")).forEach { (isGrid, p) ->
+            val on = grid == isGrid
+            Box(
+                Modifier
+                    .background(if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent)
+                    .clickable { com.hanif.smartstudy.util.QBankViewStyle.set(ctx, isGrid) }
+                    .heightIn(min = 36.dp).padding(horizontal = if (showLabels) 12.dp else 11.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (showLabels) "${p.first} ${p.second}" else p.first,
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    color = if (on) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** উপরের "MCQ | লিখিত" ট্যাব (প্রশ্নপত্রের তালিকা)। selected: 0 = MCQ, 1 = লিখিত */
+@Composable
+private fun QBankTypeTabs(selected: Int, mcqPapers: Int, writtenPapers: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        listOf(
+            Triple(0, "🔘 MCQ · ${bnDigits(mcqPapers)}টি", QBankMcqColor),
+            Triple(1, "✍️ লিখিত · ${bnDigits(writtenPapers)}টি", QBankWrittenColor)
+        ).forEach { (part, label, accent) ->
+            val on = selected == part
+            Box(
+                Modifier.weight(1f).heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (on) accent else Color.Transparent)
+                    .border(1.5.dp, if (on) accent else accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    .clickable { onSelect(part) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(label, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                    color = if (on) Color.White else accent)
+            }
+        }
+    }
+}
+
+/** একটা প্রশ্নপত্রের কার্ড — যেমন "বিদ্যুৎ বিভাগ - ২০২৬"। compact = গ্রিড-কলাম */
+@Composable
+private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val accent = if (st.paperType == 1) QBankWrittenColor else QBankMcqColor
+    val frac = if (st.totalQ > 0) (st.doneQ.toFloat() / st.totalQ).coerceIn(0f, 1f) else 0f
+    Card(
+        modifier  = modifier.fillMaxWidth().clickable { onClick() },
+        shape     = RoundedCornerShape(if (compact) 16.dp else 18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp),
+        border    = BorderStroke(1.dp, accent.copy(alpha = 0.16f))
+    ) {
+        Column(Modifier.padding(if (compact) 12.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                st.name, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${bnDigits(st.totalQ)}টি প্রশ্ন", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    color = accent, fontFamily = NotoSansBengali,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(accent.copy(alpha = 0.14f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+                if (st.doneQ > 0) Text("${st.progressPct}% সম্পন্ন", fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            LinearProgressIndicator(
+                progress = { frac },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(99.dp)),
+                color = GreenOk,
+                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            )
+        }
+    }
+}
+
+/** প্রথম স্ক্রিনের কার্ড (পদবী/প্রতিষ্ঠান): এক ট্যাপে ভেতরে ঢোকে; MCQ/লিখিত শুধু ছোট ব্যাজ (প্রশ্নপত্র-সংখ্যা)।
+ *  অ্যাডমিনে লং-প্রেস = ইমোজি বদল (আগের মতো) */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QBankEntryCard(
+    title: String, icon: String?, subLabel: String, totalQ: Int, progressFrac: Float,
+    mcqPapers: Int, writtenPapers: Int, compact: Boolean,
+    onClick: () -> Unit, onLongPress: (() -> Unit)?, modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(if (compact) 12.dp else 14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (icon != null) { Text(icon, fontSize = if (compact) 16.sp else 20.sp); Spacer(Modifier.width(6.dp)) }
+                Text(
+                    title, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
+                )
+            }
+            if (subLabel.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(subLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            Spacer(Modifier.height(9.dp))
+            Text("মোট ${bnDigits(totalQ)} প্রশ্ন", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (mcqPapers > 0) Text("🔘 MCQ ${bnDigits(mcqPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                    color = QBankMcqColor, fontFamily = NotoSansBengali, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankMcqColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
+                if (writtenPapers > 0) Text("✍️ লিখিত ${bnDigits(writtenPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                    color = QBankWrittenColor, fontFamily = NotoSansBengali, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankWrittenColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
+            }
+            Spacer(Modifier.height(9.dp))
+            LinearProgressIndicator(
+                progress = { progressFrac.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(99.dp)),
+                color = GreenOk,
+                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            )
+        }
+    }
+}
+
+/** ডিজাইন ২: নাম + দুই চিপ (MCQ | লিখিত)। অ্যাডমিনে কার্ডে লং-প্রেস = ইমোজি বদল (আগের মতো) */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QBankDualChipCard(
+    title: String, icon: String?, subLabel: String,
+    mcq: Int, written: Int, showMcq: Boolean, showWritten: Boolean,
+    onMcq: () -> Unit, onWritten: () -> Unit, onLongPress: (() -> Unit)?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .then(if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress) else Modifier),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (icon != null) { Text(icon, fontSize = 20.sp); Spacer(Modifier.width(8.dp)) }
+                Text(
+                    title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
+                    color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (subLabel.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(subLabel, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (showMcq)     QBankTypeChip("MCQ",   mcq,     Color(0xFF0E7490), mcq > 0,     onMcq,     Modifier.weight(1f))
+                if (showWritten) QBankTypeChip("লিখিত", written, Color(0xFF6D28D9), written > 0, onWritten, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** একটা চিপ: বামে ধরন, ডানে সংখ্যা। সংখ্যা ০ হলে ম্লান ও বন্ধ */
+@Composable
+private fun QBankTypeChip(label: String, count: Int, accent: Color, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    val bg = if (enabled) accent.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (enabled) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    Row(
+        modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(bg)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = fg, fontFamily = NotoSansBengali)
+        Text(bnDigits(count), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = fg, fontFamily = NotoSansBengali)
+    }
+}
+
+private fun totalQLabel(n: Int): String = "মোট প্রশ্ন সংখ্যা= ${bnDigits(n)}"
+
+@Composable
+private fun QBankSortButton(
+    current : com.hanif.smartstudy.util.QBankSort,
+    onSelect: (com.hanif.smartstudy.util.QBankSort) -> Unit
+) {
+    // সাজানোর বাটন: শুধু উপর-নিচ দুই তীর (↕) আইকন — এখন হেডারে (Admin বাটনের নিচে)।
+    // সক্রিয় সাজানো থাকলে সাদা ব্যাকগ্রাউন্ডে নীল আইকন, নাহলে হেডারের ওপর হালকা সাদা।
+    var open by remember { mutableStateOf(false) }
+    val active = current != com.hanif.smartstudy.util.QBankSort.DEFAULT
+    Box {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (active) Color.White else Color.White.copy(alpha = 0.18f))
+                .border(1.dp, if (active) Color.White else Color.White.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                .clickable { open = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.SwapVert, contentDescription = "সাজান",
+                tint = if (active) Color(0xFF3157D5) else Color.White, modifier = Modifier.size(22.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.hanif.smartstudy.util.QBankSort.entries.forEach { opt ->
+                DropdownMenuItem(
+                    text = {
+                        Text((if (opt == current) "✓  " else "     ") + opt.label, fontSize = 13.sp,
+                            fontFamily = NotoSansBengali,
+                            fontWeight = if (opt == current) FontWeight.Bold else FontWeight.Normal)
+                    },
+                    onClick = { open = false; onSelect(opt) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExamCategoryChipsRow(
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        EXAM_CATEGORIES.forEach { cat ->
+            val isActive = cat == selected
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(if (isActive) Color(0xFF3157D5) else Color.White)
+                    .border(
+                        width = 1.dp,
+                        color = if (isActive) Color(0xFF3157D5) else Color(0xFFE0E4ED),
+                        shape = RoundedCornerShape(22.dp)
+                    )
+                    .clickable { onSelect(cat) }
+                    .padding(horizontal = 13.dp, vertical = 11.dp)
+            ) {
+                Text(
+                    text = cat,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isActive) Color.White else Color(0xFF172033)
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// Subject List Screen
+// ─────────────────────────────────────────────────────────
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun SubjectListScreen(
+    mode       : StudyMode,
+    subjects   : List<SubjectEntry>,
+    weakTopics : List<WeakTopic>,
+    isLoading  : Boolean,
+    error      : String?   = null,
+    onSubject  : (String) -> Unit,
+    // ── QBank পদবী-লিস্টে: বিসিএস/প্রাথমিক/নিবন্ধন চিপে কার্ড ট্যাপ করলে এটা কল হয়
+    // (সরাসরি প্রশ্নপত্র)। null হলে বা "১৬-২০ গ্রেড" চিপে থাকলে সাধারণ onSubject ──
+    onSubjectDirect : ((String) -> Unit)? = null,
+    onMockZone : () -> Unit,
+    onModelTestZone : () -> Unit = {},
+    // ── Admin: ইনলাইন ক্রম সাজানো ──
+    isAdmin       : Boolean        = false,
+    isReorderMode : Boolean        = false,
+    isSavingOrder : Boolean        = false,
+    orderSavedMsg : String?        = null,
+    onToggleReorder: () -> Unit    = {},
+    onMoveSubject  : (Int, Int) -> Unit = { _, _ -> },
+    onRenameSubject: (old: String, new: String) -> Unit = { _, _ -> },
+    onDeleteSubject: (name: String) -> Unit = {},
+    // ── Phase 4 (Serial Manager) — শুধু যেসব caller আসলে onSaveSerialOrder ওয়্যার
+    // করেছে সেখানেই এই মেনু-অপশন দেখানো হবে (ডিফল্ট false), নাহলে QBank-এর নেস্টেড
+    // প্রতিষ্ঠান/পদ/সাল-ভিত্তিক লিস্টে (যেগুলো এখনো এই ফিচার ওয়্যার করেনি) বাটন
+    // দেখা যেত কিন্তু Save করলে চুপচাপ কিছুই হতো না ──
+    enableSerialManager: Boolean = false,
+    onSaveSerialOrder: (List<String>) -> Unit = {},
+    // ── Review System (Admin-only) — subjectId ধরে {total, reviewed} % — খালি map হলে
+    // কোনো badge দেখাবে না (non-admin/non-lazy স্ক্রিনে এটা পাস করা হয় না) ──
+    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + নাম-সার্চ ──
+    // Quiz/Study মোডে showQBankFilterBar=false থাকে বলে কিছুই render হয় না (আগের আচরণ অপরিবর্তিত)।
+    showQBankFilterBar     : Boolean               = false,
+    qbankFilterMode        : QBankFilterMode        = QBankFilterMode.DESIGNATION,
+    onQBankFilterModeChange: (QBankFilterMode) -> Unit = {},
+    qbankSearchQuery       : String                 = "",
+    onQBankSearchQueryChange: (String) -> Unit      = {},
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন — refType নির্ধারণ করে কোন
+    // reference-টেবিলে সেভ হবে ("subjects" | "posts" | "institutions"), emojiOverrides
+    // key = "$refType:${subject.subjectId}"। isAdmin true হলে আইকনে ট্যাপ করলে
+    // ছোট ইমুজি-এডিট ডায়ালগ খোলে (দেখো নিচে AdminEmojiEditDialog)। ──
+    emojiOverrides : Map<String, String> = emptyMap(),
+    refType        : String              = "subjects",
+    onEmojiChange  : (id: String, emoji: String) -> Unit = { _, _ -> },
+    // ── Pull-to-refresh (সব ইউজার) + Admin "Force Full Resync" ──
+    isRefreshing     : Boolean    = false,
+    onRefresh        : () -> Unit = {},
+    onForceFullResync: () -> Unit = {},
+    forceResyncMsg   : String?    = null,
+    onDismissForceResyncMsg: () -> Unit = {},
+    // 🆕 FIX ("ইউজারের নিজের audience-এর বাইরের Subject/Topic ০ প্রশ্ন দেখাচ্ছিল,
+    // বোঝা যাচ্ছিল না কেন" — Admin নিজেও একবার নিজের অ্যাকাউন্টে ভুল audience
+    // দেখে বিভ্রান্ত হয়েছিলেন): বর্তমান ইউজারের effective audience group
+    // (AudienceFilter.audienceGroupLabel(user), যেমন "চাকরি (Job)" বা "মাস্টার্স
+    // ১ বর্ষ") — শুধু দেখানোর জন্য, বাড়তি কিছু না (কোনো টগল/বাটন না, শুধু লেবেল)।
+    // null/ফাঁকা দিলে কিছুই রেন্ডার হয় না (আগের আচরণ অক্ষত)।
+    audienceLabel : String? = null,
+    // ── Study Nav Phase 1: Subject গ্রিডের ওপরে বসানোর অপশনাল কনটেন্ট
+    // (Study ট্যাবে "আমার পড়াশোনা" — Continue/Progress/Recent)। null হলে কিছুই
+    // render হয় না, Quiz/QBank অপরিবর্তিত। ──
+    headerSlot    : (@Composable () -> Unit)? = null,
+    // ── Quiz "+ Set Own Subject" কার্ড: onOwnPickChange != null হলে (শুধু Quiz মোডে পাস করা হয়)
+    // গ্রিডের শেষে কার্ড দেখায়। ownPick = QuizOwnPick.Option.key (null = সব বিষয়) ──
+    ownPick         : String? = null,
+    onOwnPickChange : ((String?) -> Unit)? = null,
+    // বাছা বিষয়ের কার্ডে ট্যাপ → সেই বিষয়ের ডেটা খোলে (শুধু ওই বিষয়, মূল Quiz grid অপরিবর্তিত)
+    onOwnPickOpen   : (() -> Unit)? = null,
+    // true = এখন "নিজের বিষয়" স্কোপের ভেতরে আছি (ব্যাক করলে মূল Quiz-এ ফেরে)
+    ownScopeActive  : Boolean = false,
+    // ── শুধু QBank + Admin: "QBank টপিক ম্যানেজার" (আনমুভ ফিল্টার + মার্জ টু) খোলার কলব্যাক।
+    // null হলে (Quiz/Study বা student) Admin মেনুতে এই অপশন আসে না ──
+    onOpenQBankTopicManager : (() -> Unit)? = null,
+    // ── Admin "🔀 Merge To": source বিষয়ের সব প্রশ্ন/টপিক target-এ চলে যায়, source আর থাকে না।
+    // null হলে মেনুতে অপশন আসে না ──
+    onMergeSubject : ((source: String, target: String) -> Unit)? = null
+) {
+    // এই তালিকা দেখা গেলেই আগের MCQ/লিখিত কলাম-স্কোপ মুছে ফেলা (একক গ্রিডেও যাতে পুরনো স্কোপ না থাকে)
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (mode == StudyMode.QBANK) com.hanif.smartstudy.util.QBankTypeScope.part = null }
+    val modeLabel = when (mode) {
+        StudyMode.QUIZ  -> "Quiz"
+        StudyMode.QBANK -> "Question Bank"
+        StudyMode.STUDY -> "Study"
+    }
+
+    // ── Nordic Pastel থিম চালু থাকলে হেডার vivid gradient না হয়ে
+    //    soft pastel wash + গাঢ় ইঙ্ক টেক্সট হয় (স্ক্রিনশটের "ক বিভাগ" বার-এর মতো) ──
+    val isNordic  = LocalAppTheme.current.value == AppTheme.NORDIC
+    val modeColor = if (isNordic) {
+        val flat = when (mode) {
+            StudyMode.QUIZ  -> NordicSageTint
+            StudyMode.QBANK -> NordicBlueTint
+            StudyMode.STUDY -> NordicClayTint
+        }
+        Brush.linearGradient(listOf(flat, flat))
+    } else when (mode) {
+        StudyMode.QUIZ  -> Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF7C3AED)))
+        StudyMode.QBANK -> Brush.linearGradient(listOf(Color(0xFF0891B2), Color(0xFF0E7490)))
+        StudyMode.STUDY -> Brush.linearGradient(listOf(Color(0xFF059669), Color(0xFF047857)))
+    }
+    val headerTextColor = if (isNordic) NordicInk else Color.White
+    val headerSubTextColor = if (isNordic) NordicMuted else Color.White.copy(0.65f)
+
+    // ── QBank-only সার্চ: শুধু নাম-লিস্ট (Designation/Institution/Year) ক্লায়েন্ট-সাইড
+    // ফিল্টার করে — Rename/Delete ডায়ালগ পুরো (আন-ফিল্টার্ড) subjects লিস্টই ব্যবহার করে,
+    // যাতে সার্চ করা অবস্থায়ও Admin অন্য আইটেম rename/delete করতে পারে ──
+    // ── QBank পরীক্ষা-ক্যাটাগরি চিপ (বিসিএস/প্রাথমিক/নিবন্ধন) — subject grid এর ওপরে বসে,
+    // নাম দিয়ে best-effort match করে ফিল্টার করে (subjectName-এ "bcs"/"primary"/"ntrca"
+    // বা বাংলা নাম থাকলে মিলবে)। নতুন কোনো Subject যোগ হলে (যেমন ভবিষ্যতে "প্রাথমিক
+    // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
+    // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
+    val selectedExamCategory = com.hanif.smartstudy.util.QBankCategory.selected
+    val qbankGridStyle = com.hanif.smartstudy.util.QBankViewStyle.grid   // লিস্ট/গ্রিড পছন্দ (স্থায়ী)
+    // ── ক্যাটাগরি-ফিল্টার ক্রম-সাজানোর সময়ও প্রযোজ্য (শুধু সিলেক্টেড ক্যাটাগরির কার্ড দেখা যায়);
+    // ▲▼ ও সিরিয়াল-ম্যানেজার নিচে গ্লোবাল লিস্টের সাথে ম্যাপ করা হয়, তাই অন্য ক্যাটাগরির ক্রম নষ্ট হয় না ──
+    val categorySubjects = if (showQBankFilterBar)
+        subjects.filter { examCategoryMatches(it, selectedExamCategory) } else subjects
+    // ── সাজানো (sort): প্রতিটা ক্যাটাগরির পছন্দ আলাদা ও স্থায়ী (QBankSortStore)। ১৬-২০ গ্রেডে
+    // পদবী/প্রতিষ্ঠান/সাল মোডেরও আলাদা পছন্দ। অ্যাডমিন ক্রম-ঠিক-করার মোডে সবসময় আসল ক্রম ──
+    val sortCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankSortStore.init(sortCtx) }
+    val sortScope = if (selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE)
+        "$selectedExamCategory:${qbankFilterMode.name}" else selectedExamCategory
+    var sortChoice by remember(sortScope) {
+        com.hanif.smartstudy.util.QBankSortStore.init(sortCtx)
+        mutableStateOf(com.hanif.smartstudy.util.QBankSortStore.get(sortScope))
+    }
+    val displaySubjects = run {
+        var list = categorySubjects
+        if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
+            if (qbankSearchQuery.isNotBlank() && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
+                list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
+            }
+            list = com.hanif.smartstudy.util.QBankSortStore.apply(
+                list, sortChoice,
+                name = { it.name }, subNames = { e -> e.subTopics.map { st -> st.name } },
+                totalQ = { it.totalQ }, progressPct = { it.progressPct },
+                years = { it.years }
+            )
+        }
+        list
+    }
+    // displaySubjects-এর index → পূর্ণ `subjects` লিস্টের index (নাম দিয়ে)
+    fun globalIdx(displayIdx: Int): Int =
+        subjects.indexOfFirst { it.name == displaySubjects.getOrNull(displayIdx)?.name }
+
+    // ── Admin মেনু (ক্রম ঠিক করুন / Rename / Delete) — সবগুলোই বর্তমান sheet
+    // (mode অনুযায়ী Quiz/QBank/Study) এর subject-এর ওপরই কাজ করে, অন্য sheet ছোঁয় না ──
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMergeDialog  by remember { mutableStateOf(false) }
+    // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
+    var showSerialManager by remember { mutableStateOf(false) }
+    // ── App feature request ৪: কোন subjectId-এর ইমুজি এডিট হচ্ছে (null মানে বন্ধ) ──
+    var emojiEditTargetId by remember { mutableStateOf<String?>(null) }
+    var emojiEditCurrentEmoji by remember { mutableStateOf("") }
+
+    // ── Pull-to-refresh (সব ইউজার): নিচের দিকে টেনে ধরলে reference-ডেটা
+    // (subjects/topics/tags/posts/institutions + QBank হলে exam_appearances) টাটকা
+    // হয়ে যায় — দেখো QuizViewModel.refreshCurrentMode()। PullToRefreshBox material3
+    // 1.3.0+ থেকে স্ট্যাবল (compose-bom 2024.09.00-এ আছে)। ──
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh    = onRefresh,
+        modifier     = Modifier.fillMaxSize()
+    ) {
+    LazyColumn(
+        modifier            = Modifier.fillMaxSize(),
+        contentPadding      = PaddingValues(bottom = 100.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Header
+        item {
+            Box(
+                Modifier.fillMaxWidth().background(modeColor)
+                    .padding(horizontal = 16.dp, vertical = 20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(modeLabel, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                            color = headerTextColor, fontFamily = NotoSansBengali)
+                        Text("বিষয় বেছে নিন", fontSize = 12.sp, color = headerSubTextColor,
+                            fontFamily = NotoSansBengali)
+                        if (!audienceLabel.isNullOrBlank()) {
+                            Text("🎯 $audienceLabel", fontSize = 11.sp, color = headerSubTextColor,
+                                fontFamily = NotoSansBengali)
+                        }
+                    }
+                    val showSortInHeader = showQBankFilterBar && !(isAdmin && isReorderMode)
+                    if (isAdmin || showSortInHeader) {
+                        // ── Admin বাটন (থাকলে) + তার ঠিক নিচে ↕ সাজান আইকন ──
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (isAdmin) {
+                                AdminMenuButton(
+                                    isReorderMode   = isReorderMode,
+                                    onToggleReorder = onToggleReorder,
+                                    onRenameClick   = { showRenameDialog = true },
+                                    onDeleteClick   = { showDeleteDialog = true },
+                                    onMergeClick    = if (onMergeSubject != null && subjects.size > 1) { { showMergeDialog = true } } else null,
+                                    onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null,
+                                    onOpenQBankTopicManager = onOpenQBankTopicManager
+                                )
+                            }
+                            if (showSortInHeader) {
+                                QBankSortButton(
+                                    current  = sortChoice,
+                                    onSelect = {
+                                        sortChoice = it
+                                        com.hanif.smartstudy.util.QBankSortStore.set(sortScope, it)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (isAdmin && isReorderMode) {
+            item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
+        }
+
+        // ── Study Nav Phase 1: "আমার পড়াশোনা" (Continue/Progress/Recent) ──
+        if (headerSlot != null) {
+            item { headerSlot() }
+        }
+
+        // ── QBank পরীক্ষা-ক্যাটাগরি চিপ (বিসিএস/প্রাথমিক/নিবন্ধন) — filter bar-এর ঠিক ওপরে,
+        // subject grid এর আগে। শুধু QBank মোডে (showQBankFilterBar=true), Quiz/Study
+        // মোডে কিছুই render হয় না, আগের আচরণ অপরিবর্তিত। ──
+        if (showQBankFilterBar) {
+            item {
+                ExamCategoryChipsRow(
+                    selected = selectedExamCategory,
+                    onSelect = {
+                        com.hanif.smartstudy.util.QBankCategory.selected = it
+                        // ফিল্টার শুধু ১৬-২০ গ্রেডে; অন্য ক্যাটাগরিতে পদবী-মোড (যেখানে সরাসরি প্রশ্নপত্র খোলে)
+                        if (it != com.hanif.smartstudy.util.QBankCategory.GRADE &&
+                            qbankFilterMode != QBankFilterMode.DESIGNATION) {
+                            onQBankFilterModeChange(QBankFilterMode.DESIGNATION)
+                        }
+                    }
+                )
+            }
+        }
+
+        // ── QBank-only ফিল্টার বার: পদবী/প্রতিষ্ঠান/সাল চিপ + সার্চ ──
+        if (showQBankFilterBar && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
+            item {
+                QBankFilterBar(
+                    filterMode        = qbankFilterMode,
+                    onFilterModeChange = onQBankFilterModeChange,
+                    searchQuery       = qbankSearchQuery,
+                    onSearchQueryChange = onQBankSearchQueryChange
+                )
+            }
+        }
+
+        // 🔬 DIAG ব্লক (পদবী/প্রতিষ্ঠান/সাল mode-count-sample) সরানো হলো — root cause
+        // কনফার্ম হয়ে গেছে (পুরনো/আন-রিবিল্ট APK ছিল, কোড ঠিকই ছিল)। বিস্তারিত ইতিহাস
+        // দেখো dev-notes/DIAGNOSTIC_NOTES.md। ──
+
+        // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
+        if (mode == StudyMode.STUDY && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+            item {
+                com.hanif.smartstudy.focus.FocusTodayCard(
+                    subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + subjects.map { it.name }
+                )
+            }
+        }
+
+        // Loading
+        if (isLoading) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Indigo600)
+                }
+            }
+        }
+
+        // Empty state
+        if (!isLoading && displaySubjects.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = when {
+                            showQBankFilterBar && qbankSearchQuery.isNotBlank() -> "🔍 কিছু পাওয়া যায়নি"
+                            showQBankFilterBar -> "📭 \"$selectedExamCategory\" ক্যাটাগরিতে এখনো কোনো বিষয় যোগ করা হয়নি"
+                            mode == StudyMode.QUIZ && ownScopeActive && com.hanif.smartstudy.util.QuizOwnPick.find(ownPick) != null ->
+                                "📭 \"${com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)?.label}\"-এর কোনো ডেটা এখনো যোগ হয়নি"
+                            else -> "⚠️ ডেটা আসেনি"
+                        },
+                        fontSize = 15.sp,
+                        fontFamily = NotoSansBengali,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE53935)
+                    )
+                    if (error != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = error,
+                            fontSize = 11.sp,
+                            fontFamily = NotoSansBengali,
+                            color = Color.Gray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+
+        // Subject cards — QBank এ ২-কলাম গ্রিড (সাবটপিক কাউন্ট দেখায়), Quiz/Study এ আগের মতো সিঙ্গল-কলাম লিস্ট
+        // দুই কলাম শুধু তখনই যখন তালিকায় MCQ-ও আছে আর লিখিতও আছে; একটাই ধরন থাকলে আগের মতো একক গ্রিড (কলাম-ভাগ অকারণ)
+        val qbankHasMcq     = mode == StudyMode.QBANK && displaySubjects.any { qbankTypeCount(it, 0) > 0 }
+        val qbankHasWritten = mode == StudyMode.QBANK && displaySubjects.any { qbankTypeCount(it, 1) > 0 }
+        if (mode == StudyMode.QBANK && !(isAdmin && isReorderMode)) {
+            // ── MCQ | লিখিত দুই কলাম: বাম কলামে শুধু MCQ-সহ কার্ড (MCQ সংখ্যা), ডান কলামে শুধু লিখিত-সহ কার্ড (লিখিত সংখ্যা) ──
+            // কোন কলাম থেকে ট্যাপ হলো সেটা QBankTypeScope-এ রেখে ভেতরে ঢোকা হয়; ভেতরের স্ক্রিন সেই ধরনই দেখায়।
+            // অ্যাডমিন রি-অর্ডার মোডে আগের এক-গ্রিডই থাকে (ক্রম বদলানোর জন্য)।
+            val titleFor: (SubjectEntry) -> String? = { subject ->
+                if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
+                                val insts = subject.subTopics.map { it.instLabel().trim() }.distinct()
+                                    .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) && !subject.name.contains(it) }.distinct()
+                                when {
+                                    insts.isEmpty() -> null
+                                    insts.size <= 2 -> subject.name + ", " + insts.joinToString(", ")
+                                    else            -> subject.name + ", " + insts.first() + " +${insts.size - 1}"
+                                }
+                            } else if ((selectedExamCategory == "প্রাথমিক" || selectedExamCategory == "ব্যাংক") &&
+                                (qbankFilterMode == QBankFilterMode.POST || qbankFilterMode == QBankFilterMode.DESIGNATION) &&
+                                subject.years.isNotEmpty()) {
+                                // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
+                                subject.name + ", " + subject.years.take(3).joinToString(", ") +
+                                    (if (subject.years.size > 3) " +${subject.years.size - 3}" else "")
+                            } else null
+            }
+            // ── ডিজাইন ২: প্রতিটা কার্ডে দুই চিপ ("MCQ ৫৬" | "লিখিত ১২") — চিপে ট্যাপ করলে সেই ধরনেই ঢোকে ──
+            // তালিকায় লিখিত একেবারেই না থাকলে (বা MCQ না থাকলে) শুধু যেটা আছে সেই চিপ; কার্ডে যে ধরন নেই সেই চিপ ম্লান ও বন্ধ।
+            item {
+                // তালিকা আবার দেখা গেলে (ভেতর থেকে ফিরে এলে) আগের চিপ-স্কোপ মুছে ফেলা
+                androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankTypeScope.part = null }
+            }
+            if (qbankFilterMode != QBankFilterMode.YEAR) {
+                // ── প্রশ্নপত্র-ভিত্তিক তালিকা: কার্ডে ট্যাপ → প্রশ্নপত্রের তালিকা (উপরে MCQ | লিখিত ট্যাব);
+                // মাত্র ১টা প্রশ্নপত্র থাকলে সরাসরি সেটা খোলে। লিস্ট/গ্রিড পছন্দ স্থায়ী। ──
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
+                        QBankLayoutToggle(showLabels = true)
+                    }
+                }
+                val cardFor: @Composable (SubjectEntry, Boolean) -> Unit = { subject, compact ->
+                    val mcqN = qbankTypeCount(subject, 0)
+                    val wrN  = qbankTypeCount(subject, 1)
+                    val icon = emojiOverrides["$refType:${subject.subjectId}"]?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                    val institutions = subject.subTopics.map { it.topicId.ifBlank { it.name } }.distinct().size
+                    val papers = subject.subTopics.count { it.hasQuestions() }
+                    val subLabel = if (selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) "" else when (qbankFilterMode) {
+                        QBankFilterMode.INSTITUTION, QBankFilterMode.YEAR -> "${bnDigits(institutions)}টি পদবী · ${bnDigits(papers)}টি প্রশ্নপত্র"
+                        QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> "${bnDigits(institutions)}টি প্রতিষ্ঠান · ${bnDigits(papers)}টি প্রশ্নপত্র"
+                    }
+                    QBankEntryCard(
+                        title = titleFor(subject) ?: subject.name,
+                        icon = icon,
+                        subLabel = subLabel,
+                        totalQ = mcqN + wrN,
+                        progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f,
+                        mcqPapers = qbankPaperCount(subject, 0),
+                        writtenPapers = qbankPaperCount(subject, 1),
+                        compact = compact,
+                        onClick = {
+                            val direct = onSubjectDirect
+                            val only = subject.subTopics.singleOrNull()
+                            if (direct != null && only != null) {
+                                // একটাই প্রশ্নপত্র → সরাসরি খোলো, সেই ধরনেই (MCQ/লিখিত)
+                                com.hanif.smartstudy.util.QBankTypeScope.part = only.paperType.takeIf { it >= 0 }
+                                direct(subject.name)
+                            } else {
+                                // প্রশ্নপত্রের তালিকা: ট্যাব নিজেই ডিফল্ট (MCQ) ঠিক করে নেবে
+                                com.hanif.smartstudy.util.QBankTypeScope.part = null
+                                onSubject(subject.name)
+                            }
+                        },
+                        onLongPress = if (isAdmin && subject.subjectId.isNotBlank()) ({
+                            emojiEditTargetId = subject.subjectId
+                            emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                        }) else null,
+                        modifier = if (compact) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+                if (qbankGridStyle) {
+                    item {
+                        LazyVerticalGrid(
+                            columns               = GridCells.Fixed(2),
+                            modifier              = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement   = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(displaySubjects) { _, subject -> cardFor(subject, true) }
+                        }
+                    }
+                } else {
+                    itemsIndexed(displaySubjects) { _, subject -> cardFor(subject, false) }
+                }
+            } else
+            itemsIndexed(displaySubjects) { _, subject ->
+                val mcqN = qbankTypeCount(subject, 0)
+                val wrN  = qbankTypeCount(subject, 1)
+                val icon = emojiOverrides["$refType:${subject.subjectId}"]?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                val papers = subject.subTopics.count { it.hasQuestions() }
+                val subLabel = if (selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) "" else when (qbankFilterMode) {
+                    QBankFilterMode.INSTITUTION, QBankFilterMode.YEAR -> "${bnDigits(papers)}টি পেপার · মোট ${bnDigits(mcqN + wrN)}টি প্রশ্ন"
+                    QBankFilterMode.POST, QBankFilterMode.DESIGNATION -> "${bnDigits(papers)}টি প্রতিষ্ঠান · মোট ${bnDigits(mcqN + wrN)}টি প্রশ্ন"
+                }
+                val openType = { part: Int ->
+                    com.hanif.smartstudy.util.QBankTypeScope.part = part
+                    val direct = onSubjectDirect
+                    if (direct != null && selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) direct(subject.name)
+                    else onSubject(subject.name)
+                }
+                QBankDualChipCard(
+                    title = titleFor(subject) ?: subject.name,
+                    icon = icon,
+                    subLabel = subLabel,
+                    mcq = mcqN, written = wrN,
+                    showMcq = qbankHasMcq, showWritten = qbankHasWritten,
+                    onMcq = { openType(0) },
+                    onWritten = { openType(1) },
+                    onLongPress = if (isAdmin && subject.subjectId.isNotBlank()) ({
+                        emojiEditTargetId = subject.subjectId
+                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                    }) else null
+                )
+            }
+        } else if (mode == StudyMode.QBANK) {
+            item {
+                LazyVerticalGrid(
+                    columns                = GridCells.Fixed(2),
+                    modifier               = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
+                    verticalArrangement    = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(displaySubjects) { idx, subject ->
+                        QBankSubjectCard(
+                            subject = subject,
+                            onClick = {
+                                // বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংকে সরাসরি প্রশ্নপত্র; ১৬-২০ গ্রেডে আগের মতো প্রতিষ্ঠান-লিস্ট
+                                val direct = onSubjectDirect
+                                if (direct != null && selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE) direct(subject.name)
+                                else onSubject(subject.name)
+                            },
+                            reorderEnabled = isAdmin && isReorderMode,
+                            isFirst = idx == 0,
+                            isLast  = idx == displaySubjects.lastIndex,
+                            onMoveUp   = { onMoveSubject(globalIdx(idx), globalIdx(idx - 1)) },
+                            onMoveDown = { onMoveSubject(globalIdx(idx), globalIdx(idx + 1)) },
+                            reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
+                            emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                            isAdmin = isAdmin && !isReorderMode,
+                            onEmojiClick = {
+                                emojiEditTargetId = subject.subjectId
+                                emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                            },
+                            // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান" — প্রতিষ্ঠানের নামও কার্ডে দেখায়
+                            titleOverride = if (selectedExamCategory == "নিবন্ধন" && qbankFilterMode == QBankFilterMode.DESIGNATION) {
+                                val insts = subject.subTopics.map { it.instLabel().trim() }.distinct()
+                                    .filter { it.isNotBlank() && !it.equals(subject.name.trim(), ignoreCase = true) && !subject.name.contains(it) }.distinct()
+                                when {
+                                    insts.isEmpty() -> null
+                                    insts.size <= 2 -> subject.name + ", " + insts.joinToString(", ")
+                                    else            -> subject.name + ", " + insts.first() + " +${insts.size - 1}"
+                                }
+                            } else if ((selectedExamCategory == "প্রাথমিক" || selectedExamCategory == "ব্যাংক") &&
+                                (qbankFilterMode == QBankFilterMode.POST || qbankFilterMode == QBankFilterMode.DESIGNATION) &&
+                                subject.years.isNotEmpty()) {
+                                // প্রাথমিক: "সহকারী শিক্ষক (পদ্মা), ২০২৪" · ব্যাংক: "সিনিয়র অফিসার, ২০২৪"
+                                subject.name + ", " + subject.years.take(3).joinToString(", ") +
+                                    (if (subject.years.size > 3) " +${subject.years.size - 3}" else "")
+                            } else null,
+                            // ১৬-২০ গ্রেড ছাড়া বাকি ক্যাটাগরিতে "X টি প্রতিষ্ঠান" ব্যাজ নেই
+                            hideSubLabel = selectedExamCategory != com.hanif.smartstudy.util.QBankCategory.GRADE,
+                            subLabelOverride = when (qbankFilterMode) {
+                                QBankFilterMode.INSTITUTION -> totalQLabel(subject.totalQ)
+                                QBankFilterMode.YEAR        -> totalQLabel(subject.totalQ)
+                                QBankFilterMode.POST        -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
+                                QBankFilterMode.DESIGNATION -> "${subject.subTopics.size} টি প্রতিষ্ঠান"
+                            }
+                        )
+                    }
+                }
+            }
+        } else if (isAdmin && isReorderMode) {
+            // ── Reorder মোডে পুরনো ফুল-রো লিস্ট (up/down এরো বাটনের জন্য জায়গা লাগে,
+            // ৫-কলাম গ্রিডে সেটা কুঁচকে যেত) — শুধু reorder করার সময়ই এটা দেখা যায় ──
+            itemsIndexed(displaySubjects) { idx, subject ->
+                SubjectCard(
+                    subject = subject,
+                    onClick = { onSubject(subject.name) },
+                    reorderEnabled = isAdmin && isReorderMode,
+                    isFirst = idx == 0,
+                    isLast  = idx == displaySubjects.lastIndex,
+                    onMoveUp   = { onMoveSubject(globalIdx(idx), globalIdx(idx - 1)) },
+                    onMoveDown = { onMoveSubject(globalIdx(idx), globalIdx(idx + 1)) },
+                    reviewPct = if (isAdmin) reviewProgress[subject.subjectId]?.pct else null,
+                    emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                    isAdmin = false,
+                    onEmojiClick = {}
+                )
+            }
+        } else {
+            // ── UX ফিচার: portrait ইলাস্ট্রেশন — "সব সাবজেক্ট এক স্ক্রিনে" (কোনো
+            // স্ক্রল ছাড়া), নতুন সাবজেক্ট যোগ হলে অটো রিসাইজ হয়ে সব সবসময় একই
+            // স্ক্রিনে ফিট করবে। এর জন্য LazyVerticalGrid-এর বদলে screen-height
+            // থেকে হিসাব করে সরাসরি কার্ডের width/height বসানো হচ্ছে — যতগুলো
+            // সাবজেক্ট থাকুক (row×column অটো-নির্ধারিত), সবগুলো height-এ ভাগ হয়ে
+            // ফিট করে যায়। কোর ১১টা সাবজেক্ট হার্ডকোড করা নির্দিষ্ট ক্রমে থাকে
+            // (subjectHardcodedPriority()), বাকিরা পরে। ──
+            item {
+                val orderedSubjects = remember(displaySubjects) { applyHardcodedSubjectOrder(displaySubjects) }
+                val config = LocalConfiguration.current
+                // ── Quiz: শেষে "+ Set Own Subject" কার্ড (null = সেই কার্ড) ──
+                // মূল Quiz-এর সব বিষয় আগের মতোই থাকে; শেষে (১) বাছা বিষয়ের কার্ড (থাকলে), (২) "+ Set Own Subject"
+                val showOwnCard = mode == StudyMode.QUIZ && onOwnPickChange != null && !ownScopeActive
+                val pickedOpt   = com.hanif.smartstudy.util.QuizOwnPick.find(ownPick)
+                val ownPickEntry = remember { SubjectEntry(name = "__own_pick__", totalQ = 0, doneQ = 0) }
+                val gridItems: List<SubjectEntry?> =
+                    orderedSubjects +
+                    (if (showOwnCard && pickedOpt != null) listOf<SubjectEntry?>(ownPickEntry) else emptyList()) +
+                    (if (showOwnCard && pickedOpt == null) listOf<SubjectEntry?>(null) else emptyList())
+                val count = gridItems.size.coerceAtLeast(1)
+
+                // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
+                // বেশি কলাম (নাহলে row বেড়ে কার্ড অতিরিক্ত চ্যাপ্টা/সরু হয়ে যেত) ──
+                val columns = when {
+                    count <= 6  -> 2
+                    count <= 12 -> 3
+                    count <= 20 -> 4
+                    else        -> 5
+                }
+                val rows = ceil(count / columns.toFloat()).toInt().coerceAtLeast(1)
+
+                // ── এই স্ক্রিনে গ্রিডের ওপরে যা যা আছে (header, audience-tag রো,
+                // admin বাটন, filter/search যা থাকতে পারে) তার আনুমানিক উচ্চতা বাদ
+                // দিয়ে বাকি স্ক্রিন-হাইট গ্রিডের জন্য বরাদ্দ ধরা হচ্ছে — LazyColumn-এর
+                // ভেতরে item{} হওয়ায় এখানে সরাসরি প্যারেন্টের প্রকৃত remaining height
+                // মাপা যায় না (LazyColumn ইনফিনিট height দিয়ে measure করে), তাই
+                // ডিভাইসের প্রকৃত স্ক্রিন-হাইট (LocalConfiguration) থেকে একটা
+                // reasonable estimate বিয়োগ করে কাজ চালানো হচ্ছে। ──
+                val estimatedChromeDp = 250.dp
+                val availableHeightDp = (config.screenHeightDp.dp - estimatedChromeDp).coerceAtLeast(240.dp)
+                val spacingDp = 6.dp
+                val horizontalPaddingDp = 10.dp
+
+                val cardWidthDp  = (config.screenWidthDp.dp - horizontalPaddingDp * 2 - spacingDp * (columns - 1)) / columns
+                val cardHeightDp = (availableHeightDp - spacingDp * (rows - 1)) / rows
+
+                if (orderedSubjects.isEmpty() && showOwnCard) {
+                    // কোনো সাবজেক্ট নেই (যেমন বাছা বিষয়ে ডেটা নেই) — কার্ডটা বিশাল না হয়ে ছোট থাকুক
+                    Box(Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp), contentAlignment = Alignment.Center) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(spacingDp)) {
+                            if (pickedOpt != null) {
+                                OwnPickCard(Modifier.width(150.dp).height(170.dp), pickedOpt,
+                                    onReset = { onOwnPickChange?.invoke(null) }) { onOwnPickOpen?.invoke() }
+                            } else {
+                                OwnSubjectAddCard(
+                                    modifier = Modifier.width(150.dp).height(170.dp),
+                                    ownPick  = ownPick,
+                                    onPick   = { onOwnPickChange?.invoke(it) }
+                                )
+                            }
+                        }
+                    }
+                } else
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = horizontalPaddingDp),
+                    verticalArrangement = Arrangement.spacedBy(spacingDp)
+                ) {
+                    gridItems.chunked(columns).forEach { rowSubjects ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(spacingDp)
+                        ) {
+                            rowSubjects.forEach { subject ->
+                                if (subject == null) {
+                                    OwnSubjectAddCard(
+                                        modifier = Modifier.width(cardWidthDp).height(cardHeightDp),
+                                        ownPick  = ownPick,
+                                        onPick   = { onOwnPickChange?.invoke(it) }
+                                    )
+                                    return@forEach
+                                }
+                                if (subject === ownPickEntry && pickedOpt != null) {
+                                    OwnPickCard(
+                                        Modifier.width(cardWidthDp).height(cardHeightDp), pickedOpt,
+                                        onReset = { onOwnPickChange?.invoke(null) }
+                                    ) { onOwnPickOpen?.invoke() }
+                                    return@forEach
+                                }
+                                SubjectGridImageCard(
+                                    subject = subject,
+                                    onClick = { onSubject(subject.name) },
+                                    modifier = Modifier.width(cardWidthDp).height(cardHeightDp),
+                                    emojiOverride = emojiOverrides["$refType:${subject.subjectId}"],
+                                    isAdmin = isAdmin,
+                                    onEmojiClick = {
+                                        emojiEditTargetId = subject.subjectId
+                                        emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                                    }
+                                )
+                            }
+                            // ── শেষ row-এ কলাম কম থাকলে ফাঁকা স্পেসার দিয়ে alignment ঠিক রাখা ──
+                            repeat(columns - rowSubjects.size) {
+                                Spacer(Modifier.width(cardWidthDp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── QBank subject list — banner ad ──
+        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QBANK_SUBJECT)
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+
+        // ── Model Test — শুধু QBank মোডে ──
+        if (mode == StudyMode.QBANK && displaySubjects.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick  = onModelTestZone,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)),
+                    border   = BorderStroke(1.4.dp, Color(0xFF059669))
+                ) {
+                    Text("🏆 মডেল টেস্ট", fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                        modifier = Modifier.padding(vertical = 4.dp))
+                }
+            }
+        }
+    }
+    } // PullToRefreshBox বন্ধ
+
+    if (isAdmin && showRenameDialog) {
+        AdminRenamePickerDialog(
+            title   = "$modeLabel বিষয় Rename",
+            items   = subjects.map { it.name },
+            onConfirm = { old, new -> onRenameSubject(old, new) },
+            onDismiss = { showRenameDialog = false }
+        )
+    }
+    if (isAdmin && showDeleteDialog) {
+        AdminDeletePickerDialog(
+            title   = "$modeLabel বিষয় Delete",
+            items   = subjects.map { it.name },
+            onConfirm = { name -> onDeleteSubject(name) },
+            onDismiss = { showDeleteDialog = false }
+        )
+    }
+    if (isAdmin && showMergeDialog && onMergeSubject != null) {
+        val allNames = subjects.map { it.name }
+        AdminMergePickerDialog(
+            title         = "$modeLabel বিষয় Merge To",
+            sourceHeading = "🔀 কোনটা মার্জ করবেন? (এটা আর থাকবে না)",
+            targetHeading = "➡️ কোনটার সাথে মার্জ হবে?",
+            sources       = allNames,
+            targetsFor    = { src -> allNames.filter { it != src }.map { MergeOption(it, subject = it) } },
+            onConfirm     = { src, tgt -> onMergeSubject(src, tgt.subject) },
+            onDismiss     = { showMergeDialog = false }
+        )
+    }
+    // ── Phase 4: Serial Manager — subjects এখানে ইতিমধ্যে বর্তমান display-ক্রমেই আসে,
+    // তাই এন্ট্রি নাম্বার = তাদের বর্তমান পজিশন + ১ ──
+    if (isAdmin && showSerialManager) {
+        SerialManagerDialog(
+            title     = "$modeLabel — বিষয়ের ক্রম",
+            // শুধু সিলেক্টেড ক্যাটাগরির আইটেম; সেভের সময় গ্লোবাল লিস্টের ওই আইটেমগুলোর "স্লটে"
+            // নতুন ক্রম বসে, বাকি ক্যাটাগরির আপেক্ষিক ক্রম অক্ষুণ্ণ থাকে
+            entries   = categorySubjects.mapIndexed { idx, s -> s.name to (idx + 1) },
+            onDismiss = { showSerialManager = false },
+            onSave    = { orderedNames ->
+                val catNames = categorySubjects.map { it.name }.toSet()
+                val queue = orderedNames.filter { it in catNames }.iterator()
+                val merged = subjects.map { it.name }.map { n ->
+                    if (n in catNames && queue.hasNext()) queue.next() else n
+                }
+                onSaveSerialOrder(merged)
+            }
+        )
+    }
+    // ── App feature request ৪: এডমিন ইমুজি এডিট ডায়ালগ — আইকনে ট্যাপ করলে খোলে ──
+    emojiEditTargetId?.let { targetId ->
+        AdminEmojiEditDialog(
+            currentEmoji = emojiEditCurrentEmoji,
+            onConfirm = { newEmoji ->
+                onEmojiChange(targetId, newEmoji)
+                emojiEditTargetId = null
+            },
+            onDismiss = { emojiEditTargetId = null }
+        )
+    }
+}
+
+@Composable
+private fun AdminMenuButton(
+    isReorderMode  : Boolean,
+    onToggleReorder: () -> Unit,
+    onRenameClick  : () -> Unit,
+    onDeleteClick  : () -> Unit,
+    onMoveClick    : (() -> Unit)? = null,
+    onMergeClick   : (() -> Unit)? = null,
+    // ── "🔄 Force Full Resync" — শুধু Admin-এর ড্রপডাউনে, দেখো
+    // QuizViewModel.forceFullResync()/ContentRepository.forceFullResync() এর কমেন্ট ──
+    onForceResyncClick: (() -> Unit)? = null,
+    // ── Phase 4 (Serial Manager): ড্র্যাগ করে সাজানোর বদলে সরাসরি প্রতিটার পাশে
+    // নাম্বার বসিয়ে ক্রম ঠিক করার শর্টকাট — দেখো SerialManagerDialog ──
+    onOpenSerialManager: (() -> Unit)? = null,
+    // ── শুধু QBank: আনমুভ টপিক ফিল্টার + "মার্জ টু" (QBank-এর প্রশ্ন Quiz-এ কপি) ──
+    onOpenQBankTopicManager: (() -> Unit)? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            shape    = RoundedCornerShape(12.dp),
+            color    = if (isReorderMode) Color.White else Color.White.copy(alpha = 0.18f),
+            modifier = Modifier.clickable { expanded = true }
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text("🛡️", fontSize = 13.sp)
+                Text(
+                    "Admin", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali,
+                    color = if (isReorderMode) Color(0xFF4F46E5) else Color.White
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = {
+                    Text(if (isReorderMode) "✖️ ক্রম সাজানো শেষ করুন" else "🔢 ক্রম ঠিক করুন (ড্র্যাগ করে)",
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                },
+                onClick = { expanded = false; onToggleReorder() }
+            )
+            if (onOpenSerialManager != null) {
+                DropdownMenuItem(
+                    text = { Text("🔢 সরাসরি নাম্বার বসান", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4F46E5)) },
+                    onClick = { expanded = false; onOpenSerialManager() }
+                )
+            }
+            if (onOpenQBankTopicManager != null) {
+                DropdownMenuItem(
+                    text = { Text("🧩 QBank টপিক ম্যানেজার (আনমুভ · মার্জ)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0891B2)) },
+                    onClick = { expanded = false; onOpenQBankTopicManager() }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("✏️ Rename", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) },
+                onClick = { expanded = false; onRenameClick() }
+            )
+            if (onMergeClick != null) {
+                DropdownMenuItem(
+                    text = { Text("🔀 Merge To", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF7C3AED)) },
+                    onClick = { expanded = false; onMergeClick() }
+                )
+            }
+            if (onMoveClick != null) {
+                DropdownMenuItem(
+                    text = { Text("📦 Move to Subject", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0EA5E9)) },
+                    onClick = { expanded = false; onMoveClick() }
+                )
+            }
+            if (onForceResyncClick != null) {
+                DropdownMenuItem(
+                    text = { Text("🔄 Force Full Resync (Cache Clear)", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF7C3AED)) },
+                    onClick = { expanded = false; onForceResyncClick() }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("🗑️ Delete", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEF4444)) },
+                onClick = { expanded = false; onDeleteClick() }
+            )
+        }
+    }
+}
+
+/**
+ * Phase 4 — Serial Manager: ড্র্যাগ করে এক-এক করে সরানোর বদলে, admin প্রতিটা
+ * item-এর পাশে সরাসরি একটা নাম্বার টাইপ করে দিতে পারেন। Save করলে নাম্বার
+ * অনুযায়ী sort হয়ে (duplicate থাকলে আগের আপেক্ষিক ক্রম বজায় রেখে stable-sort)
+ * চূড়ান্ত ১,২,৩...N ক্রম হিসেবে persist হয় — দেখো QuizViewModel.applySubjectSerialOrder/
+ * applySubTopicSerialOrder, যেগুলো একই persistSubjectOrder/persistSubTopicOrder
+ * পাইপলাইন (offline queue/Firebase sync) রিইউজ করে।
+ */
+@Composable
+private fun SerialManagerDialog(
+    title  : String,
+    entries: List<Pair<String, Int>>,   // name to current-serial (order না থাকলে বড় নাম্বার/শেষে)
+    onDismiss: () -> Unit,
+    onSave   : (List<String>) -> Unit
+) {
+    // ── আইটেমগুলোর জন্য এডিটেবল টেক্সট — শুরুতে বর্তমান ক্রম-অনুযায়ী ১,২,৩...N বসানো
+    // থাকে (entries ইতিমধ্যে ওই ক্রমেই আসে), যাতে খালি থেকে শুরু করা না লাগে ──
+    val numbers = remember {
+        mutableStateMapOf<String, String>().apply {
+            entries.forEachIndexed { idx, (name, _) -> put(name, (idx + 1).toString()) }
+        }
+    }
+    // ── কোন নাম্বারগুলো duplicate (একাধিক আইটেম একই নাম্বারে) — সেভের আগে admin-কে
+    // ভিজ্যুয়ালি সতর্ক করার জন্য, ব্লক করার জন্য না (সেভ করলে stable-sort দিয়ে
+    // ঠিকই ১..N compact হয়ে যাবে) ──
+    val duplicateNames by remember {
+        derivedStateOf {
+            val counts = numbers.values.filter { it.toIntOrNull() != null }.groupingBy { it }.eachCount()
+            numbers.filterValues { (counts[it] ?: 0) > 1 }.keys
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape    = RoundedCornerShape(18.dp),
+            color    = Color.White,
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.85f)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("🔢 সিরিয়াল ম্যানেজার", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
+                        Text(title, fontSize = 12.sp, color = Color.Gray, fontFamily = NotoSansBengali)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন")
+                    }
+                }
+                if (duplicateNames.isNotEmpty()) {
+                    Surface(
+                        color    = Color(0xFFFFF3CD),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            "⚠️ একই নাম্বার একাধিক জায়গায় আছে — Save করলে ওপরে যেটা আছে সেটাই আগে বসবে। " +
+                                "নিশ্চিত না হলে নাম্বারগুলো আলাদা করে দিন।",
+                            fontSize = 11.sp, color = Color(0xFF92400E), fontFamily = NotoSansBengali,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    items(entries, key = { it.first }) { (name, _) ->
+                        val isDup = duplicateNames.contains(name)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(
+                                    if (isDup) Color(0xFFFFF3CD) else Color(0xFFF8FAFC),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(name, fontSize = 13.sp, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f))
+                            OutlinedTextField(
+                                value         = numbers[name] ?: "",
+                                onValueChange = { v -> if (v.length <= 4 && v.all { it.isDigit() }) numbers[name] = v },
+                                singleLine    = true,
+                                modifier      = Modifier.width(70.dp),
+                                textStyle     = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                            )
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text("বাতিল", fontFamily = NotoSansBengali)
+                    }
+                    Button(
+                        onClick = {
+                            // ── stable sort by (number, original index) — number না দিলে
+                            // (blank/invalid) সবচেয়ে বড় ধরে শেষে চলে যাবে ──
+                            val originalIndex = entries.mapIndexed { idx, (name, _) -> name to idx }.toMap()
+                            val sortedNames = entries.map { it.first }
+                                .sortedWith(
+                                    compareBy(
+                                        { numbers[it]?.toIntOrNull() ?: Int.MAX_VALUE },
+                                        { originalIndex[it] ?: 0 }
+                                    )
+                                )
+                            onSave(sortedNames)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                    ) {
+                        Text("✅ সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminRenamePickerDialog(
+    title    : String,
+    items    : List<String>,
+    onConfirm: (old: String, new: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    // ── UX ফিক্স: "নতুন নাম" বক্স আগে সব আইটেমের একদম নিচে ছিল (লম্বা লিস্টে স্ক্রল করে শেষে
+    // যেতে হতো)। এখন যেটা সিলেক্ট করবেন ঠিক তার নিচেই বক্স আসে, পুরনো নাম দিয়ে ভরা (শুধু এডিট
+    // করলেই হয়), আর সিলেক্ট করার সাথে সাথে কার্সরও ওখানে চলে যায় ──
+    var newName  by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(selected) {
+        if (selected.isNotBlank()) {
+            kotlinx.coroutines.delay(120)
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("কোনটা Rename করবেন? (সিলেক্ট করলেই নিচে নতুন নামের বক্স আসবে)",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (items.isEmpty()) {
+                    Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                items.forEach { name ->
+                    val pick = { selected = name; newName = name }
+                    Row(
+                        Modifier.fillMaxWidth().clickable { pick() }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == name, onClick = { pick() })
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                    if (selected == name) {
+                        OutlinedTextField(
+                            value = newName, onValueChange = { newName = it },
+                            label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                            singleLine = false,
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp)
+                                .focusRequester(focusRequester)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            val canConfirm = selected.isNotBlank() && newName.trim().isNotBlank() && newName.trim() != selected
+            TextButton(
+                onClick = { if (canConfirm) { onConfirm(selected, newName.trim()); onDismiss() } },
+                enabled = canConfirm
+            ) { Text("Rename করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+}
+
+/**
+ * App feature request ৪: এডমিন সাবজেক্ট/টপিক/পদবী/প্রতিষ্ঠানের ইমুজি বদলানোর ছোট
+ * ডায়ালগ — কার্ডের আইকনে ট্যাপ করলে খোলে। AlertDialog নিজেই ছোট (একটাই টেক্সট
+ * ফিল্ড), তাই কিবোর্ড-ওভারল্যাপের ঝুঁকি নেই (দেখো AdminFieldEditDialog-এর #৬ ফিক্স,
+ * সেটা অনেক বড় ডায়ালগের জন্য দরকার ছিল, এখানে না)।
+ */
+@Composable
+private fun AdminEmojiEditDialog(
+    currentEmoji: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var value by remember { mutableStateOf(currentEmoji) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("🎨 ইমুজি বদলান", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("একটা ইমুজি টাইপ/পেস্ট করুন (খালি রাখলে ডিফল্ট আইকন ফিরে আসবে)",
+                    fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color.Gray)
+                OutlinedTextField(
+                    value = value, onValueChange = { value = it },
+                    label = { Text("ইমুজি", fontFamily = NotoSansBengali) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 24.sp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(value.trim()); onDismiss() }) {
+                Text("সেভ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+}
+
+@Composable
+private fun AdminDeletePickerDialog(
+    title    : String,
+    items    : List<String>,
+    onConfirm: (name: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected      by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var confirmStep   by remember { mutableStateOf(false) }
+
+    if (!confirmStep) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("⚠️ কোনটা ডিলিট করবেন? এর সব প্রশ্ন Sheet + Firebase থেকে চিরতরে মুছে যাবে!",
+                        fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                    if (items.isEmpty()) {
+                        Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                    }
+                    items.forEach { name ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { selected = name }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected == name, onClick = { selected = name },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFFEF4444)))
+                            Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { if (selected.isNotBlank()) confirmStep = true },
+                    enabled = selected.isNotBlank()
+                ) { Text("ডিলিট করুন 🗑️", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = { confirmStep = false },
+            title = { Text("⚠️ একদম নিশ্চিত?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Text(
+                    "\"$selected\" — এর সব প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onConfirm(selected); onDismiss() }) {
+                    Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmStep = false }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+@Composable
+private fun AdminMoveTopicPickerDialog(
+    title           : String,
+    items           : List<String>,
+    otherSubjects   : List<String>,
+    onConfirm       : (oldTopic: String, newSubject: String, newTopicName: String) -> Unit,
+    onDismiss       : () -> Unit,
+    // ── Rename/Delete (Topic ও Subject — দুটো তালিকাতেই) — null হলে সেই বাটন দেখায় না।
+    // তালিকা সাথে সাথে (instant) বদলায়; আসল ডাটাবেজ সেভ ব্যাকগ্রাউন্ডে হয়, আর দেরিতে হলেও
+    // মুছে-ফেলা/পুরনো-নাম আর ফিরে আসে না (দেখো ContentRepository-র tombstone/override) ──
+    onRenameTopic   : ((old: String, new: String) -> Unit)? = null,
+    onDeleteTopic   : ((name: String) -> Unit)? = null,
+    onRenameSubject : ((old: String, new: String) -> Unit)? = null,
+    onDeleteSubject : ((name: String) -> Unit)? = null,
+    // ── 🔀 Merge To (Rename/Delete-এর পাশে) — null হলে বাটন দেখায় না ──
+    currentSubject  : String = "",
+    onMergeTopic    : ((src: String, target: String) -> Unit)? = null,
+    onMergeSubject  : ((src: String, target: String) -> Unit)? = null
+) {
+    var merging by remember { mutableStateOf<String?>(null) }   // "T|নাম" বা "S|নাম"
+    // স্থানীয় (instant) কপি — rename/delete করলে ডায়ালগের তালিকা সাথে সাথে বদলে যায়
+    var localTopics   by remember { mutableStateOf(items) }
+    var localSubjects by remember { mutableStateOf(otherSubjects) }
+    var selectedTopic   by remember { mutableStateOf(items.firstOrNull() ?: "") }
+    var selectedSubject by remember { mutableStateOf(otherSubjects.firstOrNull() ?: "") }
+    var newTopicName    by remember { mutableStateOf(selectedTopic) }
+    // কোনটা rename হচ্ছে: "T|নাম" (Topic) বা "S|নাম" (Subject)
+    var renaming   by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    // ডিলিট কনফার্মের অপেক্ষায়: "T|নাম" বা "S|নাম"
+    var deleting   by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedTopic) { newTopicName = selectedTopic }
+
+    @Composable
+    fun EditButtons(kind: String, name: String, canRename: Boolean, canDelete: Boolean) {
+        val canMerge = if (kind == "T") onMergeTopic != null && localTopics.size > 1
+                       else onMergeSubject != null && (localSubjects.size + (if (currentSubject.isNotBlank()) 1 else 0)) > 1
+        if (canRename) {
+            TextButton(
+                onClick = { renaming = "$kind|$name"; renameText = name },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("✏️", fontSize = 15.sp) }
+        }
+        if (canMerge) {
+            TextButton(
+                onClick = { merging = "$kind|$name" },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("🔀", fontSize = 15.sp) }
+        }
+        if (canDelete) {
+            TextButton(
+                onClick = { deleting = "$kind|$name" },
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) { Text("🗑", fontSize = 15.sp) }
+        }
+    }
+
+    @Composable
+    fun RenameBox(kind: String, name: String) {
+        if (renaming != "$kind|$name") return
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            OutlinedTextField(
+                value = renameText, onValueChange = { renameText = it },
+                label = { Text("নতুন নাম", fontFamily = NotoSansBengali) },
+                singleLine = true, modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = {
+                    val nn = renameText.trim()
+                    if (nn.isNotBlank() && nn != name) {
+                        if (kind == "T") {
+                            localTopics = localTopics.map { if (it == name) nn else it }.distinct()
+                            if (selectedTopic == name) selectedTopic = nn
+                            onRenameTopic?.invoke(name, nn)
+                        } else {
+                            localSubjects = localSubjects.map { if (it == name) nn else it }.distinct()
+                            if (selectedSubject == name) selectedSubject = nn
+                            onRenameSubject?.invoke(name, nn)
+                        }
+                    }
+                    renaming = null
+                },
+                enabled = renameText.trim().isNotBlank() && renameText.trim() != name
+            ) { Text("✓", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF16A34A)) }
+            TextButton(onClick = { renaming = null }) { Text("✕", fontSize = 18.sp, color = Color(0xFF9CA3AF)) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0EA5E9)) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("📦 কোন অধ্যায় (Topic) move করবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (localTopics.isEmpty()) {
+                    Text("⚠️ কোনো Topic পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                localTopics.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selectedTopic = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedTopic == name, onClick = { selectedTopic = name },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        EditButtons("T", name, onRenameTopic != null, onDeleteTopic != null)
+                    }
+                    RenameBox("T", name)
+                    // ── নাম বদলানোর বক্স সিলেক্ট করা টপিকের ঠিক নিচেই (নিচে স্ক্রল করতে হয় না) ──
+                    if (selectedTopic == name) {
+                        OutlinedTextField(
+                            value = newTopicName, onValueChange = { newTopicName = it },
+                            label = { Text("Destination-এ Topic-এর নাম", fontFamily = NotoSansBengali) },
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 6.dp)
+                        )
+                    }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text("➡️ কোন বিষয়ে (Subject) নিয়ে যাবেন?", fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (localSubjects.isEmpty()) {
+                    Text("⚠️ move করার মতো অন্য কোনো Subject নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                localSubjects.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selectedSubject = name }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedSubject == name, onClick = { selectedSubject = name },
+                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF0EA5E9)))
+                        Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        EditButtons("S", name, onRenameSubject != null, onDeleteSubject != null)
+                    }
+                    RenameBox("S", name)
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text(
+                    "ℹ️ ওই বিষয়ে আগে থেকেই এই নামে কোনো অধ্যায় থাকলে, দুটো এক হয়ে যাবে (merge) — নাহলে নতুন অধ্যায় হিসেবে যোগ হবে।",
+                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
+                )
+            }
+        },
+        confirmButton = {
+            val canConfirm = selectedTopic.isNotBlank() && selectedSubject.isNotBlank() && newTopicName.isNotBlank()
+            TextButton(
+                onClick = { if (canConfirm) { onConfirm(selectedTopic, selectedSubject, newTopicName); onDismiss() } },
+                enabled = canConfirm
+            ) { Text("📦 Move করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = Color(0xFF0EA5E9)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+
+    // ── 🔀 Merge To — source আইটেম fix, target বাছাই ──
+    merging?.let { key ->
+        val kind = key.substringBefore('|')
+        val src  = key.substringAfter('|')
+        AdminMergePickerDialog(
+            title         = if (kind == "T") "🔀 অধ্যায় Merge To" else "🔀 বিষয় Merge To",
+            sourceHeading = "",
+            targetHeading = "➡️ কোনটার সাথে মার্জ হবে?",
+            sources       = listOf(src),
+            fixedSource   = src,
+            targetsFor    = { s ->
+                if (kind == "T") localTopics.filter { it != s }.map { MergeOption(it, subject = currentSubject, topic = it) }
+                else (localSubjects + listOfNotNull(currentSubject.takeIf { it.isNotBlank() }))
+                        .distinct().filter { it != s }.map { MergeOption(it, subject = it) }
+            },
+            onConfirm     = { s, t ->
+                if (kind == "T") {
+                    localTopics = localTopics.filter { it != s }
+                    if (selectedTopic == s) selectedTopic = localTopics.firstOrNull() ?: ""
+                    onMergeTopic?.invoke(s, t.topic)
+                } else {
+                    localSubjects = localSubjects.filter { it != s }
+                    if (selectedSubject == s) selectedSubject = localSubjects.firstOrNull() ?: ""
+                    onMergeSubject?.invoke(s, t.subject)
+                }
+            },
+            onDismiss     = { merging = null }
+        )
+    }
+
+    // ── ডিলিট কনফার্ম — হ্যাঁ চাপলেই তালিকা থেকে সাথে সাথে সরে যায়; আসল ডিলিট ব্যাকগ্রাউন্ডে ──
+    deleting?.let { key ->
+        val kind = key.substringBefore('|')
+        val name = key.substringAfter('|')
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("🗑 ডিলিট করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) },
+            text = {
+                Text(
+                    if (kind == "S") "\"$name\" বিষয় এবং তার সব Topic ও প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!"
+                    else "\"$name\" Topic-এর সব প্রশ্ন চিরতরে মুছে যাবে। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (kind == "T") {
+                        localTopics = localTopics.filter { it != name }
+                        if (selectedTopic == name) selectedTopic = localTopics.firstOrNull() ?: ""
+                        onDeleteTopic?.invoke(name)
+                    } else {
+                        localSubjects = localSubjects.filter { it != name }
+                        if (selectedSubject == name) selectedSubject = localSubjects.firstOrNull() ?: ""
+                        onDeleteSubject?.invoke(name)
+                    }
+                    deleting = null
+                }) { Text("হ্যাঁ, ডিলিট করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = Color(0xFFEF4444)) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+/** 🔀 Merge To ডায়ালগের গন্তব্য অপশন — topic ফাঁকা হলে শুধু বিষয় */
+private data class MergeOption(val label: String, val subject: String = "", val topic: String = "")
+
+/**
+ * 🔀 Merge To — source (বিষয়/অধ্যায়) বাছো (বা fixedSource দাও), তারপর target বাছো; কনফার্মের পর
+ * source-এর সব প্রশ্ন (+ বিষয় হলে সব অধ্যায়) target-এ চলে যায় এবং source আর থাকে না।
+ */
+@Composable
+private fun AdminMergePickerDialog(
+    title         : String,
+    sourceHeading : String,
+    targetHeading : String,
+    sources       : List<String>,
+    fixedSource   : String? = null,
+    targetsFor    : (String) -> List<MergeOption>,
+    onConfirm     : (source: String, target: MergeOption) -> Unit,
+    onDismiss     : () -> Unit
+) {
+    val accent = Color(0xFF7C3AED)
+    var source by remember { mutableStateOf(fixedSource ?: sources.firstOrNull() ?: "") }
+    var targetLabel by remember { mutableStateOf<String?>(null) }
+    var askConfirm by remember { mutableStateOf(false) }
+    val targets = remember(source) { targetsFor(source) }
+    val target = targets.firstOrNull { it.label == targetLabel }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (fixedSource != null) {
+                    Text("🔀 \"$fixedSource\" মার্জ হবে (এটা আর থাকবে না)", fontFamily = NotoSansBengali,
+                        fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                } else {
+                    Text(sourceHeading, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (sources.isEmpty()) {
+                        Text("⚠️ কোনো আইটেম পাওয়া যায়নি", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                    }
+                    sources.forEach { name ->
+                        val pick = { source = name; targetLabel = null }
+                        Row(
+                            Modifier.fillMaxWidth().clickable { pick() }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = source == name, onClick = { pick() },
+                                colors = RadioButtonDefaults.colors(selectedColor = accent))
+                            Text(name, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                        }
+                    }
+                    Divider(Modifier.padding(vertical = 4.dp))
+                }
+                Text(targetHeading, fontFamily = NotoSansBengali, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                if (targets.isEmpty()) {
+                    Text("⚠️ মার্জ করার মতো অন্য কিছু নেই", fontFamily = NotoSansBengali, fontSize = 12.sp, color = Color(0xFFEF4444))
+                }
+                targets.forEach { opt ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { targetLabel = opt.label }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = targetLabel == opt.label, onClick = { targetLabel = opt.label },
+                            colors = RadioButtonDefaults.colors(selectedColor = accent))
+                        Text(opt.label, fontFamily = NotoSansBengali, fontSize = 13.sp)
+                    }
+                }
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text(
+                    "ℹ️ সব প্রশ্ন (বিষয় হলে সব অধ্যায়সহ) target-এ চলে যাবে। একই নামের অধ্যায় থাকলে এক হয়ে যাবে। মার্জের পর source আর থাকবে না।",
+                    fontFamily = NotoSansBengali, fontSize = 10.5.sp, color = Color(0xFF6B7280)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { askConfirm = true }, enabled = source.isNotBlank() && target != null) {
+                Text("🔀 Merge করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold, color = accent)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল", fontFamily = NotoSansBengali) } }
+    )
+
+    if (askConfirm && target != null) {
+        AlertDialog(
+            onDismissRequest = { askConfirm = false },
+            title = { Text("🔀 মার্জ করবেন?", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent) },
+            text = {
+                Text("\"$source\" এর সব প্রশ্ন \"${target.label}\"-এ চলে যাবে এবং \"$source\" আর থাকবে না। এই কাজ ফেরানো যাবে না!",
+                    fontFamily = NotoSansBengali, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            },
+            confirmButton = {
+                TextButton(onClick = { askConfirm = false; onConfirm(source, target); onDismiss() }) {
+                    Text("হ্যাঁ, মার্জ করুন", fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, color = accent)
+                }
+            },
+            dismissButton = { TextButton(onClick = { askConfirm = false }) { Text("না, বাতিল", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+@Composable
+private fun OrderHintBar(isSaving: Boolean, msg: String?) {
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        shape  = RoundedCornerShape(12.dp),
+        color  = Color(0xFFFFFBEB),
+        border = BorderStroke(1.dp, Color(0xFFFDE68A))
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    isSaving        -> "⏳ সংরক্ষণ হচ্ছে..."
+                    msg != null     -> msg
+                    else            -> "▲▼ বাটনে চেপে ক্রম সাজান — সাথে সাথেই সংরক্ষিত হবে"
+                },
+                fontSize = 11.sp, fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold,
+                color = when {
+                    msg?.startsWith("❌") == true -> Color(0xFFB91C1C)
+                    msg?.startsWith("✅") == true -> Color(0xFF166534)
+                    else -> Color(0xFF92400E)
+                },
+                modifier = Modifier.weight(1f)
+            )
+            if (isSaving) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF92400E), strokeWidth = 2.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QBankFilterBar(
+    filterMode         : QBankFilterMode,
+    onFilterModeChange  : (QBankFilterMode) -> Unit,
+    searchQuery         : String,
+    onSearchQueryChange : (String) -> Unit
+) {
+    val qbankAccent = Color(0xFF0891B2)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState())
+        ) {
+            data class ChipDef(val mode: QBankFilterMode, val label: String, val emoji: String)
+            listOf(
+                ChipDef(QBankFilterMode.DESIGNATION, "পদবী", "🧑‍💼"),
+                ChipDef(QBankFilterMode.INSTITUTION, "প্রতিষ্ঠান", "🏢"),
+                ChipDef(QBankFilterMode.YEAR, "সাল", "📅")
+            ).forEach { chip ->
+                val selected = filterMode == chip.mode
+                Surface(
+                    onClick  = { onFilterModeChange(chip.mode) },
+                    shape    = RoundedCornerShape(20.dp),
+                    color    = if (selected) qbankAccent else qbankAccent.copy(alpha = 0.08f),
+                    border   = if (selected) null else BorderStroke(1.dp, qbankAccent.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(chip.emoji, fontSize = 12.sp)
+                        Text(
+                            chip.label, fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selected) Color.White else qbankAccent
+                        )
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                Text(
+                    when (filterMode) {
+                        QBankFilterMode.DESIGNATION -> "পদবী খুঁজুন..."
+                        QBankFilterMode.INSTITUTION -> "প্রতিষ্ঠান খুঁজুন..."
+                        QBankFilterMode.YEAR        -> "সাল খুঁজুন..."
+                        QBankFilterMode.POST        -> "পদ খুঁজুন..."
+                    },
+                    fontFamily = NotoSansBengali, fontSize = 12.sp
+                )
+            },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "সার্চ", tint = qbankAccent, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "মুছুন", modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NotoSansBengali, fontSize = 13.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = qbankAccent,
+                unfocusedBorderColor = qbankAccent.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun SubjectCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {},
+    reviewPct : Int? = null,
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন ──
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {}
+) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Card(
+        modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .then(
+                        if (isAdmin && subject.subjectId.isNotBlank())
+                            Modifier.clickable(onClick = onEmojiClick)
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center
+            ) { Text(emojiOverride ?: subjectIcon(subject.name), fontSize = 22.sp) }
+
+            Column(Modifier.weight(1f)) {
+                Text(subject.name, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                    color = textColor, fontFamily = NotoSansBengali)
+                Text("${subject.totalQ} প্রশ্ন", fontSize = 11.sp, color = mutedColor,
+                    fontFamily = NotoSansBengali)
+                QBankYearsLine(subject.years, mutedColor)
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(5.dp)
+                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(subject.progressPct / 100f).fillMaxHeight()
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF22C55E), Color(0xFF4ADE80))))
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
+                    fontFamily = NotoSansBengali)
+                // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল — কনফিউশন থাকবে না"):
+                // আগে এখানে student progress bar-এর মতোই আরেকটা রঙিন বার আঁকা হতো, যেটা
+                // সহজেই ওপরের আসল progress bar-এর সাথে গুলিয়ে ফেলত। এখন শুধু % টেক্সট। ──
+                if (reviewPct != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                }
+            }
+
+            if (reorderEnabled) {
+                ReorderUpDownButtons(isFirst = isFirst, isLast = isLast, onMoveUp = onMoveUp, onMoveDown = onMoveDown)
+            } else {
+                Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                    modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QBankSubjectCard(
+    subject : SubjectEntry,
+    onClick : () -> Unit,
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {},
+    subLabelOverride: String? = null,
+    reviewPct : Int? = null,
+    // ── App feature request ৪: এডমিন ইমুজি পরিবর্তন ──
+    emojiOverride : String? = null,
+    isAdmin       : Boolean = false,
+    onEmojiClick  : () -> Unit = {},
+    titleOverride : String? = null,     // শিক্ষক নিবন্ধন: "পদবী, প্রতিষ্ঠান"
+    hideSubLabel  : Boolean = false     // বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংকে "১ টি প্রতিষ্ঠান" ব্যাজ লুকানো → কার্ড চিকন
+) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+    val qbankAccent  = Color(0xFF0891B2)
+
+    Card(
+        modifier  = Modifier.fillMaxWidth()
+            .then(if (!reorderEnabled) Modifier.combinedClickable(
+                onClick = onClick,
+                // অ্যাডমিন: ডিফল্ট 📚 সরানো হয়েছে — ইমুজি বসাতে কার্ডে লং-প্রেস
+                onLongClick = if (isAdmin && subject.subjectId.isNotBlank()) onEmojiClick else null
+            ) else Modifier),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
+        elevation = CardDefaults.cardElevation(2.dp),
+        border    = BorderStroke(1.dp, qbankAccent.copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // ডিফল্ট 📚 আর নেই — শুধু অ্যাডমিনের সেট করা ইমুজি বা নামের কিওয়ার্ড-মিল আইকন
+                val iconText = emojiOverride?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
+                if (iconText != null) {
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                            .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
+                            .then(
+                                if (isAdmin && subject.subjectId.isNotBlank())
+                                    Modifier.clickable(onClick = onEmojiClick)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) { Text(iconText, fontSize = 20.sp) }
+                }
+                Spacer(Modifier.weight(1f))
+                if (!reorderEnabled) {
+                    Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(12.dp))
+                }
+            }
+
+            Text(titleOverride ?: subject.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                color = textColor, fontFamily = NotoSansBengali, maxLines = if (titleOverride != null) 4 else 2)
+
+            if (titleOverride == null) QBankYearsLine(subject.years, qbankAccent)
+
+            if (!hideSubLabel) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("📂", fontSize = 10.sp)
+                    Text(subLabelOverride ?: "${subject.subTopics.count { it.hasQuestions() }} টি অধ্যায়", fontSize = 10.sp, color = mutedColor,
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(5.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(subject.progressPct / 100f).fillMaxHeight()
+                        .background(Brush.horizontalGradient(listOf(qbankAccent, Color(0xFF22D3EE))))
+                )
+            }
+            Text("${subject.progressPct}% সম্পন্ন", fontSize = 9.sp, color = mutedColor,
+                fontFamily = NotoSansBengali)
+
+            // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল") — বার সরিয়ে শুধু % টেক্সট ──
+            if (reviewPct != null) {
+                Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+            }
+
+            if (reorderEnabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    IconButton(onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isFirst) qbankAccent else Color(0xFFCBD5E1))
+                    }
+                    IconButton(onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isLast) qbankAccent else Color(0xFFCBD5E1))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReorderUpDownButtons(
+    isFirst : Boolean,
+    isLast  : Boolean,
+    onMoveUp   : () -> Unit,
+    onMoveDown : () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick  = onMoveUp,
+            enabled  = !isFirst,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                Icons.Default.KeyboardArrowUp, null,
+                tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1)
+            )
+        }
+        IconButton(
+            onClick  = onMoveDown,
+            enabled  = !isLast,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                Icons.Default.KeyboardArrowDown, null,
+                tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeakTopicsBar(weakTopics: List<WeakTopic>) {
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        shape  = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F2)),
+        border = BorderStroke(1.dp, Color(0xFFFECACA))
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("🔁 দুর্বল টপিক", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF9F1239), fontFamily = NotoSansBengali,
+                modifier = Modifier.padding(bottom = 8.dp))
+            weakTopics.take(5).forEach { w ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(w.subTopic, fontSize = 12.sp, color = Color(0xFF7F1D1D),
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                    Text("${w.wrongCount}× ভুল", fontSize = 10.sp, color = Color(0xFFEF4444),
+                        fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// SubTopic List Screen
+// ─────────────────────────────────────────────────────────
+@Composable
+fun SubTopicListScreen(
+    subject    : String,
+    mode       : StudyMode,
+    subTopics  : List<SubTopicEntry>,
+    onSubTopic : (String) -> Unit,
+    onBack     : () -> Unit,
+    onModelTest : (String) -> Unit = {},
+    isAdmin       : Boolean        = false,
+    isReorderMode : Boolean        = false,
+    isSavingOrder : Boolean        = false,
+    orderSavedMsg : String?        = null,
+    onToggleReorder : () -> Unit   = {},
+    onMoveSubTopic  : (Int, Int) -> Unit = { _, _ -> },
+    onRenameSubTopic: (old: String, new: String) -> Unit = { _, _ -> },
+    onDeleteSubTopic: (name: String) -> Unit = {},
+    otherSubjectsForMove : List<String> = emptyList(),
+    onMoveSubTopicToSubject: (old: String, newSubject: String, newTopicName: String) -> Unit = { _, _, _ -> },
+    // ── "Move to Subject" ডায়ালগের Subject তালিকায় Rename/Delete (অন্য Subject-এর জন্য)।
+    // null হলে সেই বাটন দেখায় না। Topic-এর Rename/Delete আগের onRenameSubTopic/onDeleteSubTopic-ই ব্যবহার করে ──
+    onRenameOtherSubject: ((old: String, new: String) -> Unit)? = null,
+    onDeleteOtherSubject: ((name: String) -> Unit)? = null,
+    // ── Phase 4 (Serial Manager) — দেখো SubjectListScreen-এর একই প্যারামিটারের কমেন্ট ──
+    enableSerialManager: Boolean = false,
+    onSaveSerialOrder: (List<String>) -> Unit = {},
+    reviewProgress: Map<String, com.hanif.smartstudy.data.remote.GasContentService.ReviewCount> = emptyMap(),
+    // ── PERF/UX FIX ("Subject খুলে ১-২ সেকেন্ড সাদা স্ক্রিন, তারপর লিস্ট আসে"):
+    // Topics Room থেকে আসতে (বা background reference-sync শেষ হতে) সামান্য সময়
+    // লাগলে আগে এই স্ক্রিন পুরো ফাঁকা/সাদা দেখাত (হেডারে "0 টি অধ্যায়" + খালি বডি) —
+    // এখন isLoading=true থাকা অবস্থায় (subTopics এখনো খালি) সাথে সাথেই একটা
+    // স্পিনার দেখানো হয়, SubjectListScreen-এর isLoading প্যাটার্নের সাথে
+    // সামঞ্জস্যপূর্ণ রেখে। ──
+    isLoading: Boolean = false,
+    // ── FIX ("টপিকে ঢুকে প্রশ্ন দেখে Back করলে লিস্ট আবার প্রথম থেকে দেখায়"):
+    // এই স্ক্রিনের LazyColumn আগে নিজের ভেতরেই rememberLazyListState() বানাত,
+    // যেটা depth-1 (এই স্ক্রিন) ↔ depth-2 (প্রশ্ন-লিস্ট) এর মধ্যে CoreScreen-এর
+    // when-branch বদলানোর সময় dispose হয়ে যেত (state হারিয়ে ফেলত)। এখন স্ক্রল
+    // ইনডেক্স বাইরে থেকে (ViewModel-এ) সংরক্ষণ করে ফিরে আসার সময় সেখান থেকেই
+    // পুনরুদ্ধার করা হয়। ──
+    initialScrollIndex: Int = 0,
+    onScrollIndexChanged: (Int) -> Unit = {},
+    // ── Study Nav Phase 5: Topic-নাম → স্ট্যাটাস (Weak/Strong/Needs Revision...) — খালি = ব্যাজ নেই ──
+    statusByTopic: Map<String, StudyTopicStatus> = emptyMap(),
+    // ── 🔀 Merge To (অধ্যায়): old অধ্যায়ের সব প্রশ্ন targetSubject › targetTopic-এ যায়, old আর থাকে না ──
+    onMergeSubTopic: ((old: String, targetSubject: String, targetTopic: String) -> Unit)? = null,
+    // Move ডায়ালগে অন্য Subject-এর পাশের 🔀 (Subject → Subject merge)
+    onMergeOtherSubject: ((source: String, target: String) -> Unit)? = null,
+    // অন্য Subject-এর অধ্যায়ও merge target হতে পারে — subject → অধ্যায়-নামের তালিকা (খালি হলে শুধু এই Subject-এর অধ্যায়)
+    topicsBySubject: Map<String, List<String>> = emptyMap()
+) {
+    val isQBank = mode == StudyMode.QBANK
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMoveDialog   by remember { mutableStateOf(false) }
+    var showMergeDialog  by remember { mutableStateOf(false) }
+    // ── Phase 4: Serial Manager ডায়ালগ খোলা আছে কিনা ──
+    var showSerialManager by remember { mutableStateOf(false) }
+
+    // ── প্রশ্ন-শূন্য অধ্যায় সাধারণ ব্রাউজিং-এ কখনোই দেখানো হবে না (student ভুল করে
+    // ফাঁকা টপিকে ঢুকবে না, আর হেডারের "X টি অধ্যায়" কাউন্টও লিস্টে যা দেখা যাচ্ছে
+    // তার সাথে মিলবে)। তবে Admin যখন reorder মোডে আছে, তখন পুরো (ফাঁকাসহ) লিস্ট
+    // দেখানো হয় — নাহলে খালি হয়ে যাওয়া টপিক আর সাজানো/দেখা যাবে না। Rename/Delete/
+    // Move ডায়ালগও ইচ্ছাকৃতভাবে নিচে পুরো subTopics লিস্ট ব্যবহার করে, যাতে খালি
+    // টপিক অ্যাডমিন ঠিক করতে/মুছতে পারে। ──
+    // ── সাজানোর মোডে সিরিয়াল-ক্রম (সম্পন্ন-নিচে-নামা বন্ধ) — ViewModel.moveSubTopic() ঠিক এই
+    // একই TopicOrdering.serialOrder() ব্যবহার করে, তাই এখানকার index আর ওখানকার index সবসময় মেলে ──
+    // MCQ | লিখিত কলাম থেকে ঢুকলে (QBankTypeScope) শুধু সেই ধরনের প্রশ্ন আছে এমন কার্ড, সেই ধরনের সংখ্যাসহ
+    val typeScope = if (mode == StudyMode.QBANK && !(isAdmin && isReorderMode)) com.hanif.smartstudy.util.QBankTypeScope.part else null
+    // ── প্রশ্নপত্র-ভাগ (paperType ≥ 0): উপরে "MCQ | লিখিত" ট্যাব — ডিফল্ট MCQ (MCQ না থাকলে লিখিত);
+    // ট্যাবে ট্যাপ করলে বা ডানে-বামে স্লাইড করলে বদলায়। প্রতিটা প্রশ্নপত্র (প্রতিষ্ঠান+সাল+ধরন) আলাদা কার্ড। ──
+    val papersMode = isQBank && !(isAdmin && isReorderMode) && subTopics.any { it.paperType >= 0 }
+    val mcqPapers  = subTopics.count { it.paperType == 0 }
+    val writtenPapers = subTopics.count { it.paperType == 1 }
+    val defaultPart = if (mcqPapers > 0 || writtenPapers == 0) 0 else 1
+    val tabPart = if (papersMode) (com.hanif.smartstudy.util.QBankTypeScope.part ?: defaultPart) else 0
+    androidx.compose.runtime.LaunchedEffect(papersMode, subTopics) {
+        if (papersMode && com.hanif.smartstudy.util.QBankTypeScope.part == null)
+            com.hanif.smartstudy.util.QBankTypeScope.part = defaultPart
+    }
+    val paperGrid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val swipeThresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
+    val visibleSubTopics = if (isAdmin && isReorderMode) com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics)
+                            else if (papersMode) subTopics.filter { it.paperType == tabPart && it.hasQuestions() }
+                            else if (typeScope != null) subTopics.filter { !it.isModelTest }.mapNotNull { st ->
+                                val c = qbankTypeCountSt(st, typeScope)
+                                if (c <= 0) null else st.copy(
+                                    totalQ       = c,
+                                    doneQ        = if (st.totalQ > 0) minOf(c, (st.doneQ.toLong() * c / st.totalQ).toInt()) else 0,
+                                    mcqCount     = if (typeScope == 0) c else 0,
+                                    writtenCount = if (typeScope == 1) c else 0
+                                )
+                            }
+                            else subTopics.filter { it.hasQuestions() }
+
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialScrollIndex)
+
+    // ── স্ক্রল থামলেই (scrollInProgress == false) সবশেষ প্রথম-দৃশ্যমান index
+    // ViewModel-এ রিপোর্ট হয় — প্রতি ফ্রেমে না পাঠিয়ে শুধু থামার পরে, যাতে অযথা
+    // অনেকবার state আপডেট না হয় ──
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { inProgress ->
+                if (!inProgress) onScrollIndexChanged(listState.firstVisibleItemIndex)
+            }
+    }
+
+    LazyColumn(
+        state          = listState,
+        modifier       = Modifier.fillMaxSize().then(
+            if (papersMode) Modifier.pointerInput(tabPart) {
+                // ডানে-বামে স্লাইড: বামে টানলে লিখিত, ডানে টানলে MCQ (উল্লম্ব স্ক্রলে বাধা দেয় না)
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
+                    onHorizontalDrag = { _, dx -> total += dx },
+                    onDragEnd = {
+                        if (total < -swipeThresholdPx && tabPart == 0) com.hanif.smartstudy.util.QBankTypeScope.part = 1
+                        else if (total > swipeThresholdPx && tabPart == 1) com.hanif.smartstudy.util.QBankTypeScope.part = 0
+                    }
+                )
+            } else Modifier
+        ),
+        contentPadding = PaddingValues(bottom = 100.dp)
+    ) {
+        item {
+            Box(
+                Modifier.fillMaxWidth()
+                    .background(
+                        if (isQBank) Brush.linearGradient(listOf(Color(0xFF0891B2), Color(0xFF0E7490)))
+                        else Brush.linearGradient(listOf(Indigo600, Color(0xFF7C3AED)))
+                    )
+                    .padding(horizontal = 16.dp, vertical = 18.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(subject, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color.White, fontFamily = NotoSansBengali)
+                        Text(
+                            if (isLoading && visibleSubTopics.isEmpty()) "লোড হচ্ছে…"
+                            else if (papersMode) "${bnDigits(subTopics.map { it.topicId.ifBlank { it.name } }.distinct().size)}টি প্রতিষ্ঠান · ${bnDigits(subTopics.size)}টি প্রশ্নপত্র"
+                            else "${visibleSubTopics.size} টি অধ্যায়",
+                            fontSize = 11.sp, color = Color.White.copy(0.65f),
+                            fontFamily = NotoSansBengali
+                        )
+                    }
+                    if (isAdmin) {
+                        AdminMenuButton(
+                            isReorderMode   = isReorderMode,
+                            onToggleReorder = onToggleReorder,
+                            onRenameClick   = { showRenameDialog = true },
+                            onDeleteClick   = { showDeleteDialog = true },
+                            onMoveClick     = if (otherSubjectsForMove.isNotEmpty()) { { showMoveDialog = true } } else null,
+                            onMergeClick    = if (onMergeSubTopic != null) { { showMergeDialog = true } } else null,
+                            onOpenSerialManager = if (enableSerialManager) { { showSerialManager = true } } else null
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            if (isAdmin && isReorderMode) {
+                OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg)
+                Spacer(Modifier.height(6.dp))
+            }
+            AdBannerView(adUnitId = com.hanif.smartstudy.util.AdManager.BANNER_QUIZ_LIST)
+            Spacer(Modifier.height(6.dp))
+        }
+
+        val reorderEnabled = isAdmin && isReorderMode
+
+        // ── PERF/UX FIX: subTopics এখনো খালি এবং লোড চলছে হলে সাদা ফাঁকা বডির বদলে
+        // স্পিনার দেখাও — SubTopics আসা মাত্রই (state আপডেট হলেই) এই item সরে গিয়ে
+        // আসল লিস্ট রেন্ডার হবে। ──
+        if (isLoading && visibleSubTopics.isEmpty()) {
+            item {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = if (isQBank) Color(0xFF0891B2) else Indigo600)
+                }
+            }
+        }
+
+        if (papersMode) {
+            item {
+                QBankTypeTabs(
+                    selected = tabPart, mcqPapers = mcqPapers, writtenPapers = writtenPapers,
+                    onSelect = { com.hanif.smartstudy.util.QBankTypeScope.part = it }
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("${bnDigits(visibleSubTopics.size)}টি প্রশ্নপত্র", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    QBankLayoutToggle(showLabels = true)
+                }
+            }
+            if (visibleSubTopics.isEmpty()) {
+                if (!isLoading) item {
+                    Column(
+                        Modifier.fillMaxWidth().padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("এই ধরনের প্রশ্নপত্র নেই", fontSize = 14.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val other = 1 - tabPart
+                        if ((if (other == 0) mcqPapers else writtenPapers) > 0) {
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { com.hanif.smartstudy.util.QBankTypeScope.part = other }) {
+                                Text(if (other == 0) "🔘 MCQ দেখুন →" else "✍️ লিখিত দেখুন →", fontFamily = NotoSansBengali)
+                            }
+                        }
+                    }
+                }
+            } else if (paperGrid) {
+                item {
+                    LazyVerticalGrid(
+                        columns               = GridCells.Fixed(2),
+                        modifier              = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement   = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(visibleSubTopics) { _, st ->
+                            QBankPaperCard(st, compact = true, onClick = {
+                                com.hanif.smartstudy.util.QBankTypeScope.part = tabPart
+                                onSubTopic(st.name)
+                            })
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(visibleSubTopics) { _, st ->
+                    QBankPaperCard(st, compact = false, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), onClick = {
+                        com.hanif.smartstudy.util.QBankTypeScope.part = tabPart
+                        onSubTopic(st.name)
+                    })
+                }
+            }
+        } else if (isQBank) {
+            item {
+                LazyVerticalGrid(
+                    columns            = GridCells.Fixed(2),
+                    modifier           = Modifier.heightIn(max = 4000.dp).padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement   = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(visibleSubTopics) { idx, st ->
+                        QBankTopicCard(
+                            st = st,
+                            serialNo = idx + 1,
+                            onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
+                            reorderEnabled = reorderEnabled && !st.isModelTest,
+                            isFirst = idx == 0,
+                            isLast  = idx == visibleSubTopics.lastIndex,
+                            onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
+                            onMoveDown = { onMoveSubTopic(idx, idx + 1) },
+                            reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null
+                        )
+                    }
+                }
+            }
+        } else {
+            itemsIndexed(visibleSubTopics) { idx, st ->
+                SubTopicCard(
+                    st = st,
+                    serialNo = idx + 1,
+                    onClick = { if (st.isModelTest) onModelTest(st.subject) else onSubTopic(st.name) },
+                    reorderEnabled = reorderEnabled && !st.isModelTest,
+                    isFirst = idx == 0,
+                    isLast  = idx == visibleSubTopics.lastIndex,
+                    onMoveUp   = { onMoveSubTopic(idx, idx - 1) },
+                    onMoveDown = { onMoveSubTopic(idx, idx + 1) },
+                    reviewPct = if (isAdmin) reviewProgress[st.topicId]?.pct else null,
+                    status = statusByTopic[st.name]
+                )
+            }
+        }
+    }
+
+    if (isAdmin && showRenameDialog) {
+        AdminRenamePickerDialog(
+            title   = "$subject — অধ্যায় Rename",
+            items   = subTopics.filterNot { it.isModelTest }.map { it.name },
+            onConfirm = { old, new -> onRenameSubTopic(old, new) },
+            onDismiss = { showRenameDialog = false }
+        )
+    }
+    if (isAdmin && showDeleteDialog) {
+        AdminDeletePickerDialog(
+            title   = "$subject — অধ্যায় Delete",
+            items   = subTopics.filterNot { it.isModelTest }.map { it.name },
+            onConfirm = { name -> onDeleteSubTopic(name) },
+            onDismiss = { showDeleteDialog = false }
+        )
+    }
+    if (isAdmin && showMoveDialog) {
+        AdminMoveTopicPickerDialog(
+            title         = "$subject — অধ্যায় Move to Subject",
+            items         = subTopics.filterNot { it.isModelTest }.map { it.name },
+            otherSubjects = otherSubjectsForMove,
+            onConfirm     = { oldTopic, newSubject, newTopicName -> onMoveSubTopicToSubject(oldTopic, newSubject, newTopicName) },
+            onDismiss     = { showMoveDialog = false },
+            onRenameTopic   = { old, new -> onRenameSubTopic(old, new) },
+            onDeleteTopic   = { name -> onDeleteSubTopic(name) },
+            onRenameSubject = onRenameOtherSubject,
+            onDeleteSubject = onDeleteOtherSubject,
+            currentSubject  = subject,
+            onMergeTopic    = if (onMergeSubTopic != null) { { src, tgt -> onMergeSubTopic(src, subject, tgt) } } else null,
+            onMergeSubject  = onMergeOtherSubject
+        )
+    }
+    if (isAdmin && showMergeDialog && onMergeSubTopic != null) {
+        val names = subTopics.filterNot { it.isModelTest }.map { it.name }
+        AdminMergePickerDialog(
+            title         = "$subject — অধ্যায় Merge To",
+            sourceHeading = "🔀 কোন অধ্যায় মার্জ করবেন? (এটা আর থাকবে না)",
+            targetHeading = "➡️ কোন অধ্যায়ের সাথে মার্জ হবে?",
+            sources       = names,
+            targetsFor    = { src ->
+                names.filter { it != src }.map { MergeOption(it, subject = subject, topic = it) } +
+                    topicsBySubject.filterKeys { it != subject }.flatMap { (sj, ts) ->
+                        ts.map { MergeOption("$sj › $it", subject = sj, topic = it) }
+                    }
+            },
+            onConfirm     = { src, tgt -> onMergeSubTopic(src, tgt.subject, tgt.topic) },
+            onDismiss     = { showMergeDialog = false }
+        )
+    }
+    // ── Phase 4: Serial Manager — subTopics এখানে ইতিমধ্যে বর্তমান display-ক্রমেই
+    // আসে (visibleSubTopics নয়, পুরো subTopics — model test বাদ দিয়ে, কারণ ওটার
+    // আলাদা কোনো serial নেই) ──
+    if (isAdmin && showSerialManager) {
+        SerialManagerDialog(
+            title     = "$subject — অধ্যায়ের ক্রম",
+            entries   = com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics.filterNot { it.isModelTest })
+                            .mapIndexed { idx, st -> st.name to (idx + 1) },
+            onDismiss = { showSerialManager = false },
+            onSave    = { orderedNames -> onSaveSerialOrder(orderedNames) }
+        )
+    }
+}
+
+@Composable
+private fun SubTopicCard(
+    st : SubTopicEntry,
+    onClick : () -> Unit,
+    serialNo : Int = 0,          // সাজানোর মোডে "১. নাম" — admin আসল সিরিয়াল দেখতে পায়
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {},
+    reviewPct : Int? = null,
+    status : StudyTopicStatus? = null
+) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
+    if (st.isModelTest) {
+        Card(
+            modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clickable { onClick() },
+            shape     = RoundedCornerShape(14.dp),
+            colors    = CardDefaults.cardColors(containerColor = Color(0xFF059669).copy(alpha = 0.10f)),
+            elevation = CardDefaults.cardElevation(1.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("🏆", fontSize = 20.sp)
+                Column(Modifier.weight(1f)) {
+                    Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF059669), fontFamily = NotoSansBengali)
+                    Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
+                        color = mutedColor, fontFamily = NotoSansBengali)
+                }
+                Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFF059669),
+                    modifier = Modifier.size(12.dp))
+            }
+        }
+        return
+    }
+
+    Card(
+        modifier  = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
+        shape     = RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        color = textColor, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f, fill = false))
+                    // ── Study Nav Phase 5: Topic-status ব্যাজ (Not Started-এ কিছু দেখায় না) ──
+                    if (status != null && status != StudyTopicStatus.NOT_STARTED) {
+                        Text("${status.emoji} ${status.label}", fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = status.color, fontFamily = NotoSansBengali, maxLines = 1,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(status.color.copy(alpha = 0.12f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+                Text("${st.totalQ} প্রশ্ন  ·  ${st.progressPct}% সম্পন্ন", fontSize = 10.sp,
+                    color = mutedColor, fontFamily = NotoSansBengali)
+                QBankYearsLine(st.years, mutedColor, 10.sp)
+                Spacer(Modifier.height(5.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(4.dp)
+                        .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
+                            .background(Color(0xFF22C55E))
+                    )
+                }
+                // ── FIX ("রিভিউ প্রগ্রেস বার নয়, % সংখ্যা দেখানোই ভাল") — বার সরিয়ে শুধু % টেক্সট ──
+                if (reviewPct != null) {
+                    Spacer(Modifier.height(3.dp))
+                    Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                        fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+                }
+            }
+            if (reorderEnabled) {
+                ReorderUpDownButtons(isFirst = isFirst, isLast = isLast, onMoveUp = onMoveUp, onMoveDown = onMoveDown)
+            } else {
+                Icon(Icons.Default.ArrowForwardIos, null, tint = mutedColor,
+                    modifier = Modifier.size(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun QBankTopicCard(
+    st : SubTopicEntry,
+    onClick : () -> Unit,
+    serialNo : Int = 0,          // সাজানোর মোডে "১. নাম" — admin আসল সিরিয়াল দেখতে পায়
+    reorderEnabled : Boolean = false,
+    isFirst : Boolean = false,
+    isLast  : Boolean = false,
+    onMoveUp   : () -> Unit = {},
+    onMoveDown : () -> Unit = {},
+    reviewPct : Int? = null
+) {
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val textColor    = MaterialTheme.colorScheme.onSurface
+    val mutedColor   = MaterialTheme.colorScheme.onSurfaceVariant
+
+    if (st.isModelTest) {
+        Card(
+            modifier  = Modifier.fillMaxWidth().clickable { onClick() },
+            shape     = RoundedCornerShape(14.dp),
+            colors    = CardDefaults.cardColors(containerColor = Color(0xFF059669).copy(alpha = 0.10f)),
+            elevation = CardDefaults.cardElevation(1.dp)
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("🏆", fontSize = 20.sp)
+                Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF059669), fontFamily = NotoSansBengali, maxLines = 2)
+                Text("${st.modelTestCount}টি টেস্ট · পূর্ণমান", fontSize = 10.sp,
+                    color = mutedColor, fontFamily = NotoSansBengali)
+            }
+        }
+        return
+    }
+
+    val accent = when (st.questionTypeLabel) {
+        "written" -> Color(0xFF7C3AED)
+        "mixed"   -> Color(0xFFEA580C)
+        else      -> Color(0xFF0891B2)
+    }
+    val typeIcon  = when (st.questionTypeLabel) { "written" -> "✍️"; "mixed" -> "🔀"; else -> "🔘" }
+    val typeLabel = when (st.questionTypeLabel) { "written" -> "লিখিত"; "mixed" -> "মিশ্র"; else -> "MCQ" }
+
+    Card(
+        modifier  = Modifier.fillMaxWidth()
+            .then(if (!reorderEnabled) Modifier.clickable { onClick() } else Modifier),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = surfaceColor),
+        elevation = CardDefaults.cardElevation(1.dp),
+        border    = BorderStroke(1.dp, accent.copy(alpha = 0.16f))
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            if (reorderEnabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(
+                        onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowUp, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isFirst) Indigo600 else Color(0xFFCBD5E1))
+                    }
+                    IconButton(
+                        onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, null,
+                            modifier = Modifier.size(18.dp), tint = if (!isLast) Indigo600 else Color(0xFFCBD5E1))
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Icon(Icons.Default.ArrowForwardIos, null, tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(11.dp))
+                }
+            }
+            Text(if (reorderEnabled && serialNo > 0) "$serialNo. ${st.name}" else st.name, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                color = textColor, fontFamily = NotoSansBengali, maxLines = 2)
+            if (st.questionTypeLabel == "mixed") {
+                // ── দুই-ভাগ: MCQ আর লিখিত আলাদা সংখ্যায় ──
+                Text(totalQLabel(st.totalQ), fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🔘 MCQ ${bnDigits(st.mcqCount)}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0891B2), fontFamily = NotoSansBengali)
+                    Text("✍️ লিখিত ${bnDigits(st.writtenCount)}", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
+                }
+            } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(totalQLabel(st.totalQ), fontSize = 10.sp, color = mutedColor, fontFamily = NotoSansBengali)
+                Text("·", fontSize = 10.sp, color = mutedColor)
+                Text(typeIcon, fontSize = 10.sp)
+                Text(typeLabel, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                    color = accent, fontFamily = NotoSansBengali)
+            }
+            }
+            if (reviewPct != null) {
+                Text("✓ রিভিউ: $reviewPct%", fontSize = 9.sp, color = Color(0xFFB45309),
+                    fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali)
+            }
+            Box(
+                Modifier.fillMaxWidth().height(4.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(st.progressPct / 100f).fillMaxHeight()
+                        .background(Color(0xFF22C55E))
+                )
+            }
+        }
+    }
+}
+
+
+/** QBank "প্রাথমিক" ক্যাটাগরির কার্ডে পদের সাথে সাল — "📅 ২০২২ • ২০১৯ +১"; অন্য ক্যাটাগরিতে/সাল না থাকলে কিছু দেখায় না */
+@Composable
+private fun QBankYearsLine(years: List<String>, color: Color, fontSize: androidx.compose.ui.unit.TextUnit = 11.sp) {
+    if (years.isEmpty() || com.hanif.smartstudy.util.QBankCategory.selected.let { it != "প্রাথমিক" && it != "ব্যাংক" }) return
+    val shown = years.take(3).joinToString(" • ")
+    val more  = if (years.size > 3) "  +${years.size - 3}" else ""
+    Text("📅 $shown$more", fontSize = fontSize, color = color, fontWeight = FontWeight.SemiBold,
+        fontFamily = NotoSansBengali, maxLines = 2)
+}
