@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -430,28 +431,27 @@ private fun qbankPaperCount(e: SubjectEntry, part: Int): Int =
 private val QBankMcqColor     = Color(0xFF0E7490)
 private val QBankWrittenColor = Color(0xFF6D28D9)
 
-/** লিস্ট ☰ | গ্রিড ▦ — পছন্দ স্থায়ী (QBankViewStyle) */
+/** লিস্ট ☰ | গ্রিড ▦ — শুধু আইকন। পছন্দ প্রতিটা ক্যাটাগরির জন্য আলাদা ও স্থায়ী (QBankViewStyle) */
 @Composable
-private fun QBankLayoutToggle(showLabels: Boolean, modifier: Modifier = Modifier) {
+private fun QBankLayoutToggle(category: String, modifier: Modifier = Modifier) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankViewStyle.init(ctx) }
-    val grid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val grid = com.hanif.smartstudy.util.QBankViewStyle.isGrid(category)
     val line = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
     Row(
         modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, line, RoundedCornerShape(12.dp))
     ) {
-        listOf(false to ("☰" to "লিস্ট"), true to ("▦" to "গ্রিড")).forEach { (isGrid, p) ->
+        listOf(false to "☰", true to "▦").forEach { (isGrid, icon) ->
             val on = grid == isGrid
             Box(
                 Modifier
                     .background(if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent)
-                    .clickable { com.hanif.smartstudy.util.QBankViewStyle.set(ctx, isGrid) }
-                    .heightIn(min = 36.dp).padding(horizontal = if (showLabels) 12.dp else 11.dp),
+                    .clickable { com.hanif.smartstudy.util.QBankViewStyle.set(ctx, category, isGrid) }
+                    .widthIn(min = 44.dp).heightIn(min = 38.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (showLabels) "${p.first} ${p.second}" else p.first,
-                    fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = NotoSansBengali,
+                    icon, fontSize = 17.sp, fontWeight = FontWeight.Bold,
                     color = if (on) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -530,7 +530,9 @@ private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> U
 private fun QBankEntryCard(
     title: String, icon: String?, subLabel: String, totalQ: Int, progressFrac: Float,
     mcqPapers: Int, writtenPapers: Int, compact: Boolean,
-    onClick: () -> Unit, onLongPress: (() -> Unit)?, modifier: Modifier = Modifier
+    onClick: () -> Unit, onLongPress: (() -> Unit)?,
+    pinned: Boolean? = null, onTogglePin: (() -> Unit)? = null,   // pinned == null → পিন বাটন দেখায় না
+    modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier.fillMaxWidth()
@@ -538,7 +540,8 @@ private fun QBankEntryCard(
         shape     = RoundedCornerShape(18.dp),
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp),
-        border    = BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
+        border    = if (pinned == true) BorderStroke(1.5.dp, Color(0xFFF59E0B))
+                    else BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.14f))
     ) {
         Column(Modifier.padding(if (compact) 12.dp else 14.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -547,6 +550,14 @@ private fun QBankEntryCard(
                     title, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
                     color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
                 )
+                if (pinned != null && onTogglePin != null) {
+                    // 📌 পিন: পিন করা থাকলে উজ্জ্বল, নাহলে ফিকে। ট্যাপ = পিন/আনপিন (কার্ড খোলে না)
+                    Text(
+                        "📌", fontSize = if (compact) 15.sp else 18.sp,
+                        modifier = Modifier.alpha(if (pinned) 1f else 0.3f)
+                            .clip(androidx.compose.foundation.shape.CircleShape).clickable { onTogglePin() }.padding(4.dp)
+                    )
+                }
             }
             if (subLabel.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
@@ -822,7 +833,7 @@ fun SubjectListScreen(
     // শিক্ষক নিয়োগ" নামে) এমনিতেই সঠিক ক্যাটাগরিতে চলে আসবে, আলাদা কিছু বদলাতে হবে না।
     // এই ফিল্টার শুধু QBank মোডে (showQBankFilterBar) সক্রিয় — Quiz/Study অপরিবর্তিত। ──
     val selectedExamCategory = com.hanif.smartstudy.util.QBankCategory.selected
-    val qbankGridStyle = com.hanif.smartstudy.util.QBankViewStyle.grid   // লিস্ট/গ্রিড পছন্দ (স্থায়ী)
+    val qbankGridStyle = com.hanif.smartstudy.util.QBankViewStyle.isGrid(selectedExamCategory)   // লিস্ট/গ্রিড — এই ক্যাটাগরির নিজস্ব পছন্দ
     // ── ক্যাটাগরি-ফিল্টার ক্রম-সাজানোর সময়ও প্রযোজ্য (শুধু সিলেক্টেড ক্যাটাগরির কার্ড দেখা যায়);
     // ▲▼ ও সিরিয়াল-ম্যানেজার নিচে গ্লোবাল লিস্টের সাথে ম্যাপ করা হয়, তাই অন্য ক্যাটাগরির ক্রম নষ্ট হয় না ──
     val categorySubjects = if (showQBankFilterBar)
@@ -830,7 +841,13 @@ fun SubjectListScreen(
     // ── সাজানো (sort): প্রতিটা ক্যাটাগরির পছন্দ আলাদা ও স্থায়ী (QBankSortStore)। ১৬-২০ গ্রেডে
     // পদবী/প্রতিষ্ঠান/সাল মোডেরও আলাদা পছন্দ। অ্যাডমিন ক্রম-ঠিক-করার মোডে সবসময় আসল ক্রম ──
     val sortCtx = androidx.compose.ui.platform.LocalContext.current
-    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankSortStore.init(sortCtx) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.hanif.smartstudy.util.QBankSortStore.init(sortCtx)
+        com.hanif.smartstudy.util.QBankViewStyle.init(sortCtx)
+        com.hanif.smartstudy.util.QBankPinStore.init(sortCtx)
+    }
+    val qbankPinEnabled = showQBankFilterBar && !(isAdmin && isReorderMode) &&
+        (qbankFilterMode == QBankFilterMode.POST || qbankFilterMode == QBankFilterMode.DESIGNATION)
     val sortScope = if (selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE)
         "$selectedExamCategory:${qbankFilterMode.name}" else selectedExamCategory
     var sortChoice by remember(sortScope) {
@@ -849,6 +866,8 @@ fun SubjectListScreen(
                 totalQ = { it.totalQ }, progressPct = { it.progressPct },
                 years = { it.years }
             )
+            // 📌 পিন-করা পদবী সবার আগে (সাজানো/সার্চের পরেও) — ক্যাটাগরি অনুযায়ী আলাদা
+            if (qbankPinEnabled) list = com.hanif.smartstudy.util.QBankPinStore.apply(selectedExamCategory, list) { it.name }
         }
         list
     }
@@ -1060,7 +1079,7 @@ fun SubjectListScreen(
                 // মাত্র ১টা প্রশ্নপত্র থাকলে সরাসরি সেটা খোলে। লিস্ট/গ্রিড পছন্দ স্থায়ী। ──
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
-                        QBankLayoutToggle(showLabels = true)
+                        QBankLayoutToggle(category = selectedExamCategory)
                     }
                 }
                 val cardFor: @Composable (SubjectEntry, Boolean) -> Unit = { subject, compact ->
@@ -1098,6 +1117,11 @@ fun SubjectListScreen(
                         onLongPress = if (isAdmin && subject.subjectId.isNotBlank()) ({
                             emojiEditTargetId = subject.subjectId
                             emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
+                        }) else null,
+                        // পিন শুধু পদবীর তালিকায় (পদবী মোড); প্রতিষ্ঠান/সাল মোডে নয়
+                        pinned = if (qbankPinEnabled) com.hanif.smartstudy.util.QBankPinStore.isPinned(selectedExamCategory, subject.name) else null,
+                        onTogglePin = if (qbankPinEnabled) ({
+                            com.hanif.smartstudy.util.QBankPinStore.toggle(sortCtx, selectedExamCategory, subject.name)
                         }) else null,
                         modifier = if (compact) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
@@ -2566,7 +2590,7 @@ fun SubTopicListScreen(
         if (papersMode && com.hanif.smartstudy.util.QBankTypeScope.part == null)
             com.hanif.smartstudy.util.QBankTypeScope.part = defaultPart
     }
-    val paperGrid = com.hanif.smartstudy.util.QBankViewStyle.grid
+    val paperGrid = com.hanif.smartstudy.util.QBankViewStyle.isGrid(com.hanif.smartstudy.util.QBankCategory.selected)   // লিস্ট/গ্রিড — এই ক্যাটাগরির নিজস্ব পছন্দ
     val swipeThresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
     val visibleSubTopics = if (isAdmin && isReorderMode) com.hanif.smartstudy.util.TopicOrdering.serialOrder(subTopics)
                             else if (papersMode) subTopics.filter { it.paperType == tabPart && it.hasQuestions() }
@@ -2685,7 +2709,7 @@ fun SubTopicListScreen(
                 ) {
                     Text("${bnDigits(visibleSubTopics.size)}টি প্রশ্নপত্র", fontSize = 12.sp, fontFamily = NotoSansBengali,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    QBankLayoutToggle(showLabels = true)
+                    QBankLayoutToggle(category = com.hanif.smartstudy.util.QBankCategory.selected)
                 }
             }
             if (visibleSubTopics.isEmpty()) {

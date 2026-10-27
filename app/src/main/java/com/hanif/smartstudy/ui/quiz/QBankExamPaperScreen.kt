@@ -35,26 +35,26 @@ import com.hanif.smartstudy.ui.shared.ReportDialog
 import com.hanif.smartstudy.util.TtsManager
 
 // ── QBank "পদবী → প্রতিষ্ঠান → প্রশ্নপত্র" (৩য় লেয়ার) স্ক্রিন — এক্সাম-পেপার স্টাইল।
-// ব্যবহারকারীর দেওয়া HTML মকআপ অনুযায়ী তৈরি: ক্রিম রঙের পেপার ব্যাকগ্রাউন্ড, গাঢ়
+// ব্যবহারকারীর দেওয়া HTML মকআপ অনুযায়ী তৈরি: সাদা পেপার ব্যাকগ্রাউন্ড, গাঢ়
 // হেডার (প্রতিষ্ঠান + পদবী নাম), সাবজেক্ট ট্যাব (টপিক দেখানো হয় না — শুধু সাবজেক্ট),
 // প্রতিটা প্রশ্ন সরাসরি উত্তর-সহ (এটা একটা রেফারেন্স/আনসার-কী রিভিউ স্ক্রিন, লাইভ
 // কুইজ-খেলা স্ক্রিন না — তাই MCQ অপশন বাটন না দেখিয়ে সরাসরি সঠিক উত্তর দেখানো হয়)।
 // একই groupId-এর multi-part প্রশ্ন (ক/খ/গ/ঘ/ঙ) একটা কার্ডে একসাথে দেখানো হয়। ──
 
-private val PaperBg      = Color(0xFFF7F3E9)
+private val PaperBg      = Color.White                // লিখিত প্রশ্নের স্ক্রিন — সাদা ব্যাকগ্রাউন্ড
 private val HeaderTop    = Color(0xFF0891B2)   // অ্যাপের QBank থিম-রঙ (SubjectListScreen-এর গ্র্যাডিয়েন্টের সাথে ম্যাচ)
 private val HeaderBottom = Color(0xFF0E7490)
 private val HeaderBg     = HeaderTop           // solid fallback যেখানে gradient দরকার নেই
 private val HeaderCream  = Color(0xFFF7F3E9)
 private val HeaderSub    = Color(0xFFCFEBF0)
 private val GoldAccent   = Color(0xFFC9A24B)
-private val TabInactiveBg= Color(0xFFEFE9D8)
-private val TabBorder    = Color(0xFFD8D0B8)
+private val TabInactiveBg= Color(0xFFF1F5F9)
+private val TabBorder    = Color(0xFFE2E8F0)
 private val TextMain     = Color(0xFF221F1A)
 private val TextMuted    = Color(0xFF6B6552)
 private val AnswerBg     = Color(0xFFEAF1E4)
 private val AnswerText   = Color(0xFF2C4728)
-private val DashedLine   = Color(0xFFCFC6AC)
+private val DashedLine   = Color(0xFFE2E8F0)
 
 // ── PAPER COMPOSER রেন্ডারিং হেল্পার ──
 // "highlight" ফরম্যাটে Admin App-এ টেক্সট সিলেক্ট করে "🖍 হাইলাইট করো" চাপলে question-এ
@@ -98,7 +98,7 @@ private fun buildFillBlankText(question: String, answer: String): AnnotatedStrin
     }
 }
 
-private val ExplainPanel = Color(0xFFEFE9D8)
+private val ExplainPanel = Color(0xFFF1F5F9)
 private val TechPanel    = Color(0xFFEAF1E4)
 
 // ── FIX ("সাবজেক্ট ঠিকমতো Define না থাকা" সমস্যা): written প্রশ্নে subject_id
@@ -439,7 +439,7 @@ private fun ExamSerialCard(
                 text = serialText, fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
                 modifier = Modifier.width(36.dp)
             )
-            Text(
+            com.hanif.smartstudy.ui.shared.MathText(
                 text = title, fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
                 modifier = Modifier.weight(1f)
             )
@@ -465,7 +465,7 @@ private fun ExamSerialCard(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)).background(AnswerBg)
                             .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
-                        Text(text = answerLine, fontSize = 13.sp, color = AnswerText, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+                        com.hanif.smartstudy.ui.shared.MathText(text = answerLine, fontSize = 13.sp, color = AnswerText, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
                     }
                 }
 
@@ -497,15 +497,23 @@ private fun ExamSerialCard(
                                     fontWeight = FontWeight.Bold, color = Color(0xFF8A6D1D),
                                     modifier = Modifier.width(26.dp)
                                 )
-                                Text(
-                                    text = if (layout.highlight) buildHighlightedText(sub.question) else AnnotatedString(sub.question),
-                                    fontSize = 13.8.sp, lineHeight = 20.sp, color = TextMain,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                if (layout.highlight) {
+                                    Text(
+                                        text = buildHighlightedText(sub.question),
+                                        fontSize = 13.8.sp, lineHeight = 20.sp, color = TextMain,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                } else {
+                                    com.hanif.smartstudy.ui.shared.MathText(
+                                        text = sub.question,
+                                        fontSize = 13.8.sp, lineHeight = 20.sp, color = TextMain,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                                 Text(
                                     text = "  ${layout.sep}  ", fontSize = 13.8.sp, fontWeight = FontWeight.Bold, color = TextMain
                                 )
-                                Text(
+                                com.hanif.smartstudy.ui.shared.MathText(
                                     text = sub.answer, fontSize = 13.5.sp, lineHeight = 20.sp,
                                     color = AnswerText, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.weight(1f)
@@ -513,7 +521,7 @@ private fun ExamSerialCard(
                             }
                             val third = layout.thirdPre
                             if (third != null && sub.explanation.isNotBlank()) {
-                                Text(
+                                com.hanif.smartstudy.ui.shared.MathText(
                                     text = "$third${sub.explanation}${layout.thirdSuf}",
                                     fontSize = 12.sp, color = TextMuted, lineHeight = 18.sp,
                                     modifier = Modifier.padding(start = 26.dp, top = 1.dp)
@@ -650,7 +658,7 @@ private fun ExamQAItem(
         }
         if (optionsLine != null) {
             Spacer(Modifier.height(3.dp))
-            Text(
+            com.hanif.smartstudy.ui.shared.MathText(
                 text = "Options: $optionsLine",
                 fontSize = if (compact) 12.5.sp else 13.sp, color = TextMuted, lineHeight = 18.sp
             )
@@ -682,7 +690,7 @@ private fun ExamQAItem(
             Box(
                 Modifier.clip(RoundedCornerShape(3.dp)).background(AnswerBg).padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
-                Text(
+                com.hanif.smartstudy.ui.shared.MathText(
                     text = "$labelPrefix${q.answer}",
                     fontSize = if (compact) 13.sp else 13.5.sp,
                     color = AnswerText,
@@ -740,13 +748,17 @@ private fun ExamQAItem(
                     )
                     .padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 10.dp)
             ) {
-                Text(
-                    text = panelText.ifBlank { "এখনো যোগ করা হয়নি।" },
-                    fontSize = 12.5.sp,
-                    lineHeight = 20.sp,
-                    color = if (panelText.isBlank()) TextMuted else TextMain,
-                    fontStyle = if (panelText.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
-                )
+                if (panelText.isBlank()) {
+                    Text(
+                        text = "এখনো যোগ করা হয়নি।",
+                        fontSize = 12.5.sp,
+                        lineHeight = 20.sp,
+                        color = TextMuted,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    )
+                } else {
+                    com.hanif.smartstudy.ui.shared.MathText(text = panelText, fontSize = 12.5.sp, lineHeight = 20.sp, color = TextMain)
+                }
             }
             // ✍ হাতে লেখা (টাচপেন) — ব্যাখ্যা/কৌশল ট্যাব অনুযায়ী
             com.hanif.smartstudy.ui.ink.InkSection(q.id, if (detailKind == "explain") "explanation" else "technique", isAdmin)

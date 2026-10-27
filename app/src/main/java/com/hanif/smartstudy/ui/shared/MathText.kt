@@ -11,6 +11,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.unit.TextUnit
@@ -28,7 +30,7 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 
 // ── সহজ ডিটেকশন ──
 private val MATH_HINT = Regex(
-    """\^|\\[A-Za-z]+|\$|\bsqrt\s*\(|[A-Za-z0-9\)]_[\{0-9A-Za-z]"""
+    """\^|\\[A-Za-z]+|\$|\bsqrt\s*\(|[A-Za-z0-9\)]_[\{0-9A-Za-z]|<\s*/?\s*(?:sup|sub|frac|sqrt|br)\b|\broot\s*[0-9০-৯(]"""
 )
 
 fun hasMathMarkup(text: String): Boolean = text.isNotEmpty() && MATH_HINT.containsMatchIn(text)
@@ -62,8 +64,9 @@ private val SYMBOLS = listOf(
     "\\ldots" to "…", "\\cdots" to "⋯", "\\dots" to "…",
     "\\sin" to "sin", "\\cos" to "cos", "\\tan" to "tan", "\\cot" to "cot", "\\sec" to "sec", "\\csc" to "csc",
     "\\log" to "log", "\\ln" to "ln", "\\exp" to "exp",
+    "\\implies" to "⇒", "\\impliedby" to "⇐", "\\iff" to "⇔", "\\hline" to "", "\\newline" to "\n",
     "\\left" to "", "\\right" to "", "\\quad" to "  ", "\\qquad" to "   ",
-    "\\," to " ", "\\;" to " ", "\\!" to "", "\\ " to " ", "\\{" to "{", "\\}" to "}"
+    "\\," to " ", "\\;" to " ", "\\!" to "", "\\ " to " ", "\\{" to "{", "\\}" to "}", "\\'" to "'"
 )
 
 private val SYMBOL_REGEX: List<Pair<Regex, String>> = SYMBOLS.map { (k, v) ->
@@ -71,8 +74,70 @@ private val SYMBOL_REGEX: List<Pair<Regex, String>> = SYMBOLS.map { (k, v) ->
     Regex(pat) to v
 }
 
-private fun simplify(raw: String): String {
+// ── ডাটাবেসে যেসব মার্কআপ আসে (বোল্ড/আন্ডারলাইন/বর্গ/মূল/ভগ্নাংশ/∴ ইত্যাদির টেক্সট-ভার্সন) ──
+private val BR_RE         = Regex("""<\s*br\s*/?\s*>""", RegexOption.IGNORE_CASE)
+private val FRAC_TAG_RE   = Regex("""<\s*frac\s*>(.*?)<\s*/\s*frac\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val SQRT_TAG_RE   = Regex("""<\s*sqrt\s*>(.*?)<\s*/\s*sqrt\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val ROOT_PAREN_RE = Regex("""\broot\s*\(([^()]{1,24})\)""", RegexOption.IGNORE_CASE)
+private val ROOT_NUM_RE   = Regex("""\broot\s*([0-9০-৯]+(?:\.[0-9০-৯]+)?)""", RegexOption.IGNORE_CASE)
+private val MULTI_BS_RE   = Regex("""\\{2,}(?=[A-Za-z])""")
+private val ENTITIES = listOf("&nbsp;" to " ", "&lt;" to "<", "&gt;" to ">", "&quot;" to "\"", "&amp;" to "&")
+
+// ডাটায় অনেক জায়গায় শেষ "}" হারিয়ে গেছে (যেমন \\frac{২}{৫ ; x^{3}+\\frac{1}{x^{3}= কত?)। না-বন্ধ "{" টা তার
+// আসল শেষে (প্রথম ফাঁকা/=/,/;/।/? এ, না থাকলে লেখার শেষে) বন্ধ করে দেয় — শুধু গণিত-মার্কআপ থাকলে।
+private fun repairBraces(t: String): String {
+    if (t.indexOf('{') < 0 || !(t.contains("\\frac") || t.contains("\\sqrt") || t.contains("^{") || t.contains("_{"))) return t
+    var s = t
+    repeat(4) {
+        val stack = ArrayList<Int>()
+        for (i in s.indices) {
+            if (s[i] == '{') stack.add(i)
+            else if (s[i] == '}' && stack.isNotEmpty()) stack.removeAt(stack.size - 1)
+        }
+        if (stack.isEmpty()) return s
+        val start = stack.last()
+        var depth = 0
+        var j = start + 1
+        while (j < s.length) {
+            val c = s[j]
+            if (c == '{') depth++
+            else if (c == '}') { if (depth == 0) break else depth-- }
+            else if (depth == 0 && j > start + 1 && (c.isWhitespace() || c == '=' || c == ',' || c == ';' || c == '।' || c == '?')) break
+            j++
+        }
+        s = s.substring(0, j) + "}" + s.substring(j)
+    }
+    return s
+}
+
+private fun normalizeMarkup(raw: String): String {
     var t = raw
+    // ডাটায় ডবল ব্যাকস্ল্যাশ ("\\frac", "\\therefore") থাকে — একটা করে নিলে আগের LaTeX-লাইট কনভার্টার ঠিক চলে
+    if (t.indexOf('\\') >= 0) t = MULTI_BS_RE.replace(t) { "\\" }
+    t = repairBraces(t)
+    t = BR_RE.replace(t) { "\n" }
+    // <frac>১৫|৫</frac> → ১৫/৫, <sqrt>3</sqrt> → √3, root7 → √7, root(x+1) → √(x+1)
+    t = FRAC_TAG_RE.replace(t) { m ->
+        val p = m.groupValues[1].split('|', limit = 2)
+        if (p.size == 2) "\\frac{" + p[0].trim() + "}{" + p[1].trim() + "}" else m.groupValues[1]
+    }
+    t = SQRT_TAG_RE.replace(t) { m -> "\\sqrt{" + m.groupValues[1].trim() + "}" }
+    t = ROOT_PAREN_RE.replace(t) { m -> "\\sqrt{" + m.groupValues[1].trim() + "}" }
+    t = ROOT_NUM_RE.replace(t) { m -> "\\sqrt{" + m.groupValues[1] + "}" }
+    if (t.indexOf('&') >= 0) for ((k, v) in ENTITIES) t = t.replace(k, v)
+    return t
+}
+
+// <b> </b> <u> <i> <sup> <sub> <mark> <li> … — শুধু হুবহু ট্যাগ (বড়/ছোট হাতের চলে; ভেতরে ফাঁকা বা অ্যাট্রিবিউট নয়)।
+// তাই "a < b এবং c > d" এর মতো অসমতার লেখা কখনো ট্যাগ ভেবে ভুল হয় না।
+private val TAG_RE = Regex("""<(/?)(b|strong|u|i|em|sup|sub|mark|hb|li)>""", RegexOption.IGNORE_CASE)
+
+// ^{2} → ^(2): ভগ্নাংশ/মূলের ভেতরে {} থাকলে পুরনো \\frac/\\sqrt নিয়ম মিলত না (যেমন \\frac{1}{x^{2}})
+private val FRAC_ONE_RE = Regex("""\\[dt]?frac\s*\{([^{}]*)\}""")
+private val SCRIPT_BRACE_RE = Regex("""\^\{([^{}()]{1,12})\}""")
+
+private fun simplify(raw: String): String {
+    var t = SCRIPT_BRACE_RE.replace(raw) { "^(" + it.groupValues[1] + ")" }
     // $$..$$, $..$, \( \), \[ \] ডিলিমিটার সরানো (টাকার চিহ্ন "$5" এ হাত না দিয়ে — শুধু জোড়া-$)
     t = t.replace("\\[", "").replace("\\]", "").replace("\\(", "").replace("\\)", "")
     t = t.replace("$$", "")
@@ -85,6 +150,7 @@ private fun simplify(raw: String): String {
             if (simple(a) && simple(b)) "$a/$b" else "($a)/($b)"
         }
     }
+    t = FRAC_ONE_RE.replace(t) { it.groupValues[1] }
     t = SQRT_N_RE.replace(t) { m ->
         val n = m.groupValues[1].trim()
         val sup = when (n) { "3" -> "∛"; "4" -> "∜"; else -> "√" }
@@ -132,13 +198,54 @@ private fun readScript(s: String, start: Int): Pair<String, Int>? {
 private val SUB_OK = Regex("""[A-Za-z0-9)\]}]""")
 
 fun buildMathAnnotated(raw: String): AnnotatedString {
-    val s = simplify(raw)
+    val s = simplify(normalizeMarkup(raw))
     val sup = SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.72.em)
     val sub = SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.72.em)
+    val boldSt = SpanStyle(fontWeight = FontWeight.ExtraBold)
+    val underSt = SpanStyle(textDecoration = TextDecoration.Underline)
+    val italicSt = SpanStyle(fontStyle = FontStyle.Italic)
+    val markSt = SpanStyle(fontWeight = FontWeight.ExtraBold, background = Color(0x33F59E0B))
     return buildAnnotatedString {
+        // খোলা ট্যাগের স্ট্যাক — ভুল-নেস্টিং হলেও (<b><u>..</b></u>) ভাঙে না; শেষে না-বন্ধ ট্যাগ আপনিই বন্ধ হয়
+        val open = ArrayList<Pair<String, SpanStyle>>()
+        fun openTag(name: String, st: SpanStyle) { open.add(name to st); pushStyle(st) }
+        fun closeTag(name: String) {
+            val idx = open.indexOfLast { it.first == name }
+            if (idx < 0) return
+            val above = open.subList(idx + 1, open.size).toList()
+            repeat(open.size - idx) { pop() }
+            while (open.size > idx) open.removeAt(open.size - 1)
+            for (a in above) { open.add(a); pushStyle(a.second) }
+        }
         var i = 0
         while (i < s.length) {
             val c = s[i]
+            if (c == '<') {
+                val m = TAG_RE.find(s, i)
+                if (m != null && m.range.first == i) {
+                    val closing = m.groupValues[1] == "/"
+                    when (m.groupValues[2].lowercase()) {
+                        "b", "strong" -> if (closing) closeTag("b") else openTag("b", boldSt)
+                        "u"           -> if (closing) closeTag("u") else openTag("u", underSt)
+                        "i", "em"     -> if (closing) closeTag("i") else openTag("i", italicSt)
+                        "sup"         -> if (closing) closeTag("sup") else openTag("sup", sup)
+                        "sub"         -> if (closing) closeTag("sub") else openTag("sub", sub)
+                        "mark", "hb"  -> if (closing) closeTag("mark") else openTag("mark", markSt)
+                        "li"          -> if (closing) append("\n") else append("• ")
+                        else          -> Unit
+                    }
+                    i = m.range.last + 1
+                    continue
+                }
+            }
+            if (c == '*' && s.startsWith("**", i)) {
+                // **বোল্ড** — জোড়া থাকলেই (একা ** সাধারণ অক্ষর)
+                if (open.any { it.first == "**" }) { closeTag("**"); i += 2; continue }
+                if (s.indexOf("**", i + 2) > 0) { openTag("**", boldSt); i += 2; continue }
+            }
+            if (c == '^' && (s.getOrNull(i + 1) == '°' || s.getOrNull(i + 1) == '∘')) {
+                append('°'); i += 2; continue          // 90^° → 90°
+            }
             if (c == '^') {
                 val r = readScript(s, i + 1)
                 if (r != null) {
