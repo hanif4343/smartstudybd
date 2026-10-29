@@ -61,6 +61,10 @@ data class QuizUiState(
     val isQBankMtZone        : Boolean            = false,
     val qbmtCategory         : String             = "",
     val qbmtCount            : Int                = 100,
+    // ── লিখিত মডেল টেস্ট (সব বিষয় মিলিয়ে একটাই পেপার) ──
+    val qbmtKind             : Int                = 0,        // 0 = MCQ, 1 = লিখিত (মডেল টেস্ট পেজের ট্যাব)
+    val wmtPlan              : com.hanif.smartstudy.util.WrittenModelTestEngine.Plan? = null,
+    val wmtCount             : Int                = 40,       // মোট প্রশ্ন: ২৫ / ৪০ / ৫০ (৫টা করে সেকশন)
     val qbmtLoading          : Boolean            = false,
     val qbmtPlan             : com.hanif.smartstudy.util.QBankModelTestEngine.Plan? = null,
     val qbmtError            : String?            = null,
@@ -1560,7 +1564,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     fun openQBankModelTest() {
         val cat = com.hanif.smartstudy.util.QBankCategory.selected
         _state.update {
-            it.copy(isQBankMtZone = true, qbmtCategory = cat, qbmtPlan = null, qbmtError = null, qbmtLoading = true)
+            it.copy(isQBankMtZone = true, qbmtCategory = cat, qbmtPlan = null, qbmtError = null, qbmtLoading = true, qbmtKind = 0)
         }
         rebuildQBankMtPlan()
     }
@@ -1651,6 +1655,93 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** রেজাল্ট থেকে "আবার চেষ্টা" — একই প্রশ্ন-সেট আবার (উত্তর রিসেট) */
+    // ═════════ লিখিত মডেল টেস্ট ═════════
+    private var wmtJob: Job? = null
+    private var wmtPoolCache: List<QuestionItem>? = null
+
+    /** MCQ | লিখিত ট্যাব বদল */
+    fun setQBankMtKind(kind: Int) {
+        if (kind == _state.value.qbmtKind) return
+        qbmtJob?.cancel(); wmtJob?.cancel()
+        _state.update { it.copy(qbmtKind = kind, qbmtError = null, qbmtLoading = false) }
+        if (kind == 1) {
+            if (_state.value.wmtPlan == null) generateWrittenMt()
+        } else if (_state.value.qbmtPlan == null) {
+            _state.update { it.copy(qbmtLoading = true) }
+            rebuildQBankMtPlan()
+        }
+    }
+
+    fun setWrittenMtCount(n: Int) {
+        if (n == _state.value.wmtCount) return
+        _state.update { it.copy(wmtCount = n) }
+        generateWrittenMt()
+    }
+
+    /** "🔄 আবার বানান" — নতুন র‍্যান্ডম পেপার */
+    fun regenerateWrittenMt() = generateWrittenMt()
+
+    private fun generateWrittenMt() {
+        wmtJob?.cancel()
+        _state.update { it.copy(wmtPlan = null, qbmtError = null, qbmtLoading = true) }
+        wmtJob = viewModelScope.launch {
+            try {
+                val pool   = loadWrittenMtPool()
+                val recent = qbankMtStore.recentIds(com.hanif.smartstudy.util.WrittenModelTestEngine.CATEGORY_KEY)
+                val count  = _state.value.wmtCount
+                val plan = withContext(Dispatchers.Default) {
+                    com.hanif.smartstudy.util.WrittenModelTestEngine.generate(pool, count, recent)
+                }
+                _state.update { it.copy(wmtPlan = plan, qbmtLoading = false, qbmtError = null) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("QuizVM", "generateWrittenMt failed: ${e.message}")
+                _state.update { it.copy(qbmtLoading = false, qbmtError = "লিখিত প্রশ্ন আনতে সমস্যা হয়েছে। ইন্টারনেট দেখে আবার চেষ্টা করুন।") }
+            }
+        }
+    }
+
+    /** সব QBank-এর লিখিত প্রশ্ন (ক্যাটাগরি নির্বিশেষে — লিখিত প্রায় সবই চাকরির পদবীতে)। Room-এ না থাকলে ১২০টা করে ব্যাচে আনা হয়
+     *  (এক URL-এ ১২০০+ আইডি গেলে GAS ফেল করে) */
+    private suspend fun loadWrittenMtPool(): List<QuestionItem> {
+        wmtPoolCache?.let { return it }
+        repo.syncExamAppearances()
+        val ids = repo.getQBankTypeMap().filterValues { it }.keys.toList()
+        if (ids.isEmpty()) return emptyList()
+        ids.chunked(120).forEach { part -> repo.ensureRoomQuestionsByIds(StudyMode.QBANK.name, part) }
+        val user = session.getCurrentUser().withQuizOwnAudience(StudyMode.QBANK)
+        val tag  = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
+            .let { t -> if (user?.isAdmin() == true) quizAdminTag(user, StudyMode.QBANK).ifBlank { t } else t }
+        val items = ids.chunked(400).flatMap { part -> repo.getRoomQuestionsByIds(StudyMode.QBANK.name, part, tag) }
+        if (items.isNotEmpty()) wmtPoolCache = items
+        return items
+    }
+
+    /** "▶ শুরু" — তৈরি পেপার লিখিত এক্সাম-পেপার স্ক্রিনে (উত্তর প্রথমে লুকানো) */
+    fun startWrittenMt() {
+        val plan = _state.value.wmtPlan ?: return
+        if (plan.questions.isEmpty()) return
+        val bookmarks = _state.value.bookmarkedIds
+        val qs = plan.questions.map { it.copy(answerState = AnswerState.Unanswered, isBookmarked = bookmarks.contains(it.id)) }
+        viewModelScope.launch {
+            qbankMtStore.addRecent(com.hanif.smartstudy.util.WrittenModelTestEngine.CATEGORY_KEY, qs.map { it.id })
+        }
+        timerJob?.cancel()
+        _state.update {
+            it.copy(
+                isQBankMtZone = false, mode = StudyMode.QBANK,
+                questions = qs, totalQuestions = 0, currentPage = 0,
+                isQuizActive = false, showResult = false, result = null, answeredCount = 0, timerSec = 0,
+                navPath = NavPath("Model Test", "লিখিত · ${qs.size}"),
+                activeQBankMt = com.hanif.smartstudy.util.QBankModelTestEngine.Active(
+                    category = com.hanif.smartstudy.util.WrittenModelTestEngine.CATEGORY_KEY,
+                    requested = plan.requested, title = "লিখিত মডেল টেস্ট (${qs.size}টি প্রশ্ন)", questionIds = qs.map { q -> q.id }
+                )
+            )
+        }
+    }
+
     fun retryQBankMt() {
         if (_state.value.qbmtPlan == null) return
         _state.update { it.copy(showResult = false, result = null, activeQBankMt = null) }

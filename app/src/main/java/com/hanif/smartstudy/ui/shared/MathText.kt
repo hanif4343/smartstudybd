@@ -243,6 +243,23 @@ fun buildMathAnnotated(raw: String): AnnotatedString {
                 if (open.any { it.first == "**" }) { closeTag("**"); i += 2; continue }
                 if (s.indexOf("**", i + 2) > 0) { openTag("**", boldSt); i += 2; continue }
             }
+            if (c == '*') {
+                // *শব্দ* — হাইলাইট করা শব্দ (বোল্ড)। শুধু শব্দের শুরুতে খুললে/শেষে বন্ধ হলে; ১*২*৩ এর মতো গুণ-চিহ্নে হাত দেয় না
+                if (open.any { it.first == "*" }) {
+                    if (i > 0 && !s[i - 1].isWhitespace()) { closeTag("*"); i++; continue }
+                } else {
+                    val prevOk = i == 0 || !(s[i - 1].isLetterOrDigit() || s[i - 1] == ')')
+                    val next = s.getOrNull(i + 1)
+                    if (prevOk && next != null && !next.isWhitespace() && next != '*') {
+                        val j = s.indexOf('*', i + 1)
+                        val nl = s.indexOf('\n', i)
+                        if (j > i + 1 && (nl < 0 || nl > j) && !s[j - 1].isWhitespace() &&
+                            (j + 1 >= s.length || !s[j + 1].isLetterOrDigit())) {
+                            openTag("*", boldSt); i++; continue
+                        }
+                    }
+                }
+            }
             if (c == '^' && (s.getOrNull(i + 1) == '°' || s.getOrNull(i + 1) == '∘')) {
                 append('°'); i += 2; continue          // 90^° → 90°
             }

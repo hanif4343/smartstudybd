@@ -99,6 +99,8 @@ private fun buildFillBlankText(question: String, answer: String): AnnotatedStrin
 }
 
 private val ExplainPanel = Color(0xFFF1F5F9)
+/** লিখিত মডেল টেস্টে উত্তর/ব্যাখ্যা প্রথমে লুকানো থাকে (QBankExamPaperScreen-এর hideAnswers) */
+private val LocalPaperHideAnswers = androidx.compose.runtime.compositionLocalOf { false }
 private val TechPanel    = Color(0xFFEAF1E4)
 
 // ── FIX ("সাবজেক্ট ঠিকমতো Define না থাকা" সমস্যা): written প্রশ্নে subject_id
@@ -110,7 +112,7 @@ private val TechPanel    = Color(0xFFEAF1E4)
 // একটা কনসোলিডেশন ম্যাপ রাখা হলো, ডেটা অপরিবর্তিত থেকেও ঠিক ৪টা ট্যাবে ভাগ হয়ে যাবে।
 // যেই subjectId এই ম্যাপে নেই (বা ফাঁকা) সেটাই আসল ডেটা-গ্যাপ — "অন্যান্য"-তে থেকে যাবে,
 // ওগুলোর subject_id Sheet-এ বসানো দরকার। ──
-private val WRITTEN_SUBJECT_BUCKET = mapOf(
+internal val WRITTEN_SUBJECT_BUCKET = mapOf(
     "QB01" to "ইংরেজি",       // English Grammar
     "QB02" to "ইংরেজি",       // English Literature
     "QB03" to "সাধারণ জ্ঞান", // আন্তর্জাতিক
@@ -169,9 +171,47 @@ private fun subjectLabelOf(q: QuestionItem): String =
     WRITTEN_SUBJECT_BUCKET[q.subjectId] ?: "অন্যান্য"
 
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * লিখিত পেপার স্ক্রিন। hideAnswers = true (লিখিত মডেল টেস্ট) হলে উত্তর/ব্যাখ্যা/কৌশল প্রথমে লুকানো থাকে;
+ * নিচে ডানের ভাসমান বাটনে ট্যাপ করলে দেখা/লুকানো যায়। ডিফল্ট false — বাকি সব জায়গায় আগের আচরণ।
+ */
 @Composable
 fun QBankExamPaperScreen(
+    institutionName : String,
+    postName        : String,
+    showInstitution : Boolean = true,
+    questions       : List<QuestionItem>,
+    isAdmin         : Boolean = false,
+    onBack          : () -> Unit,
+    onBookmark      : (String) -> Unit,
+    onReport        : (globalIndex: Int, issue: String) -> Unit,
+    hideAnswers     : Boolean = false
+) {
+    var hidden by remember(hideAnswers) { mutableStateOf(hideAnswers) }
+    androidx.compose.runtime.CompositionLocalProvider(LocalPaperHideAnswers provides hidden) {
+        Box(Modifier.fillMaxSize()) {
+            QBankExamPaperScreenImpl(
+                institutionName = institutionName, postName = postName, showInstitution = showInstitution,
+                questions = questions, isAdmin = isAdmin, onBack = onBack, onBookmark = onBookmark, onReport = onReport
+            )
+            if (hideAnswers) {
+                Text(
+                    text = if (hidden) "👁 উত্তর দেখান" else "🙈 উত্তর লুকান",
+                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd).padding(16.dp)
+                        .clip(RoundedCornerShape(24.dp)).background(Color(0xFF0E7490))
+                        .clickable { hidden = !hidden }
+                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QBankExamPaperScreenImpl(
     institutionName : String,
     postName        : String,
     showInstitution : Boolean = true,   // false হলে (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক) শুধু পদবী
@@ -393,6 +433,7 @@ private fun ExamSerialCard(
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit
 ) {
+    val hide = LocalPaperHideAnswers.current
     val labels = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ")
     val first = serial.first()
     val heading = first.groupHeading
@@ -461,7 +502,7 @@ private fun ExamSerialCard(
                     }
                     Spacer(Modifier.height(8.dp))
                     val answerLine = "Answer: " + serial.joinToString("   ") { "${it.question.trim()} ${it.answer.trim()}" }
-                    Box(
+                    if (!hide) Box(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)).background(AnswerBg)
                             .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
@@ -481,7 +522,7 @@ private fun ExamSerialCard(
                         serial.forEach { sub ->
                             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                                 PaperCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
-                                PaperCell(sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                                PaperCell(if (hide) "—" else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
                             }
                         }
                     }
@@ -514,13 +555,13 @@ private fun ExamSerialCard(
                                     text = "  ${layout.sep}  ", fontSize = 13.8.sp, fontWeight = FontWeight.Bold, color = TextMain
                                 )
                                 com.hanif.smartstudy.ui.shared.MathText(
-                                    text = sub.answer, fontSize = 13.5.sp, lineHeight = 20.sp,
+                                    text = if (hide) "＿＿＿" else sub.answer, fontSize = 13.5.sp, lineHeight = 20.sp,
                                     color = AnswerText, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.weight(1f)
                                 )
                             }
                             val third = layout.thirdPre
-                            if (third != null && sub.explanation.isNotBlank()) {
+                            if (third != null && sub.explanation.isNotBlank() && !hide) {
                                 com.hanif.smartstudy.ui.shared.MathText(
                                     text = "$third${sub.explanation}${layout.thirdSuf}",
                                     fontSize = 12.sp, color = TextMuted, lineHeight = 18.sp,
@@ -639,7 +680,8 @@ private fun ExamQAItem(
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit
 ) {
-    val showSolutionInline = inlineSolution && q.explanation.isNotBlank()
+    val hide = LocalPaperHideAnswers.current
+    val showSolutionInline = inlineSolution && q.explanation.isNotBlank() && !LocalPaperHideAnswers.current
     var detailOpen by remember(q.id) { mutableStateOf(false) }
     var detailKind by remember(q.id) { mutableStateOf(if (showSolutionInline) "technique" else "explain") } // "explain" | "technique"
     var bookmarked by remember(q.id, q.isBookmarked) { mutableStateOf(q.isBookmarked) }
@@ -648,7 +690,7 @@ private fun ExamQAItem(
         // ── PAPER COMPOSER: formatStyle অনুযায়ী প্রশ্ন-টেক্সট রেন্ডার আলাদা হয় ──
         val questionFontSize = if (compact) 13.8.sp else 14.5.sp
         val questionLineHeight = if (compact) 19.sp else 21.sp
-        val inlineFillBlank = if (q.formatStyle == "fillblank" && q.answer.isNotBlank())
+        val inlineFillBlank = if (!hide && q.formatStyle == "fillblank" && q.answer.isNotBlank())
             buildFillBlankText(q.question, q.answer) else null
 
         when {
@@ -685,7 +727,7 @@ private fun ExamQAItem(
         // শুধু উত্তরের টেক্সটটাই থাকে, কোনো লেবেল ছাড়া।
         // ── inlineFillBlank != null হলে উত্তর ইতিমধ্যে বাক্যের ভিতরেই দেখানো হয়ে গেছে,
         // তাই নিচে আবার আলাদা বক্সে দেখানো হয় না (ডুপ্লিকেট এড়াতে)। ──
-        if (q.answer.isNotBlank() && inlineFillBlank == null) {
+        if (q.answer.isNotBlank() && inlineFillBlank == null && !hide) {
             val labelPrefix = answerLabel ?: (if (subjectLabelOf(q) == "ইংরেজি") "" else "উত্তর: ")
             Box(
                 Modifier.clip(RoundedCornerShape(3.dp)).background(AnswerBg).padding(horizontal = 8.dp, vertical = 2.dp)
@@ -706,7 +748,7 @@ private fun ExamQAItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            if (hide) Spacer(Modifier) else Box(
                 Modifier
                     .clip(RoundedCornerShape(7.dp))
                     .background(if (detailOpen) HeaderBg else Color(0xFFFDF6E3))
@@ -722,7 +764,7 @@ private fun ExamQAItem(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ExamIconButton(emoji = "🔊") { onSpeak(q.question + ". উত্তর: " + q.answer, q.id) }
+                ExamIconButton(emoji = "🔊") { onSpeak(if (hide) q.question else (q.question + ". উত্তর: " + q.answer), q.id) }
                 ExamIconButton(emoji = if (bookmarked) "★" else "☆", active = bookmarked) {
                     bookmarked = !bookmarked
                     onBookmark(q.id)
@@ -731,7 +773,7 @@ private fun ExamQAItem(
             }
         }
 
-        if (detailOpen) {
+        if (detailOpen && !hide) {
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                 if (!showSolutionInline) DetailTab("ব্যাখ্যা", detailKind == "explain") { detailKind = "explain" }

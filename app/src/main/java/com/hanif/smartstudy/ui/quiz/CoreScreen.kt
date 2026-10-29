@@ -210,9 +210,31 @@ fun CoreScreen(
                 plan         = state.qbmtPlan,
                 onCategory   = { viewModel.setQBankMtCategory(it) },
                 onCount      = { viewModel.setQBankMtCount(it) },
-                onRegenerate = { viewModel.regenerateQBankMt() },
-                onStart      = { viewModel.startQBankMt() },
-                onBack       = { viewModel.navigateBack() }
+                onRegenerate = { if (state.qbmtKind == 1) viewModel.regenerateWrittenMt() else viewModel.regenerateQBankMt() },
+                onStart      = { if (state.qbmtKind == 1) viewModel.startWrittenMt() else viewModel.startQBankMt() },
+                onBack       = { viewModel.navigateBack() },
+                // ── MCQ | লিখিত ট্যাব (লিখিত = সব বিষয় মিলিয়ে একটাই পেপার) ──
+                kind         = state.qbmtKind,
+                wPlan        = state.wmtPlan,
+                wCount       = state.wmtCount,
+                onKind       = { viewModel.setQBankMtKind(it) },
+                onWCount     = { viewModel.setWrittenMtCount(it) }
+            )
+        }
+
+        // ── লিখিত মডেল টেস্ট: তৈরি পেপার (প্রতিটা সেকশন একটা ভার্চুয়াল গ্রুপ) লিখিত এক্সাম-পেপার স্ক্রিনে;
+        // উত্তর প্রথমে লুকানো, নিচে ডানের বাটনে দেখা যায় ──
+        state.activeQBankMt?.category == com.hanif.smartstudy.util.WrittenModelTestEngine.CATEGORY_KEY -> {
+            QBankExamPaperScreen(
+                institutionName = "লিখিত মডেল টেস্ট",
+                postName        = "সব বিষয় · " + state.questions.size.toString().map { if (it in '0'..'9') "০১২৩৪৫৬৭৮৯"[it - '0'] else it }.joinToString("") + "টি প্রশ্ন",
+                showInstitution = true,
+                questions       = state.questions,
+                isAdmin         = state.isAdmin,
+                onBack          = { viewModel.navigateBack() },
+                onBookmark      = { qid -> viewModel.toggleBookmark(qid) },
+                onReport        = { idx, issue -> viewModel.reportQuestion(idx, issue) },
+                hideAnswers     = true
             )
         }
 
