@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.hanif.smartstudy.data.model.QuestionItem
 import com.hanif.smartstudy.ui.shared.ReportDialog
 import com.hanif.smartstudy.util.TtsManager
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.launch
 
 // ── QBank "পদবী → প্রতিষ্ঠান → প্রশ্নপত্র" (৩য় লেয়ার) স্ক্রিন — এক্সাম-পেপার স্টাইল।
 // ব্যবহারকারীর দেওয়া HTML মকআপ অনুযায়ী তৈরি: সাদা পেপার ব্যাকগ্রাউন্ড, গাঢ়
@@ -226,6 +228,11 @@ private fun QBankExamPaperScreenImpl(
     // (top-level subjectLabelOf() ব্যবহার হচ্ছে, দেখো ফাইলের ওপরে) ──
     fun subjectLabel(q: QuestionItem): String = subjectLabelOf(q)
 
+    // ── শিট-ভিউ (ছাপা সল্যুশন-শিটের মতো একটানা পেপার) | কার্ড-ভিউ (আগের ট্যাব + কার্ড) — হেডারের 📄|🗂 টগলে বদলায় ──
+    val viewCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankPaperViewStore.init(viewCtx) }
+    val sheet = com.hanif.smartstudy.util.QBankPaperViewStore.sheet
+
     // ── সাবজেক্ট ট্যাবের ক্রম — সবসময় বাংলা→ইংরেজি→গণিত→সাধারণ জ্ঞান (যেগুলোর
     // প্রশ্ন আছে শুধু সেগুলোই দেখাবে), "অন্যান্য" থাকলে সবার শেষে (ডেটা-গ্যাপ নির্দেশক) ──
     val subjectOrder = remember(questions) {
@@ -316,7 +323,22 @@ private fun QBankExamPaperScreenImpl(
                     count    = paperImages.size
                 )
                 Spacer(Modifier.width(8.dp))
-                Box(
+                Row(
+                    Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                ) {
+                    listOf(true to "📄", false to "🗂").forEach { (isSheet, icon) ->
+                        Box(
+                            Modifier.background(if (sheet == isSheet) Color.White.copy(alpha = 0.30f) else Color.Transparent)
+                                .clickable { com.hanif.smartstudy.util.QBankPaperViewStore.set(viewCtx, isSheet) }
+                                .size(width = 36.dp, height = 34.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text(icon, fontSize = 15.sp) }
+                    }
+                }
+                if (!sheet) Spacer(Modifier.width(8.dp))
+                if (!sheet) Box(
                     Modifier.size(34.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(Color.White.copy(alpha = if (sortReversed) 0.28f else 0.12f))
@@ -340,6 +362,18 @@ private fun QBankExamPaperScreenImpl(
             }
         }
 
+        if (sheet) {
+            PaperSheetView(
+                questions       = questions,
+                institutionName = institutionName,
+                postName        = postName,
+                showInstitution = showInstitution,
+                onBookmark      = onBookmark,
+                onSpeak         = { text, key -> TtsManager.speak(text, key) },
+                onReportTap     = { q -> reportTarget = q },
+                modifier        = Modifier.weight(1f)
+            )
+        } else {
         // ── সাবজেক্ট ট্যাব — টপিক এখানে দেখানো হয় না, শুধু সাবজেক্ট ──
         Row(
             Modifier
@@ -409,6 +443,7 @@ private fun QBankExamPaperScreenImpl(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+        }  // else (কার্ড-ভিউ)
     }
 
     reportTarget?.let { q ->
@@ -844,3 +879,272 @@ private fun ExamIconButton(emoji: String, active: Boolean = false, onClick: () -
 // ── ছোট হেল্পার: BorderStroke সহজে লেখার জন্য (import শর্টকাট) ──
 private fun BorderStroke2(width: androidx.compose.ui.unit.Dp, color: Color) =
     androidx.compose.foundation.BorderStroke(width, color)
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   📄 শিট-ভিউ — ছাপা "লিখিত জব সল্যুশন"-এর মতো একটানা পেপার
+   • উপরে প্রতিষ্ঠান ব্যানার + "পদের নাম:" + সাল/মোট প্রশ্ন
+   • বিষয়ের শিরোনাম (বাংলা (১৬)); সাবজেক্ট-চিপে ট্যাপ করলে সেখানে স্ক্রল
+   • পুরো পেপারে একটানা নম্বর (১, ২, … ৩৪); গ্রুপ হলে বোল্ড হেডিং + ক. খ. গ. উপ-প্রশ্ন
+   • ধরন অনুযায়ী: "ক. সদেব = সদা+এব" (এক লাইন) অথবা বোল্ড প্রশ্ন + নিচে "উ. উত্তর"
+   • গণিতে বক্সে "সমাধান:"
+   • প্রতিটা প্রশ্নের ডানে ⋮ (শুনুন / বুকমার্ক / রিপোর্ট)
+   • উত্তর-লুকানো মোডে (মডেল টেস্ট) উত্তর/ব্যাখ্যা দেখায় না
+   ══════════════════════════════════════════════════════════════════════════ */
+private val SheetLetters = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ", "ট", "ঠ", "ড", "ঢ", "ণ", "ত", "থ", "দ", "ধ", "ন")
+private fun sheetLabel(i: Int): String = SheetLetters.getOrNull(i) ?: paperBn(i + 1, 1)
+
+private sealed class SheetRow {
+    class Head(val top: String, val mid: String, val year: String, val total: Int) : SheetRow()
+    class Subject(val label: String, val count: Int) : SheetRow()
+    class Item(val no: Int, val items: List<QuestionItem>, val subject: String) : SheetRow()
+}
+
+private fun buildSheetRows(questions: List<QuestionItem>, institutionName: String, postName: String, showInstitution: Boolean): List<SheetRow> {
+    val rows = ArrayList<SheetRow>()
+    val both = showInstitution && institutionName.isNotBlank() && postName.isNotBlank()
+    rows.add(
+        SheetRow.Head(
+            top = if (both) institutionName else postName.ifBlank { institutionName },
+            mid = if (both) postName else "",
+            year = questions.firstOrNull { it.year.isNotBlank() }?.year.orEmpty(),
+            total = questions.size
+        )
+    )
+    val present = questions.map { subjectLabelOf(it) }.toSet()
+    val order = WRITTEN_SUBJECT_ORDER.filter { it in present } + (if ("অন্যান্য" in present) listOf("অন্যান্য") else emptyList())
+    var no = 0
+    for (label in order) {
+        val qs = questions.filter { subjectLabelOf(it) == label }
+        rows.add(SheetRow.Subject(label, qs.size))
+        val groups = qs.filter { it.isGrouped() }.groupBy { it.groupId }
+        val seen = HashSet<String>()
+        for (q in qs) {
+            if (q.isGrouped()) {
+                if (seen.add(q.groupId)) {
+                    no++
+                    rows.add(SheetRow.Item(no, (groups[q.groupId] ?: listOf(q)).sortedBy { it.subIndex }, label))
+                }
+            } else {
+                no++
+                rows.add(SheetRow.Item(no, listOf(q), label))
+            }
+        }
+    }
+    return rows
+}
+
+@Composable
+private fun PaperSheetView(
+    questions       : List<QuestionItem>,
+    institutionName : String,
+    postName        : String,
+    showInstitution : Boolean,
+    onBookmark      : (String) -> Unit,
+    onSpeak         : (String, String) -> Unit,
+    onReportTap     : (QuestionItem) -> Unit,
+    modifier        : Modifier = Modifier
+) {
+    val rows = remember(questions, institutionName, postName, showInstitution) {
+        buildSheetRows(questions, institutionName, postName, showInstitution)
+    }
+    val hide = LocalPaperHideAnswers.current
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val subjects = remember(rows) { rows.filterIsInstance<SheetRow.Subject>() }
+
+    Column(modifier.fillMaxWidth().background(PaperBg)) {
+        // সাবজেক্ট-চিপ — ট্যাপে সেই বিষয়ের শুরুতে স্ক্রল
+        if (subjects.size > 1) {
+            Row(
+                Modifier.fillMaxWidth().background(TabInactiveBg)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                subjects.forEach { sub ->
+                    Text(
+                        text = sub.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = HeaderBg,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50)).background(Color.White)
+                            .border(1.dp, HeaderBg.copy(alpha = 0.4f), RoundedCornerShape(50))
+                            .clickable {
+                                val at = rows.indexOf(sub)
+                                if (at >= 0) scope.launch { listState.animateScrollToItem(at) }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 90.dp)) {
+            items(rows.size) { i ->
+                when (val r = rows[i]) {
+                    is SheetRow.Head -> Column(Modifier.fillMaxWidth()) {
+                        Box(
+                            Modifier.fillMaxWidth().background(Color(0xFF111827)).padding(horizontal = 16.dp, vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(r.top, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+                        }
+                        if (r.mid.isNotBlank()) {
+                            Text(
+                                text = "পদের নাম: ${r.mid}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                                textDecoration = TextDecoration.Underline, textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp)
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(if (r.year.isNotBlank()) "সাল: ${r.year}" else "", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
+                            Text("মোট প্রশ্ন: ${paperBn(r.total, 1)}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
+                        }
+                        Divider(color = TextMain.copy(alpha = 0.2f), thickness = 1.dp)
+                    }
+                    is SheetRow.Subject -> Column(
+                        Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("${r.label} (${paperBn(r.count, 1)})", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = HeaderBg)
+                        Spacer(Modifier.height(4.dp))
+                        Box(Modifier.width(56.dp).height(3.dp).background(HeaderBg))
+                    }
+                    is SheetRow.Item -> SheetItem(r.no, r.items, r.subject, hide, onBookmark, onSpeak, onReportTap)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetItem(
+    no: Int, items: List<QuestionItem>, subject: String, hide: Boolean,
+    onBookmark: (String) -> Unit, onSpeak: (String, String) -> Unit, onReportTap: (QuestionItem) -> Unit
+) {
+    val first = items.first()
+    val math = subject == "গণিত"
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        if (first.isGrouped()) {
+            val heading = first.groupHeading
+            val layout = resolvePaperLayout(heading, first.formatStyle, paperOptionsLine(first) != null, subject == "ইংরেজি")
+            Row(verticalAlignment = Alignment.Top) {
+                Text("${paperBn(no, 1)}.", fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                    modifier = Modifier.widthIn(min = 28.dp))
+                com.hanif.smartstudy.ui.shared.MathText(
+                    text = paperHeadingBase(heading), fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold,
+                    color = TextMain, lineHeight = 22.sp, modifier = Modifier.weight(1f)
+                )
+            }
+            if (layout.kind == "cloze") {
+                val cp = paperClozeParts(heading)
+                if (cp.words.isNotEmpty()) {
+                    com.hanif.smartstudy.ui.shared.MathText(
+                        text = cp.words.joinToString("  |  "), fontSize = 13.sp, color = TextMuted,
+                        modifier = Modifier.padding(start = 28.dp, top = 4.dp)
+                    )
+                }
+                if (cp.passage.isNotBlank()) {
+                    com.hanif.smartstudy.ui.shared.MathText(
+                        text = cp.passage, fontSize = 14.sp, lineHeight = 21.sp, color = TextMain,
+                        modifier = Modifier.padding(start = 28.dp, top = 4.dp)
+                    )
+                }
+            }
+            items.forEachIndexed { i, q ->
+                SheetSub("${sheetLabel(i)}.", q, layout, math, hide, onBookmark, onSpeak, onReportTap)
+            }
+        } else {
+            SheetSub("${paperBn(no, 1)}.", first, PaperLayout("plain"), math, hide, onBookmark, onSpeak, onReportTap)
+        }
+    }
+    Divider(color = DashedLine, thickness = 1.dp)
+}
+
+@Composable
+private fun SheetText(
+    text: String,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    fontWeight: FontWeight? = null,
+    lineHeight: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified
+) = com.hanif.smartstudy.ui.shared.MathText(
+    text = text, modifier = modifier, fontSize = fontSize, fontWeight = fontWeight, color = color, lineHeight = lineHeight
+)
+
+@Composable
+private fun SheetSub(
+    label: String, q: QuestionItem, layout: PaperLayout, math: Boolean, hide: Boolean,
+    onBookmark: (String) -> Unit, onSpeak: (String, String) -> Unit, onReportTap: (QuestionItem) -> Unit
+) {
+    var menu by remember { mutableStateOf(false) }
+    val sep = layout.sep.ifBlank { "=" }
+    val inlineThird = layout.thirdPre == "("                       // সমাস: "প্রশ্ন = উত্তর (ব্যাখ্যা)"
+    val oneLine = layout.kind == "tbl" || (layout.kind == "pair" && (!layout.highlight || inlineThird))
+    val ans = if (hide) "＿＿＿" else q.answer
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Top) {
+        Text(label, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain,
+            modifier = Modifier.widthIn(min = 28.dp).padding(top = 1.dp))
+        Column(Modifier.weight(1f)) {
+            if (oneLine) {
+                if (layout.highlight) {
+                    val third = if (inlineThird && !hide && q.explanation.isNotBlank()) " (${q.explanation})" else ""
+                    Text(
+                        text = buildAnnotatedString { append(buildHighlightedText(q.question)); append("  $sep  $ans$third") },
+                        fontSize = 14.5.sp, lineHeight = 22.sp, color = TextMain
+                    )
+                } else {
+                    SheetText(text = "${q.question}  $sep  $ans", fontSize = 14.5.sp, lineHeight = 22.sp, color = TextMain)
+                }
+                if (!inlineThird && layout.thirdPre != null && !hide && q.explanation.isNotBlank()) {
+                    SheetText(text = "${layout.thirdPre} ${q.explanation}${layout.thirdSuf}", fontSize = 13.sp, lineHeight = 20.sp, color = TextMuted)
+                }
+            } else {
+                if (layout.highlight) {
+                    Text(buildHighlightedText(q.question), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp, color = TextMain)
+                } else {
+                    SheetText(text = q.question, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp, color = TextMain)
+                }
+                if (layout.kind == "mcq") {
+                    paperOptionsLine(q)?.let { SheetText(text = "অপশন: $it", fontSize = 13.sp, lineHeight = 20.sp, color = TextMuted) }
+                }
+                if (!hide && q.answer.isNotBlank()) {
+                    SheetText(text = "উ. ${q.answer}", fontSize = 14.5.sp, lineHeight = 22.sp, color = AnswerText)
+                }
+                if (!hide && q.explanation.isNotBlank()) {
+                    if (math) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "সমাধান:", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = HeaderBg,
+                            modifier = Modifier.border(1.dp, HeaderBg, RoundedCornerShape(3.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                        SheetText(text = q.explanation, fontSize = 14.sp, lineHeight = 22.sp, color = TextMain, modifier = Modifier.padding(top = 4.dp))
+                    } else {
+                        SheetText(text = "ব্যাখ্যা: ${q.explanation}", fontSize = 12.5.sp, lineHeight = 19.sp, color = TextMuted)
+                    }
+                }
+            }
+            if (!hide && q.technique.isNotBlank()) {
+                SheetText(text = "কৌশল: ${q.technique}", fontSize = 12.5.sp, lineHeight = 19.sp, color = AnswerText.copy(alpha = 0.85f))
+            }
+        }
+        // ⋮ — শুনুন / বুকমার্ক / রিপোর্ট
+        Box {
+            Text("⋮", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMuted,
+                modifier = Modifier.clickable { menu = true }.padding(horizontal = 8.dp, vertical = 2.dp))
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("🔊 শুনুন") },
+                    onClick = { menu = false; onSpeak(if (hide) q.question else (q.question + ". উত্তর: " + q.answer), q.id) }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (q.isBookmarked) "★ বুকমার্ক সরান" else "☆ বুকমার্ক") },
+                    onClick = { menu = false; onBookmark(q.id) }
+                )
+                DropdownMenuItem(
+                    text = { Text("🚩 রিপোর্ট") },
+                    onClick = { menu = false; onReportTap(q) }
+                )
+            }
+        }
+    }
+}
