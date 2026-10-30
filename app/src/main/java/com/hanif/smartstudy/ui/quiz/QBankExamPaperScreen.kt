@@ -365,9 +365,6 @@ private fun QBankExamPaperScreenImpl(
         if (sheet) {
             PaperSheetView(
                 questions       = questions,
-                institutionName = institutionName,
-                postName        = postName,
-                showInstitution = showInstitution,
                 onBookmark      = onBookmark,
                 onSpeak         = { text, key -> TtsManager.speak(text, key) },
                 onReportTap     = { q -> reportTarget = q },
@@ -882,35 +879,33 @@ private fun BorderStroke2(width: androidx.compose.ui.unit.Dp, color: Color) =
 
 
 /* ══════════════════════════════════════════════════════════════════════════
-   📄 শিট-ভিউ — ছাপা "লিখিত জব সল্যুশন"-এর মতো একটানা পেপার
-   • উপরে প্রতিষ্ঠান ব্যানার + "পদের নাম:" + সাল/মোট প্রশ্ন
+   📄 শিট-ভিউ — ছাপা "লিখিত জব সল্যুশন"-এর মতো একটানা পেপার (হালকা রঙে)
+   • প্রতিষ্ঠান/পদ/সংখ্যা উপরের অ্যাপ-হেডারেই একবার আছে — এখানে আর দ্বিতীয়বার নয়
    • বিষয়ের শিরোনাম (বাংলা (১৬)); সাবজেক্ট-চিপে ট্যাপ করলে সেখানে স্ক্রল
-   • পুরো পেপারে একটানা নম্বর (১, ২, … ৩৪); গ্রুপ হলে বোল্ড হেডিং + ক. খ. গ. উপ-প্রশ্ন
-   • ধরন অনুযায়ী: "ক. সদেব = সদা+এব" (এক লাইন) অথবা বোল্ড প্রশ্ন + নিচে "উ. উত্তর"
-   • গণিতে বক্সে "সমাধান:"
-   • প্রতিটা প্রশ্নের ডানে ⋮ (শুনুন / বুকমার্ক / রিপোর্ট)
-   • উত্তর-লুকানো মোডে (মডেল টেস্ট) উত্তর/ব্যাখ্যা দেখায় না
+   • পুরো পেপারে একটানা নম্বর; গ্রুপ হলে হেডিং একবারই (১. সন্ধি বিচ্ছেদ করুন:)
+   • কার্ড-ভিউর সব লেআউট-সিস্টেম আছে:
+       tbl   → বর্ডার-টেবিল (প্রদত্ত শব্দ | সন্ধি বিচ্ছেদ …)
+       pair  → "ক. সদেব = সদা+এব" (+ বাক্য/ব্যাখ্যা লাইন)
+       cloze → শব্দ-বাক্স + অনুচ্ছেদ + উত্তর
+       stack/mcq/fill/plain → প্রশ্ন + নিচে "উ. উত্তর" (গণিতে বক্সে "সমাধান:")
+   • প্রতিটা প্রশ্নের ডানে ⋮ (শুনুন / বুকমার্ক / রিপোর্ট); উত্তর-লুকানো মোডে উত্তর দেখায় না
    ══════════════════════════════════════════════════════════════════════════ */
+// হালকা রঙ-সেট (TextMain-এর মতো গাঢ় কালো নয়)
+private val SheetInk     = Color(0xFF475467)
+private val SheetInkSoft = Color(0xFF7B8794)
+private val SheetTblLine = Color(0xFFD5DCE6)
+private val SheetTblHead = Color(0xFFF3F6FA)
+
 private val SheetLetters = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ", "ট", "ঠ", "ড", "ঢ", "ণ", "ত", "থ", "দ", "ধ", "ন")
 private fun sheetLabel(i: Int): String = SheetLetters.getOrNull(i) ?: paperBn(i + 1, 1)
 
 private sealed class SheetRow {
-    class Head(val top: String, val mid: String, val year: String, val total: Int) : SheetRow()
     class Subject(val label: String, val count: Int) : SheetRow()
     class Item(val no: Int, val items: List<QuestionItem>, val subject: String) : SheetRow()
 }
 
-private fun buildSheetRows(questions: List<QuestionItem>, institutionName: String, postName: String, showInstitution: Boolean): List<SheetRow> {
+private fun buildSheetRows(questions: List<QuestionItem>): List<SheetRow> {
     val rows = ArrayList<SheetRow>()
-    val both = showInstitution && institutionName.isNotBlank() && postName.isNotBlank()
-    rows.add(
-        SheetRow.Head(
-            top = if (both) institutionName else postName.ifBlank { institutionName },
-            mid = if (both) postName else "",
-            year = questions.firstOrNull { it.year.isNotBlank() }?.year.orEmpty(),
-            total = questions.size
-        )
-    )
     val present = questions.map { subjectLabelOf(it) }.toSet()
     val order = WRITTEN_SUBJECT_ORDER.filter { it in present } + (if ("অন্যান্য" in present) listOf("অন্যান্য") else emptyList())
     var no = 0
@@ -935,19 +930,26 @@ private fun buildSheetRows(questions: List<QuestionItem>, institutionName: Strin
 }
 
 @Composable
+private fun SheetText(
+    text: String,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    fontWeight: FontWeight? = null,
+    lineHeight: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified
+) = com.hanif.smartstudy.ui.shared.MathText(
+    text = text, modifier = modifier, fontSize = fontSize, fontWeight = fontWeight, color = color, lineHeight = lineHeight
+)
+
+@Composable
 private fun PaperSheetView(
-    questions       : List<QuestionItem>,
-    institutionName : String,
-    postName        : String,
-    showInstitution : Boolean,
-    onBookmark      : (String) -> Unit,
-    onSpeak         : (String, String) -> Unit,
-    onReportTap     : (QuestionItem) -> Unit,
-    modifier        : Modifier = Modifier
+    questions   : List<QuestionItem>,
+    onBookmark  : (String) -> Unit,
+    onSpeak     : (String, String) -> Unit,
+    onReportTap : (QuestionItem) -> Unit,
+    modifier    : Modifier = Modifier
 ) {
-    val rows = remember(questions, institutionName, postName, showInstitution) {
-        buildSheetRows(questions, institutionName, postName, showInstitution)
-    }
+    val rows = remember(questions) { buildSheetRows(questions) }
     val hide = LocalPaperHideAnswers.current
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -964,10 +966,10 @@ private fun PaperSheetView(
             ) {
                 subjects.forEach { sub ->
                     Text(
-                        text = sub.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = HeaderBg,
+                        text = sub.label, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = HeaderBg,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50)).background(Color.White)
-                            .border(1.dp, HeaderBg.copy(alpha = 0.4f), RoundedCornerShape(50))
+                            .border(1.dp, HeaderBg.copy(alpha = 0.35f), RoundedCornerShape(50))
                             .clickable {
                                 val at = rows.indexOf(sub)
                                 if (at >= 0) scope.launch { listState.animateScrollToItem(at) }
@@ -980,33 +982,13 @@ private fun PaperSheetView(
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 90.dp)) {
             items(rows.size) { i ->
                 when (val r = rows[i]) {
-                    is SheetRow.Head -> Column(Modifier.fillMaxWidth()) {
-                        Box(
-                            Modifier.fillMaxWidth().background(Color(0xFF111827)).padding(horizontal = 16.dp, vertical = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(r.top, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
-                        }
-                        if (r.mid.isNotBlank()) {
-                            Text(
-                                text = "পদের নাম: ${r.mid}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
-                                textDecoration = TextDecoration.Underline, textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp)
-                            )
-                        }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(if (r.year.isNotBlank()) "সাল: ${r.year}" else "", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
-                            Text("মোট প্রশ্ন: ${paperBn(r.total, 1)}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
-                        }
-                        Divider(color = TextMain.copy(alpha = 0.2f), thickness = 1.dp)
-                    }
                     is SheetRow.Subject -> Column(
-                        Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 6.dp),
+                        Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("${r.label} (${paperBn(r.count, 1)})", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = HeaderBg)
+                        Text("${r.label} (${paperBn(r.count, 1)})", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = HeaderBg)
                         Spacer(Modifier.height(4.dp))
-                        Box(Modifier.width(56.dp).height(3.dp).background(HeaderBg))
+                        Box(Modifier.width(48.dp).height(2.dp).background(HeaderBg.copy(alpha = 0.55f)))
                     }
                     is SheetRow.Item -> SheetItem(r.no, r.items, r.subject, hide, onBookmark, onSpeak, onReportTap)
                 }
@@ -1026,63 +1008,126 @@ private fun SheetItem(
         if (first.isGrouped()) {
             val heading = first.groupHeading
             val layout = resolvePaperLayout(heading, first.formatStyle, paperOptionsLine(first) != null, subject == "ইংরেজি")
+            // হেডিং — একবারই
             Row(verticalAlignment = Alignment.Top) {
-                Text("${paperBn(no, 1)}.", fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold, color = TextMain,
+                Text("${paperBn(no, 1)}.", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SheetInk,
                     modifier = Modifier.widthIn(min = 28.dp))
-                com.hanif.smartstudy.ui.shared.MathText(
-                    text = paperHeadingBase(heading), fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold,
-                    color = TextMain, lineHeight = 22.sp, modifier = Modifier.weight(1f)
+                SheetText(
+                    text = paperHeadingBase(heading), fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = SheetInk, lineHeight = 22.sp, modifier = Modifier.weight(1f)
                 )
             }
-            if (layout.kind == "cloze") {
-                val cp = paperClozeParts(heading)
-                if (cp.words.isNotEmpty()) {
-                    com.hanif.smartstudy.ui.shared.MathText(
-                        text = cp.words.joinToString("  |  "), fontSize = 13.sp, color = TextMuted,
-                        modifier = Modifier.padding(start = 28.dp, top = 4.dp)
-                    )
+            when (layout.kind) {
+                // ── শব্দ-বাক্স + অনুচ্ছেদ + উত্তর ──
+                "cloze" -> {
+                    val cp = paperClozeParts(heading)
+                    Spacer(Modifier.height(6.dp))
+                    if (cp.words.isNotEmpty()) PaperWordBox(cp.words)
+                    if (cp.passage.isNotBlank()) {
+                        SheetText(text = cp.passage, fontSize = 14.sp, lineHeight = 22.sp, color = SheetInk,
+                            modifier = Modifier.padding(top = 8.dp))
+                    }
+                    if (!hide) {
+                        val answerLine = "উ. " + items.joinToString("   ") { "${it.question.trim()} ${it.answer.trim()}" }
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(4.dp))
+                                .background(AnswerBg).padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) { SheetText(text = answerLine, fontSize = 13.sp, lineHeight = 20.sp, color = AnswerText) }
+                    }
                 }
-                if (cp.passage.isNotBlank()) {
-                    com.hanif.smartstudy.ui.shared.MathText(
-                        text = cp.passage, fontSize = 14.sp, lineHeight = 21.sp, color = TextMain,
-                        modifier = Modifier.padding(start = 28.dp, top = 4.dp)
-                    )
+                // ── দুই কলামের টেবিল (প্রদত্ত শব্দ | সন্ধি বিচ্ছেদ ইত্যাদি) ──
+                "tbl" -> {
+                    val c0 = layout.cols.getOrNull(0) ?: ""
+                    val c1 = layout.cols.getOrNull(1) ?: ""
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 8.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, SheetTblLine), RoundedCornerShape(6.dp))
+                    ) {
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(SheetTblHead)) {
+                            SheetCell(c0, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                            SheetCell(c1, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                            Box(Modifier.width(34.dp).fillMaxHeight().border(androidx.compose.foundation.BorderStroke(0.6.dp, SheetTblLine))) {}
+                        }
+                        items.forEach { sub ->
+                            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                SheetCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
+                                SheetCell(if (hide) "—" else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                                Box(
+                                    Modifier.width(34.dp).fillMaxHeight()
+                                        .border(androidx.compose.foundation.BorderStroke(0.6.dp, SheetTblLine)),
+                                    contentAlignment = Alignment.Center
+                                ) { SheetMenu(sub, hide, onBookmark, onSpeak, onReportTap) }
+                            }
+                        }
+                    }
                 }
-            }
-            items.forEachIndexed { i, q ->
-                SheetSub("${sheetLabel(i)}.", q, layout, math, hide, onBookmark, onSpeak, onReportTap)
+                // ── pair / stack / mcq / fill / plain: ক. খ. গ. উপ-প্রশ্ন ──
+                else -> items.forEachIndexed { i, q ->
+                    SheetSub("${sheetLabel(i)}.", q, layout, math, hide, onBookmark, onSpeak, onReportTap)
+                }
             }
         } else {
+            // একক প্রশ্ন: "২০.  প্রশ্ন … উ. উত্তর"
             SheetSub("${paperBn(no, 1)}.", first, PaperLayout("plain"), math, hide, onBookmark, onSpeak, onReportTap)
         }
     }
     Divider(color = DashedLine, thickness = 1.dp)
 }
 
+/** টেবিলের ঘর (হালকা বর্ডার) */
 @Composable
-private fun SheetText(
-    text: String,
-    fontSize: androidx.compose.ui.unit.TextUnit,
-    color: Color,
-    modifier: Modifier = Modifier,
-    fontWeight: FontWeight? = null,
-    lineHeight: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified
-) = com.hanif.smartstudy.ui.shared.MathText(
-    text = text, modifier = modifier, fontSize = fontSize, fontWeight = fontWeight, color = color, lineHeight = lineHeight
-)
+private fun SheetCell(text: String, bold: Boolean = false, color: Color = SheetInk, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .border(androidx.compose.foundation.BorderStroke(0.6.dp, SheetTblLine))
+            .padding(horizontal = 8.dp, vertical = 7.dp)
+    ) {
+        SheetText(
+            text = text, fontSize = 13.5.sp, lineHeight = 20.sp, color = color,
+            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal
+        )
+    }
+}
+
+/** ⋮ — শুনুন / বুকমার্ক / রিপোর্ট */
+@Composable
+private fun SheetMenu(
+    q: QuestionItem, hide: Boolean,
+    onBookmark: (String) -> Unit, onSpeak: (String, String) -> Unit, onReportTap: (QuestionItem) -> Unit
+) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Text("⋮", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SheetInkSoft,
+            modifier = Modifier.clickable { menu = true }.padding(horizontal = 8.dp, vertical = 2.dp))
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("🔊 শুনুন") },
+                onClick = { menu = false; onSpeak(if (hide) q.question else (q.question + ". উত্তর: " + q.answer), q.id) }
+            )
+            DropdownMenuItem(
+                text = { Text(if (q.isBookmarked) "★ বুকমার্ক সরান" else "☆ বুকমার্ক") },
+                onClick = { menu = false; onBookmark(q.id) }
+            )
+            DropdownMenuItem(
+                text = { Text("🚩 রিপোর্ট") },
+                onClick = { menu = false; onReportTap(q) }
+            )
+        }
+    }
+}
 
 @Composable
 private fun SheetSub(
     label: String, q: QuestionItem, layout: PaperLayout, math: Boolean, hide: Boolean,
     onBookmark: (String) -> Unit, onSpeak: (String, String) -> Unit, onReportTap: (QuestionItem) -> Unit
 ) {
-    var menu by remember { mutableStateOf(false) }
     val sep = layout.sep.ifBlank { "=" }
     val inlineThird = layout.thirdPre == "("                       // সমাস: "প্রশ্ন = উত্তর (ব্যাখ্যা)"
-    val oneLine = layout.kind == "tbl" || (layout.kind == "pair" && (!layout.highlight || inlineThird))
+    val oneLine = layout.kind == "pair" && (!layout.highlight || inlineThird)
     val ans = if (hide) "＿＿＿" else q.answer
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Top) {
-        Text(label, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = TextMain,
+        Text(label, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = SheetInkSoft,
             modifier = Modifier.widthIn(min = 28.dp).padding(top = 1.dp))
         Column(Modifier.weight(1f)) {
             if (oneLine) {
@@ -1090,61 +1135,43 @@ private fun SheetSub(
                     val third = if (inlineThird && !hide && q.explanation.isNotBlank()) " (${q.explanation})" else ""
                     Text(
                         text = buildAnnotatedString { append(buildHighlightedText(q.question)); append("  $sep  $ans$third") },
-                        fontSize = 14.5.sp, lineHeight = 22.sp, color = TextMain
+                        fontSize = 14.5.sp, lineHeight = 22.sp, color = SheetInk
                     )
                 } else {
-                    SheetText(text = "${q.question}  $sep  $ans", fontSize = 14.5.sp, lineHeight = 22.sp, color = TextMain)
+                    SheetText(text = "${q.question}  $sep  $ans", fontSize = 14.5.sp, lineHeight = 22.sp, color = SheetInk)
                 }
                 if (!inlineThird && layout.thirdPre != null && !hide && q.explanation.isNotBlank()) {
-                    SheetText(text = "${layout.thirdPre} ${q.explanation}${layout.thirdSuf}", fontSize = 13.sp, lineHeight = 20.sp, color = TextMuted)
+                    SheetText(text = "${layout.thirdPre} ${q.explanation}${layout.thirdSuf}", fontSize = 13.sp, lineHeight = 20.sp, color = SheetInkSoft)
                 }
             } else {
                 if (layout.highlight) {
-                    Text(buildHighlightedText(q.question), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp, color = TextMain)
+                    Text(buildHighlightedText(q.question), fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp, color = SheetInk)
                 } else {
-                    SheetText(text = q.question, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp, color = TextMain)
+                    SheetText(text = q.question, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp, color = SheetInk)
                 }
                 if (layout.kind == "mcq") {
-                    paperOptionsLine(q)?.let { SheetText(text = "অপশন: $it", fontSize = 13.sp, lineHeight = 20.sp, color = TextMuted) }
+                    paperOptionsLine(q)?.let { SheetText(text = "অপশন: $it", fontSize = 13.sp, lineHeight = 20.sp, color = SheetInkSoft) }
                 }
                 if (!hide && q.answer.isNotBlank()) {
-                    SheetText(text = "উ. ${q.answer}", fontSize = 14.5.sp, lineHeight = 22.sp, color = AnswerText)
+                    SheetText(text = "উ. ${q.answer}", fontSize = 14.5.sp, lineHeight = 22.sp, color = AnswerText.copy(alpha = 0.9f))
                 }
                 if (!hide && q.explanation.isNotBlank()) {
                     if (math) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "সমাধান:", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = HeaderBg,
-                            modifier = Modifier.border(1.dp, HeaderBg, RoundedCornerShape(3.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                            "সমাধান:", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = HeaderBg,
+                            modifier = Modifier.border(1.dp, HeaderBg.copy(alpha = 0.6f), RoundedCornerShape(3.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
                         )
-                        SheetText(text = q.explanation, fontSize = 14.sp, lineHeight = 22.sp, color = TextMain, modifier = Modifier.padding(top = 4.dp))
+                        SheetText(text = q.explanation, fontSize = 14.sp, lineHeight = 22.sp, color = SheetInk, modifier = Modifier.padding(top = 4.dp))
                     } else {
-                        SheetText(text = "ব্যাখ্যা: ${q.explanation}", fontSize = 12.5.sp, lineHeight = 19.sp, color = TextMuted)
+                        SheetText(text = "ব্যাখ্যা: ${q.explanation}", fontSize = 12.5.sp, lineHeight = 19.sp, color = SheetInkSoft)
                     }
                 }
             }
             if (!hide && q.technique.isNotBlank()) {
-                SheetText(text = "কৌশল: ${q.technique}", fontSize = 12.5.sp, lineHeight = 19.sp, color = AnswerText.copy(alpha = 0.85f))
+                SheetText(text = "কৌশল: ${q.technique}", fontSize = 12.5.sp, lineHeight = 19.sp, color = AnswerText.copy(alpha = 0.8f))
             }
         }
-        // ⋮ — শুনুন / বুকমার্ক / রিপোর্ট
-        Box {
-            Text("⋮", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextMuted,
-                modifier = Modifier.clickable { menu = true }.padding(horizontal = 8.dp, vertical = 2.dp))
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text("🔊 শুনুন") },
-                    onClick = { menu = false; onSpeak(if (hide) q.question else (q.question + ". উত্তর: " + q.answer), q.id) }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (q.isBookmarked) "★ বুকমার্ক সরান" else "☆ বুকমার্ক") },
-                    onClick = { menu = false; onBookmark(q.id) }
-                )
-                DropdownMenuItem(
-                    text = { Text("🚩 রিপোর্ট") },
-                    onClick = { menu = false; onReportTap(q) }
-                )
-            }
-        }
+        SheetMenu(q, hide, onBookmark, onSpeak, onReportTap)
     }
 }
