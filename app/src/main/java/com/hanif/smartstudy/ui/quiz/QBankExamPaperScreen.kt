@@ -983,7 +983,7 @@ private fun PaperColumnsFlow(
             if (y > pageMax) pageMax = y
         }
         val totalH = pageTop + pageMax
-        layout(constraints.maxWidth, constraints.constrainHeight(totalH)) {
+        layout(constraints.maxWidth, totalH.coerceIn(constraints.minHeight, constraints.maxHeight)) {
             placeables.forEachIndexed { i, p -> p.placeRelative(xs[i], ys[i]) }
         }
     }
