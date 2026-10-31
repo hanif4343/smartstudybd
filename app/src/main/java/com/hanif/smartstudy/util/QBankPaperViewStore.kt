@@ -18,11 +18,17 @@ object QBankPaperViewStore {
     var sheet by mutableStateOf(true)
         private set
 
+    /** শিট-ভিউর জুম (লেখার মাপের গুণক): ০.৭ – ২.০, ডিফল্ট ১.০ */
+    var zoom by mutableStateOf(1f)
+        private set
+
     fun init(ctx: Context) {
         if (loaded) return
         loaded = true
         try {
-            sheet = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, true)
+            val p = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            sheet = p.getBoolean(KEY, true)
+            zoom  = p.getFloat("zoom", 1f).coerceIn(0.7f, 2.0f)
         } catch (_: Exception) { /* ডিফল্ট শিট-ভিউ */ }
     }
 
@@ -30,6 +36,13 @@ object QBankPaperViewStore {
         sheet = value
         try {
             ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
+        } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
+    }
+
+    fun setZoom(ctx: Context, value: Float) {
+        zoom = value.coerceIn(0.7f, 2.0f)
+        try {
+            ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat("zoom", zoom).apply()
         } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
     }
 }
