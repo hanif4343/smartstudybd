@@ -35,6 +35,7 @@ import com.hanif.smartstudy.ui.shared.ReportDialog
 import com.hanif.smartstudy.util.TtsManager
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.launch
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -915,7 +916,7 @@ private val SheetTblHead = Color(0xFFF3F6FA)
 private val SheetLetters = listOf("ক", "খ", "গ", "ঘ", "ঙ", "চ", "ছ", "জ", "ঝ", "ঞ", "ট", "ঠ", "ড", "ঢ", "ণ", "ত", "থ", "দ", "ধ", "ন")
 private fun sheetLabel(i: Int): String = SheetLetters.getOrNull(i) ?: paperBn(i + 1, 1)
 
-/** একটা নম্বর-দেওয়া প্রশ্ন/গ্রুপ। headLabel != null হলে এর আগে বিষয়ের শিরোনাম (শিরোনাম একা কলামের নিচে পড়ে না) */
+/** একটা এন্ট্রি = নম্বর-দেওয়া প্রশ্ন/গ্রুপ (items ≠ খালি), অথবা বিষয়ের শিরোনাম (headLabel ≠ null, items খালি) */
 private class SheetEntry(val no: Int, val items: List<QuestionItem>, val subject: String, val headLabel: String?, val headCount: Int)
 
 private fun buildSheetEntries(questions: List<QuestionItem>): List<SheetEntry> {
@@ -925,18 +926,19 @@ private fun buildSheetEntries(questions: List<QuestionItem>): List<SheetEntry> {
     var no = 0
     for (label in order) {
         val qs = questions.filter { subjectLabelOf(it) == label }
+        out.add(SheetEntry(0, emptyList(), label, label, qs.size))          // বিষয়ের শিরোনাম
         val groups = qs.filter { it.isGrouped() }.groupBy { it.groupId }
         val seen = HashSet<String>()
-        var first = true
-        fun add(items: List<QuestionItem>) {
-            no++
-            out.add(SheetEntry(no, items, label, if (first) label else null, qs.size))
-            first = false
-        }
         for (q in qs) {
             if (q.isGrouped()) {
-                if (seen.add(q.groupId)) add((groups[q.groupId] ?: listOf(q)).sortedBy { it.subIndex })
-            } else add(listOf(q))
+                if (seen.add(q.groupId)) {
+                    no++
+                    out.add(SheetEntry(no, (groups[q.groupId] ?: listOf(q)).sortedBy { it.subIndex }, label, null, qs.size))
+                }
+            } else {
+                no++
+                out.add(SheetEntry(no, listOf(q), label, null, qs.size))
+            }
         }
     }
     return out
@@ -956,12 +958,12 @@ private fun SheetText(
 
 /** সাদা পাতার উপরে একবারই: প্রতিষ্ঠান (বা শিরোনাম) + পদবী + প্রশ্ন-সংখ্যা — আলাদা কোনো কালো/নীল ব্লক নয় */
 @Composable
-private fun SheetTitleBlock(institutionName: String, postName: String, showInstitution: Boolean, total: Int) {
+private fun SheetTitleBlock(institutionName: String, postName: String, showInstitution: Boolean, total: Int, modifier: Modifier = Modifier) {
     val both = showInstitution && institutionName.isNotBlank() && postName.isNotBlank()
     val top = if (both) institutionName else postName.ifBlank { institutionName }
     val mid = if (both) postName else ""
     Column(
-        Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 6.dp),
+        modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(top, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = SheetInk, textAlign = TextAlign.Center)
@@ -978,16 +980,18 @@ private fun SheetTitleBlock(institutionName: String, postName: String, showInsti
 }
 
 /**
- * পাতা-ভিত্তিক কলাম-প্রবাহ (ক্রম অক্ষুণ্ণ):
- *  ১) আইটেমগুলো ক্রমানুসারে পাতায় ভরে — এক কলাম ভরলে পরের কলামে, দুটো ভরলে পরের পাতায়।
- *  ২) প্রতিটা পাতায় দুই কলাম সমান ভারসাম্যে ভাগ হয় (ক্রম একই: বাম কলাম ওপর→নিচ, তারপর ডান কলাম)।
- *  ৩) কলামের মাঝে পাতলা উল্লম্ব দাগ, আর পাতার মাঝে আড়াআড়ি দাগ — তাই কোথায় পাতা বদলাল পরিষ্কার।
- * pageTops[i] = i-তম আইটেমের পাতার শুরুর Y (চিপে-ট্যাপে স্ক্রলের জন্য)। columns = 1 হলে সাধারণ উল্লম্ব তালিকা।
+ * শিটের বিন্যাস — দুটো ক্রম:
+ *  • সারি-ক্রম (rowMajor, ডিফল্ট): ১ বামে, ২ তার ডানে; তারপর পরের সারিতে ৩ বামে, ৪ ডানে … প্রতিটা সারি সমান উচ্চতায়
+ *    (ওপরে সারিবদ্ধ)। বিষয়ের শিরোনাম (fullWidth) পুরো প্রস্থ জুড়ে আলাদা সারিতে। কোনটার পর কোনটা — এক নজরে বোঝা যায়।
+ *  • কলাম-ক্রম: পাতা-ভিত্তিক — বাম কলাম ওপর→নিচ, তারপর ডান কলাম, তারপর পরের পাতা (প্রতি পাতায় কলাম ভারসাম্যে ভাগ);
+ *    শিরোনাম তার পরের প্রশ্ন থেকে আলাদা হয়ে কলামের তলায় একা পড়ে না।
+ *  • columns = 1 হলে (জুম বেশি/সরু স্ক্রিন) সব সোজা উল্লম্ব।
+ * কলামের মাঝে ও সারি/পাতার মাঝে পাতলা দাগ। pageTops[i] = i-তম আইটেমের সারি/পাতার শুরুর Y (চিপে-ট্যাপে স্ক্রলের জন্য)।
  */
 @Composable
 private fun PaperColumnsFlow(
-    columns: Int, pageHeight: Dp, gap: Dp, pageTops: MutableMap<Int, Int>,
-    modifier: Modifier = Modifier, content: @Composable () -> Unit
+    columns: Int, pageHeight: Dp, gap: Dp, rowMajor: Boolean, fullWidth: List<Boolean>,
+    pageTops: MutableMap<Int, Int>, modifier: Modifier = Modifier, content: @Composable () -> Unit
 ) {
     // [x1, y1, x2, y2] — মেজারে ভরে, ড্র-তে আঁকে
     val dividers = remember { ArrayList<IntArray>() }
@@ -1006,68 +1010,107 @@ private fun PaperColumnsFlow(
         val gapPx = gap.roundToPx()
         val colW = ((constraints.maxWidth - gapPx * (columns - 1)) / columns).coerceAtLeast(0)
         val pageH = pageHeight.roundToPx()
-        val cc = Constraints(minWidth = colW, maxWidth = colW)
-        val placeables = measurables.map { it.measure(cc) }
-        val n = placeables.size
-
-        // ধাপ ১: ক্রমানুসারে পাতায় ভাগ (প্রতিটা পাতা = আইটেম-সূচির তালিকা)
-        val pages = ArrayList<MutableList<Int>>()
-        var cur = ArrayList<Int>()
-        var col = 0
-        var colY = 0
-        for (i in 0 until n) {
-            val h = placeables[i].height
-            if (colY > 0 && colY + h > pageH) {
-                col++
-                colY = 0
-                if (col >= columns) { pages.add(cur); cur = ArrayList(); col = 0 }
-            }
-            cur.add(i)
-            colY += h
+        val n = measurables.size
+        val rowFlow = columns == 1 || rowMajor
+        fun isFull(i: Int) = fullWidth.getOrElse(i) { false }
+        val placeables = measurables.mapIndexed { i, m ->
+            val w = if (rowFlow && isFull(i)) constraints.maxWidth else colW
+            m.measure(Constraints(minWidth = w, maxWidth = w))
         }
-        if (cur.isNotEmpty()) pages.add(cur)
-
-        // ধাপ ২: প্রতি পাতায় কলাম-ভারসাম্য + অবস্থান
         val xs = IntArray(n)
         val ys = IntArray(n)
         dividers.clear()
-        val pageGap = gapPx
-        var pageTop = 0
-        for ((pi, page) in pages.withIndex()) {
-            val split = if (columns == 2 && page.size >= 2) {
-                // বাম কলামে প্রথম s টা, ডানে বাকি — max(দুই কলামের উচ্চতা) সবচেয়ে কম হয় এমন s
-                var total = 0
-                for (i in page) total += placeables[i].height
-                var run = 0
-                var best = page.size
-                var bestMax = total
-                for (s in 1 until page.size) {
-                    run += placeables[page[s - 1]].height
-                    val m = maxOf(run, total - run)
-                    if (m < bestMax) { bestMax = m; best = s }
+        var totalH = 0
+
+        if (rowFlow) {
+            // ── সারি-ক্রম ──
+            val rowGap = gapPx / 2 + 2
+            var y = 0
+            var i = 0
+            while (i < n) {
+                if (isFull(i)) {                                    // বিষয়ের শিরোনাম — পুরো প্রস্থ
+                    xs[i] = 0; ys[i] = y; pageTops[i] = y
+                    y += placeables[i].height + rowGap
+                    i++
+                    continue
                 }
-                best
-            } else page.size
-            var yL = 0
-            var yR = 0
-            for ((k, i) in page.withIndex()) {
-                if (k < split) { xs[i] = 0; ys[i] = pageTop + yL; yL += placeables[i].height }
-                else { xs[i] = colW + gapPx; ys[i] = pageTop + yR; yR += placeables[i].height }
-                pageTops[i] = pageTop
-            }
-            val used = maxOf(yL, yR)
-            if (split < page.size && columns == 2) {
-                val mx = colW + gapPx / 2
-                dividers.add(intArrayOf(mx, pageTop, mx, pageTop + used))
-            }
-            pageTop += used
-            if (pi < pages.size - 1) {
-                val ly = pageTop + pageGap / 2
+                val idxs = ArrayList<Int>()
+                var j = i
+                while (j < n && idxs.size < columns && !isFull(j)) { idxs.add(j); j++ }
+                var rowH = 0
+                for ((k, id) in idxs.withIndex()) {
+                    xs[id] = k * (colW + gapPx); ys[id] = y; pageTops[id] = y
+                    if (placeables[id].height > rowH) rowH = placeables[id].height
+                }
+                for (k in 1 until idxs.size) {
+                    val mx = k * (colW + gapPx) - gapPx / 2
+                    dividers.add(intArrayOf(mx, y, mx, y + rowH))
+                }
+                y += rowH
+                val ly = y + rowGap / 2
                 dividers.add(intArrayOf(0, ly, constraints.maxWidth, ly))
-                pageTop += pageGap
+                y += rowGap
+                i = j
             }
+            totalH = y
+        } else {
+            // ── কলাম-ক্রম (পাতা-ভিত্তিক, ভারসাম্যে) ──
+            val pages = ArrayList<MutableList<Int>>()
+            var cur = ArrayList<Int>()
+            var col = 0
+            var colY = 0
+            for (i in 0 until n) {
+                val h = placeables[i].height
+                val need = if (isFull(i) && i + 1 < n) h + placeables[i + 1].height else h   // শিরোনাম + পরের প্রশ্ন একসাথে
+                val afterHeading = i > 0 && isFull(i - 1)        // শিরোনামের ঠিক পরের প্রশ্ন সবসময় শিরোনামের সাথেই (নিজে লম্বা হলেও)
+                if (colY > 0 && !afterHeading && colY + need > pageH) {
+                    col++
+                    colY = 0
+                    if (col >= columns) { pages.add(cur); cur = ArrayList(); col = 0 }
+                }
+                cur.add(i)
+                colY += h
+            }
+            if (cur.isNotEmpty()) pages.add(cur)
+
+            var pageTop = 0
+            for ((pi, page) in pages.withIndex()) {
+                val split = if (columns == 2 && page.size >= 2) {
+                    var total = 0
+                    for (i in page) total += placeables[i].height
+                    var run = 0
+                    var best = page.size
+                    var bestMax = total
+                    for (s in 1 until page.size) {
+                        run += placeables[page[s - 1]].height
+                        if (isFull(page[s - 1])) continue           // শিরোনামের ঠিক পরে কলাম ভাঙা নয়
+                        val m = maxOf(run, total - run)
+                        if (m < bestMax) { bestMax = m; best = s }
+                    }
+                    best
+                } else page.size
+                var yL = 0
+                var yR = 0
+                for ((k, i) in page.withIndex()) {
+                    if (k < split) { xs[i] = 0; ys[i] = pageTop + yL; yL += placeables[i].height }
+                    else { xs[i] = colW + gapPx; ys[i] = pageTop + yR; yR += placeables[i].height }
+                    pageTops[i] = pageTop
+                }
+                val used = maxOf(yL, yR)
+                if (split < page.size && columns == 2) {
+                    val mx = colW + gapPx / 2
+                    dividers.add(intArrayOf(mx, pageTop, mx, pageTop + used))
+                }
+                pageTop += used
+                if (pi < pages.size - 1) {
+                    val ly = pageTop + gapPx / 2
+                    dividers.add(intArrayOf(0, ly, constraints.maxWidth, ly))
+                    pageTop += gapPx
+                }
+            }
+            totalH = pageTop
         }
-        layout(constraints.maxWidth, pageTop.coerceIn(constraints.minHeight, constraints.maxHeight)) {
+        layout(constraints.maxWidth, totalH.coerceIn(constraints.minHeight, constraints.maxHeight)) {
             for (i in 0 until n) placeables[i].placeRelative(xs[i], ys[i])
         }
     }
@@ -1093,6 +1136,9 @@ private fun PaperSheetView(
     val scope = rememberCoroutineScope()
     val pageTops = remember { HashMap<Int, Int>() }
     val heads = remember(entries) { entries.mapIndexedNotNull { i, e -> e.headLabel?.let { it to i } } }
+    val fullWidth = remember(entries) { entries.map { it.headLabel != null } }
+    val rowOrder = com.hanif.smartstudy.util.QBankPaperViewStore.rowOrder
+    var titleH by remember { mutableStateOf(0) }
 
     BoxWithConstraints(modifier.fillMaxWidth().background(PaperBg)) {
         val cols = if (zoom > 1.25f || maxWidth < 340.dp) 1 else 2
@@ -1113,12 +1159,17 @@ private fun PaperSheetView(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50)).background(Color.White)
                                 .border(1.dp, HeaderBg.copy(alpha = 0.35f), RoundedCornerShape(50))
-                                .clickable { scope.launch { scroll.animateScrollTo(pageTops[idx] ?: 0) } }
+                                .clickable { scope.launch { scroll.animateScrollTo(titleH + (pageTops[idx] ?: 0)) } }
                                 .padding(horizontal = 12.dp, vertical = 5.dp)
                         )
                     }
                 }
                 Spacer(Modifier.width(6.dp))
+                // ⇄ সারি-ক্রম (১|২, ৩|৪ …)  ⇅ কলাম-ক্রম (বাম কলাম নেমে, তারপর ডান)
+                SheetZoomBtn(if (rowOrder) "⇄" else "⇅") {
+                    com.hanif.smartstudy.util.QBankPaperViewStore.setRowOrder(ctx, !rowOrder)
+                }
+                Spacer(Modifier.width(4.dp))
                 SheetZoomBtn("A−") {
                     zoom = (zoom - 0.15f).coerceAtLeast(0.7f)
                     com.hanif.smartstudy.util.QBankPaperViewStore.setZoom(ctx, zoom)
@@ -1154,9 +1205,10 @@ private fun PaperSheetView(
                     }
                 ) {
                     Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
-                        SheetTitleBlock(institutionName, postName, showInstitution, questions.size)
+                        SheetTitleBlock(institutionName, postName, showInstitution, questions.size,
+                            modifier = Modifier.onSizeChanged { titleH = it.height })
                         PaperColumnsFlow(
-                            columns = cols, pageHeight = pageH, gap = 14.dp, pageTops = pageTops,
+                            columns = cols, pageHeight = pageH, gap = 14.dp, rowMajor = rowOrder, fullWidth = fullWidth, pageTops = pageTops,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             entries.forEach { e -> SheetEntryView(e, hide, onBookmark, onSpeak, onReportTap) }
@@ -1181,22 +1233,23 @@ private fun SheetZoomBtn(label: String, onClick: () -> Unit) {
     )
 }
 
-/** একটা এন্ট্রি = ঠিক একটা রুট-নোড (কলাম-প্রবাহের এক আইটেম) */
+/** একটা এন্ট্রি = ঠিক একটা রুট-নোড (প্রবাহের এক আইটেম): বিষয়ের শিরোনাম অথবা নম্বর-দেওয়া প্রশ্ন/গ্রুপ */
 @Composable
 private fun SheetEntryView(
     e: SheetEntry, hide: Boolean,
     onBookmark: (String) -> Unit, onSpeak: (String, String) -> Unit, onReportTap: (QuestionItem) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 9.dp)) {
-        if (e.headLabel != null) {
-            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).height(1.dp).background(HeaderBg.copy(alpha = 0.35f)))
-                Text("${e.headLabel} (${paperBn(e.headCount, 1)})", fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                    color = HeaderBg, modifier = Modifier.padding(horizontal = 8.dp))
-                Box(Modifier.weight(1f).height(1.dp).background(HeaderBg.copy(alpha = 0.35f)))
-            }
+    if (e.headLabel != null) {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).height(1.dp).background(HeaderBg.copy(alpha = 0.35f)))
+            Text("${e.headLabel} (${paperBn(e.headCount, 1)})", fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
+                color = HeaderBg, modifier = Modifier.padding(horizontal = 10.dp))
+            Box(Modifier.weight(1f).height(1.dp).background(HeaderBg.copy(alpha = 0.35f)))
         }
-        SheetEntryBody(e, hide, onBookmark, onSpeak, onReportTap)
+    } else {
+        Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            SheetEntryBody(e, hide, onBookmark, onSpeak, onReportTap)
+        }
     }
 }
 

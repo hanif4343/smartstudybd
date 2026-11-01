@@ -18,6 +18,10 @@ object QBankPaperViewStore {
     var sheet by mutableStateOf(true)
         private set
 
+    /** শিট-ভিউ সাজানোর ক্রম: true = সারি-ক্রম (১|২, ৩|৪ …; ডিফল্ট), false = কলাম-ক্রম (বাম কলাম নিচে নেমে, তারপর ডান) */
+    var rowOrder by mutableStateOf(true)
+        private set
+
     /** শিট-ভিউর জুম (লেখার মাপের গুণক): ০.৭ – ২.০, ডিফল্ট ১.০ */
     var zoom by mutableStateOf(1f)
         private set
@@ -29,6 +33,7 @@ object QBankPaperViewStore {
             val p = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             sheet = p.getBoolean(KEY, true)
             zoom  = p.getFloat("zoom", 1f).coerceIn(0.7f, 2.0f)
+            rowOrder = p.getBoolean("rowOrder", true)
         } catch (_: Exception) { /* ডিফল্ট শিট-ভিউ */ }
     }
 
@@ -43,6 +48,13 @@ object QBankPaperViewStore {
         zoom = value.coerceIn(0.7f, 2.0f)
         try {
             ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat("zoom", zoom).apply()
+        } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
+    }
+
+    fun setRowOrder(ctx: Context, value: Boolean) {
+        rowOrder = value
+        try {
+            ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("rowOrder", value).apply()
         } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
     }
 }
