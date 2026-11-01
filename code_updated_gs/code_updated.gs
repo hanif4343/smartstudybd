@@ -2066,6 +2066,38 @@ function qDeleteByReference_(ss, viewName, refType, refId) {
   return { status: "success", result: "success", deleted: r.removed, hardDeleted: r.deleted, removedFromViewOnly: r.demoted, examAppearancesDeleted: ea, sheet: viewName, keptReferences: keep };
 }
 
+/* ══ Exam_Appearances ডুপ্লিকেট-চেক ══
+   চাবি = প্রশ্ন + পদ + প্রতিষ্ঠান + সাল — চারটাই হুবহু মিললে তবেই "আগে থেকেই আছে"।
+   পদ ও প্রতিষ্ঠান একই হলেও সাল আলাদা হলে এটা ডুপ্লিকেট নয়, আলাদা appearance (যোগ হবে)।
+   পদ/প্রতিষ্ঠান/সাল — যেকোনো একটা ফাঁকা থাকলে চাবি "" হয় = কখনো ডুপ্লিকেট ধরা হয় না (নিরাপদ দিক)। */
+function qEaYear_(y) {
+  return String(y == null ? "" : y)
+    .replace(/[\u09E6-\u09EF]/g, function (d) { return String(d.charCodeAt(0) - 0x09E6); })   // বাংলা অংক → ইংরেজি (২০২৩ ≡ 2023)
+    .replace(/\s+/g, "").toLowerCase();
+}
+function qEaKey_(qid, postId, instId, year) {
+  var q = String(qid == null ? "" : qid).trim(), p = String(postId == null ? "" : postId).trim(),
+      i = String(instId == null ? "" : instId).trim(), y = qEaYear_(year);
+  if (!q || !p || !i || !y) return "";
+  return q + "|" + p + "|" + i + "|" + y;
+}
+// all = শিটের সব সারি (প্রথম সারি হেডার) — শিট আবার না পড়ে চাবি-ম্যাপ বানায় (qBulkSave_ একবার পড়ে এখান থেকেই সব নেয়)
+function qEaKeysFromData_(all) {
+  var out = {}; if (!all || all.length < 2) return out;
+  var hdr = all[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var cq = hdr.indexOf("question_id"), cp = hdr.indexOf("post_id"), ci = hdr.indexOf("institution_id"), cy = hdr.indexOf("year");
+  if (cq < 0) cq = 1; if (cp < 0) cp = 2; if (ci < 0) ci = 3; if (cy < 0) cy = 4;
+  for (var r = 1; r < all.length; r++) {
+    var k = qEaKey_(all[r][cq], all[r][cp], all[r][ci], all[r][cy]);
+    if (k) out[k] = String(all[r][0] == null ? "" : all[r][0]);
+  }
+  return out;
+}
+function qEaLoadKeys_(eaSh) {
+  var lr = eaSh.getLastRow(); if (lr < 2) return {};
+  return qEaKeysFromData_(eaSh.getRange(1, 1, lr, eaSh.getLastColumn()).getValues());
+}
+
 /** bulk_save_rows (Quiz/QBank, unified) — নতুন নিয়মে Questions-এ লেখা */
 function qBulkSave_(params, ss) {
   var tab = params.targetTab || params.sheet;
@@ -2083,7 +2115,23 @@ function qBulkSave_(params, ss) {
     for (var nd = 0; nd < need.length; nd++) if (ix[need[nd]] === undefined) return { result: "error", error: "Questions শিটে কলাম নেই: " + need[nd] };
 
     var n = sh.getLastRow() - 1;
-    var data = n > 0 ? sh.getRange(2, 1, n, lc).getValues() : [];
+    // ⚡ Questions শিটের শুধু যে ৮টা কলাম এখানে লাগে সেগুলোই পড়া হয় (id, question, subtopic, subject, questiontype, in_quiz, in_qbank, topic_id)।
+    //    আগে সব কলাম (লম্বা explanation/অপশন/ট্যাগ সহ) পড়া হতো — শিট বড় হলে সেটাই সবচেয়ে ধীর অংশ। পাশাপাশি থাকা কলাম এক রেঞ্জে পড়া হয়।
+    //    বাকি ঘরগুলো ফাঁকা থাকে — নিচের কোড এই ৮টার বাইরে data[][] থেকে কিছু পড়ে না।
+    var data = [];
+    if (n > 0) {
+      var wantKeys = ["id", "question", "subtopic", "subject", "questiontype", "inquiz", "inqbank", "topicid"], wantCols = [];
+      wantKeys.forEach(function (wk) { if (ix[wk] !== undefined && wantCols.indexOf(ix[wk]) < 0) wantCols.push(ix[wk]); });
+      wantCols.sort(function (a, b) { return a - b; });
+      for (var dr = 0; dr < n; dr++) data.push(new Array(lc));
+      var wi = 0;
+      while (wi < wantCols.length) {
+        var wj = wi; while (wj + 1 < wantCols.length && wantCols[wj + 1] === wantCols[wj] + 1) wj++;
+        var wWidth = wantCols[wj] - wantCols[wi] + 1, wBlk = sh.getRange(2, wantCols[wi] + 1, n, wWidth).getValues();
+        for (var wr = 0; wr < n; wr++) for (var wc = 0; wc < wWidth; wc++) data[wr][wantCols[wi] + wc] = wBlk[wr][wc];
+        wi = wj + 1;
+      }
+    }
     var norm = function (s) { return (s || "").toString().toLowerCase().replace(/\s+/g, " ").trim().substring(0, 100); };
     var existing = {}, existingByQ = {}, maxQn = 0, idsSeen = {};
     var cQ = ix["question"], cSt = ix["subtopic"], cSu = ix["subject"], cId = ix["id"];
@@ -2099,12 +2147,14 @@ function qBulkSave_(params, ss) {
     }
 
     // Exam_Appearances (v2) সিকোয়েন্স
-    var eaSh = qEaSheet_(ss), eaCur = 0;
+    var eaSh = qEaSheet_(ss), eaCur = 0, eaAll = null;
     if (params.examAppearance && tab === "QBank" && eaSh) {
       var prop = PropertiesService.getScriptProperties();
       eaCur = parseInt(prop.getProperty("MAX_ID_EXAM_APPEARANCES") || "0", 10) || 0;
       if (eaSh.getLastRow() > 1) {
-        eaSh.getRange(2, 1, eaSh.getLastRow() - 1, 1).getValues().forEach(function (x) { var mm = (x[0] || "").toString().match(/(\d+)$/); if (mm) { var v = parseInt(mm[1], 10); if (v > eaCur) eaCur = v; } });
+        // ⚡ Exam_Appearances শিট এই অনুরোধে মাত্র একবার পড়া হয় — eaCur, eaSet, eaSeen তিনটাই এই ডেটা থেকে (আগে ৩ বার পড়া হতো)
+        eaAll = eaSh.getRange(1, 1, eaSh.getLastRow(), Math.max(5, eaSh.getLastColumn())).getValues();
+        for (var ea0 = 1; ea0 < eaAll.length; ea0++) { var mm = (eaAll[ea0][0] || "").toString().match(/(\d+)$/); if (mm) { var v = parseInt(mm[1], 10); if (v > eaCur) eaCur = v; } }
       }
     }
 
@@ -2116,8 +2166,7 @@ function qBulkSave_(params, ss) {
     if (params.examAppearance && tab === "QBank") {
       var pa = params.examAppearance;
       paperKey = String(pa.postId || "").trim() + "|" + String(pa.institutionId || "").trim() + "|" + ceYearKey(pa.year);
-      if (eaSh && eaSh.getLastRow() > 1) {
-        var eaAll = eaSh.getRange(1, 1, eaSh.getLastRow(), Math.max(5, eaSh.getLastColumn())).getValues();
+      if (eaAll) {
         var eh = eaAll[0].map(function (h) { return String(h).trim(); });
         var eq = eh.indexOf("question_id"), ep = eh.indexOf("post_id"), ei = eh.indexOf("institution_id"), ey = eh.indexOf("year");
         if (eq >= 0 && ep >= 0 && ei >= 0 && ey >= 0) {
@@ -2129,6 +2178,16 @@ function qBulkSave_(params, ss) {
       }
     }
 
+    // একই (প্রশ্ন+পদ+প্রতিষ্ঠান+সাল) আগে থাকলে আবার appearance যোগ হয় না; সাল আলাদা হলে যোগ হয়
+    var eaSeen = {}, eaAlready = 0, eaMissing = 0;   // eaMissing = যে সারির Appearance না যোগ হয়েছে, না আগে থেকে ছিল (সত্যিকারের ব্যর্থতা)
+    if (params.examAppearance && tab === "QBank" && eaSh) eaSeen = qEaKeysFromData_(eaAll);
+    var addEa = function (qid) {
+      var ea = params.examAppearance, k = qEaKey_(qid, ea.postId, ea.institutionId, ea.year);
+      if (k && eaSeen[k]) { eaAlready++; return false; }
+      if (k) eaSeen[k] = 1;
+      eaCur++; eaRows.push(["EA" + eaCur, qid, ea.postId || "", ea.institutionId || "", ea.year || ""]);
+      return true;
+    };
     var unclassified = 0;   // নতুন QBank সারি যেগুলো এখনো Subject/Topic পায়নি (রুল মেলেনি)
     var added = 0, skipped = 0, linked = 0, eaRows = [], eaLinked = 0, dirty = {}, newRows = [], resultIds = new Array(rows.length).fill("");
     var toggles = []; // [rowIndexInData, colIndex, "Y"]
@@ -2159,9 +2218,10 @@ function qBulkSave_(params, ss) {
             if (tab === "Quiz" && !qY_(exRow[ix["inquiz"]]) && !exWritten) { toggles.push([ex.row, ix["inquiz"]]); exRow[ix["inquiz"]] = "Y"; linked++; if (ix["topicid"] !== undefined) dirty[String(exRow[ix["topicid"]] || "").trim()] = 1; }
             if (tab === "QBank" && !qY_(exRow[ix["inqbank"]])) { toggles.push([ex.row, ix["inqbank"]]); exRow[ix["inqbank"]] = "Y"; linked++; if (ix["topicid"] !== undefined) dirty[String(exRow[ix["topicid"]] || "").trim()] = 1; }
           }
-          if (params.examAppearance && tab === "QBank" && eaSh && !(eaSet[ex.id] && eaSet[ex.id][paperKey])) {
-            (eaSet[ex.id] = eaSet[ex.id] || {})[paperKey] = 1;
-            eaCur++; eaRows.push(["EA" + eaCur, ex.id, params.examAppearance.postId || "", params.examAppearance.institutionId || "", params.examAppearance.year || ""]); eaLinked++;
+          if (params.examAppearance && tab === "QBank") {
+            if (!eaSh) eaMissing++;                                              // Exam_Appearances শিটই নেই
+            else if (eaSet[ex.id] && eaSet[ex.id][paperKey]) eaAlready++;        // এই পেপারে (পদ+প্রতিষ্ঠান+সাল) আগে থেকেই আছে — ব্যর্থতা নয়
+            else { (eaSet[ex.id] = eaSet[ex.id] || {})[paperKey] = 1; if (addEa(ex.id)) eaLinked++; }
           }
           continue;
         }
@@ -2214,10 +2274,8 @@ function qBulkSave_(params, ss) {
         if (norm(row.question)) { var qkN = norm(row.question) + "|" + tk; (existingByQ[qkN] = existingByQ[qkN] || []).push({ id: bId, row: -1 }); }
         if (paperKey) (eaSet[bId] = eaSet[bId] || {})[paperKey] = 1;
         added++;
-        if (params.examAppearance && tab === "QBank" && eaSh) {
-          eaCur++; eaRows.push(["EA" + eaCur, bId, params.examAppearance.postId || "", params.examAppearance.institutionId || "", params.examAppearance.year || ""]);
-        }
-      } catch (rowErr) { skipped++; }
+        if (params.examAppearance && tab === "QBank") { if (eaSh) addEa(bId); else eaMissing++; }
+      } catch (rowErr) { skipped++; if (params.examAppearance && tab === "QBank") eaMissing++; }
     }
 
     if (newRows.length) {
@@ -2229,9 +2287,16 @@ function qBulkSave_(params, ss) {
       eaSh.getRange(eaSh.getLastRow() + 1, 1, eaRows.length, 5).setValues(eaRows);
       PropertiesService.getScriptProperties().setProperty("MAX_ID_EXAM_APPEARANCES", String(eaCur));
     }
-    if (newRows.length || toggles.length) { markTopicsDirty(dirty); qRefreshTopicCounts_(ss); }
+    // ⚡ Topic-গণনা (পুরো শিট ২ বার স্ক্যান) — কয়েক চাংকে যাওয়া সাবমিটে শুধু শেষ চাংকে (sync !== false) চালানো হয়;
+    //    মাঝের চাংকে কিছু বদলালে শুধু "বাকি আছে" চিহ্ন রাখা হয় (শেষ চাংক না এলেও পরের যেকোনো সেভে নিজে মিটে যায়)।
+    //    sync না পাঠানো পুরনো/অন্য কলার (যেমন Q2Q) আগের মতোই প্রতিবার চালায়।
+    var cntChanged = !!(newRows.length || toggles.length);
+    if (cntChanged) markTopicsDirty(dirty);
+    var cntProp = PropertiesService.getScriptProperties();
+    if (params.sync === false) { if (cntChanged) cntProp.setProperty("TOPIC_COUNTS_PENDING", "1"); }
+    else if (cntChanged || cntProp.getProperty("TOPIC_COUNTS_PENDING") === "1") { qRefreshTopicCounts_(ss); cntProp.deleteProperty("TOPIC_COUNTS_PENDING"); }
     return { result: "success", added: added, skipped: skipped, linkedToExisting: linked, firebaseSynced: true,
-             examAppearancesAdded: eaRows.length, examAppearancesLinkedToExisting: eaLinked, ids: resultIds, autoClassified: autoClassified, unclassified: unclassified };
+             examAppearancesAdded: eaRows.length, examAppearancesLinkedToExisting: eaLinked, examAppearancesAlreadyExisted: eaAlready, examAppearancesMissing: eaMissing, ids: resultIds, autoClassified: autoClassified, unclassified: unclassified };
   } finally { lock.releaseLock(); }
 }
 
@@ -2370,6 +2435,12 @@ function doGet(e) {
   if (action.indexOf("tt_")===0) {
     if (typeof ac_handleAction_!=="function") return json({status:"error",message:"AutoClassify.gs প্রজেক্টে যোগ করা নেই"});
     return json(ac_handleAction_(action, e.parameter));
+  }
+
+  // ── Topic Manager (Admin App) — topic_manager.gs ──
+  if (action.indexOf("tm_")===0) {
+    if (typeof tm_handleAction_!=="function") return json({status:"error",message:"topic_manager.gs প্রজেক্টে যোগ করা নেই"});
+    return json(tm_handleAction_(action, e.parameter));
   }
 
   // ── ✍ হাতে লেখা (ইঙ্ক) ──
@@ -3424,6 +3495,9 @@ function doGet(e) {
     if (!aeaQid||!aeaPostId||!aeaInstId||!aeaYear) return json({status:"error",result:"error",message:"questionId/postId/institutionId/year সবগুলো প্রয়োজন"});
     var aeaSs=SpreadsheetApp.getActiveSpreadsheet(), aeaSh=qEaSheet_(aeaSs);
     if (!aeaSh) return json({status:"error",result:"error",message:"Exam_Appearances sheet নেই"});
+    // একই প্রশ্ন + পদ + প্রতিষ্ঠান + সাল আগে থেকেই থাকলে আবার যোগ হবে না; সাল আলাদা হলে নতুন appearance হিসেবে যোগ হবে
+    var aeaKey=qEaKey_(aeaQid,aeaPostId,aeaInstId,aeaYear);
+    if (aeaKey) { var aeaKeys=qEaLoadKeys_(aeaSh); if (aeaKeys[aeaKey]) return json({status:"success",result:"success",alreadyExists:true,appearanceId:aeaKeys[aeaKey]}); }
     var aeaNewId="EA-"+Utilities.getUuid().substring(0,8);
     aeaSh.appendRow([aeaNewId, aeaQid, aeaPostId, aeaInstId, aeaYear]);
     return json({status:"success",result:"success",appearanceId:aeaNewId});
@@ -4940,6 +5014,12 @@ function doPost(e) {
     if (params.type && String(params.type).indexOf("tt_")===0) {
       if (typeof ac_handleAction_!=="function") return json({status:"error",message:"AutoClassify.gs প্রজেক্টে যোগ করা নেই"});
       return json(ac_handleAction_(String(params.type), params));
+    }
+
+    // ── Topic Manager (POST: মার্জ/ডিলিট/Undo) ──
+    if (params.type && String(params.type).indexOf("tm_")===0) {
+      if (typeof tm_handleAction_!=="function") return json({status:"error",message:"topic_manager.gs প্রজেক্টে যোগ করা নেই"});
+      return json(tm_handleAction_(String(params.type), params));
     }
 
     // ── QBank→Quiz Converter (Admin App AI Job) বাল্ক ইনসার্ট ──
