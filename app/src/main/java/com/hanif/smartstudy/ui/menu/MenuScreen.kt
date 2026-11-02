@@ -661,6 +661,7 @@ fun MenuRow(
 
 private val AUDIENCE_TAGS = listOf(
     "" to "👔 Job Seeker (Default)",
+    "Nursing Admission" to "🩺 Nursing Admission",
     "Masters 2" to "🎓 Masters 2nd",
     "Masters 1" to "🎓 Masters 1st",
     "Honours 4" to "🎓 Honours 4th",

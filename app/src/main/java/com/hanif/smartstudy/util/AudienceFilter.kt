@@ -152,6 +152,7 @@ object AudienceFilter {
             group.equals("Job", ignoreCase = true)      -> "চাকরি (Job)"
             group.startsWith("Class",   ignoreCase = true) ->
                 "${group.removePrefix("Class").trim()} শ্রেণি"
+            group.equals("Nursing Admission", ignoreCase = true) -> "নার্সিং ভর্তি"
             group.startsWith("Masters", ignoreCase = true) ->
                 "মাস্টার্স ${group.removePrefix("Masters").trim()} বর্ষ"
             group.startsWith("Honours", ignoreCase = true) ->

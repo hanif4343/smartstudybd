@@ -187,6 +187,13 @@ fun MainScreen(
             openChallengeWhenEnabled = false
         }
     }
+    // 🩺 Nursing Admission → QBank-এ Midwife / BSc Nursing / Diploma In Nursing ক্যাটাগরি।
+    // Admin হলে "দেখার tag" (adminViewingTag) অনুযায়ী, নইলে ইউজারের নিজের classLevel অনুযায়ী।
+    LaunchedEffect(menuState.adminViewingTag, menuState.isAdmin) {
+        val cl = if (menuState.isAdmin && menuState.adminViewingTag.isNotBlank()) menuState.adminViewingTag
+                 else session.getCurrentUser()?.classLevel
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(cl)
+    }
     LaunchedEffect(menuState.adminViewingTag) {
         if (menuState.isAdmin) {
             quizViewModel.adminRefreshContent()

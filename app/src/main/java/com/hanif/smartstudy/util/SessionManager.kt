@@ -297,11 +297,14 @@ class SessionManager(private val context: Context) {
         // ── CdnService-কে জানানো: এই account admin কিনা — সেই অনুযায়ী পরের CDN
         // request-এ KV rate-limit bypass header যাবে কিনা ঠিক হয় (দেখো CdnService.kt) ──
         com.hanif.smartstudy.data.remote.CdnService.isAdminSession = user.isAdmin()
+        // 🩺 Nursing Admission ইউজার হলে QBank-এ নার্সিং ক্যাটাগরি
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(user.classLevel)
     }
 
     suspend fun clearUser() {
         context.dataStore.edit { it.remove(KEY_USER_JSON) }
         com.hanif.smartstudy.data.remote.CdnService.isAdminSession = false
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(null)
     }
 
     // ── Theme ─────────────────────────────────────────────────

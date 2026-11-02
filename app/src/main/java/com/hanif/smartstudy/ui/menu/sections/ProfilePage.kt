@@ -55,7 +55,8 @@ private val CLASS_LEVEL_OPTIONS = listOf(
     "Honours 3" to "অনার্স ৩য় বর্ষ",
     "Honours 4" to "অনার্স ৪র্থ বর্ষ",
     "Masters 1" to "মাস্টার্স ১ম বর্ষ",
-    "Masters 2" to "মাস্টার্স ২য় বর্ষ"
+    "Masters 2" to "মাস্টার্স ২য় বর্ষ",
+    "Nursing Admission" to "🩺 নার্সিং ভর্তি (Nursing Admission)"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

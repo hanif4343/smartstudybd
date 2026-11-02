@@ -11,15 +11,43 @@ import androidx.compose.runtime.setValue
  */
 object QBankCategory {
     const val GRADE = "১৬-২০ গ্রেড"
-    val ALL = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "ব্যাংক", GRADE)
+    private val GENERAL_ALL = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "ব্যাংক", GRADE)
+
+    // ── 🩺 Nursing Admission ইউজারদের জন্য আলাদা ৩টা ক্যাটাগরি ──
+    const val MIDWIFE = "Midwife"
+    const val BSC_NURSING = "BSc Nursing"
+    const val DIPLOMA_NURSING = "Diploma In Nursing"
+    val NURSING_ALL = listOf(MIDWIFE, BSC_NURSING, DIPLOMA_NURSING)
+
+    /** audience tag / classLevel যেটা Nursing ইউজার বোঝায় */
+    const val NURSING_TAG = "Nursing Admission"
+
+    /** true হলে নার্সিং ক্যাটাগরি দেখাবে (Compose state — বদলালে UI আপনা-আপনি আপডেট হয়) */
+    var nursingMode by mutableStateOf(false)
+        private set
+
+    /** বর্তমান মোড অনুযায়ী চিপ-তালিকা */
+    val ALL: List<String> get() = if (nursingMode) NURSING_ALL else GENERAL_ALL
+
     /** বর্তমানে সিলেক্টেড চিপ — UI সেট করে, ViewModel (সাল-মোড) পড়ে; back করলেও মনে থাকে */
-    var selected by mutableStateOf(ALL.first())
+    var selected by mutableStateOf(GENERAL_ALL.first())
+
+    fun isNursingTag(tag: String?): Boolean = tag?.trim().equals(NURSING_TAG, ignoreCase = true)
+
+    /** ইউজার (বা admin-এর audience override) অনুযায়ী মোড সেট করো; সিলেক্টেড চিপ অবৈধ হলে প্রথমটায় ফেরাও */
+    fun applyAudience(classLevel: String?) {
+        nursingMode = isNursingTag(classLevel)
+        if (selected !in ALL) selected = ALL.first()
+    }
 
     private val NAMED = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "ব্যাংক")
 
     fun nameMatches(name: String, category: String): Boolean {
         val n = name.trim().lowercase()
         return when (category) {
+            MIDWIFE         -> n.contains("midwife") || n.contains("midwifery") || name.contains("মিডওয়াইফ")
+            BSC_NURSING     -> n.contains("bsc") || n.contains("b.sc") || n.contains("b sc") || name.contains("বিএসসি")
+            DIPLOMA_NURSING -> n.contains("diploma") || name.contains("ডিপ্লোমা")
             "বিসিএস"   -> n.contains("bcs") || name.contains("বিসিএস")
             "প্রাথমিক" -> n.contains("primary") || name.contains("প্রাথমিক")
             // শিক্ষক নিবন্ধন (NTRCA): কলেজ পর্যায় / স্কুল পর্যায় নামেও আসে
@@ -40,6 +68,12 @@ object QBankCategory {
      */
     fun matches(names: List<String>, category: String): Boolean {
         fun hit(cat: String) = names.any { nameMatches(it, cat) }
+        // নার্সিং ক্যাটাগরি: কার্ডের নিজের নাম আগে, না মিললে নেস্টেড নাম
+        if (category in NURSING_ALL) {
+            val own = names.firstOrNull().orEmpty()
+            val ownCat = NURSING_ALL.firstOrNull { nameMatches(own, it) }
+            return if (ownCat != null) ownCat == category else hit(category)
+        }
         val ownName = names.firstOrNull().orEmpty()
         val ownCategory = NAMED.firstOrNull { nameMatches(ownName, it) }
         return when (category) {

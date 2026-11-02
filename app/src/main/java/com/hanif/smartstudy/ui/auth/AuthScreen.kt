@@ -60,6 +60,9 @@ val CLASS_GROUPS = listOf(
     )),
     ClassGroup("মাস্টার্স", "🔬", listOf(
         "Masters 1","Masters 2","Masters Final"
+    )),
+    ClassGroup("ভর্তি প্রস্তুতি", "🩺", listOf(
+        "Nursing Admission"
     ))
 )
 
