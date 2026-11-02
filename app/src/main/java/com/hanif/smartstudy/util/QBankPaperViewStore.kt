@@ -22,6 +22,14 @@ object QBankPaperViewStore {
     var rowOrder by mutableStateOf(true)
         private set
 
+    /**
+     * লিখিত পেপারের উত্তর-মোড: true = "উত্তরসহ" (সল্যুশন-শিটের মতো — প্রশ্ন + উত্তর/ব্যাখ্যা; ডিফল্ট),
+     * false = "শুধু প্রশ্ন" (ছাপা প্রশ্নপত্রের মতো — উত্তর/ব্যাখ্যা/কৌশল কিছুই দেখায় না)।
+     * ইউজার যেকোনো সময় বদলাতে পারে; পছন্দটা স্থায়ী।
+     */
+    var showAnswers by mutableStateOf(true)
+        private set
+
     /** শিট-ভিউর জুম (লেখার মাপের গুণক): ০.৭ – ২.০, ডিফল্ট ১.০ */
     var zoom by mutableStateOf(1f)
         private set
@@ -34,6 +42,7 @@ object QBankPaperViewStore {
             sheet = p.getBoolean(KEY, true)
             zoom  = p.getFloat("zoom", 1f).coerceIn(0.7f, 2.0f)
             rowOrder = p.getBoolean("rowOrder", true)
+            showAnswers = p.getBoolean("showAnswers", true)
         } catch (_: Exception) { /* ডিফল্ট শিট-ভিউ */ }
     }
 
@@ -41,6 +50,13 @@ object QBankPaperViewStore {
         sheet = value
         try {
             ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, value).apply()
+        } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
+    }
+
+    fun setShowAnswers(ctx: Context, value: Boolean) {
+        showAnswers = value
+        try {
+            ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("showAnswers", value).apply()
         } catch (_: Exception) { /* মেমোরিতে থাকবে */ }
     }
 

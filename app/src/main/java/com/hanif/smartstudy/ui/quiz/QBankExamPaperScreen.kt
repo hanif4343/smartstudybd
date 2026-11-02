@@ -119,6 +119,10 @@ private fun buildFillBlankText(question: String, answer: String): AnnotatedStrin
 private val ExplainPanel = Color(0xFFF1F5F9)
 /** লিখিত মডেল টেস্টে উত্তর/ব্যাখ্যা প্রথমে লুকানো থাকে (QBankExamPaperScreen-এর hideAnswers) */
 private val LocalPaperHideAnswers = androidx.compose.runtime.compositionLocalOf { false }
+
+/** "শুধু প্রশ্ন" মোড (ইউজারের টগল) — ছাপা প্রশ্নপত্রের মতো: উত্তরের ফাঁকা দাগ/ড্যাশও দেখায় না।
+ *  (লিখিত মডেল টেস্টের লুকানো-উত্তর মোডে এটা false — সেখানে "＿＿＿" ফাঁকা আগের মতোই থাকে) */
+private val LocalPaperQuestionsOnly = androidx.compose.runtime.compositionLocalOf { false }
 private val TechPanel    = Color(0xFFEAF1E4)
 
 // ── FIX ("সাবজেক্ট ঠিকমতো Define না থাকা" সমস্যা): written প্রশ্নে subject_id
@@ -206,11 +210,22 @@ fun QBankExamPaperScreen(
     hideAnswers     : Boolean = false
 ) {
     var hidden by remember(hideAnswers) { mutableStateOf(hideAnswers) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalPaperHideAnswers provides hidden) {
+    // ── সাধারণ QBank পেপারে: ইউজারের "শুধু প্রশ্ন | উত্তরসহ" টগল (স্থায়ী পছন্দ) ──
+    //    লিখিত মডেল টেস্টে (hideAnswers = true) আগের ভাসমান "উত্তর দেখান" বাটনই থাকে।
+    val modeCtx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.hanif.smartstudy.util.QBankPaperViewStore.init(modeCtx) }
+    val showAnswers = com.hanif.smartstudy.util.QBankPaperViewStore.showAnswers
+    val questionsOnly = !hideAnswers && !showAnswers
+    val effectiveHide = if (hideAnswers) hidden else !showAnswers
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalPaperHideAnswers provides effectiveHide,
+        LocalPaperQuestionsOnly provides questionsOnly
+    ) {
         Box(Modifier.fillMaxSize()) {
             QBankExamPaperScreenImpl(
                 institutionName = institutionName, postName = postName, showInstitution = showInstitution,
-                questions = questions, isAdmin = isAdmin, onBack = onBack, onBookmark = onBookmark, onReport = onReport
+                questions = questions, isAdmin = isAdmin, onBack = onBack, onBookmark = onBookmark, onReport = onReport,
+                showAnswerModeToggle = !hideAnswers
             )
             if (hideAnswers) {
                 Text(
@@ -237,7 +252,8 @@ private fun QBankExamPaperScreenImpl(
     isAdmin         : Boolean = false,
     onBack          : () -> Unit,
     onBookmark      : (String) -> Unit,
-    onReport        : (globalIndex: Int, issue: String) -> Unit
+    onReport        : (globalIndex: Int, issue: String) -> Unit,
+    showAnswerModeToggle : Boolean = false   // true হলে হেডারের নিচে "শুধু প্রশ্ন | উত্তরসহ" বার
 ) {
     // ── FIX: এখন subjectId-কে সরাসরি (Room reference-নাম না) ৪-বাকেট কনসোলিডেশন
     // ম্যাপ দিয়ে রেজল্ভ করা হয় — written অংশে সবসময় ঠিক ৪টা সাবজেক্ট-ট্যাবই দেখাবে
@@ -365,6 +381,31 @@ private fun QBankExamPaperScreenImpl(
                 ) {
                     Icon(Icons.Filled.SwapVert, contentDescription = "সাজান",
                         tint = HeaderCream, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        // ── 📝 শুধু প্রশ্ন (ছাপা প্রশ্নপত্রের মতো)  |  ✅ উত্তরসহ (সল্যুশন-শিটের মতো) — দুই ভিউ, ইউজার বদলাতে পারে ──
+        if (showAnswerModeToggle) {
+            val answersOn = com.hanif.smartstudy.util.QBankPaperViewStore.showAnswers
+            Row(
+                Modifier.fillMaxWidth().background(TabInactiveBg).padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(false to "📝 শুধু প্রশ্ন", true to "✅ উত্তরসহ").forEach { (withAns, label) ->
+                    val on = answersOn == withAns
+                    Box(
+                        Modifier.weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (on) HeaderBg else Color.White)
+                            .border(1.dp, if (on) HeaderBg else HeaderBg.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable { com.hanif.smartstudy.util.QBankPaperViewStore.setShowAnswers(viewCtx, withAns) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                            color = if (on) HeaderCream else HeaderBg)
+                    }
                 }
             }
         }
@@ -1308,7 +1349,7 @@ private fun SheetEntryBody(
                         SheetLongPressMenu(sub, hide, onBookmark, onSpeak, onReportTap) {
                             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                                 SheetCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
-                                SheetCell(if (hide) "—" else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                                SheetCell(if (hide) (if (LocalPaperQuestionsOnly.current) "" else "—") else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
                             }
                         }
                     }
@@ -1383,6 +1424,7 @@ private fun SheetSub(
     val sep = layout.sep.ifBlank { "=" }
     val inlineThird = layout.thirdPre == "("                       // সমাস: "প্রশ্ন = উত্তর (ব্যাখ্যা)"
     val oneLine = layout.kind == "pair" && (!layout.highlight || inlineThird)
+    val qOnly = LocalPaperQuestionsOnly.current
     val ans = if (hide) "＿＿＿" else q.answer
     SheetLongPressMenu(q, hide, onBookmark, onSpeak, onReportTap) {
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.Top) {
@@ -1393,11 +1435,11 @@ private fun SheetSub(
                     if (layout.highlight) {
                         val third = if (inlineThird && !hide && q.explanation.isNotBlank()) " (${q.explanation})" else ""
                         Text(
-                            text = buildAnnotatedString { append(buildHighlightedText(q.question)); append("  $sep  $ans$third") },
+                            text = buildAnnotatedString { append(buildHighlightedText(q.question)); if (!qOnly) append("  $sep  $ans$third") },
                             fontSize = 12.5.sp, lineHeight = 18.sp, color = SheetInk
                         )
                     } else {
-                        SheetText(text = "${q.question}  $sep  $ans", fontSize = 12.5.sp, lineHeight = 18.sp, color = SheetInk)
+                        SheetText(text = if (qOnly) q.question else "${q.question}  $sep  $ans", fontSize = 12.5.sp, lineHeight = 18.sp, color = SheetInk)
                     }
                     if (!inlineThird && layout.thirdPre != null && !hide && q.explanation.isNotBlank()) {
                         SheetText(text = "${layout.thirdPre} ${q.explanation}${layout.thirdSuf}", fontSize = 11.5.sp, lineHeight = 16.sp, color = SheetInkSoft)
