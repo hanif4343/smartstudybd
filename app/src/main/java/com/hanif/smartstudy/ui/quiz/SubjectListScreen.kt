@@ -128,6 +128,26 @@ private fun subjectImageRes(rawName: String): Int? {
     }
 }
 
+// ── Design 1 — ক্যাটাগরি আইকন ম্যাপ (subjectImageRes-এর সমান্তরাল) ──
+// শুধু ক্যাটাগরি-স্তরের নামের জন্য: সরকারি চাকরি / BCS / ব্যাংক / নার্সিং /
+// ভিডিও ক্লাস। বিষয়-স্তরের ছবি (বাংলা/ইংরেজি/গণিত/সাধারণ জ্ঞান ইত্যাদি)
+// subjectImageRes-এই থাকে — এখানে ডুপ্লিকেট করা হয়নি। নাম না মিললে null,
+// তখন কলার আগের ফলব্যাক (subject ছবি → emoji) অপরিবর্তিত থাকে।
+// NFC নরমালাইজেশন subjectImageRes-এর মতোই, যাতে "য়"-এর দুই রূপ মেলে।
+@DrawableRes
+private fun categoryImageRes(rawName: String): Int? {
+    val name = java.text.Normalizer.normalize(rawName, java.text.Normalizer.Form.NFC)
+    val n = name.lowercase()
+    return when {
+        name.contains("বিসিএস") || n.contains("bcs") -> R.drawable.category_bcs
+        name.contains("নার্সিং") || name.contains("নার্স") || n.contains("nursing") || n.contains("nurse") -> R.drawable.category_nursing
+        name.contains("ব্যাংক") || n.contains("bank") -> R.drawable.category_bank
+        name.contains("সরকারি") || n.contains("government") || n.contains("govt") -> R.drawable.category_gov_job
+        name.contains("ভিডিও") || n.contains("video") -> R.drawable.category_video
+        else -> null
+    }
+}
+
 /** ড্রপডাউন থাম্বনেইল — SSC/HSC-এর নিজস্ব ছবি, বাকিগুলো subjectImageRes()-এর ছবি */
 @DrawableRes
 private fun ownPickImageRes(opt: com.hanif.smartstudy.util.QuizOwnPick.Option): Int? = when (opt.key) {
@@ -296,7 +316,13 @@ private fun SubjectGridImageCard(
     // Study মোডে ছবির নিচে ছোট তথ্য-লাইন ("১২ অধ্যায় · ৪০%") — null হলে কিছুই দেখায় না
     caption       : String? = null
 ) {
-    val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
+    // Design 1: ক্যাটাগরি ছবি বিষয়-ছবির আগে; তবে অ্যাডমিন emoji override
+    // সেট থাকলে ছবি দেখানো হয় না (আগের বিষয়-ছবির ক্ষেত্রেও override
+    // ছবিকে সরাতে পারত না — এখানে ক্যাটাগরির ক্ষেত্রে override রক্ষা করা হলো,
+    // যাতে অ্যাডমিনের সেট করা emoji হারিয়ে না যায়)।
+    val categoryRes = remember(subject.name) { categoryImageRes(subject.name) }
+    val subjectRes = remember(subject.name) { subjectImageRes(subject.name) }
+    val imageRes = if (emojiOverride == null) categoryRes ?: subjectRes else null
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
@@ -547,7 +573,7 @@ private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> U
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QBankEntryCard(
-    title: String, icon: String?, subLabel: String, totalQ: Int, progressFrac: Float,
+    title: String, icon: String?, @DrawableRes iconRes: Int? = null, subLabel: String, totalQ: Int, progressFrac: Float,
     mcqPapers: Int, writtenPapers: Int, compact: Boolean,
     onClick: () -> Unit, onLongPress: (() -> Unit)?,
     pinned: Boolean? = null, onTogglePin: (() -> Unit)? = null,   // pinned == null → পিন বাটন দেখায় না
@@ -564,7 +590,9 @@ private fun QBankEntryCard(
     ) {
         Column(Modifier.padding(if (compact) 12.dp else 14.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                if (icon != null) { Text(icon, fontSize = if (compact) 16.sp else 20.sp); Spacer(Modifier.width(6.dp)) }
+                // Design 1: ক্যাটাগরি ছবি থাকলে ছবি, নাহলে আগের emoji টেক্সট।
+                if (iconRes != null) { Image(painter = painterResource(iconRes), contentDescription = title, modifier = Modifier.size(if (compact) 20.dp else 24.dp), contentScale = ContentScale.Crop); Spacer(Modifier.width(6.dp)) }
+                else if (icon != null) { Text(icon, fontSize = if (compact) 16.sp else 20.sp); Spacer(Modifier.width(6.dp)) }
                 Text(
                     title, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
                     color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, modifier = Modifier.weight(1f)
@@ -609,7 +637,7 @@ private fun QBankEntryCard(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QBankDualChipCard(
-    title: String, icon: String?, subLabel: String,
+    title: String, icon: String?, @DrawableRes iconRes: Int? = null, subLabel: String,
     mcq: Int, written: Int, showMcq: Boolean, showWritten: Boolean,
     onMcq: () -> Unit, onWritten: () -> Unit, onLongPress: (() -> Unit)?
 ) {
@@ -623,7 +651,9 @@ private fun QBankDualChipCard(
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                if (icon != null) { Text(icon, fontSize = 20.sp); Spacer(Modifier.width(8.dp)) }
+                // Design 1: ক্যাটাগরি ছবি থাকলে ছবি, নাহলে আগের emoji টেক্সট।
+                if (iconRes != null) { Image(painter = painterResource(iconRes), contentDescription = title, modifier = Modifier.size(24.dp), contentScale = ContentScale.Crop); Spacer(Modifier.width(8.dp)) }
+                else if (icon != null) { Text(icon, fontSize = 20.sp); Spacer(Modifier.width(8.dp)) }
                 Text(
                     title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 3,
                     color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
@@ -1165,6 +1195,8 @@ fun SubjectListScreen(
                     QBankEntryCard(
                         title = titleFor(subject) ?: subject.name,
                         icon = icon,
+                        // Design 1: অ্যাডমিন emoji override থাকলে ছবি নয়, override-ই থাকবে।
+                        iconRes = if (emojiOverrides["$refType:${subject.subjectId}"].isNullOrBlank()) categoryImageRes(subject.name) else null,
                         subLabel = subLabel,
                         totalQ = mcqN + wrN,
                         progressFrac = if (subject.totalQ > 0) subject.doneQ.toFloat() / subject.totalQ else 0f,
@@ -1229,6 +1261,8 @@ fun SubjectListScreen(
                 QBankDualChipCard(
                     title = titleFor(subject) ?: subject.name,
                     icon = icon,
+                    // Design 1: অ্যাডমিন emoji override থাকলে ছবি নয়, override-ই থাকবে।
+                    iconRes = if (emojiOverrides["$refType:${subject.subjectId}"].isNullOrBlank()) categoryImageRes(subject.name) else null,
                     subLabel = subLabel,
                     mcq = mcqN, written = wrN,
                     showMcq = qbankHasMcq, showWritten = qbankHasWritten,
@@ -2467,7 +2501,21 @@ private fun QBankSubjectCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // ডিফল্ট 📚 আর নেই — শুধু অ্যাডমিনের সেট করা ইমুজি বা নামের কিওয়ার্ড-মিল আইকন
                 val iconText = emojiOverride?.takeIf { it.isNotBlank() } ?: subjectIconOrNull(subject.name)
-                if (iconText != null) {
+                // Design 1: অ্যাডমিন override থাকলে ছবি নয়; নাহলে ক্যাটাগরি ছবি,
+                // তারপর আগের emoji ফলব্যাক। অ্যাডমিন ক্লিক (emoji বদল) অপরিবর্তিত।
+                val categoryRes = if (emojiOverride.isNullOrBlank()) categoryImageRes(subject.name) else null
+                if (categoryRes != null) {
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                            .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
+                            .then(
+                                if (isAdmin && subject.subjectId.isNotBlank())
+                                    Modifier.clickable(onClick = onEmojiClick)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) { Image(painter = painterResource(categoryRes), contentDescription = subject.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                } else if (iconText != null) {
                     Box(
                         Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
                             .background(Brush.linearGradient(listOf(qbankAccent.copy(0.16f), qbankAccent.copy(0.06f))))
