@@ -48,6 +48,7 @@ fun MenuScreen(
     highlightRoutineItemId   : String? = null,
     onRoutineItemHighlighted : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenStudyTab    : () -> Unit = {},
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {},
     onBackToHome      : (() -> Unit)? = null   // Home থেকে সরাসরি কোনো সাবপেজ (Saved Question, Statistics ইত্যাদি)
@@ -105,7 +106,7 @@ fun MenuScreen(
                                     quizViewModel = quizViewModel,
                                     highlightRoutineItemId = highlightRoutineItemId,
                                     onRoutineItemHighlighted = onRoutineItemHighlighted,
-                                    onOpenStudy = onOpenStudy, onOpenInstantTest = onOpenInstantTest,
+                                    onOpenStudy = onOpenStudy, onOpenStudyTab = onOpenStudyTab, onOpenInstantTest = onOpenInstantTest,
                                     onOpenWeeklyTest = onOpenWeeklyTest)
             MenuNav.PROFILE     -> ProfileScreen(state, vm, onBack = { screen = MenuNav.MAIN }, onOpenTestHistory = { screen = MenuNav.TEST_HISTORY })
             MenuNav.STATS       -> StatsScreen(state, vm, onBack = { screen = MenuNav.MAIN })
@@ -295,6 +296,7 @@ fun MainMenuScreen(
     highlightRoutineItemId   : String? = null,
     onRoutineItemHighlighted : () -> Unit = {},
     onOpenStudy       : (subject: String, subTopic: String) -> Unit = { _, _ -> },
+    onOpenStudyTab    : () -> Unit = {},
     onOpenInstantTest : (subject: String, subTopic: String) -> Unit = { _, _ -> },
     onOpenWeeklyTest  : () -> Unit = {}
 ) {
@@ -398,6 +400,7 @@ fun MainMenuScreen(
             // ── Menu items ──
             MenuGroup("📊 তথ্য") {
                 MenuRow("🕘 History",        "তোমার সব কুইজ ও টেস্ট",  Icons.Default.History)      { onNavigate(MenuNav.HISTORY) }
+                MenuRow("📚 আমার লাইব্রেরি", "কোর্স ও ভিডিও দেখুন",   Icons.Default.School)       { onOpenStudyTab() }
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
