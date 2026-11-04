@@ -427,8 +427,9 @@ private fun applyHardcodedSubjectOrder(subjects: List<SubjectEntry>): List<Subje
 // তাই সেটাকে সবসময় "content আছে" ধরা হয়। ──
 private fun SubTopicEntry.hasQuestions(): Boolean = isModelTest || totalQ > 0
 
-// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — নিয়মগুলো util/QBankCategory.kt-তে (ViewModel-ও ব্যবহার করে) ──
-private val EXAM_CATEGORIES = com.hanif.smartstudy.util.QBankCategory.ALL
+// ── QBank পরীক্ষা-ক্যাটাগরি চিপ — তালিকা প্রতিবার বর্তমান অডিয়েন্স থেকে নেওয়া হয়
+// (আগে এটা ফাইল-লেভেল val-এ একবার ধরা হতো, তাই অ্যাডমিন অডিয়েন্স বদলালেও
+// চিপ বদলাত না — নার্সিং সুইচে চাকরির চিপই থেকে যেত, ভেতরে Midwife সিলেক্টেড থাকত) ──
 
 // ── সিলেক্টেড চিপ ফাইল-লেভেলে রাখা হয়েছে — প্রশ্নপত্র থেকে back করলে স্ক্রিন নতুন করে
 // compose হয়, তখন remember রিসেট হয়ে সবসময় প্রথম চিপে ফিরে যেত। ViewModel-ও পড়ে (সাল-মোড) ──
@@ -741,7 +742,7 @@ private fun ExamCategoryChipsRow(
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        EXAM_CATEGORIES.forEach { cat ->
+        com.hanif.smartstudy.util.QBankCategory.ALL.forEach { cat ->
             val isActive = cat == selected
             Box(
                 modifier = Modifier
