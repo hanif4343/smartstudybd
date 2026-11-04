@@ -305,6 +305,8 @@ fun QuestionListScreen(
     // (ViewModel-এর index আসল লিস্ট ধরে চলে, তাই vmIdx দিয়ে ম্যাপ করা হয়)। ──
     val allQuestions = questions
     var qbankTypeTabState by rememberSaveable { mutableStateOf(0) }   // 0 = MCQ, 1 = Written
+    // QBank written paper view — practice list kept as-is, this only switches to paper view.
+    var showWrittenPaper by remember { mutableStateOf(false) }
     // forceTypeTab != null হলে বাইরের দুই-ভাগ বার (QBankTwoPartBar) ট্যাব ঠিক করে দেয়, ভেতরের ট্যাব-সারি লুকানো থাকে
     val qbankTypeTab = forceTypeTab ?: qbankTypeTabState
     val qbankMcqCount = remember(allQuestions) { allQuestions.count { !it.isWritten() } }
@@ -913,6 +915,22 @@ fun QuestionListScreen(
                     }
                 }
 
+                // ── QBank Written: পেপার ভিউ টগল (শুধু Written ট্যাবে) ──
+                if (mode == StudyMode.QBANK && qbankTypeTab == 1 && qbankWrittenCount > 0) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(onClick = { showWrittenPaper = !showWrittenPaper }) {
+                            Text(
+                                if (showWrittenPaper) "প্র্যাকটিস লিস্ট" else "পেপার ভিউ",
+                                fontFamily = NotoSansBengali,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
                 // ── QBank: "মূল প্রশ্নপত্র" বাটন হেডারে সরানো হয়েছে (QuestionTopBar)।
                 // বাটন চাপলে এখানে ছবিগুলো খোলে। ──
                 if (mode == StudyMode.QBANK && paperExpanded && (paperImages.isNotEmpty() || vmState.isAdmin)) {
@@ -987,6 +1005,12 @@ fun QuestionListScreen(
                         }
                     }
                 )
+                if (showWrittenPaper && mode == StudyMode.QBANK && qbankTypeTab == 1) {
+                    WrittenPaperScreen(
+                        questions = pagedQuestions.filter { it.isWritten() },
+                        modifier = Modifier.weight(1f)
+                    )
+                } else
                 // Question list
                 LazyColumn(
                     state               = listState,
