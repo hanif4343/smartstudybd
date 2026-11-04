@@ -922,6 +922,10 @@ fun SubjectListScreen(
         onRefresh    = onRefresh,
         modifier     = Modifier.fillMaxSize()
     ) {
+    // ── Phase 3: Study internal tabs (depth 0 only) ──
+    // SubjectListScreen is rendered only at depth 0 for Study, so this
+    // tab row cannot appear on depth 1/2 Study screens. Default = বিষয়.
+    var studyTab by remember { mutableStateOf(StudyTab.SUBJECTS) }
     LazyColumn(
         modifier            = Modifier.fillMaxSize(),
         contentPadding      = PaddingValues(bottom = 100.dp),
@@ -974,12 +978,17 @@ fun SubjectListScreen(
             }
         }
 
+        // ── Phase 3: Study internal tab row — Study depth 0 only ──
+        if (mode == StudyMode.STUDY) {
+            item { StudyTabRow(selected = studyTab, onSelect = { studyTab = it }) }
+        }
+
         if (isAdmin && isReorderMode) {
             item { OrderHintBar(isSaving = isSavingOrder, msg = orderSavedMsg) }
         }
 
         // ── Study Nav Phase 1: "আমার পড়াশোনা" (Continue/Progress/Recent) ──
-        if (headerSlot != null) {
+        if (headerSlot != null && (mode != StudyMode.STUDY || studyTab == StudyTab.SUBJECTS)) {
             item { headerSlot() }
         }
 
@@ -1019,7 +1028,7 @@ fun SubjectListScreen(
         // দেখো dev-notes/DIAGNOSTIC_NOTES.md। ──
 
         // ── ফোকাস মোড: "🎯 আজ ফোকাস" কার্ড — শুধু Study ট্যাবে, এখন সবার জন্য উন্মুক্ত ──
-        if (mode == StudyMode.STUDY && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
+        if (mode == StudyMode.STUDY && studyTab == StudyTab.SUBJECTS && com.hanif.smartstudy.focus.FocusModeConfig.ENABLED) {
             item {
                 com.hanif.smartstudy.focus.FocusTodayCard(
                     subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + subjects.map { it.name }
@@ -1028,7 +1037,7 @@ fun SubjectListScreen(
         }
 
         // ── Study: "বিষয়সমূহ" শিরোনাম (আগে "আজ ফোকাস" কার্ডটা "Subjects" শিরোনামের নিচে ভুলভাবে পড়ত) + সার্চ ──
-        if (mode == StudyMode.STUDY && !isLoading) {
+        if (mode == StudyMode.STUDY && studyTab == StudyTab.SUBJECTS && !isLoading) {
             item {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp),
@@ -1058,8 +1067,8 @@ fun SubjectListScreen(
             }
         }
 
-        // Loading
-        if (isLoading) {
+        // Loading — Study-তে কোর্স/ভিডিও ট্যাবে বিষয়ের লোডিং দেখানো হবে না
+        if (isLoading && (mode != StudyMode.STUDY || studyTab == StudyTab.SUBJECTS)) {
             item {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Indigo600)
@@ -1068,7 +1077,7 @@ fun SubjectListScreen(
         }
 
         // Empty state
-        if (!isLoading && displaySubjects.isEmpty()) {
+        if (!isLoading && displaySubjects.isEmpty() && (mode != StudyMode.STUDY || studyTab == StudyTab.SUBJECTS)) {
             item {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -1101,6 +1110,9 @@ fun SubjectListScreen(
             }
         }
 
+        // ── Phase 3 gating: Study-তে বিষয়-কার্ড শুধু বিষয় ট্যাবে; কোর্স/ভিডিও
+        // ট্যাবে তার বদলে সংশ্লিষ্ট ট্যাব-কম্পোজেবল দেখায়। Quiz/QBank অপরিবর্তিত। ──
+        if (mode != StudyMode.STUDY || studyTab == StudyTab.SUBJECTS) {
         // Subject cards — QBank এ ২-কলাম গ্রিড (সাবটপিক কাউন্ট দেখায়), Quiz/Study এ আগের মতো সিঙ্গল-কলাম লিস্ট
         // দুই কলাম শুধু তখনই যখন তালিকায় MCQ-ও আছে আর লিখিতও আছে; একটাই ধরন থাকলে আগের মতো একক গ্রিড (কলাম-ভাগ অকারণ)
         val qbankHasMcq     = mode == StudyMode.QBANK && displaySubjects.any { qbankTypeCount(it, 0) > 0 }
@@ -1419,6 +1431,12 @@ fun SubjectListScreen(
                     }
                 }
             }
+        }
+
+        } else if (studyTab == StudyTab.COURSES) {
+            item { StudyCourseTab() }
+        } else {
+            item { StudyVideoTab() }
         }
 
         // ── QBank subject list — banner ad ──
