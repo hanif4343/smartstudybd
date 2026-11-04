@@ -1538,9 +1538,7 @@ fun QuestionListScreen(
         if (mode != StudyMode.STUDY && pagedQuestions.isNotEmpty()) {
             val density = LocalDensity.current
             val maxHeightPx = with(density) { maxHeight.toPx() }
-            val showPen = vmState.isAdmin
-            var inkTargetId by remember { mutableStateOf<String?>(null) }
-            val btnSizePx = with(density) { (if (showPen) 96.dp else 48.dp).toPx() }
+            val btnSizePx = with(density) { 48.dp.toPx() }
             var dragOffsetPx by remember { mutableStateOf(vmState.floatingNavYFrac * maxHeightPx) }
             // অন্য কোথাও থেকে (অন্য প্রশ্ন-লিস্ট স্ক্রিন খুললে) persisted মান বদলালে সিঙ্ক করো
             LaunchedEffect(vmState.floatingNavYFrac, maxHeightPx) {
@@ -1571,16 +1569,7 @@ fun QuestionListScreen(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ✍ টাচপেন — বর্তমানে ওপরে দেখা প্রশ্নের ব্যাখ্যা/কৌশল হাতে লেখা (শুধু অ্যাডমিন)
-                if (showPen) {
-                    Box(
-                        Modifier.size(48.dp).clickable {
-                            pagedQuestions.getOrNull(topVisibleIdx)?.id?.takeIf { it.isNotBlank() }?.let { inkTargetId = it }
-                        },
-                        contentAlignment = Alignment.Center
-                    ) { Text("✍", fontSize = 20.sp, color = Color.White) }
-                    Box(Modifier.width(28.dp).height(1.dp).background(Color.White.copy(alpha = 0.4f)))
-                }
+                // টাচপেন আর এখানে নয় — এখন + আইকনের পাশে (ব্যাখ্যা/টেকনিক যোগ করার জায়গায়)।
                 Box(
                     Modifier.size(48.dp).clickable {
                         scrollScope.launch {
@@ -1590,9 +1579,6 @@ fun QuestionListScreen(
                     },
                     contentAlignment = Alignment.Center
                 ) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "পরের প্রশ্ন", tint = Color.White) }
-            }
-            inkTargetId?.let { id ->
-                com.hanif.smartstudy.ui.ink.InkPadForQuestion(questionId = id, onDismiss = { inkTargetId = null })
             }
         }
       }
