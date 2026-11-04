@@ -1,7 +1,5 @@
 package com.hanif.smartstudy.ui.home
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,11 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.hanif.smartstudy.data.local.RoutineGoal
-import com.hanif.smartstudy.data.model.DailyRoutine
-import com.hanif.smartstudy.data.model.HomeOverview
 import com.hanif.smartstudy.data.model.RecentActivityItem
-import com.hanif.smartstudy.data.model.RoutineItem
 import com.hanif.smartstudy.ui.theme.LocalDarkMode
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.BuddyViewModel
@@ -60,8 +54,6 @@ import com.hanif.smartstudy.viewmodel.HomeUiState
 // ═══════════════════════════════════════════════════════════
 
 private val HdIndigo = Color(0xFF4F46E5)
-private val HdGreen  = Color(0xFF10B981)
-private val HdBlue   = Color(0xFF2563EB)
 private val HdAmber  = Color(0xFFF59E0B)
 
 // ── ছোট সহায়ক ফাংশন ──
@@ -99,15 +91,11 @@ private fun hdGreeting(): String {
     }
 }
 
-/** হেডারের নিচের লাইন — স্থির motto-র বদলে ইউজারের আসল অবস্থা (স্ট্রিক, আজকের পড়া/প্রশ্ন) */
+/** হেডারের নিচের লাইন — শুধু স্ট্রিক (আজকের লক্ষ্য/অগ্রগতি এখানে নয়) */
 private fun hdStatusLine(state: HomeUiState): String {
     val streak = state.streakInfo.streakDays
-    val studyMin = state.goalProgress.doneMinutes
-    val answered = state.overview.todayQuizAnswered
     return when {
-        streak >= 2 && (studyMin > 0 || answered > 0) -> "🔥 $streak দিন টানা · আজ ${hdFmtMin(studyMin)} পড়া, $answered প্রশ্ন"
-        studyMin > 0 || answered > 0 -> "আজ ${hdFmtMin(studyMin)} পড়েছো, $answered টি প্রশ্নের উত্তর দিয়েছো"
-        streak >= 1 -> "🔥 $streak দিনের স্ট্রিক — আজ শুরু করলে বজায় থাকবে"
+        streak >= 1 -> "🔥 $streak দিনের স্ট্রিক"
         else -> com.hanif.smartstudy.util.AudienceProfiles.current.welcome
     }
 }
@@ -199,7 +187,7 @@ internal fun HomeSkyHeader(
     val sun      = if (dark) Color(0xFFFDE68A) else Color(0xFFFFE9A8)
 
     var menuOpen by remember { mutableStateOf(false) }
-    // ── আসল তথ্য-ভিত্তিক লাইন (স্থির motto না): স্ট্রিক / আজকের পড়া / আজকের প্রশ্ন থেকে ──
+    // ── স্ট্রিক লাইন (শুধু স্ট্রিক; আজকের লক্ষ্য/অগ্রগতি নয়) ──
     val motto = hdStatusLine(state)
     val name = state.user?.displayName() ?: "বন্ধু"
 
@@ -419,148 +407,6 @@ private fun HdBuddyInner(state: HomeUiState, onOpen: () -> Unit) {
             )
         }
         HdChevron()
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-// ৩) আজকের লক্ষ্য — একটাই কার্ড (আগে: মোট অগ্রগতি + আজকের রুটিন + আজকের লক্ষ্য, তিনটা কার্ডে একই তথ্য)
-// ═══════════════════════════════════════════════════════════
-@Composable
-internal fun HomeTodayCard(
-    overview: HomeOverview,
-    routine: DailyRoutine,
-    goal: RoutineGoal,
-    studyDoneMin: Int,
-    onOpenRoutine: () -> Unit,
-    onOpenStats: () -> Unit
-) {
-    // মোট সময়: রুটিন থাকলে আইটেমগুলোর যোগফল, নইলে দৈনিক লক্ষ্য
-    val totalMin = if (routine.items.isNotEmpty()) routine.items.sumOf { it.minutes } else goal.dailyMinutes
-    val doneMin  = if (routine.items.isNotEmpty()) routine.items.filter { it.done }.sumOf { it.minutes } else studyDoneMin
-    val fraction = if (totalMin > 0) doneMin.toFloat() / totalMin else 0f
-    // সময় অনুযায়ী সাজানো: সম্পন্ন নয় এমন আগে, রিমাইন্ডার-সময় অনুযায়ী
-    val shown = remember(routine) {
-        routine.items.sortedWith(
-            compareBy<RoutineItem>({ it.done }, { if (it.hasReminder) it.reminderHour * 60 + it.reminderMinute else 24 * 60 + 1 })
-        ).take(2)
-    }
-    HdCard(Modifier.fillMaxWidth(), radius = 24.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            HdSectionTitle(Icons.Default.TrackChanges, "আজকের লক্ষ্য", MaterialTheme.colorScheme.onSurface, "পরিসংখ্যান", onOpenStats)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                HdRing(fraction, 86.dp, 9.dp, HdGreen, HdGreen.copy(alpha = 0.16f)) {
-                    Text(hdFmtMin(doneMin), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali, maxLines = 1, softWrap = false)
-                    Text("লক্ষ্য ${hdFmtMin(totalMin)}", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = NotoSansBengali, maxLines = 1)
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    HdTodayBar(
-                        "প্রশ্ন", "${overview.todayQuizAnswered} / ${overview.quizDailyTarget}",
-                        if (overview.quizDailyTarget > 0) overview.todayQuizAnswered.toFloat() / overview.quizDailyTarget else 0f,
-                        HdIndigo
-                    )
-                    HdTodayBar(
-                        "মডেল টেস্ট", "আজ ${overview.todayModelTests} · ৭ দিনে ${overview.weekModelTests}",
-                        if (overview.modelTestTarget > 0) overview.todayModelTests.toFloat() / overview.modelTestTarget else 0f,
-                        HdBlue
-                    )
-                }
-            }
-            // ── আজকের রুটিন (সর্বোচ্চ ২টা); খালি হলে এক লাইনের আমন্ত্রণ ──
-            if (shown.isEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                        .background(HdBlue.copy(alpha = 0.07f)).clickable(onClick = onOpenRoutine)
-                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.CalendarMonth, null, tint = HdBlue, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("আজকের পড়ার রুটিন সাজাও", Modifier.weight(1f), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali)
-                    HdChevron(HdBlue, 16.dp)
-                }
-            } else {
-                shown.forEachIndexed { i, item ->
-                    val chipColor = if (i % 2 == 0) HdGreen else HdBlue
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                            .background(chipColor.copy(alpha = 0.07f))
-                            .clickable(onClick = onOpenRoutine).padding(horizontal = 8.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            Modifier.clip(RoundedCornerShape(10.dp)).background(chipColor.copy(alpha = 0.18f))
-                                .padding(horizontal = 6.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                item.reminderTimeLabel().ifBlank { "যেকোনো" },
-                                fontSize = 10.sp, fontWeight = FontWeight.Bold, color = chipColor,
-                                fontFamily = NotoSansBengali, maxLines = 1, softWrap = false
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            val head = listOf(item.subject, item.subTopic).filter { it.isNotBlank() }
-                                .joinToString(" – ").ifBlank { item.title }
-                            Text(head, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface, fontFamily = NotoSansBengali,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${hdFmtMin(item.minutes)}${if (item.done) " · সম্পন্ন" else ""}", fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali, maxLines = 1)
-                        }
-                        if (item.done) Icon(Icons.Default.CheckCircle, null, tint = HdGreen, modifier = Modifier.size(16.dp))
-                        else HdChevron(MaterialTheme.colorScheme.onSurfaceVariant, 16.dp)
-                    }
-                }
-            }
-            // ── সঠিক হার — শুধু কিছু সমাধান করা থাকলে (০% দেখিয়ে ভয় দেখানো নয়) ──
-            if (overview.quizAttempted > 0) {
-                Text(
-                    "এ পর্যন্ত ${overview.quizAttempted}টা প্রশ্ন সমাধান · সঠিক হার ${overview.quizAccuracyPct}%",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HdTodayBar(label: String, value: String, fraction: Float, color: Color) {
-    val anim by animateFloatAsState(fraction.coerceIn(0f, 1f), tween(700), label = "todayBar")
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface,
-                fontFamily = NotoSansBengali, maxLines = 1)
-            Text(value, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(color.copy(alpha = 0.18f))) {
-            Box(Modifier.fillMaxWidth(anim).fillMaxHeight().clip(CircleShape).background(color))
-        }
-    }
-}
-
-@Composable
-private fun HdRing(
-    fraction: Float, size: Dp, stroke: Dp, color: Color, track: Color,
-    center: @Composable ColumnScope.() -> Unit
-) {
-    val anim by animateFloatAsState(fraction.coerceIn(0f, 1f), tween(700), label = "ring")
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.matchParentSize()) {
-            val sw = stroke.toPx()
-            val tl = Offset(sw / 2f, sw / 2f)
-            val sz = Size(this.size.width - sw, this.size.height - sw)
-            drawArc(track, -90f, 360f, false, topLeft = tl, size = sz, style = Stroke(sw, cap = StrokeCap.Round))
-            if (anim > 0f) {
-                drawArc(color, -90f, 360f * anim, false, topLeft = tl, size = sz, style = Stroke(sw, cap = StrokeCap.Round))
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { center() }
     }
 }
 

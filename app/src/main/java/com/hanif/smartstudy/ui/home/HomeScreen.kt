@@ -158,10 +158,9 @@ fun HomeScreen(
     onSetDarkMode  : (Boolean) -> Unit = {}     // ⋮ মেনুর Dark Mode টগল (সেশনে সেভ করতে)
 ) {
     val state by viewModel.uiState.collectAsState()
-    // আজকের রুটিন/লক্ষ্য কার্ডের ডেটা — একই RoutineViewModel (Menu → Routine-এর সাথে শেয়ার্ড)
+    // আজকের রুটিনের ডেটা (শুরু করার ধাপে ব্যবহৃত) — একই RoutineViewModel (Menu → Routine-এর সাথে শেয়ার্ড)
     val routineVm: RoutineViewModel = viewModel()
     val routine by routineVm.state.collectAsState()
-    val routineGoal by routineVm.goal.collectAsState()
 
     var showNotifSheet by remember { mutableStateOf(false) }
     var showMockTestPicker by remember { mutableStateOf(false) }
@@ -271,13 +270,6 @@ fun HomeScreen(
                 )
             }
 
-            // স্ট্রিক / বাডি — কিছু না থাকলে পুরো সারিই অদৃশ্য
-            HomeBuddyStreakRow(
-                state        = state,
-                buddyEnabled = buddyEnabled,
-                onOpenBuddy  = onOpenBuddyTab,
-                onOpenStreak = { onOpenMenuPage("stats") }
-            )
 
             // দ্রুত বাটন — অডিয়েন্স-প্রোফাইল ঠিক করে কোনগুলো ও কোন ক্রমে
             val quickActions = AudienceProfiles.current.quickActions.mapNotNull { id ->
@@ -301,15 +293,6 @@ fun HomeScreen(
                 onOpenStudy = onOpenStudyTab
             )
 
-            // আজকের লক্ষ্য — একটাই কার্ড (প্রশ্ন · মডেল টেস্ট · পড়ার রিং · আজকের রুটিন)
-            HomeTodayCard(
-                overview      = state.overview,
-                routine       = routine,
-                goal          = routineGoal,
-                studyDoneMin  = state.goalProgress.doneMinutes,
-                onOpenRoutine = { onOpenMenuPage("routine") },
-                onOpenStats   = { onOpenMenuPage("stats") }
-            )
 
             // সাম্প্রতিক কার্যক্রম — খালি থাকলে অংশটাই দেখায় না
             if (state.recentActivity.isNotEmpty()) {
