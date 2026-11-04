@@ -787,6 +787,10 @@ fun QuestionListScreen(
             .onKeyEvent(kbKeyHandler)
             .focusable()
     ) {
+      // কুইজ/QBank-এ অ্যাডমিনের জন্য ✍ বাটন ভাসমান বাটনের ভেতরে — তাই প্রশ্নের নিচের ইনলাইন বাটন লুকানো
+      androidx.compose.runtime.CompositionLocalProvider(
+          com.hanif.smartstudy.ui.ink.LocalInkInlineButtons provides !(vmState.isAdmin && mode != StudyMode.STUDY)
+      ) {
         Scaffold(
             topBar = {
                 QuestionTopBar(
@@ -1510,7 +1514,9 @@ fun QuestionListScreen(
         if (mode != StudyMode.STUDY && pagedQuestions.isNotEmpty()) {
             val density = LocalDensity.current
             val maxHeightPx = with(density) { maxHeight.toPx() }
-            val btnSizePx = with(density) { 48.dp.toPx() }
+            val showPen = vmState.isAdmin
+            var inkTargetId by remember { mutableStateOf<String?>(null) }
+            val btnSizePx = with(density) { (if (showPen) 96.dp else 48.dp).toPx() }
             var dragOffsetPx by remember { mutableStateOf(vmState.floatingNavYFrac * maxHeightPx) }
             // অন্য কোথাও থেকে (অন্য প্রশ্ন-লিস্ট স্ক্রিন খুললে) persisted মান বদলালে সিঙ্ক করো
             LaunchedEffect(vmState.floatingNavYFrac, maxHeightPx) {
@@ -1519,41 +1525,53 @@ fun QuestionListScreen(
             val topVisibleIdx = listState.firstVisibleItemIndex.coerceIn(0, pagedQuestions.lastIndex)
             val currentAnswered = pagedQuestions.getOrNull(topVisibleIdx)?.answerState !is AnswerState.Unanswered
             val btnAlpha by animateFloatAsState(if (currentAnswered) 1f else 0.5f, label = "floatingNavAlpha")
-            Box(
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset { IntOffset(0, dragOffsetPx.roundToInt()) }
                     .padding(end = 10.dp)
-                    .size(48.dp)
+                    .width(48.dp)
                     .graphicsLayer(alpha = btnAlpha)
-                    .shadow(4.dp, CircleShape)
-                    .clip(CircleShape)
+                    .shadow(4.dp, RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(24.dp))
                     .background(Indigo600)
-                    // ── লং-প্রেস ধরে ড্র্যাগ করলে সরানো যায় — সাধারণ ছোট ট্যাপে drag
-                    // detector কিছুই করে না, তাই নিচের .clickable ঠিকভাবে কাজ করে
-                    // (tap আর drag-to-move-এর মধ্যে কোনো বিভ্রান্তি হয় না) ──
+                    // লং-প্রেস ধরে ড্র্যাগ করলে পুরো বাটন সরে; ছোট ট্যাপে নিচের clickable কাজ করে
                     .pointerInput(maxHeightPx, btnSizePx) {
                         detectDragGesturesAfterLongPress(
-                            onDragEnd = {
-                                viewModel.updateFloatingNavYFrac(dragOffsetPx / maxHeightPx)
-                            }
+                            onDragEnd = { viewModel.updateFloatingNavYFrac(dragOffsetPx / maxHeightPx) }
                         ) { change, dragAmount ->
                             change.consume()
                             dragOffsetPx = (dragOffsetPx + dragAmount.y)
                                 .coerceIn(0f, (maxHeightPx - btnSizePx).coerceAtLeast(0f))
                         }
-                    }
-                    .clickable {
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // ✍ টাচপেন — বর্তমানে ওপরে দেখা প্রশ্নের ব্যাখ্যা/কৌশল হাতে লেখা (শুধু অ্যাডমিন)
+                if (showPen) {
+                    Box(
+                        Modifier.size(48.dp).clickable {
+                            pagedQuestions.getOrNull(topVisibleIdx)?.id?.takeIf { it.isNotBlank() }?.let { inkTargetId = it }
+                        },
+                        contentAlignment = Alignment.Center
+                    ) { Text("✍", fontSize = 20.sp, color = Color.White) }
+                    Box(Modifier.width(28.dp).height(1.dp).background(Color.White.copy(alpha = 0.4f)))
+                }
+                Box(
+                    Modifier.size(48.dp).clickable {
                         scrollScope.launch {
                             val nextIdx = (topVisibleIdx + 1).coerceAtMost(pagedQuestions.lastIndex)
                             listState.animateScrollToItem(nextIdx)
                         }
                     },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "পরের প্রশ্ন", tint = Color.White)
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "পরের প্রশ্ন", tint = Color.White) }
+            }
+            inkTargetId?.let { id ->
+                com.hanif.smartstudy.ui.ink.InkPadForQuestion(questionId = id, onDismiss = { inkTargetId = null })
             }
         }
+      }
     }
 
     // ── Admin "Move" — destination Subject/Topic ডায়ালগ ──

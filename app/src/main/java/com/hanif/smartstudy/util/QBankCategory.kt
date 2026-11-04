@@ -10,52 +10,33 @@ import androidx.compose.runtime.setValue
  * "১৬-২০ গ্রেড" catch-all: বাকি চারটার কোনোটাতে না মিললেই এখানে।
  */
 object QBankCategory {
-    const val GRADE = "১৬-২০ গ্রেড"
-    private val GENERAL_ALL = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "ব্যাংক", GRADE)
+    const val GRADE = AudienceProfiles.CAT_GRADE
 
-    // ── 🩺 Nursing Admission ইউজারদের জন্য আলাদা ৩টা ক্যাটাগরি ──
-    const val MIDWIFE = "Midwife"
-    const val BSC_NURSING = "BSc Nursing"
-    const val DIPLOMA_NURSING = "Diploma In Nursing"
-    val NURSING_ALL = listOf(MIDWIFE, BSC_NURSING, DIPLOMA_NURSING)
+    // ── 🩺 নার্সিং ক্যাটাগরি (সংজ্ঞা AudienceProfiles-এ; এখানে সুবিধার জন্য নাম) ──
+    const val MIDWIFE = AudienceProfiles.CAT_MIDWIFE
+    const val BSC_NURSING = AudienceProfiles.CAT_BSC_NURSING
+    const val DIPLOMA_NURSING = AudienceProfiles.CAT_DIPLOMA_NURSING
+    val NURSING_ALL = AudienceProfiles.NURSING_QBANK
 
-    /** audience tag / classLevel যেটা Nursing ইউজার বোঝায় */
-    const val NURSING_TAG = "Nursing Admission"
-
-    /** true হলে নার্সিং ক্যাটাগরি দেখাবে (Compose state — বদলালে UI আপনা-আপনি আপডেট হয়) */
-    var nursingMode by mutableStateOf(false)
-        private set
-
-    /** বর্তমান মোড অনুযায়ী চিপ-তালিকা */
-    val ALL: List<String> get() = if (nursingMode) NURSING_ALL else GENERAL_ALL
+    /** বর্তমান অডিয়েন্সের (AudienceProfiles.current) চিপ-তালিকা — অডিয়েন্স বদলালে আপনা-আপনি বদলায় */
+    val ALL: List<String> get() = AudienceProfiles.current.qbankCategories
 
     /** বর্তমানে সিলেক্টেড চিপ — UI সেট করে, ViewModel (সাল-মোড) পড়ে; back করলেও মনে থাকে */
-    var selected by mutableStateOf(GENERAL_ALL.first())
+    var selected by mutableStateOf(AudienceProfiles.GENERAL_QBANK.first())
 
-    fun isNursingTag(tag: String?): Boolean = tag?.trim().equals(NURSING_TAG, ignoreCase = true)
-
-    /** ইউজার (বা admin-এর audience override) অনুযায়ী মোড সেট করো; সিলেক্টেড চিপ অবৈধ হলে প্রথমটায় ফেরাও */
+    /** ইউজার (বা admin-এর audience override) অনুযায়ী অডিয়েন্স সেট করো; সিলেক্টেড চিপ অবৈধ হলে প্রথমটায় ফেরাও */
     fun applyAudience(classLevel: String?) {
-        nursingMode = isNursingTag(classLevel)
+        AudienceProfiles.apply(classLevel)
         if (selected !in ALL) selected = ALL.first()
     }
 
-    private val NAMED = listOf("বিসিএস", "প্রাথমিক", "নিবন্ধন", "ব্যাংক")
+    private val NAMED = AudienceProfiles.NAMED_GROUPS.first()
 
+    /** কার্ডের নামে ক্যাটাগরির কীওয়ার্ড আছে কিনা (কীওয়ার্ড-তালিকা AudienceProfiles.CATEGORY_KEYWORDS-এ) */
     fun nameMatches(name: String, category: String): Boolean {
+        val keys = AudienceProfiles.CATEGORY_KEYWORDS[category] ?: return false
         val n = name.trim().lowercase()
-        return when (category) {
-            MIDWIFE         -> n.contains("midwife") || n.contains("midwifery") || name.contains("মিডওয়াইফ")
-            BSC_NURSING     -> n.contains("bsc") || n.contains("b.sc") || n.contains("b sc") || name.contains("বিএসসি")
-            DIPLOMA_NURSING -> n.contains("diploma") || name.contains("ডিপ্লোমা")
-            "বিসিএস"   -> n.contains("bcs") || name.contains("বিসিএস")
-            "প্রাথমিক" -> n.contains("primary") || name.contains("প্রাথমিক")
-            // শিক্ষক নিবন্ধন (NTRCA): কলেজ পর্যায় / স্কুল পর্যায় নামেও আসে
-            "নিবন্ধন"  -> n.contains("ntrca") || n.contains("registration") || name.contains("নিবন্ধন") ||
-                          name.contains("কলেজ পর্যায়") || name.contains("স্কুল পর্যায়")
-            "ব্যাংক"   -> n.contains("bank") || name.contains("ব্যাংক")
-            else       -> false
-        }
+        return keys.any { n.contains(it) }
     }
 
     /**
@@ -68,16 +49,17 @@ object QBankCategory {
      */
     fun matches(names: List<String>, category: String): Boolean {
         fun hit(cat: String) = names.any { nameMatches(it, cat) }
-        // নার্সিং ক্যাটাগরি: কার্ডের নিজের নাম আগে, না মিললে নেস্টেড নাম
-        if (category in NURSING_ALL) {
-            val own = names.firstOrNull().orEmpty()
-            val ownCat = NURSING_ALL.firstOrNull { nameMatches(own, it) }
+        // নামযুক্ত ক্যাটাগরি (বিসিএস/প্রাথমিক/নিবন্ধন/ব্যাংক বা মিডওয়াইফ/বিএসসি/ডিপ্লোমা):
+        // কার্ডের নিজের নাম আগে; তাতে না মিললে নেস্টেড নাম (প্রতিষ্ঠান) দেখে মেলানো।
+        val group = AudienceProfiles.NAMED_GROUPS.firstOrNull { category in it }
+        if (group != null) {
+            val ownName0 = names.firstOrNull().orEmpty()
+            val ownCat = group.firstOrNull { nameMatches(ownName0, it) }
             return if (ownCat != null) ownCat == category else hit(category)
         }
         val ownName = names.firstOrNull().orEmpty()
         val ownCategory = NAMED.firstOrNull { nameMatches(ownName, it) }
         return when (category) {
-            in NAMED -> if (ownCategory != null) ownCategory == category else hit(category)
             // ── FIX: আগে GRADE = "কোনো নামযুক্ত ক্যাটাগরিতেই মেলেনি"। ফলে একটা বড় পদবীর (যেমন "অফিস সহকারী কাম
             // কম্পিউটার অপারেটর", ১১ প্রতিষ্ঠান) শুধু একটা প্রতিষ্ঠানের নামে "প্রাথমিক ও গণশিক্ষা মন্ত্রণালয়"
             // থাকলেই পুরো পদবী "প্রাথমিক" চিপে চলে যেত, "১৬-২০ গ্রেড"-এ আর আসত না (৬২৩টা লিখিত প্রশ্নসহ গায়েব)।

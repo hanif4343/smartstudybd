@@ -101,9 +101,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
                 set(java.util.Calendar.SECOND, 0);      set(java.util.Calendar.MILLISECOND, 0)
             }.timeInMillis
-            val modelToday = history.count { it.isModelTest && it.timestamp >= dayStart }
+            // মক + মডেল দুটোই "টেস্ট": হোমের "মডেল টেস্ট" টাইল আসলে মক-প্রবাহ খোলে (source = mock_test), তাই শুধু model_test গুনলে লক্ষ্য কখনো বাড়ত না
+            val modelToday = history.count { (it.isModelTest || it.isMockTest) && it.timestamp >= dayStart }
             val weekStart  = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
-            val modelWeek  = history.count { it.isModelTest && it.timestamp >= weekStart }
+            val modelWeek  = history.count { (it.isModelTest || it.isMockTest) && it.timestamp >= weekStart }
             val overview   = repo.getHomeOverview(modelToday, modelWeek)
             val recent     = history.take(3).map { h ->
                 val first = h.topics.firstOrNull().orEmpty()

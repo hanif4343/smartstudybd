@@ -111,10 +111,9 @@ object AudienceFilter {
         val tagNames = tids.mapNotNull { tagsById[it]?.trim()?.takeIf { n -> n.isNotBlank() } }
         if (tagNames.isEmpty()) return true   // অজানা/মুছে-ফেলা tag_id — নিরাপদে দেখিয়ে দাও, লুকিয়ে ফেলো না
 
-        val effectiveGroup = audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminOverrideTag.isNotBlank()) adminOverrideTag else it }
+        val group = effectiveGroup(user, adminOverrideTag)
 
-        return tagNames.any { it.equals(effectiveGroup, ignoreCase = true) }
+        return tagNames.any { it.equals(group, ignoreCase = true) }
     }
 
     // ── Challenge opponent compatibility ─────────────────────
@@ -125,15 +124,13 @@ object AudienceFilter {
      *   - classLevel খালি না হলে → classLevel-ই group key
      *   - classLevel খালি হলে → userType বা "Job" default
      */
-    fun audienceGroupOf(user: User?): String {
-        val cl = user?.classLevel?.trim() ?: ""
-        val ut = user?.userType?.trim()   ?: ""
-        return when {
-            cl.isNotBlank()                     -> cl   // Student — classLevel = group key
-            ut.equals("Job", ignoreCase = true) -> "Job"
-            else                                -> "Job" // default = Job group
-        }
-    }
+    fun audienceGroupOf(user: User?): String = AudienceProfiles.groupOf(user)
+
+    /**
+     * অ্যাডমিন হলে তার "Switch Audience" tag (ফাঁকা না হলে), নইলে ইউজারের নিজের group।
+     * আগে এই একই লাইন ১৫+ জায়গায় কপি ছিল — এখন সবাই এটা ডাকে।
+     */
+    fun effectiveGroup(user: User?, adminTag: String): String = AudienceProfiles.effectiveGroup(user, adminTag)
 
     /**
      * Returns true যদি দুজন ইউজার একে অপরকে challenge করতে পারে।
@@ -146,18 +143,5 @@ object AudienceFilter {
     /**
      * Human-readable group label — UI-তে দেখানোর জন্য
      */
-    fun audienceGroupLabel(user: User?): String {
-        val group = audienceGroupOf(user)
-        return when {
-            group.equals("Job", ignoreCase = true)      -> "চাকরি (Job)"
-            group.startsWith("Class",   ignoreCase = true) ->
-                "${group.removePrefix("Class").trim()} শ্রেণি"
-            group.equals("Nursing Admission", ignoreCase = true) -> "নার্সিং ভর্তি"
-            group.startsWith("Masters", ignoreCase = true) ->
-                "মাস্টার্স ${group.removePrefix("Masters").trim()} বর্ষ"
-            group.startsWith("Honours", ignoreCase = true) ->
-                "অনার্স ${group.removePrefix("Honours").trim()} বর্ষ"
-            else -> group
-        }
-    }
+    fun audienceGroupLabel(user: User?): String = AudienceProfiles.groupLabelFor(audienceGroupOf(user))
 }

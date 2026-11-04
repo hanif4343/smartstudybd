@@ -17,12 +17,12 @@ import com.hanif.smartstudy.viewmodel.QuizViewModel
  *  • StudyRevisionSession — "5–10 মিনিটের Quick Revision": Quick Note → ৩টি প্রশ্ন → Wrong Review → ✅ শেষ
  */
 enum class StudyTopicStatus(val emoji: String, val label: String, val color: Color) {
-    NOT_STARTED("⚪", "Not Started", Color(0xFF9CA3AF)),
-    LEARNING("🔵", "Learning", Color(0xFF3B82F6)),
-    PRACTICING("🟡", "Practicing", Color(0xFFD97706)),
-    STRONG("🟢", "Strong", Color(0xFF16A34A)),
-    WEAK("🔴", "Weak", Color(0xFFDC2626)),
-    NEEDS_REVISION("🔄", "Needs Revision", Color(0xFF7C3AED))
+    NOT_STARTED("⚪", "শুরু হয়নি", Color(0xFF9CA3AF)),
+    LEARNING("🔵", "শিখছি", Color(0xFF3B82F6)),
+    PRACTICING("🟡", "অনুশীলনে", Color(0xFFD97706)),
+    STRONG("🟢", "শক্ত", Color(0xFF16A34A)),
+    WEAK("🔴", "দুর্বল", Color(0xFFDC2626)),
+    NEEDS_REVISION("🔄", "রিভিশন দরকার", Color(0xFF7C3AED))
 }
 
 data class RevEntry(

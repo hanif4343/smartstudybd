@@ -157,7 +157,58 @@ data class QuizUiState(
     // মতো দেখানো হয় (orderSavedMsg-এর প্যাটার্নেই, শুধু আলাদা ফিল্ড যাতে দুটো একসাথে
     // ওভাররাইট না করে)। ──
     val qbankAdminMsg : String? = null
-)
+
+) {
+    // ══ টেস্ট-প্রবাহের একত্রিত দৃশ্য (ধাপ M2) — নিচের ফ্ল্যাগগুলো আগের মতোই আছে; এগুলো তাদের থেকে হিসাব করা ══
+
+    /** মক/মডেল/QBank-মডেলের যেকোনো ধাপে (পিকার, তালিকা, সেটআপ বা চলমান টেস্ট) আছি কিনা — CoreScreen-এর ৬টা ফ্ল্যাগের বারবার-লেখা শর্ত এখন এটাই */
+    val inTestFlow: Boolean
+        get() = isMockZone || isQBankMtZone || activeQBankMt != null || isModelTestZone || isModelTestSubjectPicker
+
+    /** প্রবাহের এই মুহূর্তের একটা ধাপ */
+    val testStage: com.hanif.smartstudy.util.TestStage
+        get() = when {
+            isMockZone               -> com.hanif.smartstudy.util.TestStage.MOCK_PICKER
+            isQBankMtZone            -> com.hanif.smartstudy.util.TestStage.QBANK_SETUP
+            isModelTestSubjectPicker -> com.hanif.smartstudy.util.TestStage.MODEL_SUBJECT_PICKER
+            isModelTestZone          -> com.hanif.smartstudy.util.TestStage.MODEL_LIST
+            activeTest != null       -> com.hanif.smartstudy.util.TestStage.RUNNING
+            else                     -> com.hanif.smartstudy.util.TestStage.NONE
+        }
+
+    /**
+     * চলমান বা সদ্য-শেষ টেস্টের পরিচয়। অগ্রাধিকার: মক → QBank-মডেল/লিখিত → কুইজ-মডেল।
+     * (মক আগে, কারণ মক শুরুর সময় আগের কোনো মডেল-টেস্টের অবশিষ্ট অবস্থা থাকলেও মকের ইতিহাসই ঠিক।)
+     */
+    val activeTest: com.hanif.smartstudy.util.ActiveTest?
+        get() {
+            val mt  = activeModelTest
+            val qmt = activeQBankMt
+            return when {
+                navPath.subject == "Mock Test" -> com.hanif.smartstudy.util.ActiveTest(
+                    kind   = com.hanif.smartstudy.util.TestKind.MOCK,
+                    title  = "মক টেস্ট",
+                    mode   = mode,
+                    topics = com.hanif.smartstudy.util.TestPlanner.topicLabels(mockConfig.selectedTopics)
+                )
+                qmt != null -> com.hanif.smartstudy.util.ActiveTest(
+                    kind   = if (qmt.category == com.hanif.smartstudy.util.WrittenModelTestEngine.CATEGORY_KEY)
+                                 com.hanif.smartstudy.util.TestKind.WRITTEN_MODEL
+                             else com.hanif.smartstudy.util.TestKind.QBANK_MODEL,
+                    title  = qmt.title,
+                    mode   = StudyMode.QBANK,
+                    topics = listOf(qmt.title)
+                )
+                mt != null -> com.hanif.smartstudy.util.ActiveTest(
+                    kind   = com.hanif.smartstudy.util.TestKind.QUIZ_MODEL,
+                    title  = "${mt.subject} — ${mt.displayTitle()}",
+                    mode   = mode,
+                    topics = listOf("${mt.subject} — ${mt.displayTitle()}")
+                )
+                else -> null
+            }
+        }
+}
 
 class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -825,8 +876,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
             val user     = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
 
             // অনলাইন + অসম্পূর্ণ হলে নতুন ব্যাচ যোগ করার চেষ্টা — ব্যর্থ হলে (অফলাইন/নেটওয়ার্ক
             // এরর) চুপচাপ ধরে নিয়ে Room-এ যা আছে তাই দেখানো হবে, ক্র্যাশ করবে না
@@ -990,8 +1040,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val sheet = _state.value.mode.name
             val user  = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
 
             val roomCount = repo.getRoomTotalCount(sheet, subject, subTopic, tag)
 
@@ -1191,8 +1240,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun refreshQuestionsInPlaceFromRoom(sheet: String, topicId: String) {
         val user     = session.getCurrentUser().withQuizOwnAudience()
         val adminTag = quizAdminTag(user)
-        val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
         val fresh = repo.getRoomQuestionsForTopic(sheet, topicId, tag).associateBy { it.id }
 
         _state.update { st ->
@@ -1362,9 +1410,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         // QBank-এর "🏆 মডেল টেস্ট" → নতুন QBank Model Test (ক্যাটাগরি → প্রশ্ন সংখ্যা)
         if (_state.value.mode == StudyMode.QBANK) { openQBankModelTest(); return }
         viewModelScope.launch {
-            val user = session.getCurrentUser()
-            val isJob = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .equals("Job", ignoreCase = true)
+            // startModelTest ও বাকি পথের মতোই একই user/adminTag গঠন — নইলে অ্যাডমিনের "এভাবে দেখুন"
+            // বা ইউজারের নিজের বিষয়-বাছাইয়ে এই সিদ্ধান্ত অন্য পথের সাথে মিলত না (M1 ফিক্স)
+            val user     = session.getCurrentUser().withQuizOwnAudience()
+            val adminTag = quizAdminTag(user)
+            val isJob = com.hanif.smartstudy.util.AudienceProfiles.resolve(
+                com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
+            ).isJob
 
             if (isJob) {
                 _state.update { it.copy(isModelTestJobUser = true) }
@@ -1376,7 +1428,6 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 modelTestSubjectList = emptyList()) }
 
             val content  = (repo.getContent() as? DataState.Success)?.data ?: AppContent()
-            val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
             val filtered = content.forUser(user, adminTag)
             // ইউজারের classLevel অনুযায়ী Quiz sheet-এ যেসব সাবজেক্ট আছে (audience-filtered)
             val subjects = filtered.quiz.mapNotNull { it.subject }.filter { it.isNotBlank() }.toSet().sorted()
@@ -1543,8 +1594,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val sheet = _state.value.mode.name
             val user     = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag      = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
             var topicId = _state.value.subTopics.find { it.name == subTopic }?.topicId.orEmpty()
             if (topicId.isBlank()) {
                 val subjectId = _state.value.subjects.find { it.name == subject }?.subjectId
@@ -1829,28 +1879,32 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             // মুহূর্তে cache miss হলে খালি AppContent() পড়ে যেতে পারত। তাই এখানে আগে
             // shared memory cache (ContentRepository.getMemCache()) সরাসরি চেক করি —
             // সেটা থাকলে নেটওয়ার্ক/সাসপেন্ড কল ছাড়াই তাৎক্ষণিক লোকাল ডেটা পাওয়া যায়।
-            val content = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()
+            val rawContent = com.hanif.smartstudy.data.repository.ContentRepository.getMemCache()
                 ?: (repo.getContent() as? DataState.Success)?.data
                 ?: AppContent()
+            // ── অডিয়েন্স-ফিল্টার (M1 ফিক্স): আগে মকের পুল কাঁচা কনটেন্ট থেকে নেওয়া হতো, তাই কোনো
+            //    বিষয় না বেছে শুরু করলে অন্য অডিয়েন্সের (যেমন বিসিএস) প্রশ্নও আসার ঝুঁকি ছিল।
+            //    এখন মডেল টেস্টের মতোই ছাঁকা — ইউজার/অ্যাডমিন-override অনুযায়ী। ──
+            val mockUser     = session.getCurrentUser().withQuizOwnAudience()
+            val mockAdminTag = quizAdminTag(mockUser)
             val cfg     = _state.value.mockConfig
             val mode    = _state.value.mode
-            val pool    = when (mode) {
-                StudyMode.QUIZ  -> content.quiz.map  { QuestionItem.fromQuizItem(it) }
-                StudyMode.QBANK -> content.qbank.map { QuestionItem.fromQBankItem(it) }
-                StudyMode.STUDY -> content.study.map { QuestionItem.fromStudyItem(it) }
-            }
-            val filtered = if (cfg.selectedTopics.isEmpty()) pool
-            else pool.filter { q ->
-                cfg.selectedTopics.any { key ->
-                    val parts = key.split("||")
-                    q.subject == parts.getOrNull(0) && q.subTopic == parts.getOrNull(1)
-                }
-            }
-            val questions = filtered.shuffled().take(cfg.questionLimit)
-                .map { it.copy(isWeakTopic = isWeak(it.subTopic)) }
+            // প্রশ্ন বাছাই এখন TestPlanner-এ (বিশুদ্ধ ফাংশন, অডিয়েন্স-ছাঁকা) — আচরণ আগের মতোই
+            val plan = com.hanif.smartstudy.util.TestPlanner.planMock(
+                content  = rawContent,
+                user     = mockUser,
+                adminTag = mockAdminTag,
+                spec     = com.hanif.smartstudy.util.TestSpec(
+                    mode = mode, selectedTopics = cfg.selectedTopics, count = cfg.questionLimit
+                )
+            )
+            val questions = plan.questions.map { it.copy(isWeakTopic = isWeak(it.subTopic)) }
             _state.update {
                 it.copy(isMockZone = false, questions = questions, isQuizActive = true,
                         showResult = false, result = null, answeredCount = 0,
+                        // আগের কোনো মডেল-টেস্টের অবশিষ্ট অবস্থা থাকলে মুছে দাও — নইলে লিখিত-উত্তর "জমা-মাত্র"
+                        // ধরা পড়ত এবং ইতিহাসে ভুল ধরনের এন্ট্রি যেত
+                        activeModelTest = null, activeModelTestType = null, activeQBankMt = null,
                         // NOTE: আগে এখানে NavPath("Mock Test") (শুধু subject, subTopic=null)
                         // ব্যবহার হতো — NavPath.depth() তখন 1 হতো, ফলে CoreScreen ভুলবশত
                         // SubTopicListScreen দেখাত (প্রশ্ন লিস্ট না দেখিয়ে "0 টি অধ্যায়" খালি স্ক্রিন)।
@@ -2129,52 +2183,22 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val result = QuizResult(questions.size, correct, wrong, skipped, elapsed, xp, subjectMap, recorded, reviewItems)
         _state.update { it.copy(result = result, showResult = true, isQuizActive = false, timerSec = 0) }
 
-        // ── "এখন টেস্ট দাও" (Mock Test) রেজাল্ট হিস্ট্রিতে জমা রাখো ──
-        if (_state.value.navPath.subject == "Mock Test" && result.total > 0) {
-            viewModelScope.launch {
-                val cfg = _state.value.mockConfig
-                val topicLabels = if (cfg.selectedTopics.isEmpty()) {
-                    listOf("সব বিষয় (র‍্যান্ডম)")
-                } else {
-                    cfg.selectedTopics.map { key ->
-                        val parts = key.split("||")
-                        val subj  = parts.getOrNull(0) ?: ""
-                        val sub   = parts.getOrNull(1)
-                        if (!sub.isNullOrBlank()) "$subj - $sub" else subj
-                    }
-                }
-                historyCache.addEntry(result.toHistoryEntry(_state.value.mode.name, topicLabels, source = "mock_test"), result.reviewItems)
-            }
-        }
-
-        // ── Model Test রেজাল্ট হিস্ট্রিতে জমা রাখো — কবে দিয়েছিল, কত স্কোর, progress ট্র্যাক করার জন্য ──
-        val mt = _state.value.activeModelTest
-        if (mt != null && result.total > 0) {
+        // ── টেস্টের (মক / কুইজ-মডেল / QBank-মডেল / লিখিত-মডেল) ফলাফল ইতিহাসে — এখন একটাই জায়গা থেকে।
+        //    source ও বিষয়-লেবেল ActiveTest থেকে আসে; মান আগের মতোই ("mock_test" / "model_test")। ──
+        val finishedTest = _state.value.activeTest
+        if (finishedTest != null && result.total > 0) {
+            val qmt = _state.value.activeQBankMt
             viewModelScope.launch {
                 historyCache.addEntry(
                     result.toHistoryEntry(
-                        mode   = _state.value.mode.name,
-                        topics = listOf("${mt.subject} — ${mt.displayTitle()}"),
-                        source = "model_test"
+                        mode   = finishedTest.mode.name,
+                        topics = finishedTest.topics,
+                        source = finishedTest.kind.historySource
                     ),
                     result.reviewItems
                 )
-            }
-        }
-
-        // ── QBank Model Test রেজাল্ট হিস্ট্রিতে (রিভিউসহ) + সাম্প্রতিক-প্রশ্ন তালিকায় ──
-        val qmt = _state.value.activeQBankMt
-        if (qmt != null && result.total > 0) {
-            viewModelScope.launch {
-                historyCache.addEntry(
-                    result.toHistoryEntry(
-                        mode   = StudyMode.QBANK.name,
-                        topics = listOf(qmt.title),
-                        source = "model_test"
-                    ),
-                    result.reviewItems
-                )
-                qbankMtStore.addRecent(qmt.category, qmt.questionIds)
+                // QBank-মডেল টেস্টে সাম্প্রতিক-প্রশ্ন তালিকাও আপডেট (পরের টেস্টে একই প্রশ্ন শেষে যায়)
+                if (qmt != null) qbankMtStore.addRecent(qmt.category, qmt.questionIds)
             }
         }
 
@@ -2345,8 +2369,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("QuizVM", "rebuildSubjects mode=$mode items=${items.size}")
 
         // Canonical tag for order lookup — same logic as audienceGroupOf() / forUser() filter
-        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
         val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
 
         val progressMap = loadProgressMap()
@@ -2423,8 +2446,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
         val progressMap = loadProgressMap()
 
-        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
         val encodedTag = com.hanif.smartstudy.data.model.AppContent.normalizedTagForPath(effectiveTag)
 
         val order = content.subTopicOrder[mode.name]?.get(encodedTag)?.get(subject) ?: emptyMap()
@@ -2590,8 +2612,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val user     = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
             val bookmarks = _state.value.bookmarkedIds
 
             // ── FIX ("০/০ প্রশ্ন" বাগ): Room-এ না-থাকা linkedQuestionId গুলো
@@ -2685,8 +2706,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val user     = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
             val bookmarks = _state.value.bookmarkedIds
 
             val ids = repo.getRoomAppearanceQuestionIdsForYear(year)
@@ -2929,8 +2949,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val user     = session.getCurrentUser().withQuizOwnAudience()
             val adminTag = quizAdminTag(user)
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
             val bookmarks = _state.value.bookmarkedIds
 
             // ── FIX ("০/০ প্রশ্ন" বাগ): Room-এ না-থাকা linkedQuestionId গুলো আগে
@@ -3285,8 +3304,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val mode = _state.value.mode
         val user = session.getCurrentUser().withQuizOwnAudience()
         val adminTag = quizAdminTag(user)
-        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val effectiveTag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
         // ── Phase 3 (audience tag audit): reorder সবসময় mode+tag ভিত্তিক আলাদা ক্রম
         // হিসেবে সেভ হয় (persistSubjectOrder/persistSubTopicOrder এর ওপরের কমেন্ট
         // দেখো)। Admin ভুল ট্যাগে (বা admin panel-এ tag না বেছে blank রেখে) সেভ
@@ -3562,8 +3580,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         val sheet    = _state.value.mode.name
         val user     = session.getCurrentUser().withQuizOwnAudience()
         val adminTag = quizAdminTag(user)
-        val tag      = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-            .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+        val tag      = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
 
         // ── FIX ("পরবর্তী বাটনে ফাঁকা স্ক্রিন" বাগ, root cause): এই টপিক Phase 6-এর
         // লেজি topicId সিস্টেম দিয়ে খোলা হয়েছিল কিনা (navigateToSubTopicLazy) চেক করো —

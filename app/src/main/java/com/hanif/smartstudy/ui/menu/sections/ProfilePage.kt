@@ -36,28 +36,10 @@ private val USER_TYPE_OPTIONS = listOf(
 )
 
 // classLevel: ফাঁকা = Job seeker, নির্দিষ্ট মান = সেই শ্রেণির শিক্ষার্থী
-private val CLASS_LEVEL_OPTIONS = listOf(
-    ""          to "প্রযোজ্য নয় (Job Seeker)",
-    "Class 1"   to "১ম শ্রেণি",
-    "Class 2"   to "২য় শ্রেণি",
-    "Class 3"   to "৩য় শ্রেণি",
-    "Class 4"   to "৪র্থ শ্রেণি",
-    "Class 5"   to "৫ম শ্রেণি",
-    "Class 6"   to "৬ষ্ঠ শ্রেণি",
-    "Class 7"   to "৭ম শ্রেণি",
-    "Class 8"   to "৮ম শ্রেণি",
-    "Class 9"   to "৯ম শ্রেণি",
-    "Class 10"  to "১০ম শ্রেণি (SSC)",
-    "Class 11"  to "একাদশ শ্রেণি",
-    "Class 12"  to "দ্বাদশ শ্রেণি (HSC)",
-    "Honours 1" to "অনার্স ১ম বর্ষ",
-    "Honours 2" to "অনার্স ২য় বর্ষ",
-    "Honours 3" to "অনার্স ৩য় বর্ষ",
-    "Honours 4" to "অনার্স ৪র্থ বর্ষ",
-    "Masters 1" to "মাস্টার্স ১ম বর্ষ",
-    "Masters 2" to "মাস্টার্স ২য় বর্ষ",
-    "Nursing Admission" to "🩺 নার্সিং ভর্তি (Nursing Admission)"
-)
+private val CLASS_LEVEL_OPTIONS: List<Pair<String, String>> =
+    listOf("" to "প্রযোজ্য নয় (Job Seeker)") +
+        com.hanif.smartstudy.util.AudienceProfiles.signupGroups.flatMap { it.tags }
+            .map { it to com.hanif.smartstudy.util.AudienceProfiles.displayLabel(it) }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

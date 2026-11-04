@@ -33,14 +33,19 @@ import com.hanif.smartstudy.viewmodel.MenuViewModel
 import com.hanif.smartstudy.viewmodel.QuizViewModel
 import kotlinx.coroutines.launch
 
+/**
+ * নিচের নেভ-বার: Home · Quiz · QBank · Study · Me (নাম ইংরেজিতেই)।
+ * HISTORY আর নেভ-বারে নেই — "Me" পাতার ভেতরে "History" সারি থেকে খোলে।
+ * (enum-এ রাখা হয়েছে যাতে পুরনো রেফারেন্স না ভাঙে; visibleTabs ফিল্টারে লুকানো)
+ */
 enum class BottomTab(val icon: String, val label: String) {
     HOME(      "🏠", "Home"),
     QUIZ(      "🎯", "Quiz"),
     QBANK(     "📚", "QBank"),
     STUDY(     "📖", "Study"),
     HISTORY(   "🕘", "History"),
-    CHALLENGE( "⚔️", "চ্যালেঞ্জ"),
-    MENU(      "👤", "Menu")
+    CHALLENGE( "⚔️", "Challenge"),
+    MENU(      "👤", "Me")
 }
 
 @Composable
@@ -190,9 +195,13 @@ fun MainScreen(
     // 🩺 Nursing Admission → QBank-এ Midwife / BSc Nursing / Diploma In Nursing ক্যাটাগরি।
     // Admin হলে "দেখার tag" (adminViewingTag) অনুযায়ী, নইলে ইউজারের নিজের classLevel অনুযায়ী।
     LaunchedEffect(menuState.adminViewingTag, menuState.isAdmin) {
-        val cl = if (menuState.isAdmin && menuState.adminViewingTag.isNotBlank()) menuState.adminViewingTag
-                 else session.getCurrentUser()?.classLevel
-        com.hanif.smartstudy.util.QBankCategory.applyAudience(cl)
+        // অ্যাডমিন: তার "Switch Audience" পছন্দ (ফাঁকা = Job) — নিজের প্রোফাইলের classLevel কখনোই নয়।
+        // সাধারণ ইউজার: নিজের classLevel।
+        val u = session.getCurrentUser()
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(
+            if (u?.isAdmin() == true) menuState.adminViewingTag.ifBlank { session.getAdminAudienceTag() }
+            else session.effectiveAudienceOf(u)
+        )
     }
     LaunchedEffect(menuState.adminViewingTag) {
         if (menuState.isAdmin) {
@@ -431,7 +440,8 @@ fun MainScreen(
                 // bottom nav-এ দেখানো হয় না — ChallengeZone/ChallengeViewModel/
                 // WeekendBattleViewModel কখনো তৈরিই হবে না
                 val visibleTabs = BottomTab.entries.filter {
-                    it != BottomTab.CHALLENGE || menuState.challengesEnabled
+                    it != BottomTab.HISTORY &&
+                        (it != BottomTab.CHALLENGE || menuState.challengesEnabled)
                 }
                 visibleTabs.forEach { tab ->
                     NavigationBarItem(

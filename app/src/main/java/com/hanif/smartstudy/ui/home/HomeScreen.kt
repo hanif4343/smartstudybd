@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import com.hanif.smartstudy.util.AudienceProfiles
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -243,27 +244,56 @@ fun HomeScreen(
                 onOpenStreak = { onOpenMenuPage("stats") }
             )
 
-            // ── এখন কী করব? — চালিয়ে যান + দ্রুত অ্যাকশন + প্রশ্নব্যাংক ক্যাটাগরি ──
-            HomeContinueCard(
-                recent       = state.recentActivity,
-                onContinue   = { r ->
-                    when {
-                        r.isModelTest     -> onOpenMenuPage("testhistory")
-                        r.mode == "QBANK" -> onOpenQBankTab()
-                        r.mode == "QUIZ"  -> onOpenQuizTab()
-                        r.mode == "STUDY" -> onOpenStudyTab()
-                        r.mode == "VIVA"  -> onOpenViva()
-                        else              -> onOpenMenuPage("testhistory")
-                    }
-                },
-                onStartFresh = onOpenQBankTab
+            // ── এখন কী করব? ──
+            // নতুন ইউজার (কোনো কার্যক্রম নেই): "শুরু করার ৩ ধাপ" — খালি কার্ডের বদলে করার মতো কাজ।
+            // নইলে: "চালিয়ে যান" হিরো কার্ড (শেষ যেখানে ছিলে সেখান থেকে এক ট্যাপে)।
+            val startSteps: List<Triple<String, Boolean, () -> Unit>> = listOf(
+                Triple("প্রথম কুইজটা দাও", state.overview.quizAttempted > 0, onOpenQuizTab),
+                Triple("আজকের পড়ার রুটিন সাজাও", routine.items.isNotEmpty(), { onOpenMenuPage("routine") }),
+                Triple("একটা মডেল টেস্ট দাও", state.overview.weekModelTests > 0, { onOpenMockTest(true) })
             )
-            HomeQuickActionsRow(
-                onWrongReview = { onOpenMenuPage("wrongreview") },
-                onModelTest   = { onOpenMockTest(true) },   // সরাসরি QBank মডেল টেস্ট (Quiz/QBank প্রশ্ন নেই)
-                onSaved       = { onOpenMenuPage("bookmarks") },
-                onRoutine     = { onOpenMenuPage("routine") }
+            if (state.recentActivity.isEmpty() && startSteps.any { !it.second }) {
+                HomeStartChecklist(startSteps)
+            } else {
+                HomeContinueCard(
+                    recent       = state.recentActivity,
+                    onContinue   = { r ->
+                        when {
+                            r.isModelTest     -> onOpenMenuPage("testhistory")
+                            r.mode == "QBANK" -> onOpenQBankTab()
+                            r.mode == "QUIZ"  -> onOpenQuizTab()
+                            r.mode == "STUDY" -> onOpenStudyTab()
+                            r.mode == "VIVA"  -> onOpenViva()
+                            else              -> onOpenMenuPage("testhistory")
+                        }
+                    },
+                    onStartFresh = onOpenQBankTab
+                )
+            }
+
+            // স্ট্রিক / বাডি — কিছু না থাকলে পুরো সারিই অদৃশ্য
+            HomeBuddyStreakRow(
+                state        = state,
+                buddyEnabled = buddyEnabled,
+                onOpenBuddy  = onOpenBuddyTab,
+                onOpenStreak = { onOpenMenuPage("stats") }
             )
+
+            // দ্রুত বাটন — অডিয়েন্স-প্রোফাইল ঠিক করে কোনগুলো ও কোন ক্রমে
+            val quickActions = AudienceProfiles.current.quickActions.mapNotNull { id ->
+                when (id) {
+                    "wrong"   -> HomeQuickAction("ভুল রিভিউ", Icons.Default.Cancel, Color(0xFFF59E0B)) { onOpenMenuPage("wrongreview") }
+                    "model"   -> HomeQuickAction("মডেল টেস্ট", Icons.Default.Description, Color(0xFFEF4444)) { onOpenMockTest(true) }
+                    "saved"   -> HomeQuickAction("সেভ করা", Icons.Default.Bookmark, Color(0xFF8B5CF6)) { onOpenMenuPage("bookmarks") }
+                    "routine" -> HomeQuickAction("রুটিন", Icons.Default.CalendarMonth, Color(0xFF22C55E)) { onOpenMenuPage("routine") }
+                    "typing"  -> HomeQuickAction("টাইপিং", Icons.Default.Keyboard, Color(0xFF16A34A), onOpenTyping)
+                    "viva"    -> HomeQuickAction("ভাইভা", Icons.Default.Mic, Color(0xFF7C3AED), onOpenViva)
+                    "focus"   -> HomeQuickAction("ফোকাস", Icons.Default.CenterFocusStrong, Color(0xFF0D9488), onOpenFocusMode)
+                    else      -> null
+                }
+            }
+            HomeQuickActions(quickActions)
+
             HomeQBankCategoriesRow(
                 categories  = com.hanif.smartstudy.util.QBankCategory.ALL,
                 onPick      = onOpenQBankCategory,
@@ -271,32 +301,26 @@ fun HomeScreen(
                 onOpenStudy = onOpenStudyTab
             )
 
-            // মোট অগ্রগতি (Quiz-এর গড় সঠিক %) + পড়াশোনা / কুইজ / মডেল টেস্ট
-            HomeProgressCard(
-                overview     = state.overview,
-                studyDoneMin = state.goalProgress.doneMinutes,
-                studyGoalMin = state.goalProgress.goalMinutes,
-                onOpenStats  = { onOpenMenuPage("stats") }
-            )
-
-            // আজকের রুটিন + আজকের লক্ষ্য
-            HomeRoutineGoalRow(
+            // আজকের লক্ষ্য — একটাই কার্ড (প্রশ্ন · মডেল টেস্ট · পড়ার রিং · আজকের রুটিন)
+            HomeTodayCard(
+                overview      = state.overview,
                 routine       = routine,
                 goal          = routineGoal,
                 studyDoneMin  = state.goalProgress.doneMinutes,
-                onOpenRoutine = { onOpenMenuPage("routine") }
+                onOpenRoutine = { onOpenMenuPage("routine") },
+                onOpenStats   = { onOpenMenuPage("stats") }
             )
 
-            // সাম্প্রতিক কার্যক্রম
-            HomeRecentCard(recent = state.recentActivity, onOpenHistory = { onOpenMenuPage("testhistory") })
+            // সাম্প্রতিক কার্যক্রম — খালি থাকলে অংশটাই দেখায় না
+            if (state.recentActivity.isNotEmpty()) {
+                HomeRecentCard(recent = state.recentActivity, onOpenHistory = { onOpenMenuPage("testhistory") })
+            }
 
-            // Leaderboard · Support · Tools
+            // লিডারবোর্ড · AI সহকারী · আরও
             HomeBottomTilesRow(
                 onLeaderboard = { onOpenMenuPage("leaderboard") },
                 onSupport     = onOpenAiChat,
-                onTools       = { showTools = true },
-                // আসল XP ও লেভেল (শীর্ষ শিক্ষার্থী-র স্থির লেখার বদলে)
-                leaderboardSub = "${state.xpInfo.xp} XP · লেভেল ${state.xpInfo.currentLevel.level}"
+                onTools       = { showTools = true }
             )
 
             AdBannerPlaceholder()
@@ -314,20 +338,20 @@ fun HomeScreen(
 
     if (showTools) {
         val toolEntries = buildList {
-            add(HdQuickEntry("Mock Test", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
-            add(HdQuickEntry("Viva", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
-            add(HdQuickEntry("Typing", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
-            add(HdQuickEntry("Wrong Review", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
-            add(HdQuickEntry("Focus", Icons.Default.CenterFocusStrong, Color(0xFF2DD4BF), Color(0xFF0D9488), onOpenFocusMode))
-            add(HdQuickEntry("Routine", Icons.Default.CalendarMonth, Color(0xFFFB923C), Color(0xFFEA580C)) { onOpenMenuPage("routine") })
-            add(HdQuickEntry("Search", Icons.Default.Search, Color(0xFF93C5FD), Color(0xFF3B82F6), onSearchClick))
-            add(HdQuickEntry("Saved", Icons.Default.Bookmark, Color(0xFFFDE047), Color(0xFFCA8A04)) { onOpenMenuPage("bookmarks") })
-            add(HdQuickEntry("Stats", Icons.Default.BarChart, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("stats") })
-            add(HdQuickEntry("Buddy", Icons.Default.Groups, Color(0xFF5EEAD4), Color(0xFF0D9488), onOpenBuddyTab))
-            add(HdQuickEntry("Challenge", Icons.Default.EmojiEvents, Color(0xFFFCD34D), Color(0xFFD97706)) {
+            add(HdQuickEntry("মক টেস্ট", Icons.Default.Description, Color(0xFFFBBF24), Color(0xFFF59E0B)) { showMockTestPicker = true })
+            add(HdQuickEntry("ভাইভা", Icons.Default.Mic, Color(0xFFA78BFA), Color(0xFF7C3AED), onOpenViva))
+            add(HdQuickEntry("টাইপিং", Icons.Default.Keyboard, Color(0xFF4ADE80), Color(0xFF16A34A), onOpenTyping))
+            add(HdQuickEntry("ভুল রিভিউ", Icons.Default.Cancel, Color(0xFFFCA5A5), Color(0xFFDC2626)) { onOpenMenuPage("wrongreview") })
+            add(HdQuickEntry("ফোকাস", Icons.Default.CenterFocusStrong, Color(0xFF2DD4BF), Color(0xFF0D9488), onOpenFocusMode))
+            add(HdQuickEntry("রুটিন", Icons.Default.CalendarMonth, Color(0xFFFB923C), Color(0xFFEA580C)) { onOpenMenuPage("routine") })
+            add(HdQuickEntry("সার্চ", Icons.Default.Search, Color(0xFF93C5FD), Color(0xFF3B82F6), onSearchClick))
+            add(HdQuickEntry("সেভ করা", Icons.Default.Bookmark, Color(0xFFFDE047), Color(0xFFCA8A04)) { onOpenMenuPage("bookmarks") })
+            add(HdQuickEntry("পরিসংখ্যান", Icons.Default.BarChart, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("stats") })
+            add(HdQuickEntry("বাডি", Icons.Default.Groups, Color(0xFF5EEAD4), Color(0xFF0D9488), onOpenBuddyTab))
+            add(HdQuickEntry("চ্যালেঞ্জ", Icons.Default.EmojiEvents, Color(0xFFFCD34D), Color(0xFFD97706)) {
                 if (challengesEnabled) onOpenChallenge() else askEnable = "challenge"
             })
-            if (isAdmin) add(HdQuickEntry("Admin", Icons.Default.AdminPanelSettings, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("admin") })
+            if (isAdmin) add(HdQuickEntry("অ্যাডমিন", Icons.Default.AdminPanelSettings, Color(0xFFC4B5FD), Color(0xFF7C3AED)) { onOpenMenuPage("admin") })
         }
         HomeToolsSheet(entries = toolEntries, onDismiss = { showTools = false })
     }
@@ -351,7 +375,7 @@ fun HomeScreen(
         val isChallenge = which == "challenge"
         AlertDialog(
             onDismissRequest = { askEnable = null },
-            title = { Text(if (isChallenge) "Challenge" else "Study Buddy",
+            title = { Text(if (isChallenge) "চ্যালেঞ্জ" else "স্টাডি বাডি",
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
             text = { Text("এই ফিচারটা এখন বন্ধ আছে। চালু করবেন? (Settings → লাইভ ফিচার থেকে যেকোনো সময় বন্ধ করা যায়)",
                 fontFamily = NotoSansBengali, fontSize = 13.sp,
@@ -632,7 +656,7 @@ private fun HomeQuickAccessGrid(
         val isChallenge = which == "challenge"
         AlertDialog(
             onDismissRequest = { askEnable = null },
-            title = { Text(if (isChallenge) "Challenge" else "Study Buddy",
+            title = { Text(if (isChallenge) "চ্যালেঞ্জ" else "স্টাডি বাডি",
                 fontFamily = NotoSansBengali, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) },
             text = { Text("এই ফিচারটা এখন বন্ধ আছে। চালু করবেন? (Settings → লাইভ ফিচার থেকে যেকোনো সময় বন্ধ করা যায়)",
                 fontFamily = NotoSansBengali, fontSize = 13.sp,

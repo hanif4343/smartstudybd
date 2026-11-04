@@ -292,7 +292,9 @@ private fun SubjectGridImageCard(
     modifier : Modifier = Modifier,
     emojiOverride : String? = null,
     isAdmin       : Boolean = false,
-    onEmojiClick  : () -> Unit = {}
+    onEmojiClick  : () -> Unit = {},
+    // Study মোডে ছবির নিচে ছোট তথ্য-লাইন ("১২ অধ্যায় · ৪০%") — null হলে কিছুই দেখায় না
+    caption       : String? = null
 ) {
     val imageRes = remember(subject.name) { subjectImageRes(subject.name) }
     Column(
@@ -336,6 +338,17 @@ private fun SubjectGridImageCard(
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         lineHeight = 15.sp
+                    )
+                }
+            }
+            if (caption != null) {
+                Box(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        caption, fontSize = 10.5.sp, fontFamily = NotoSansBengali, maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -519,6 +532,12 @@ private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> U
                 color = GreenOk,
                 trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
             )
+            // শতাংশ সংখ্যায়ও — শুধু বার দেখে কত শেষ হলো বোঝা যেত না
+            if (progressFrac > 0f) {
+                Spacer(Modifier.height(3.dp))
+                Text("${bnDigits((progressFrac.coerceIn(0f, 1f) * 100).toInt())}% সম্পন্ন", fontSize = 10.5.sp,
+                    fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -568,10 +587,10 @@ private fun QBankEntryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (mcqPapers > 0) Text("🔘 MCQ ${bnDigits(mcqPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                if (mcqPapers > 0) Text("🔘 MCQ · ${bnDigits(mcqPapers)}টি পেপার", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
                     color = QBankMcqColor, fontFamily = NotoSansBengali, maxLines = 1,
                     modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankMcqColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
-                if (writtenPapers > 0) Text("✍️ লিখিত ${bnDigits(writtenPapers)}টি", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
+                if (writtenPapers > 0) Text("✍️ লিখিত · ${bnDigits(writtenPapers)}টি পেপার", fontSize = if (compact) 11.sp else 12.sp, fontWeight = FontWeight.Bold,
                     color = QBankWrittenColor, fontFamily = NotoSansBengali, maxLines = 1,
                     modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(QBankWrittenColor.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 4.dp))
             }
@@ -854,8 +873,16 @@ fun SubjectListScreen(
         com.hanif.smartstudy.util.QBankSortStore.init(sortCtx)
         mutableStateOf(com.hanif.smartstudy.util.QBankSortStore.get(sortScope))
     }
+    // Study মোডের বিষয়/টপিক সার্চ (বিষয় ৬টার বেশি হলে সার্চ বার দেখায়)
+    var studyQuery by remember { mutableStateOf("") }
     val displaySubjects = run {
         var list = categorySubjects
+        if (mode == StudyMode.STUDY && studyQuery.isNotBlank()) {
+            list = list.filter { s ->
+                s.name.contains(studyQuery, ignoreCase = true) ||
+                    s.subTopics.any { st -> st.name.contains(studyQuery, ignoreCase = true) }
+            }
+        }
         if (showQBankFilterBar && !(isAdmin && isReorderMode)) {
             if (qbankSearchQuery.isNotBlank() && selectedExamCategory == com.hanif.smartstudy.util.QBankCategory.GRADE) {
                 list = list.filter { it.name.contains(qbankSearchQuery, ignoreCase = true) }
@@ -997,6 +1024,37 @@ fun SubjectListScreen(
                 com.hanif.smartstudy.focus.FocusTodayCard(
                     subjects = listOf(com.hanif.smartstudy.focus.FocusModeConfig.TYPING_FOCUS_SUBJECT) + subjects.map { it.name }
                 )
+            }
+        }
+
+        // ── Study: "বিষয়সমূহ" শিরোনাম (আগে "আজ ফোকাস" কার্ডটা "Subjects" শিরোনামের নিচে ভুলভাবে পড়ত) + সার্চ ──
+        if (mode == StudyMode.STUDY && !isLoading) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "📘 বিষয়সমূহ", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                        fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onBackground
+                    )
+                    if (subjects.size > 6) {
+                        OutlinedTextField(
+                            value = studyQuery,
+                            onValueChange = { studyQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            placeholder = { Text("বিষয় বা টপিক খোঁজো", fontFamily = NotoSansBengali, fontSize = 13.sp) },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            trailingIcon = {
+                                if (studyQuery.isNotEmpty()) {
+                                    IconButton(onClick = { studyQuery = "" }) { Icon(Icons.Default.Close, null) }
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
 
@@ -1269,7 +1327,9 @@ fun SubjectListScreen(
 
                 // ── কলাম সংখ্যা সাবজেক্ট-সংখ্যা অনুযায়ী অটো — বেশি সাবজেক্ট হলে
                 // বেশি কলাম (নাহলে row বেড়ে কার্ড অতিরিক্ত চ্যাপ্টা/সরু হয়ে যেত) ──
-                val columns = when {
+                // Study মোডে হেডার-কার্ডগুলো বেশি জায়গা নেয়, তাই "সব এক স্ক্রিনে" নয় — কমপ্যাক্ট কার্ড (৪টা পর্যন্ত ২ কলাম, বেশি হলে ৩)
+                val studyCompact = mode == StudyMode.STUDY
+                val columns = if (studyCompact) { if (count <= 4) 2 else 3 } else when {
                     count <= 6  -> 2
                     count <= 12 -> 3
                     count <= 20 -> 4
@@ -1290,7 +1350,8 @@ fun SubjectListScreen(
                 val horizontalPaddingDp = 10.dp
 
                 val cardWidthDp  = (config.screenWidthDp.dp - horizontalPaddingDp * 2 - spacingDp * (columns - 1)) / columns
-                val cardHeightDp = (availableHeightDp - spacingDp * (rows - 1)) / rows
+                val cardHeightDp = if (studyCompact) cardWidthDp * 1.25f
+                                   else (availableHeightDp - spacingDp * (rows - 1)) / rows
 
                 if (orderedSubjects.isEmpty() && showOwnCard) {
                     // কোনো সাবজেক্ট নেই (যেমন বাছা বিষয়ে ডেটা নেই) — কার্ডটা বিশাল না হয়ে ছোট থাকুক
@@ -1343,7 +1404,11 @@ fun SubjectListScreen(
                                     onEmojiClick = {
                                         emojiEditTargetId = subject.subjectId
                                         emojiEditCurrentEmoji = emojiOverrides["$refType:${subject.subjectId}"] ?: ""
-                                    }
+                                    },
+                                    caption = if (studyCompact) {
+                                        val ch = subject.subTopics.size
+                                        (if (ch > 0) "${bnDigits(ch)} অধ্যায় · " else "") + "${bnDigits(subject.progressPct)}%"
+                                    } else null
                                 )
                             }
                             // ── শেষ row-এ কলাম কম থাকলে ফাঁকা স্পেসার দিয়ে alignment ঠিক রাখা ──

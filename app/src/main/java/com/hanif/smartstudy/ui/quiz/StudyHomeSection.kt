@@ -120,12 +120,6 @@ fun StudyHomeSection(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            "📚 আমার পড়াশোনা",
-            fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
-            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onBackground
-        )
-
         // ── Continue Learning ──
         if (last != null) {
             Surface(
@@ -134,11 +128,11 @@ fun StudyHomeSection(
                 modifier = Modifier.fillMaxWidth().clickable { onOpenTopic(last.subject, last.topic) }
             ) {
                 Row(
-                    Modifier.padding(14.dp),
+                    Modifier.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("▶ Continue Learning", fontSize = 11.sp, color = Color.White.copy(0.8f),
+                        Text("▶ চালিয়ে যাও", fontSize = 11.sp, color = Color.White.copy(0.8f),
                             fontFamily = NotoSansBengali, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(2.dp))
                         Text(last.topic, fontSize = 17.sp, color = Color.White,
@@ -163,7 +157,7 @@ fun StudyHomeSection(
                             .clickable { onOpenTopic(last.subject, last.topic) }
                             .padding(horizontal = 14.dp, vertical = 9.dp)
                     ) {
-                        Text("Continue", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        Text("চালাও", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                             color = StudyGreenDark, fontFamily = NotoSansBengali)
                     }
                 }
@@ -173,8 +167,10 @@ fun StudyHomeSection(
         // ── Phase 6: 🤝 Study Buddy — আজকের অগ্রগতি + এখন কোন Topic পড়ছে (Join) ──
         val buddyVm: BuddyViewModel = viewModel()
         val buddyState by buddyVm.state.collectAsState()
-        if (buddyState.hasBuddy) {
-            val bName = buddyState.buddy?.buddyName ?: "Buddy"
+        // বন্ধু শুধু তখনই দেখায় যখন সে এই মুহূর্তে পড়ছে (Join করার সুযোগ) — নইলে "আজ ০% সম্পন্ন" ধরনের
+        // অর্থহীন কার্ড জায়গা খায়। বন্ধুর পূর্ণ অবস্থা হোমে ও বাডি পাতায় থাকে।
+        if (buddyState.hasBuddy && buddyState.buddyStudying?.isFresh() == true) {
+            val bName = buddyState.buddy?.buddyName ?: "বন্ধু"
             val st    = buddyState.buddyStudying
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -188,7 +184,7 @@ fun StudyHomeSection(
                             fontFamily = NotoSansBengali, color = StudyGreenDark)
                         Text(
                             if (st != null && st.isFresh()) "এখন পড়ছে: ${st.topic}"
-                            else if (buddyState.buddyProgress.progressPct >= 0) "আজ ${buddyState.buddyProgress.progressPct}% সম্পন্ন" else "Study Buddy",
+                            else if (buddyState.buddyProgress.progressPct >= 0) "আজ ${buddyState.buddyProgress.progressPct}% সম্পন্ন" else "স্টাডি বাডি",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
@@ -205,7 +201,7 @@ fun StudyHomeSection(
         }
 
         // ── Overall progress ──
-        if (totalQ > 0) {
+        if (totalQ > 0 && doneQ > 0) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -258,7 +254,7 @@ fun StudyHomeSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("🔄 আজ Revision দরকার", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                    Text("🔄 আজ রিভিশন দরকার", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
                         color = purple, fontFamily = NotoSansBengali)
                     ov.queue.take(3).forEach { r ->
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
@@ -285,7 +281,7 @@ fun StudyHomeSection(
                             .clickable { showPlan = true }.padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("🤖 AI Study Plan", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        Text("🤖 AI স্টাডি প্ল্যান", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                             color = Color(0xFF7C3AED), fontFamily = NotoSansBengali)
                     }
                     Box(
@@ -296,7 +292,7 @@ fun StudyHomeSection(
                             }.padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Start Revision (৫–১০ মিনিট)", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        Text("রিভিশন শুরু করুন (৫–১০ মিনিট)", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                             color = Color.White, fontFamily = NotoSansBengali)
                     }
                 }
@@ -307,36 +303,30 @@ fun StudyHomeSection(
             StudyPlanSheet(ov.queue, onOpenTopic) { showPlan = false }
         }
 
-        // ── Recent (শেষ ৫টা Topic; প্রথমটা Continue কার্ডেই আছে, তাই বাকিগুলো) ──
+        // ── সাম্প্রতিক (প্রথমটা "চালিয়ে যাও" কার্ডেই আছে, তাই বাকিগুলো) — আড়াআড়ি ছোট চিপ, উচ্চতা বাঁচে ──
         val others = if (recent.size > 1) recent.drop(1) else emptyList()
         if (others.isNotEmpty()) {
-            Text("🕘 Recent", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            Text("🕘 সাম্প্রতিক", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onBackground)
-            others.forEach { r ->
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenTopic(r.subject, r.topic) }
-                ) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(r.topic, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                others.forEach { r ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
+                        modifier = Modifier.widthIn(max = 220.dp).clickable { onOpenTopic(r.subject, r.topic) }
+                    ) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(r.topic, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                                 fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(r.subject, fontSize = 11.sp,
+                            Text("${r.subject} · ${r.progress}%", fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontFamily = NotoSansBengali, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Text("${r.progress}%", fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                            color = StudyGreen, fontFamily = NotoSansBengali)
                     }
                 }
             }
         }
-
-        Text("📘 Subjects", fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(top = 2.dp))
     }
 }

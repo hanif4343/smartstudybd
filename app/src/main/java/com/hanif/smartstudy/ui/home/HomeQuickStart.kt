@@ -12,12 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -40,7 +44,7 @@ import com.hanif.smartstudy.ui.theme.NotoSansBengali
 // ═══════════════════════════════════════════════════════════
 // Home — "এখন কী করব?" অংশ (নতুন)
 //   ১) চালিয়ে যান কার্ড   — সর্বশেষ কার্যক্রম (HomeUiState.recentActivity) থেকে, এক ট্যাপে ঠিক ট্যাবে
-//   ২) দ্রুত অ্যাকশন      — ভুল রিভিউ · মডেল টেস্ট · সেভ করা · রুটিন (Tools শিটে লুকানো ছিল)
+//   ২) দ্রুত অ্যাকশন      — অডিয়েন্স-প্রোফাইল থেকে আসা সর্বোচ্চ ৪টা বাটন
 //   ৩) প্রশ্নব্যাংক সারি   — ক্যাটাগরি ট্যাপ করলে সরাসরি সেই ক্যাটাগরির প্রশ্নপত্র-তালিকা
 // ViewModel/ডেটা মডেলে কোনো পরিবর্তন নেই — শুধু বিদ্যমান ডেটা আর কলব্যাক ব্যবহার হয়েছে।
 // ═══════════════════════════════════════════════════════════
@@ -95,19 +99,63 @@ internal fun HomeContinueCard(
     }
 }
 
-/** চারটা হালকা-রঙের টাইল। রঙ alpha দিয়ে বানানো, তাই ডার্ক মোডেও মানিয়ে যায়। */
+/** হোমের একটা দ্রুত বাটন */
+internal data class HomeQuickAction(val label: String, val icon: ImageVector, val tint: Color, val onClick: () -> Unit)
+
+/** অডিয়েন্স-প্রোফাইল থেকে আসা (সর্বোচ্চ ৪টা) হালকা-রঙের টাইল। রঙ alpha দিয়ে বানানো, তাই ডার্ক মোডেও মানিয়ে যায়। */
 @Composable
-internal fun HomeQuickActionsRow(
-    onWrongReview: () -> Unit,
-    onModelTest: () -> Unit,
-    onSaved: () -> Unit,
-    onRoutine: () -> Unit
-) {
+internal fun HomeQuickActions(actions: List<HomeQuickAction>) {
+    if (actions.isEmpty()) return
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QsTile("ভুল রিভিউ", Icons.Default.Cancel, Color(0xFFF59E0B), onWrongReview, Modifier.weight(1f))
-        QsTile("মডেল টেস্ট", Icons.Default.Description, Color(0xFFEF4444), onModelTest, Modifier.weight(1f))
-        QsTile("সেভ করা", Icons.Default.Bookmark, Color(0xFF8B5CF6), onSaved, Modifier.weight(1f))
-        QsTile("রুটিন", Icons.Default.CalendarMonth, Color(0xFF22C55E), onRoutine, Modifier.weight(1f))
+        actions.take(4).forEach { a -> QsTile(a.label, a.icon, a.tint, a.onClick, Modifier.weight(1f)) }
+    }
+}
+
+/**
+ * নতুন ইউজারের জন্য "শুরু করার ৩ ধাপ" — খালি কার্ডের বদলে করার মতো কাজ।
+ * তিনটাই শেষ হলে হোম আর এটা দেখায় না।
+ */
+@Composable
+internal fun HomeStartChecklist(
+    steps: List<Triple<String, Boolean, () -> Unit>>   // (লেখা, শেষ হয়েছে?, ট্যাপে কী হবে)
+) {
+    val shape = RoundedCornerShape(22.dp)
+    val accent = MaterialTheme.colorScheme.primary
+    val doneCount = steps.count { it.second }
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(accent.copy(alpha = 0.10f)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("শুরু করার ${steps.size}টা ধাপ", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                    fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurface)
+                Text("তোমার প্রস্তুতির প্রথম দিনটা সাজিয়ে নাও", fontSize = 12.sp, fontFamily = NotoSansBengali,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("$doneCount/${steps.size}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                fontFamily = NotoSansBengali, color = accent)
+        }
+        steps.forEach { (label, done, onClick) ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
+                    .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    if (done) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked, null,
+                    tint = if (done) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(label, Modifier.weight(1f), fontSize = 13.sp, fontFamily = NotoSansBengali,
+                    fontWeight = if (done) FontWeight.Normal else FontWeight.SemiBold,
+                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
+        }
     }
 }
 
@@ -160,7 +208,7 @@ internal fun HomeQBankCategoriesRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             categories.forEach { c -> QsChip(c, filled = false) { onPick(c) } }
-            QsChip("Study", filled = true, onClick = onOpenStudy)
+            QsChip("স্টাডি", filled = true, onClick = onOpenStudy)
         }
     }
 }

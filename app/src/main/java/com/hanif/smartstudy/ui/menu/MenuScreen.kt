@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -69,21 +70,7 @@ fun MenuScreen(
     }
 
     // Sub-screen nav — initialPage থেকে শুরু করো
-    val startScreen = remember(initialPage) {
-        when (initialPage?.lowercase()) {
-            "stats"       -> MenuNav.STATS
-            "bookmarks"   -> MenuNav.BOOKMARKS
-            "admin"       -> MenuNav.ADMIN
-            "leaderboard" -> MenuNav.LEADERBOARD
-            "profile"     -> MenuNav.PROFILE
-            "studybuddy"  -> MenuNav.STUDY_BUDDY
-            "testhistory" -> MenuNav.TEST_HISTORY
-            "routine"     -> MenuNav.ROUTINE
-            "wrongreview" -> MenuNav.WRONG_REVIEW
-            "settings"    -> MenuNav.SETTINGS
-            else          -> MenuNav.MAIN
-        }
-    }
+    val startScreen = remember(initialPage) { menuNavFor(initialPage) }
     var screen by remember { mutableStateOf(startScreen) }
 
     // initialPage বদলালে navigate করো (notification click এর পরে)
@@ -141,6 +128,22 @@ fun MenuScreen(
                 onBack        = { screen = MenuNav.MAIN },
                 quizViewModel = quizViewModel
             )
+            MenuNav.HISTORY -> Column(Modifier.fillMaxSize()) {
+                // History এখন নিচের নেভ-বারে নেই — Me → History। ওপরে ছোট ব্যাক-সারি।
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { screen = MenuNav.MAIN }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                    Text("Me", fontSize = 13.sp, fontFamily = NotoSansBengali,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box(Modifier.weight(1f)) {
+                    com.hanif.smartstudy.ui.history.HistoryScreen(
+                        quizViewModel  = quizViewModel,
+                        onOpenMenuPage = { p -> screen = menuNavFor(p) }
+                    )
+                }
+            }
         }
     }
 
@@ -164,7 +167,23 @@ fun MenuScreen(
     }
 }
 
-enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY, ROUTINE, WRONG_REVIEW }
+enum class MenuNav { MAIN, PROFILE, STATS, SETTINGS, BOOKMARKS, LEADERBOARD, ADMIN, PRIVACY, STUDY_BUDDY, TEST_HISTORY, ROUTINE, WRONG_REVIEW, HISTORY }
+
+/** পেজের নাম (হোম/নোটিফিকেশন/ডিপ-লিংক থেকে আসা) → Me-পাতার ভেতরের স্ক্রিন */
+internal fun menuNavFor(page: String?): MenuNav = when (page?.lowercase()) {
+    "stats"       -> MenuNav.STATS
+    "bookmarks"   -> MenuNav.BOOKMARKS
+    "admin"       -> MenuNav.ADMIN
+    "leaderboard" -> MenuNav.LEADERBOARD
+    "profile"     -> MenuNav.PROFILE
+    "studybuddy"  -> MenuNav.STUDY_BUDDY
+    "testhistory" -> MenuNav.TEST_HISTORY
+    "routine"     -> MenuNav.ROUTINE
+    "wrongreview" -> MenuNav.WRONG_REVIEW
+    "settings"    -> MenuNav.SETTINGS
+    "history"     -> MenuNav.HISTORY
+    else          -> MenuNav.MAIN
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Routine / Wrong Review — Home থেকে সরাসরি open হওয়ার জন্য dedicated screen
@@ -378,6 +397,7 @@ fun MainMenuScreen(
 
             // ── Menu items ──
             MenuGroup("📊 তথ্য") {
+                MenuRow("🕘 History",        "তোমার সব কুইজ ও টেস্ট",  Icons.Default.History)      { onNavigate(MenuNav.HISTORY) }
                 MenuRow("📈 পরিসংখ্যান",   "সঠিক/ভুল, XP ইতিহাস",  Icons.Default.BarChart)     { onNavigate(MenuNav.STATS) }
                 MenuRow("⭐ সংরক্ষিত",      "bookmark করা প্রশ্ন",   Icons.Default.Bookmark)     { onNavigate(MenuNav.BOOKMARKS) }
                 MenuRow("🏆 লিডারবোর্ড",   "শীর্ষ শিক্ষার্থীরা",   Icons.Default.Leaderboard)  { onNavigate(MenuNav.LEADERBOARD) }
@@ -659,28 +679,8 @@ fun MenuRow(
 //  Admin Audience Switch Section
 // ─────────────────────────────────────────────────────────────
 
-private val AUDIENCE_TAGS = listOf(
-    "" to "👔 Job Seeker (Default)",
-    "Nursing Admission" to "🩺 Nursing Admission",
-    "Masters 2" to "🎓 Masters 2nd",
-    "Masters 1" to "🎓 Masters 1st",
-    "Honours 4" to "🎓 Honours 4th",
-    "Honours 3" to "🎓 Honours 3rd",
-    "Honours 2" to "🎓 Honours 2nd",
-    "Honours 1" to "🎓 Honours 1st",
-    "Class 12"  to "📚 Class 12",
-    "Class 11"  to "📚 Class 11",
-    "Class 10"  to "📚 Class 10",
-    "Class 9"   to "📚 Class 9",
-    "Class 8"   to "📚 Class 8",
-    "Class 7"   to "📚 Class 7",
-    "Class 6"   to "📚 Class 6",
-    "Class 5"   to "📚 Class 5",
-    "Class 4"   to "📚 Class 4",
-    "Class 3"   to "📚 Class 3",
-    "Class 2"   to "📚 Class 2",
-    "Class 1"   to "📚 Class 1"
-)
+// অ্যাডমিনের Switch Audience তালিকা এখন কেন্দ্রীয় AudienceProfiles থেকে আসে
+private val AUDIENCE_TAGS = com.hanif.smartstudy.util.AudienceProfiles.adminSwitchOptions
 
 @Composable
 fun AdminSwitchTagSection(currentTag: String, onSwitch: (String) -> Unit) {

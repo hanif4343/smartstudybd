@@ -90,8 +90,7 @@ fun GlobalSearchScreen(
         val found = withContext(Dispatchers.IO) {
             val user     = session.getCurrentUser()
             val adminTag = if (user?.isAdmin() == true) session.getAdminAudienceTag() else ""
-            val tag = com.hanif.smartstudy.util.AudienceFilter.audienceGroupOf(user)
-                .let { if (user?.isAdmin() == true && adminTag.isNotBlank()) adminTag else it }
+            val tag = com.hanif.smartstudy.util.AudienceFilter.effectiveGroup(user, adminTag)
             val quiz  = dao.search("QUIZ",  activeQuery, tag)
             val qbank = dao.search("QBANK", activeQuery, tag)
             val study = dao.search("STUDY", activeQuery, tag)

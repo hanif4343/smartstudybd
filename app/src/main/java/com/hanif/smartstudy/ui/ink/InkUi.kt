@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -46,6 +47,13 @@ import kotlin.math.max
    ══════════════════════════════════════════════════════════════════════════ */
 
 private const val INK_W = 1000f              // লজিক্যাল চওড়া
+private const val INK_MAX_H = 10000f         // পাতার সর্বোচ্চ উচ্চতা (লজিক্যাল একক)
+private const val INK_GROW_STEP = 800f       // নিচে লিখতে লিখতে পাতা এতটুকু করে বাড়ে
+private const val INK_GROW_EDGE = 450f       // নিচের কিনারার এত কাছে কলম এলে পাতা বাড়ে
+
+/** true হলে প্রশ্নের নিচে ইনলাইন "✍ হাতে লেখো" বাটন দেখায়। কুইজ/QBank তালিকায় ভাসমান বাটনের
+ *  ভেতরে ✍ থাকে, তাই সেখানে এটা false করে দেওয়া হয় — ফলে দুইবার বাটন আসে না। */
+val LocalInkInlineButtons = androidx.compose.runtime.compositionLocalOf { true }
 private const val INK_GAP_MS = 250f          // প্লে-তে দুই স্ট্রোকের মাঝের বিরতি
 private const val INK_DEFAULT = 0xFF111111.toInt()   // ডিফল্ট কালো — ডার্ক মোডে সাদাটে দেখায়
 private val INK_COLORS = listOf(INK_DEFAULT, 0xFF1D4ED8.toInt(), 0xFFDC2626.toInt())
@@ -100,7 +108,7 @@ private fun DrawScope.drawStroke(pts: List<InkPt>, width: Float, color: Color, s
 @Composable
 fun InkViewer(doc: InkDoc, modifier: Modifier = Modifier) {
     val dark = LocalDarkMode.current.value
-    val ratio = (doc.w.toFloat() / doc.h.coerceAtLeast(1).toFloat()).coerceIn(0.25f, 6f)
+    val ratio = (doc.w.toFloat() / doc.h.coerceAtLeast(1).toFloat()).coerceIn(0.1f, 6f)
     Box(
         modifier.fillMaxWidth().aspectRatio(ratio)
             .clip(RoundedCornerShape(10.dp)).background(inkPaper(dark))
@@ -117,6 +125,7 @@ fun InkViewer(doc: InkDoc, modifier: Modifier = Modifier) {
 fun InkSection(questionId: String, field: String, isAdmin: Boolean, modifier: Modifier = Modifier) {
     if (questionId.isBlank()) return
     val ctx = LocalContext.current.applicationContext
+    val inlineButtons = LocalInkInlineButtons.current
     LaunchedEffect(Unit) { InkRepository.ensureIndex() }
     val ver = InkRepository.version(questionId, field)
     var doc by remember(questionId, field, ver) { mutableStateOf<InkDoc?>(null) }
@@ -131,7 +140,8 @@ fun InkSection(questionId: String, field: String, isAdmin: Boolean, modifier: Mo
             loading = false
         } else { doc = null; loading = false }
     }
-    if (ver == null && !isAdmin) return
+    val canEditHere = isAdmin && inlineButtons
+    if (ver == null && !canEditHere) return
     val title = if (field == "technique") "✍ হাতে লেখা কৌশল" else "✍ হাতে লেখা সমাধান"
     Column(modifier.fillMaxWidth().padding(top = 8.dp)) {
         if (ver != null) {
@@ -158,7 +168,7 @@ fun InkSection(questionId: String, field: String, isAdmin: Boolean, modifier: Mo
                 else -> TextButton(onClick = { retry++ }) { Text("লোড করা যায়নি — আবার চেষ্টা", fontFamily = NotoSansBengali) }
             }
         }
-        if (isAdmin) {
+        if (canEditHere) {
             OutlinedButton(
                 onClick = { editing = true },
                 modifier = Modifier.heightIn(min = 44.dp),
@@ -188,7 +198,11 @@ fun InkPadDialog(
     title: String,
     initial: InkDoc?,
     onDismiss: () -> Unit,
-    onSave: suspend (InkDoc?, String?) -> String?
+    onSave: suspend (InkDoc?, String?) -> String?,
+    // ব্যাখ্যা | কৌশল বদলানোর চিপ (null হলে দেখায় না)
+    fieldOptions: List<Pair<String, String>>? = null,
+    currentField: String = "",
+    onFieldChange: (String) -> Unit = {}
 ) {
     val dark = LocalDarkMode.current.value
     var strokes by remember { mutableStateOf(initial?.strokes ?: emptyList()) }
@@ -198,8 +212,9 @@ fun InkPadDialog(
     var colorIdx by remember { mutableStateOf(0) }
     var widthIdx by remember { mutableStateOf(1) }
     var grid by remember { mutableStateOf(true) }
-    var writeMode by remember { mutableStateOf(true) }
-    var docH by remember { mutableStateOf(max(initial?.h ?: 0, 1200).toFloat()) }
+    // আঙুলেও লেখা: বন্ধ (ডিফল্ট) = শুধু স্টাইলাস লেখে, আঙুল/তালু শুধু পাতা ওপর-নিচ টানে
+    var fingerDraw by remember { mutableStateOf(false) }
+    var docH by remember { mutableStateOf(max(initial?.h ?: 0, 1200).toFloat().coerceAtMost(INK_MAX_H)) }
     var dirty by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -253,8 +268,14 @@ fun InkPadDialog(
 
                 // ── টুলবার ──
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(selected = writeMode, onClick = { writeMode = !writeMode },
-                        label = { Text(if (writeMode) "✍ লেখা মোড" else "☝ স্ক্রল মোড", fontFamily = NotoSansBengali) })
+                    fieldOptions?.forEach { (key, label) ->
+                        FilterChip(selected = currentField == key, onClick = {
+                            if (key == currentField) return@FilterChip
+                            if (dirty) error = "আগে সংরক্ষণ করুন, তারপর ব্যাখ্যা/কৌশল বদলান" else onFieldChange(key)
+                        }, label = { Text("✍ $label", fontFamily = NotoSansBengali, fontWeight = FontWeight.Bold) })
+                    }
+                    FilterChip(selected = fingerDraw, onClick = { fingerDraw = !fingerDraw },
+                        label = { Text(if (fingerDraw) "☝ আঙুলে লিখছি" else "🖊 শুধু স্টাইলাস", fontFamily = NotoSansBengali) })
                     OutlinedButton(enabled = undo.isNotEmpty(), onClick = {
                         redo.add(strokes); strokes = undo.removeAt(undo.size - 1); dirty = true
                     }, modifier = Modifier.heightIn(min = 40.dp)) { Text("↶ ফেরাও", fontFamily = NotoSansBengali) }
@@ -275,7 +296,7 @@ fun InkPadDialog(
                     }
                     FilterChip(selected = showText, onClick = { showText = !showText }, label = { Text("Aa টেক্সট", fontFamily = NotoSansBengali) })
                     FilterChip(selected = grid, onClick = { grid = !grid }, label = { Text("গ্রিড", fontFamily = NotoSansBengali) })
-                    OutlinedButton(enabled = docH < 5000f, onClick = { docH += 500f; dirty = true }, modifier = Modifier.heightIn(min = 40.dp)) { Text("＋ জায়গা", fontFamily = NotoSansBengali) }
+                    OutlinedButton(enabled = docH < INK_MAX_H, onClick = { docH = (docH + 800f).coerceAtMost(INK_MAX_H); dirty = true }, modifier = Modifier.heightIn(min = 40.dp)) { Text("＋ জায়গা", fontFamily = NotoSansBengali) }
                     OutlinedButton(enabled = strokes.isNotEmpty(), onClick = { askClear = true }, modifier = Modifier.heightIn(min = 40.dp)) { Text("সব মোছো", fontFamily = NotoSansBengali) }
                 }
                 Spacer(Modifier.height(6.dp))
@@ -284,16 +305,23 @@ fun InkPadDialog(
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(10.dp)).background(inkPaper(dark)).border(1.dp, inkLine(dark), RoundedCornerShape(10.dp))) {
                     val wPx = constraints.maxWidth.toFloat()
                     val scale = wPx / INK_W
-                    val canvasH = with(LocalDensity.current) { (docH * scale).toDp() }
-                    Box(Modifier.fillMaxSize().verticalScroll(scroll, enabled = !writeMode)) {
+                    // পাতা সবসময় পুরো পর্দা ভরে থাকে (লেখার জায়গা কম পড়ে না)
+                    val viewportUnits = constraints.maxHeight.toFloat() / scale
+                    LaunchedEffect(viewportUnits) { if (docH < viewportUnits) docH = viewportUnits.coerceAtMost(INK_MAX_H) }
+                    val canvasH = with(LocalDensity.current) { (docH * scale).toDp() }.coerceAtLeast(maxHeight)
+                    Box(Modifier.fillMaxSize().verticalScroll(scroll)) {
                         Canvas(
                             Modifier.fillMaxWidth().height(canvasH)
-                                .pointerInput(writeMode, eraser, colorIdx, widthIdx, scale) {
-                                    if (!writeMode) return@pointerInput
+                                .pointerInput(eraser, colorIdx, widthIdx, scale, fingerDraw) {
                                     awaitEachGesture {
                                         val down = awaitFirstDown(requireUnconsumed = false)
+                                        val isPen = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+                                        // আঙুল/তালু (স্টাইলাস-অনলি মোডে) → কিছুই না করে স্ক্রলকে ছেড়ে দাও:
+                                        // আঙুলে টেনে পাতা নিচে আনা/ওপরে তোলা যায়, তালু লেখায় বাধা দেয় না
+                                        if (!isPen && !fingerDraw) return@awaitEachGesture
+                                        val useEraser = eraser || down.type == PointerType.Eraser
                                         val t0 = System.currentTimeMillis()
-                                        if (eraser) {
+                                        if (useEraser) {
                                             var pushed = false
                                             fun eraseAt(o: Offset) {
                                                 val lx = o.x / scale
@@ -307,8 +335,11 @@ fun InkPadDialog(
                                             eraseAt(down.position); down.consume()
                                             do {
                                                 val ev = awaitPointerEvent()
-                                                ev.changes.forEach { if (it.pressed) { eraseAt(it.position); it.consume() } }
-                                            } while (ev.changes.any { it.pressed })
+                                                ev.changes.forEach { c ->
+                                                    if (c.id == down.id && c.pressed) eraseAt(c.position)
+                                                    c.consume()   // অন্য পয়েন্টার (তালু) স্ক্রল/লেখা কিছুই ঘটাবে না
+                                                }
+                                            } while (ev.changes.any { it.id == down.id && it.pressed })
                                         } else {
                                             liveList.clear()
                                             fun add(o: Offset) {
@@ -318,13 +349,18 @@ fun InkPadDialog(
                                                 if (last == null || hypot(lx - last.x, ly - last.y) >= 1.5f) {
                                                     liveList.add(InkPt(lx, ly, (System.currentTimeMillis() - t0).toInt()))
                                                     liveTick++
+                                                    // নিচের কিনারার কাছে লিখলে পাতা নিজে থেকে বাড়ে — টেনে নামানোর জায়গা সবসময় থাকে
+                                                    if (ly > docH - INK_GROW_EDGE && docH < INK_MAX_H) docH = (docH + INK_GROW_STEP).coerceAtMost(INK_MAX_H)
                                                 }
                                             }
                                             add(down.position); down.consume()
                                             do {
                                                 val ev = awaitPointerEvent()
-                                                ev.changes.forEach { if (it.pressed) { add(it.position); it.consume() } }
-                                            } while (ev.changes.any { it.pressed })
+                                                ev.changes.forEach { c ->
+                                                    if (c.id == down.id && c.pressed) add(c.position)
+                                                    c.consume()   // তালুর স্পর্শ গিলে ফেলা হয় — পাতা নড়ে না, দাগও পড়ে না
+                                                }
+                                            } while (ev.changes.any { it.id == down.id && it.pressed })
                                             if (liveList.isNotEmpty()) {
                                                 pushUndo()
                                                 strokes = strokes + InkStroke(INK_COLORS[colorIdx], INK_WIDTHS[widthIdx], liveList.toList())
@@ -347,6 +383,16 @@ fun InkPadDialog(
                                 drawStroke(liveList.toList(), INK_WIDTHS[widthIdx], inkColor(INK_COLORS[colorIdx], dark), scale, Float.MAX_VALUE)
                             }
                         }
+                    }
+                    // প্রথম দাগ না পড়া পর্যন্ত ছোট নির্দেশ (স্পর্শ আটকায় না)
+                    if (strokes.isEmpty()) {
+                        Text(
+                            if (fingerDraw) "আঙুল দিয়ে লিখুন। ওপর-নিচ করতে ওপরের \"আঙুলে লিখছি\" বন্ধ করুন।"
+                            else "স্টাইলাস দিয়ে লিখুন · আঙুল দিয়ে টেনে পাতা ওপর-নিচ করুন (তালু বাধা দেবে না)",
+                            Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 16.dp, end = 16.dp),
+                            fontSize = 12.sp, fontFamily = NotoSansBengali,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
                     }
                 }
                 if (showText) {
@@ -386,11 +432,6 @@ fun InkPadDialog(
                         }
                     }
                 }
-                Text(
-                    if (writeMode) "টাচপেন বা আঙুলে লিখুন। নিচে নামতে \"☝ স্ক্রল মোড\" বা \"＋ জায়গা\" ব্যবহার করুন।" else "স্ক্রল মোড: আঙুলে ওপর-নিচ করুন। লিখতে আবার \"✍ লেখা মোড\" চাপুন।",
-                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = NotoSansBengali,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
             }
         }
     }
@@ -411,6 +452,37 @@ fun InkPadDialog(
             text = { Text("\"ফেরাও\" দিয়ে আবার ফিরিয়ে আনা যাবে (সংরক্ষণের আগে)।", fontFamily = NotoSansBengali) },
             confirmButton = { TextButton(onClick = { pushUndo(); strokes = emptyList(); askClear = false }) { Text("মুছুন", fontFamily = NotoSansBengali) } },
             dismissButton = { TextButton(onClick = { askClear = false }) { Text("না", fontFamily = NotoSansBengali) } }
+        )
+    }
+}
+
+
+/** কুইজ/QBank তালিকার ভাসমান বাটনের ✍ থেকে খোলে: একটা প্রশ্নের ব্যাখ্যা বা কৌশল হাতে লেখার পূর্ণ-পাতা প্যাড */
+@Composable
+fun InkPadForQuestion(questionId: String, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current.applicationContext
+    var field by remember(questionId) { mutableStateOf("explanation") }
+    var doc by remember(questionId, field) { mutableStateOf<InkDoc?>(null) }
+    var loaded by remember(questionId, field) { mutableStateOf(false) }
+    LaunchedEffect(questionId, field) {
+        InkRepository.ensureIndex()
+        doc = if (InkRepository.version(questionId, field) != null) InkRepository.load(ctx, questionId, field) else null
+        loaded = true
+    }
+    if (!loaded) return
+    key(questionId, field) {
+        InkPadDialog(
+            title = if (field == "technique") "✍ হাতে লেখা কৌশল" else "✍ হাতে লেখা সমাধান",
+            initial = doc,
+            onDismiss = onDismiss,
+            onSave = { d, t ->
+                val err = InkRepository.save(questionId, field, d, text = t)
+                if (err == null) onDismiss()
+                err
+            },
+            fieldOptions = listOf("explanation" to "ব্যাখ্যা", "technique" to "কৌশল"),
+            currentField = field,
+            onFieldChange = { field = it }
         )
     }
 }

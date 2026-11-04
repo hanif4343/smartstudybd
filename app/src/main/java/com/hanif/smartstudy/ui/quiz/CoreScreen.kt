@@ -137,12 +137,8 @@ fun CoreScreen(
     val isInsideQBankPostPicker = mode == StudyMode.QBANK &&
         (state.qbankFilterMode == QBankFilterMode.POST || state.qbankFilterMode == QBankFilterMode.DESIGNATION) &&
         state.qbankSelectedPost != null
-    val isInsideNav = state.isMockZone ||
+    val isInsideNav = state.inTestFlow ||
                       state.ownScopeActive ||
-                      state.isQBankMtZone ||
-                      state.activeQBankMt != null ||
-                      state.isModelTestZone ||
-                      state.isModelTestSubjectPicker ||
                       state.showResult ||
                       state.navPath.depth() > 0 ||
                       isInsideQBankInstitutionPicker ||
@@ -152,9 +148,7 @@ fun CoreScreen(
         // generic navigateBack() শুধু plain Subject→SubTopic হায়ারার্কি বোঝে, এই
         // মোডগুলোর উল্টানো/flat হায়ারার্কি বোঝে না। Mock/Model Test/Result-এ আগের
         // মতোই generic navigateBack() ব্যবহার হয়। ──
-        val useQBankFilterBack = mode == StudyMode.QBANK &&
-            !state.isMockZone && !state.isModelTestZone &&
-            !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null && !state.showResult
+        val useQBankFilterBack = mode == StudyMode.QBANK && !state.inTestFlow && !state.showResult
         if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
     }
 
@@ -349,9 +343,7 @@ fun CoreScreen(
                     // কোনো when-branch-ই ম্যাচ করতো না (স্ক্রিন সাদা), আর BackHandler-ও
                     // ইতিমধ্যে ভাঙা navPath নিয়ে বিভ্রান্ত হয়ে যেত। এখন BackHandler-এর মতোই
                     // এখানেও চেক করে সঠিক ফাংশন কল হচ্ছে। ──
-                    val useQBankFilterBack = mode == StudyMode.QBANK &&
-                        !state.isMockZone && !state.isModelTestZone &&
-                        !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null
+                    val useQBankFilterBack = mode == StudyMode.QBANK && !state.inTestFlow
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 }
             )
@@ -394,7 +386,7 @@ fun CoreScreen(
                 },
                 isAdmin         = state.isAdmin,
                 onBack          = {
-                    val useQBankFilterBack = !state.isMockZone && !state.isModelTestZone && !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null
+                    val useQBankFilterBack = !state.inTestFlow
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 },
                 onBookmark      = { qid -> viewModel.toggleBookmark(qid) },
@@ -450,9 +442,7 @@ fun CoreScreen(
                 // হয় বলে সমস্যাটা সেখানেই বেশি ধরা পড়ত)। এখন উপরের BackHandler-এর
                 // মতোই সঠিক ফাংশন বেছে নেওয়া হচ্ছে। ──
                 onBack              = {
-                    val useQBankFilterBack = mode == StudyMode.QBANK &&
-                        !state.isMockZone && !state.isModelTestZone &&
-                        !state.isModelTestSubjectPicker && !state.isQBankMtZone && state.activeQBankMt == null && !state.showResult
+                    val useQBankFilterBack = mode == StudyMode.QBANK && !state.inTestFlow && !state.showResult
                     if (useQBankFilterBack) viewModel.qbankFilterBack() else viewModel.navigateBack()
                 },
                 onSubmit            = { viewModel.submitQuiz() },

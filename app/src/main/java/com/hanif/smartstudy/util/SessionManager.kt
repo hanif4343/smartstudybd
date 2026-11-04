@@ -298,7 +298,9 @@ class SessionManager(private val context: Context) {
         // request-এ KV rate-limit bypass header যাবে কিনা ঠিক হয় (দেখো CdnService.kt) ──
         com.hanif.smartstudy.data.remote.CdnService.isAdminSession = user.isAdmin()
         // 🩺 Nursing Admission ইউজার হলে QBank-এ নার্সিং ক্যাটাগরি
-        com.hanif.smartstudy.util.QBankCategory.applyAudience(user.classLevel)
+        // অ্যাডমিনের ক্ষেত্রে নিজের classLevel নয় — তার "Switch Audience" পছন্দ অনুযায়ী
+        val adminTag = (context.dataStore.data.first()[KEY_ADMIN_AUDIENCE_TAG] ?: "").trim().ifBlank { "Job" }
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(if (user.isAdmin()) adminTag else user.classLevel)
     }
 
     suspend fun clearUser() {
@@ -324,6 +326,14 @@ class SessionManager(private val context: Context) {
     }
 
     fun themeColorFlow(): Flow<String> = context.dataStore.data.map { it[KEY_THEME_COLOR] ?: "indigo" }
+
+    /** ইউজার নিজে থিম বেছেছে কিনা বোঝার জন্য: কখনো না বাছলে ফাঁকা ("") ফেরত দেয় */
+    fun getThemeColorChosen(): String = runBlocking { cachedPrefs()[KEY_THEME_COLOR] ?: "" }
+    fun themeColorChosenFlow(): Flow<String> = context.dataStore.data.map { it[KEY_THEME_COLOR] ?: "" }
+
+    /** ইউজারের বাছা থিম; না বাছলে বর্তমান অডিয়েন্সের ডিফল্ট থিম */
+    fun getEffectiveThemeColor(): String =
+        getThemeColorChosen().ifBlank { com.hanif.smartstudy.util.AudienceProfiles.current.defaultTheme }
 
     suspend fun setThemeColor(color: String) {
         context.dataStore.edit { it[KEY_THEME_COLOR] = color }
@@ -977,9 +987,19 @@ class SessionManager(private val context: Context) {
     }
 
     // ── Admin Audience Tag ────────────────────────────────────
+    /**
+     * অ্যাডমিনের "দেখার audience"। ফাঁকা সংরক্ষিত মান = Job Seeker (ডিফল্ট) — তাই সবসময় একটা
+     * স্পষ্ট নাম ফেরত দেয় ("Job" বা অন্য tag)। এতে "Job বেছেছি" আর "কিছুই বাছিনি" আর কখনো
+     * গুলিয়ে যায় না, এবং অ্যাডমিনের নিজের প্রোফাইলের classLevel (যেমন Nursing Admission)
+     * ভুলে audience হিসেবে ধরা পড়ে না।
+     */
     fun getAdminAudienceTag(): String = runBlocking {
-        cachedPrefs()[KEY_ADMIN_AUDIENCE_TAG] ?: ""
+        (cachedPrefs()[KEY_ADMIN_AUDIENCE_TAG] ?: "").trim().ifBlank { "Job" }
     }
+
+    /** এই মুহূর্তে ইউজারের কার্যকর audience: অ্যাডমিন হলে তার বেছে নেওয়া tag, নইলে নিজের classLevel */
+    fun effectiveAudienceOf(user: User?): String =
+        if (user?.isAdmin() == true) getAdminAudienceTag() else (user?.classLevel ?: "")
     suspend fun setAdminAudienceTag(tag: String) {
         context.dataStore.edit { it[KEY_ADMIN_AUDIENCE_TAG] = tag }
     }

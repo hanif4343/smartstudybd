@@ -300,7 +300,7 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val localUser  = session.getCurrentUser()
             val isDark     = session.isDarkMode()
-            val theme      = themeFromString(session.getThemeColor())
+            val theme      = themeFromString(session.getEffectiveThemeColor())
             val soundOff   = session.isSoundOff()
             val offlineOn  = session.isOfflineMode()
             val dataSrcMode = session.getDataSourceMode()
@@ -976,9 +976,10 @@ class MenuViewModel(app: Application) : AndroidViewModel(app) {
     fun adminSwitchAudienceTag(tag: String) {
         if (!_state.value.isAdmin) return
         viewModelScope.launch {
-            session.setAdminAudienceTag(tag)
-            val label = if (tag.isBlank()) "Job Seeker (default)" else tag
-            _state.update { it.copy(adminViewingTag = tag, toast = "🔄 দেখছেন: $label") }
+            val t = tag.trim().ifBlank { "Job" }   // ফাঁকা = Job Seeker — স্পষ্ট নামে সংরক্ষণ
+            session.setAdminAudienceTag(t)
+            val label = if (t.equals("Job", ignoreCase = true)) "Job Seeker (default)" else t
+            _state.update { it.copy(adminViewingTag = t, toast = "🔄 দেখছেন: $label") }
         }
     }
 

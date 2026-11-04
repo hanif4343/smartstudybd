@@ -183,21 +183,25 @@ class MainActivity : ComponentActivity() {
 
         pendingDeepLink.value = intent?.parseDeepLink() ?: DeepLinkAction(DeepLinkAction.Type.NONE)
 
+        // অডিয়েন্স (নার্সিং/শিক্ষার্থী/চাকরি) আগেভাগে ঠিক করা — যাতে প্রথম ফ্রেমেই সঠিক ডিফল্ট থিম আসে
+        com.hanif.smartstudy.util.QBankCategory.applyAudience(session.effectiveAudienceOf(session.getCurrentUser()))
+
         setContent {
             val darkFlow  = remember { session.darkModeFlow() }
-            val themeFlow = remember { session.themeColorFlow() }
+            val themeFlow = remember { session.themeColorChosenFlow() }
             val scaleFlow = remember { session.fontScaleFlow() }
             // ── PERF FIX: আগে initial ভ্যালু হিসেবে session.isDarkMode()/getThemeColor()/
             // getFontScale() সরাসরি কল হতো — এগুলো Composable body-র সাধারণ argument
             // বলে প্রতিবার recomposition এ আবার কল হতো। remember দিয়ে শুধু প্রথমবারই
             // (composition-এ ঢোকার সময়) একবার নেওয়া হচ্ছে, পরের recomposition এ আর না। ──
             val initialDark  = remember { session.isDarkMode() }
-            val initialTheme = remember { session.getThemeColor() }
+            val initialTheme = remember { session.getThemeColorChosen() }
             val initialScale = remember { session.getFontScale() }
             val isDark    by darkFlow.collectAsState(initial = initialDark)
             val themeStr  by themeFlow.collectAsState(initial = initialTheme)
             val uiScale   by scaleFlow.collectAsState(initial = initialScale)
-            val appTheme  = themeFromString(themeStr)
+            // ইউজার নিজে থিম না বেছে থাকলে (ফাঁকা) বর্তমান অডিয়েন্সের ডিফল্ট থিম
+            val appTheme  = themeFromString(themeStr.ifBlank { com.hanif.smartstudy.util.AudienceProfiles.current.defaultTheme })
 
             val isOnline by ConnectivityObserver.observe(this@MainActivity)
                 .collectAsState(initial = true)

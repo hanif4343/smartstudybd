@@ -47,24 +47,8 @@ import com.hanif.smartstudy.viewmodel.AuthViewModel
 // ── শ্রেণী গ্রুপ ──
 data class ClassGroup(val label: String, val emoji: String, val items: List<String>)
 
-val CLASS_GROUPS = listOf(
-    ClassGroup("মাধ্যমিক", "📚", listOf(
-        "Class 1","Class 2","Class 3","Class 4","Class 5",
-        "Class 6","Class 7","Class 8","Class 9","Class 10"
-    )),
-    ClassGroup("উচ্চ মাধ্যমিক", "🎓", listOf(
-        "Class 11","Class 12"
-    )),
-    ClassGroup("অনার্স", "🏛️", listOf(
-        "Honours 1","Honours 2","Honours 3","Honours 4"
-    )),
-    ClassGroup("মাস্টার্স", "🔬", listOf(
-        "Masters 1","Masters 2","Masters Final"
-    )),
-    ClassGroup("ভর্তি প্রস্তুতি", "🩺", listOf(
-        "Nursing Admission"
-    ))
-)
+// সংজ্ঞা কেন্দ্রীয় AudienceProfiles.signupGroups-এ — নতুন গ্রুপ যোগ করতে সেখানেই
+val CLASS_GROUPS = com.hanif.smartstudy.util.AudienceProfiles.signupGroups.map { ClassGroup(it.label, it.emoji, it.tags) }
 
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
