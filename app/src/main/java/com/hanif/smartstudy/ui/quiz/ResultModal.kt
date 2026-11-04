@@ -456,7 +456,9 @@ fun MockSelectionScreen(
                     )
                     Button(
                         onClick  = onStart,
-                        enabled  = selectedCount > 0 || true,
+                        // ০ টপিক থাকলে শুরু নয় — নইলে ০ প্রশ্নের মক শুরু হয়ে যেত।
+                        // (টপিক না বাছলেও শুরু চলে, তখন পুরো পুল থেকে প্রশ্ন আসে।)
+                        enabled  = subjects.isNotEmpty(),
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape    = RoundedCornerShape(16.dp),
                         colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
@@ -477,6 +479,22 @@ fun MockSelectionScreen(
             contentPadding      = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (subjects.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("📭 এই মোড/অডিয়েন্সে কোনো টপিক পাওয়া যায়নি",
+                            fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFE53935), fontFamily = NotoSansBengali)
+                        Spacer(Modifier.height(8.dp))
+                        Text("QBank/Quiz ট্যাবে বিষয় দেখা যাচ্ছে কি না দেখুন, অডিয়েন্স বদলে আবার চেষ্টা করুন, অথবা ফিরে গিয়ে আবার মক টেস্ট খুলুন।",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = NotoSansBengali, textAlign = TextAlign.Center)
+                    }
+                }
+            }
             itemsIndexed(subjects) { idx, subject ->
                 MockSubjectAccordion(
                     subject      = subject,
