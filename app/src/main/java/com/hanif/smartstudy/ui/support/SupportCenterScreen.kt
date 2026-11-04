@@ -25,7 +25,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
+import com.hanif.smartstudy.R
 import com.hanif.smartstudy.ui.shared.Indigo600
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 import com.hanif.smartstudy.viewmodel.SupportFaq
@@ -159,6 +162,17 @@ private fun SupportHome(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Design 1: সাপোর্ট ছবি গাইড কার্ডের উপরে। Call/Telegram/WhatsApp
+        // কার্ড যোগ করা হয়নি — এই ব্রাঞ্চে সেগুলো নেই, ডিজাইন-অনলি স্কোপের বাইরে।
+        item {
+            Image(
+                painter = painterResource(R.drawable.illust_support),
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Fit
+            )
+        }
+
         // App কীভাবে ব্যবহার করব
         item {
             Card(
