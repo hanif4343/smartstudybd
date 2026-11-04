@@ -25,6 +25,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.hanif.smartstudy.R
 import com.hanif.smartstudy.data.model.*
