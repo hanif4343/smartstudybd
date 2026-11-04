@@ -533,9 +533,9 @@ private fun QBankPaperCard(st: SubTopicEntry, compact: Boolean, onClick: () -> U
                 trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
             )
             // শতাংশ সংখ্যায়ও — শুধু বার দেখে কত শেষ হলো বোঝা যেত না
-            if (progressFrac > 0f) {
+            if (frac > 0f) {
                 Spacer(Modifier.height(3.dp))
-                Text("${bnDigits((progressFrac.coerceIn(0f, 1f) * 100).toInt())}% সম্পন্ন", fontSize = 10.5.sp,
+                Text("${bnDigits((frac.coerceIn(0f, 1f) * 100).toInt())}% সম্পন্ন", fontSize = 10.5.sp,
                     fontFamily = NotoSansBengali, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
