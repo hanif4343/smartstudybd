@@ -23,7 +23,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.hanif.smartstudy.R
 import com.hanif.smartstudy.data.model.*
 import com.hanif.smartstudy.ui.shared.*
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
@@ -101,6 +104,15 @@ fun ResultModal(
             } else {
             item {
                 Spacer(Modifier.height(8.dp))
+                // Design 1: সফলতার ছবি, শুধু গ্রেডেড রেজাল্টে, ScoreRing-এর উপরে।
+                // আনগ্রেডেড (লিখিত, recorded > 0) ব্রাঞ্চ অপরিবর্তিত।
+                Image(
+                    painter = painterResource(R.drawable.illust_quiz_success),
+                    contentDescription = null,
+                    modifier = Modifier.size(160.dp),
+                    contentScale = ContentScale.Fit
+                )
+                Spacer(Modifier.height(12.dp))
                 ScoreRing(pct = result.pct)
                 Spacer(Modifier.height(12.dp))
                 Text(result.emoji, fontSize = 36.sp)
