@@ -2279,6 +2279,7 @@ fun UserTechniqueSection(
     var techniques     by remember(questionId) { mutableStateOf<List<UserTechnique>>(emptyList()) }
     var isLoading      by remember(questionId) { mutableStateOf(false) }
     var showAddDialog  by remember { mutableStateOf(false) }
+    var showInkPad     by remember { mutableStateOf(false) }  // + আইকনের পাশের ✍ — হাতে লেখা ব্যাখ্যা/কৌশল
     var editTarget     by remember { mutableStateOf<UserTechnique?>(null) }
     var linkSource     by remember { mutableStateOf<UserTechnique?>(null) }   // 🔗 সম্পর্কিত-প্রশ্ন ডায়ালগের উৎস টেকনিক
     var linkAutoClose  by remember { mutableStateOf(false) }                   // সেভের পর নিজে থেকে খুললে, প্রস্তাব না থাকলে চুপচাপ বন্ধ
@@ -2424,6 +2425,23 @@ fun UserTechniqueSection(
                         tint = Indigo600, modifier = Modifier.size(16.dp))
                 }
             }
+            // ── ✍ টাচপেন — ভাসমান পিল থেকে এখানে সরানো হলো: + আইকনের পাশে।
+            // শুধু অ্যাডমিন; চাপলে ব্যাখ্যা/কৌশল বেছে হাতে লেখার প্যাড খুলবে ──
+            if (isAdminUser) {
+                Surface(
+                    onClick  = { showInkPad = true },
+                    shape    = CircleShape,
+                    color    = Indigo600.copy(alpha = 0.12f),
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("✍", fontSize = 15.sp, color = Indigo600)
+                    }
+                }
+            }
+        }
+        if (showInkPad) {
+            com.hanif.smartstudy.ui.ink.InkPadForQuestion(questionId = questionId, onDismiss = { showInkPad = false })
         }
 
         // ── 📝 এই প্রশ্নের অসমাপ্ত ড্রাফট — ট্যাপ করলে যেখানে ছেড়েছিলেন সেখান থেকে শুরু ──
