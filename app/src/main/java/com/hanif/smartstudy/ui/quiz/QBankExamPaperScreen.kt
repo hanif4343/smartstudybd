@@ -14,12 +14,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -59,7 +60,7 @@ import kotlin.math.roundToInt
 // কুইজ-খেলা স্ক্রিন না — তাই MCQ অপশন বাটন না দেখিয়ে সরাসরি সঠিক উত্তর দেখানো হয়)।
 // একই groupId-এর multi-part প্রশ্ন (ক/খ/গ/ঘ/ঙ) একটা কার্ডে একসাথে দেখানো হয়। ──
 
-private val PaperBg      = Color.White                // লিখিত প্রশ্নের স্ক্রিন — সাদা ব্যাকগ্রাউন্ড
+private val PaperBg      = Color(0xFFFAF7F0)           // লিখিত প্রশ্নের স্ক্রিন — খাঁটি সাদা নয়, হালকা উষ্ণ কাগজ-রঙ (চোখে কম লাগে)
 private val HeaderTop    = Color(0xFF0891B2)   // অ্যাপের QBank থিম-রঙ (SubjectListScreen-এর গ্র্যাডিয়েন্টের সাথে ম্যাচ)
 private val HeaderBottom = Color(0xFF0E7490)
 private val HeaderBg     = HeaderTop           // solid fallback যেখানে gradient দরকার নেই
@@ -309,8 +310,14 @@ private fun QBankExamPaperScreenImpl(
 
     var reportTarget by remember { mutableStateOf<QuestionItem?>(null) }
     var sortReversed by remember { mutableStateOf(false) }
-    // ── "মূল প্রশ্নপত্র" — হেডারে বাটন, চাপলে হেডারের নিচে ছবি খোলে ──
+    // ── "মূল প্রশ্নপত্র" — এখন ⋮ মেনুতে, চাপলে হেডারের নিচে ছবি খোলে ──
     var paperExpanded by remember { mutableStateOf(false) }
+    // ── হেডারের ⋮ মেনু + শিট-ভিউয়ে সেকশনে ঝাঁপ (সাবজেক্ট-চিপ সারির বদলে) ──
+    var showMenu by remember { mutableStateOf(false) }
+    var sheetJumpTo by remember { mutableStateOf<Int?>(null) }
+    val sheetHeads = remember(questions) {
+        buildSheetEntries(questions).mapIndexedNotNull { i, e -> e.headLabel?.let { it to i } }
+    }
     val paperImages = remember(questions) { questions.flatMap { it.questionPaperImageList() }.distinct() }
     val shownSerials = remember(serials, sortReversed) { if (sortReversed) serials.reversed() else serials }
 
@@ -353,40 +360,39 @@ private fun QBankExamPaperScreenImpl(
                     Text(text = "প্রশ্নব্যাংক · ${questions.size} প্রশ্ন", color = HeaderSub, fontSize = 12.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                // ── হেডারের ডানে: "মূল প্রশ্নপত্র" বাটন + ↕ সাজান (ট্যাপে সিরিয়াল ক্রম উল্টে যায়) ──
-                com.hanif.smartstudy.ui.shared.QuestionPaperHeaderButton(
-                    enabled  = paperImages.isNotEmpty(),
-                    expanded = paperExpanded,
-                    onClick  = { paperExpanded = !paperExpanded },
-                    onDark   = true,
-                    count    = paperImages.size
-                )
-                Spacer(Modifier.width(8.dp))
-                Row(
-                    Modifier.clip(RoundedCornerShape(10.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                ) {
-                    listOf(true to "📄", false to "🗂").forEach { (isSheet, icon) ->
-                        Box(
-                            Modifier.background(if (sheet == isSheet) Color.White.copy(alpha = 0.30f) else Color.Transparent)
-                                .clickable { com.hanif.smartstudy.util.QBankPaperViewStore.set(viewCtx, isSheet) }
-                                .size(width = 36.dp, height = 34.dp),
-                            contentAlignment = Alignment.Center
-                        ) { Text(icon, fontSize = 15.sp) }
+                // ── হেডারের ডানে শুধু ⋮ — বাড়তি সবকিছু (মূল প্রশ্নপত্র, ভিউ বদল,
+                // সাজান, সেকশনে যান) এই মেনুর ভেতরে, যাতে বারটা গোছালো থাকে।
+                // প্রশ্ন/উত্তর টগল মেনুতে ঢোকানো হয়নি — ওটা নিচের বারে চোখের সামনেই থাকে। ──
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "আরো", tint = HeaderCream)
                     }
-                }
-                if (!sheet) Spacer(Modifier.width(8.dp))
-                if (!sheet) Box(
-                    Modifier.size(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.White.copy(alpha = if (sortReversed) 0.28f else 0.12f))
-                        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                        .clickable { sortReversed = !sortReversed },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.SwapVert, contentDescription = "সাজান",
-                        tint = HeaderCream, modifier = Modifier.size(20.dp))
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        if (paperImages.isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text(if (paperExpanded) "মূল প্রশ্নপত্র লুকান" else "মূল প্রশ্নপত্র দেখুন") },
+                                onClick = { paperExpanded = !paperExpanded; showMenu = false }
+                            )
+                        }
+                        if (sheet) {
+                            sheetHeads.forEach { (label, idx) ->
+                                DropdownMenuItem(
+                                    text = { Text("সেকশনে যান: $label") },
+                                    onClick = { sheetJumpTo = idx; showMenu = false }
+                                )
+                            }
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (sheet) "কার্ড ভিউতে দেখুন" else "শিট ভিউতে দেখুন") },
+                            onClick = { com.hanif.smartstudy.util.QBankPaperViewStore.set(viewCtx, !sheet); showMenu = false }
+                        )
+                        if (!sheet) {
+                            DropdownMenuItem(
+                                text = { Text(if (sortReversed) "সাজান: স্বাভাবিক ক্রম" else "সাজান: উল্টো ক্রম") },
+                                onClick = { sortReversed = !sortReversed; showMenu = false }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -435,6 +441,8 @@ private fun QBankExamPaperScreenImpl(
                 onBookmark      = onBookmark,
                 onSpeak         = { text, key -> TtsManager.speak(text, key) },
                 onReportTap     = { q -> reportTarget = q },
+                jumpTo          = sheetJumpTo,
+                onJumpDone      = { sheetJumpTo = null },
                 modifier        = Modifier.weight(1f)
             )
         } else {
@@ -1169,6 +1177,8 @@ private fun PaperSheetView(
     onBookmark      : (String) -> Unit,
     onSpeak     : (String, String) -> Unit,
     onReportTap : (QuestionItem) -> Unit,
+    jumpTo      : Int? = null,
+    onJumpDone  : () -> Unit = {},
     modifier    : Modifier = Modifier
 ) {
     val entries = remember(questions) { buildSheetEntries(questions) }
@@ -1177,11 +1187,16 @@ private fun PaperSheetView(
     val baseDensity = LocalDensity.current
     var zoom by remember { mutableStateOf(com.hanif.smartstudy.util.QBankPaperViewStore.zoom) }
     val scroll = rememberScrollState()
-    val scope = rememberCoroutineScope()
     val pageTops = remember { HashMap<Int, Int>() }
-    val heads = remember(entries) { entries.mapIndexedNotNull { i, e -> e.headLabel?.let { it to i } } }
     val fullWidth = remember(entries) { entries.map { it.headLabel != null } }
     var titleH by remember { mutableStateOf(0) }
+    // ── ⋮ মেনু থেকে "সেকশনে যান" চাপলে এখানে স্ক্রল হবে ──
+    androidx.compose.runtime.LaunchedEffect(jumpTo) {
+        jumpTo?.let { idx ->
+            scroll.animateScrollTo(titleH + (pageTops[idx] ?: 0))
+            onJumpDone()
+        }
+    }
 
     BoxWithConstraints(modifier.fillMaxWidth().background(PaperBg)) {
         // PDF-হুবহু: "শুধু প্রশ্ন" = PDF প্রশ্নপত্রের (পেজ ১) মতো এক কলাম, একটানা —
@@ -1191,41 +1206,8 @@ private fun PaperSheetView(
         val cols = if (questionsOnlySheet) 1 else if (zoom > 1.25f || maxWidth < 340.dp) 1 else 2
         val pageH = if (cols == 1) 100000.dp else (maxHeight - 52.dp).coerceAtLeast(260.dp)
         Column(Modifier.fillMaxSize()) {
-            // সাবজেক্ট-চিপ + জুম
-            Row(
-                Modifier.fillMaxWidth().background(TabInactiveBg).padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    heads.forEach { (label, idx) ->
-                        Text(
-                            text = label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = HeaderBg,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50)).background(Color.White)
-                                .border(1.dp, HeaderBg.copy(alpha = 0.35f), RoundedCornerShape(50))
-                                .clickable { scope.launch { scroll.animateScrollTo(titleH + (pageTops[idx] ?: 0)) } }
-                                .padding(horizontal = 12.dp, vertical = 5.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(6.dp))
-                // PDF-হুবহু মোডে সারি/কলাম-ক্রম টগল আর প্রযোজ্য নয় — প্রবাহ মোড
-                // থেকেই ঠিক হয় (প্রশ্ন-শুধু: এক কলাম, উত্তরসহ: কলাম-প্রবাহ), তাই বোতাম লুকানো।
-                Spacer(Modifier.width(4.dp))
-                SheetZoomBtn("A−") {
-                    zoom = (zoom - 0.15f).coerceAtLeast(0.7f)
-                    com.hanif.smartstudy.util.QBankPaperViewStore.setZoom(ctx, zoom)
-                }
-                Text("${(zoom * 100).roundToInt()}%", fontSize = 10.5.sp, color = SheetInkSoft,
-                    modifier = Modifier.widthIn(min = 34.dp), textAlign = TextAlign.Center)
-                SheetZoomBtn("A+") {
-                    zoom = (zoom + 0.15f).coerceAtMost(2.0f)
-                    com.hanif.smartstudy.util.QBankPaperViewStore.setZoom(ctx, zoom)
-                }
-            }
+            // উপরের চিপ-সারি আর জুম-সারি তুলে দেওয়া হলো: সেকশনে যাওয়া এখন
+            // হেডারের ⋮ মেনুতে, আর জুম নিচে বামে ভাসমান — পেপারটা পরিষ্কার থাকে।
             // জুম = লেখার মাপ (sp) গুণ; পাতার মাপ/ফাঁকা (dp) একই
             androidx.compose.runtime.CompositionLocalProvider(
                 LocalDensity provides Density(baseDensity.density, baseDensity.fontScale * zoom)
@@ -1259,6 +1241,26 @@ private fun PaperSheetView(
                             entries.forEach { e -> SheetEntryView(e, hide, onBookmark, onSpeak, onReportTap) }
                         }
                         Spacer(Modifier.height(90.dp))
+                    }
+                    // ── জুম নিচে বামে ভাসমান (উপরে ডানে আঙুল পৌঁছানো কঠিন বলে) ──
+                    Row(
+                        Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 16.dp)
+                            .shadow(8.dp, RoundedCornerShape(12.dp))
+                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .padding(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        SheetZoomBtn("A−") {
+                            zoom = (zoom - 0.15f).coerceAtLeast(0.7f)
+                            com.hanif.smartstudy.util.QBankPaperViewStore.setZoom(ctx, zoom)
+                        }
+                        Text("${(zoom * 100).roundToInt()}%", fontSize = 10.5.sp, color = SheetInkSoft,
+                            modifier = Modifier.widthIn(min = 34.dp), textAlign = TextAlign.Center)
+                        SheetZoomBtn("A+") {
+                            zoom = (zoom + 0.15f).coerceAtMost(2.0f)
+                            com.hanif.smartstudy.util.QBankPaperViewStore.setZoom(ctx, zoom)
+                        }
                     }
                 }
             }
