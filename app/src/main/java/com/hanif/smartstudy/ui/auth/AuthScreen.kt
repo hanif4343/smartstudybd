@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
+import com.hanif.smartstudy.R
 import com.hanif.smartstudy.MainActivity
 import com.hanif.smartstudy.ui.theme.*
 import com.hanif.smartstudy.viewmodel.AuthState
@@ -84,12 +87,20 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 .padding(horizontal = 24.dp, vertical = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Design 1: 📚 প্লেসহোল্ডারের বদলে মাসকট ছবি। গোল ব্যাকগ্রাউন্ড
+            // রাখা হয়েছে, কিন্তু clip সরানো হয়েছে — নাহলে চওড়া ছবিটি
+            // গোল করে কাটা পড়ত। সাইজ 110dp (নির্দেশিত 90–120dp-এর মধ্যে)।
             Box(
-                modifier = Modifier.size(90.dp).clip(CircleShape)
-                    .background(White.copy(alpha = 0.15f)),
+                modifier = Modifier.size(120.dp)
+                    .background(White.copy(alpha = 0.15f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text("📚", fontSize = 42.sp)
+                Image(
+                    painter = painterResource(R.drawable.illust_mascot),
+                    contentDescription = "Smart Study",
+                    modifier = Modifier.size(110.dp),
+                    contentScale = ContentScale.Fit
+                )
             }
             Spacer(Modifier.height(12.dp))
             Text("Smart Study", color = White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = NotoSansBengali)
