@@ -301,6 +301,9 @@ class CaseInsensitiveAdapterFactory : com.google.gson.TypeAdapterFactory {
             k == "subtopic_id" || k == "subtopicid"  -> "subtopic_id"
             k == "group_id" || k == "groupid"        -> "group_id"
             k == "sub_index" || k == "subindex"      -> "sub_index"
+            // QBank written: sheet/Firebase key is "formatstyle" (no underscore),
+            // model field is "format_style" — without this alias the value was lost.
+            k == "formatstyle" || k == "format_style" -> "format_style"
             else                                    -> key
         }
     }
