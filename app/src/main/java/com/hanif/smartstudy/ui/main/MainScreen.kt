@@ -679,6 +679,9 @@ fun MainScreen(
                         studyViewModel.navigateToSubject(subject)
                         if (subTopic.isNotBlank()) studyViewModel.navigateToSubTopic(subTopic)
                     },
+                    // Phase 3 v2: Me → আমার লাইব্রেরি opens the Study tab;
+                    // user then taps কোর্স. Direct-to-Course deep link is NOT claimed.
+                    onOpenStudyTab = { currentTab = BottomTab.STUDY },
                     onOpenInstantTest = { subject, subTopic ->
                         currentTab = BottomTab.QUIZ
                         quizViewModel.startInstantTestFor(subject, subTopic)
