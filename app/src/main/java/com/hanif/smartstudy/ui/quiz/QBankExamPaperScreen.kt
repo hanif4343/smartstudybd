@@ -91,6 +91,12 @@ private fun buildHighlightedText(raw: String): AnnotatedString = buildAnnotatedS
     append(raw.substring(lastEnd))
 }
 
+// PDF-প্রশ্নপত্রের মতো ফাঁকা: Fill in the blanks-এ _word_ / __word__ মার্ক করা অংশের
+// জায়গায় "---" (PDF-এর মতো) — উত্তর শব্দটা প্রশ্নের লাইনে কখনোই দেখাবে না, উ. লাইনে
+// আলাদাভাবে আসবে (উত্তরসহ মোডে), প্রশ্ন-শুধু মোডে শুধু "---" থাকবে।
+private fun buildPdfBlankText(raw: String): String =
+    raw.replace(Regex("__([^_]+?)__"), "---").replace(Regex("_([^_]+)_"), "---")
+
 // "fillblank" ফরম্যাটে (ইংরেজি) — Admin App-এর PaperComposer-এ 🖍 "Blank মার্ক করো" বাটনে
 // যে শব্দটা সিলেক্ট করা হয় সেটাই __word__ মার্কআপ হয়ে question-এর ভিতরে থেকে যায় (মুছে
 // যায় না — দেখো uploaderUtils.js buildSheetRow-এর কমেন্ট), আর সেই একই টেক্সট আলাদাভাবে
@@ -788,6 +794,7 @@ private fun ExamQAItem(
 
         when {
             inlineFillBlank != null -> Text(text = inlineFillBlank, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
+            hide && q.formatStyle == "fillblank" -> com.hanif.smartstudy.ui.shared.MathText(text = buildPdfBlankText(q.question), fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
             q.formatStyle == "highlight" -> Text(text = buildHighlightedText(q.question), fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
             else -> com.hanif.smartstudy.ui.shared.MathText(text = q.question, fontSize = questionFontSize, lineHeight = questionLineHeight, color = TextMain)
         }
@@ -1055,7 +1062,8 @@ private fun PaperColumnsFlow(
         val rowFlow = columns == 1 || rowMajor
         fun isFull(i: Int) = fullWidth.getOrElse(i) { false }
         val placeables = measurables.mapIndexed { i, m ->
-            val w = if (rowFlow && isFull(i)) constraints.maxWidth else colW
+            // বিষয়ের শিরোনাম সবসময় পুরো প্রস্থ (সারি-ক্রমেও, কলাম-প্রবাহেও)
+            val w = if (isFull(i)) constraints.maxWidth else colW
             m.measure(Constraints(minWidth = w, maxWidth = w))
         }
         val xs = IntArray(n)
@@ -1095,61 +1103,56 @@ private fun PaperColumnsFlow(
             }
             totalH = y
         } else {
-            // ── কলাম-ক্রম (পাতা-ভিত্তিক, ভারসাম্যে) ──
-            val pages = ArrayList<MutableList<Int>>()
-            var cur = ArrayList<Int>()
-            var col = 0
-            var colY = 0
-            for (i in 0 until n) {
-                val h = placeables[i].height
-                val need = if (isFull(i) && i + 1 < n) h + placeables[i + 1].height else h   // শিরোনাম + পরের প্রশ্ন একসাথে
-                val afterHeading = i > 0 && isFull(i - 1)        // শিরোনামের ঠিক পরের প্রশ্ন সবসময় শিরোনামের সাথেই (নিজে লম্বা হলেও)
-                if (colY > 0 && !afterHeading && colY + need > pageH) {
-                    col++
-                    colY = 0
-                    if (col >= columns) { pages.add(cur); cur = ArrayList(); col = 0 }
+            // ── কলাম-ক্রম — PDF সল্যুশনের মতো, সেকশন-ভিত্তিক: প্রতিটা বিষয়ের
+            // শিরোনাম পুরো প্রস্থে, তার নিচে ওই বিষয়ের প্রশ্নগুলো দুই কলামে
+            // ভারসাম্যে ভাগ (বাম কলাম + ডান কলাম, মাঝে লম্বা দাগ)। সারি-জোড়া
+            // নয়, তাই লম্বা-ছোট জোড়ার নিচে ফাঁকা তৈরি হয় না; পরের বিষয়ের
+            // শিরোনাম আগের সেকশনের দুই কলাম শেষ হওয়ার পরেই আসে।
+            var y = 0
+            var i = 0
+            while (i < n) {
+                if (isFull(i)) {
+                    xs[i] = 0; ys[i] = y; pageTops[i] = y
+                    y += placeables[i].height + gapPx / 2
+                    i++
                 }
-                cur.add(i)
-                colY += h
-            }
-            if (cur.isNotEmpty()) pages.add(cur)
-
-            var pageTop = 0
-            for ((pi, page) in pages.withIndex()) {
-                val split = if (columns == 2 && page.size >= 2) {
+                val sectionStart = i
+                var j = i
+                while (j < n && !isFull(j)) j++
+                val section = (sectionStart until j).toList()
+                if (section.isNotEmpty()) {
                     var total = 0
-                    for (i in page) total += placeables[i].height
+                    for (id in section) total += placeables[id].height
                     var run = 0
-                    var best = page.size
+                    var best = section.size
                     var bestMax = total
-                    for (s in 1 until page.size) {
-                        run += placeables[page[s - 1]].height
-                        if (isFull(page[s - 1])) continue           // শিরোনামের ঠিক পরে কলাম ভাঙা নয়
+                    for (sp in 1 until section.size) {
+                        run += placeables[section[sp - 1]].height
                         val m = maxOf(run, total - run)
-                        if (m < bestMax) { bestMax = m; best = s }
+                        if (m < bestMax) { bestMax = m; best = sp }
                     }
-                    best
-                } else page.size
-                var yL = 0
-                var yR = 0
-                for ((k, i) in page.withIndex()) {
-                    if (k < split) { xs[i] = 0; ys[i] = pageTop + yL; yL += placeables[i].height }
-                    else { xs[i] = colW + gapPx; ys[i] = pageTop + yR; yR += placeables[i].height }
-                    pageTops[i] = pageTop
+                    var yL = 0
+                    var yR = 0
+                    for ((k, id) in section.withIndex()) {
+                        if (k < best) { xs[id] = 0; ys[id] = y + yL; yL += placeables[id].height }
+                        else { xs[id] = colW + gapPx; ys[id] = y + yR; yR += placeables[id].height }
+                        pageTops[id] = y
+                    }
+                    val used = maxOf(yL, yR)
+                    if (best > 0 && best < section.size) {
+                        val mx = colW + gapPx / 2
+                        dividers.add(intArrayOf(mx, y, mx, y + used))
+                    }
+                    y += used
+                    if (j < n) {
+                        val ly = y + gapPx / 2
+                        dividers.add(intArrayOf(0, ly, constraints.maxWidth, ly))
+                        y += gapPx
+                    }
                 }
-                val used = maxOf(yL, yR)
-                if (split < page.size && columns == 2) {
-                    val mx = colW + gapPx / 2
-                    dividers.add(intArrayOf(mx, pageTop, mx, pageTop + used))
-                }
-                pageTop += used
-                if (pi < pages.size - 1) {
-                    val ly = pageTop + gapPx / 2
-                    dividers.add(intArrayOf(0, ly, constraints.maxWidth, ly))
-                    pageTop += gapPx
-                }
+                i = j
             }
-            totalH = pageTop
+            totalH = y
         }
         layout(constraints.maxWidth, totalH.coerceIn(constraints.minHeight, constraints.maxHeight)) {
             for (i in 0 until n) placeables[i].placeRelative(xs[i], ys[i])
@@ -1178,11 +1181,14 @@ private fun PaperSheetView(
     val pageTops = remember { HashMap<Int, Int>() }
     val heads = remember(entries) { entries.mapIndexedNotNull { i, e -> e.headLabel?.let { it to i } } }
     val fullWidth = remember(entries) { entries.map { it.headLabel != null } }
-    val rowOrder = com.hanif.smartstudy.util.QBankPaperViewStore.rowOrder
     var titleH by remember { mutableStateOf(0) }
 
     BoxWithConstraints(modifier.fillMaxWidth().background(PaperBg)) {
-        val cols = if (zoom > 1.25f || maxWidth < 340.dp) 1 else 2
+        // PDF-হুবহু: "শুধু প্রশ্ন" = PDF প্রশ্নপত্রের (পেজ ১) মতো এক কলাম, একটানা —
+        // সারি-জোড়ার ফাঁকা থাকবে না। "উত্তরসহ" = PDF সল্যুশনের (পেজ ২-৪) মতো দুই কলাম,
+        // কলাম-প্রবাহে (বাম কলাম ভরে, তারপর ডান — সেকশন-ভিত্তিক ভারসাম্যে)।
+        val questionsOnlySheet = LocalPaperQuestionsOnly.current
+        val cols = if (questionsOnlySheet) 1 else if (zoom > 1.25f || maxWidth < 340.dp) 1 else 2
         val pageH = if (cols == 1) 100000.dp else (maxHeight - 52.dp).coerceAtLeast(260.dp)
         Column(Modifier.fillMaxSize()) {
             // সাবজেক্ট-চিপ + জুম
@@ -1206,10 +1212,8 @@ private fun PaperSheetView(
                     }
                 }
                 Spacer(Modifier.width(6.dp))
-                // ⇄ সারি-ক্রম (১|২, ৩|৪ …)  ⇅ কলাম-ক্রম (বাম কলাম নেমে, তারপর ডান)
-                SheetZoomBtn(if (rowOrder) "⇄" else "⇅") {
-                    com.hanif.smartstudy.util.QBankPaperViewStore.setRowOrder(ctx, !rowOrder)
-                }
+                // PDF-হুবহু মোডে সারি/কলাম-ক্রম টগল আর প্রযোজ্য নয় — প্রবাহ মোড
+                // থেকেই ঠিক হয় (প্রশ্ন-শুধু: এক কলাম, উত্তরসহ: কলাম-প্রবাহ), তাই বোতাম লুকানো।
                 Spacer(Modifier.width(4.dp))
                 SheetZoomBtn("A−") {
                     zoom = (zoom - 0.15f).coerceAtLeast(0.7f)
@@ -1249,7 +1253,7 @@ private fun PaperSheetView(
                         SheetTitleBlock(institutionName, postName, showInstitution, questions.size,
                             modifier = Modifier.onSizeChanged { titleH = it.height })
                         PaperColumnsFlow(
-                            columns = cols, pageHeight = pageH, gap = 14.dp, rowMajor = rowOrder, fullWidth = fullWidth, pageTops = pageTops,
+                            columns = cols, pageHeight = pageH, gap = 14.dp, rowMajor = if (questionsOnlySheet) true else false, fullWidth = fullWidth, pageTops = pageTops,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             entries.forEach { e -> SheetEntryView(e, hide, onBookmark, onSpeak, onReportTap) }
@@ -1336,20 +1340,36 @@ private fun SheetEntryBody(
             "tbl" -> {
                 val c0 = layout.cols.getOrNull(0) ?: ""
                 val c1 = layout.cols.getOrNull(1) ?: ""
+                val qOnlyTbl = LocalPaperQuestionsOnly.current
                 Column(
                     Modifier.fillMaxWidth().padding(top = 5.dp)
                         .clip(RoundedCornerShape(5.dp))
                         .border(androidx.compose.foundation.BorderStroke(1.dp, SheetTblLine), RoundedCornerShape(5.dp))
                 ) {
-                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(SheetTblHead)) {
-                        SheetCell(c0, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
-                        SheetCell(c1, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
-                    }
-                    items.forEach { sub ->
-                        SheetLongPressMenu(sub, hide, onBookmark, onSpeak, onReportTap) {
-                            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                                SheetCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
-                                SheetCell(if (hide) (if (LocalPaperQuestionsOnly.current) "" else "—") else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                    if (qOnlyTbl) {
+                        // PDF প্রশ্নপত্রের মতো: প্রশ্ন-শুধুতে শুধু প্রথম কলাম, খালি
+                        // দ্বিতীয় কলাম দেখাবে না (আগে খালি কলামই ফাঁকা দেখাত)।
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(SheetTblHead)) {
+                            SheetCell(c0, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                        }
+                        items.forEach { sub ->
+                            SheetLongPressMenu(sub, hide, onBookmark, onSpeak, onReportTap) {
+                                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                    SheetCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
+                                }
+                            }
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(SheetTblHead)) {
+                            SheetCell(c0, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                            SheetCell(c1, bold = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                        }
+                        items.forEach { sub ->
+                            SheetLongPressMenu(sub, hide, onBookmark, onSpeak, onReportTap) {
+                                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                                    SheetCell(sub.question, modifier = Modifier.weight(1f).fillMaxHeight())
+                                    SheetCell(if (hide) "—" else sub.answer, color = AnswerText, modifier = Modifier.weight(1f).fillMaxHeight())
+                                }
                             }
                         }
                     }
@@ -1445,10 +1465,12 @@ private fun SheetSub(
                         SheetText(text = "${layout.thirdPre} ${q.explanation}${layout.thirdSuf}", fontSize = 11.5.sp, lineHeight = 16.sp, color = SheetInkSoft)
                     }
                 } else {
+                    // PDF-এর মতো: Fill in the blanks-এ প্রশ্নের লাইনে উত্তর শব্দ নয়, "---" ফাঁকা।
+                    val sheetQuestion = if (layout.kind == "fill" || q.formatStyle == "fillblank") buildPdfBlankText(q.question) else q.question
                     if (layout.highlight) {
-                        Text(buildHighlightedText(q.question), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp, color = SheetInk)
+                        Text(buildHighlightedText(sheetQuestion), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp, color = SheetInk)
                     } else {
-                        SheetText(text = q.question, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp, color = SheetInk)
+                        SheetText(text = sheetQuestion, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp, color = SheetInk)
                     }
                     if (layout.kind == "mcq") {
                         paperOptionsLine(q)?.let { SheetText(text = "অপশন: $it", fontSize = 11.5.sp, lineHeight = 16.sp, color = SheetInkSoft) }
