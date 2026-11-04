@@ -87,9 +87,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 .padding(horizontal = 24.dp, vertical = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Design 1: 📚 প্লেসহোল্ডারের বদলে মাসকট ছবি। গোল ব্যাকগ্রাউন্ড
-            // রাখা হয়েছে, কিন্তু clip সরানো হয়েছে — নাহলে চওড়া ছবিটি
-            // গোল করে কাটা পড়ত। সাইজ 110dp (নির্দেশিত 90–120dp-এর মধ্যে)।
+            // Design 1: 📚 প্লেসহোল্ডারের বদলে মাসকট ছবি, গোল করে কাটা।
+            // (আগের চওড়া ছবিতে clip সরাতে হয়েছিল; নতুন বর্গাকার মাসকটে
+            // দুজনই মাঝখানে, তাই CircleShape + Crop-এ কেউ কাটা পড়বে না।)
             Box(
                 modifier = Modifier.size(120.dp)
                     .background(White.copy(alpha = 0.15f), CircleShape),
@@ -98,8 +98,8 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 Image(
                     painter = painterResource(R.drawable.illust_mascot),
                     contentDescription = "Smart Study",
-                    modifier = Modifier.size(110.dp),
-                    contentScale = ContentScale.Fit
+                    modifier = Modifier.size(110.dp).clip(CircleShape),
+                    contentScale = ContentScale.Crop
                 )
             }
             Spacer(Modifier.height(12.dp))
