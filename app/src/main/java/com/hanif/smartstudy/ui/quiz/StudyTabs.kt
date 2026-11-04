@@ -23,6 +23,7 @@ package com.hanif.smartstudy.ui.quiz
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -44,11 +45,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hanif.smartstudy.R
 import com.hanif.smartstudy.ui.theme.NotoSansBengali
 
 /** Study ট্যাবের ভেতরের ট্যাব — ক্রম ঠিক এইভাবেই থাকবে, মাত্র ৩টি। */
@@ -181,10 +185,21 @@ fun StudyEmptyState(text: String, modifier: Modifier = Modifier) {
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text, fontSize = 13.sp, fontFamily = NotoSansBengali,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // Design 1: খালি-স্টেট ছবি টেক্সটের উপরে। সিগনেচার অপরিবর্তিত, তাই
+        // StudyCourseTab-সহ সব কল-সাইট আগের মতোই কাজ করবে।
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(R.drawable.illust_empty_state),
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth().height(160.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text, fontSize = 13.sp, fontFamily = NotoSansBengali,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
