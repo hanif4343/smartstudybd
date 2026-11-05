@@ -92,7 +92,7 @@ fun TodayScreen(nav: NavController, vm: VisionViewModel) {
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "রিভিশন বাকি: $dueCountটি",
+                    text = "রিভিশন বাকি: ${dueCount}টি",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(8.dp))
