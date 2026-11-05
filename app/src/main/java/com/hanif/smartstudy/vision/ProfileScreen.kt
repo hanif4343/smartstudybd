@@ -111,7 +111,7 @@ fun ProfileScreen(nav: NavController, vm: VisionViewModel) {
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "লিখিত অনুশীলন: $writtenCountটি",
+            text = "লিখিত অনুশীলন: ${writtenCount}টি",
             style = MaterialTheme.typography.bodyLarge
         )
         Spacer(modifier = Modifier.height(20.dp))
